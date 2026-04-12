@@ -678,7 +678,7 @@ textarea{resize:vertical;min-height:80px;}
   <div id="est-add-form-wrap"></div>
   <div id="est-itens-lista"></div>
 
-  <button class="est-pedido-btn" onclick="estGerarPedido()">&#128203; Gerar Pedido PDF &#8212; Itens com Estoque Baixo</button>
+  <div id="est-pedido-btns"></div>
 </div>
 
 <!-- MODAL -->
@@ -1650,7 +1650,6 @@ function estCarregarFirebase(){
     if(doc&&doc.exists&&doc.data()&&doc.data().data){
       var cloudData=doc.data().data;
       if(cloudData&&cloudData.cats){
-        // Only overwrite if cloud has data OR local is empty
         if(cloudData.cats.length>0||estData.cats.length===0){
           estData=cloudData;
         }
@@ -1698,7 +1697,9 @@ function estRenderCatPills(){
   pill('Todos','__all__',estCatAtiva==='__all__','');
   if(totalBaixo){ pill('⚠️ Baixo ('+totalBaixo+')','__baixo__',estCatAtiva==='__baixo__',''); }
 
-  // Sub title
+  // Render PDF buttons per category
+  estRenderPedidoBtns();
+
   var sub=document.getElementById('est-sub');
   if(sub){
     var catNome = estCatAtiva==='__all__'?'Todos':estCatAtiva==='__baixo__'?'Estoque Baixo':(estData.cats.find(function(c){return c.id===estCatAtiva;})||{}).nome||'';
@@ -1711,59 +1712,7 @@ function estRenderCatPills(){
 function estRenderAddForm(){
   var el=document.getElementById('est-add-form-wrap');
   if(!el) return;
-  el.innerHTML=''; return; /* inline forms now per category */
-  var cat=estData.cats.find(function(c){return c.id===estCatAtiva;});
-  if(!cat){el.innerHTML='';return;}
-  var div=document.createElement('div');
-  div.className='est-add-form';
-  div.innerHTML='<div class="est-add-title">+ Adicionar produto em '+escHtml(cat.nome)+'</div>'
-    +'<div style="margin-bottom:8px">'
-    +'<input type="text" class="est-add-inp" id="est-ai" placeholder="Nome do produto..." style="width:100%">'
-    +'</div>'
-    +'<div class="est-add-row">'
-    +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
-    +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Qtd atual (inicia em 0)</label>'
-    +'<input type="number" class="est-add-min" id="est-aq" value="0" min="0" style="width:100%" disabled>'
-    +'</div>'
-    +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
-    +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Quantidade mínima</label>'
-    +'<input type="number" class="est-add-min" id="est-am" placeholder="0" min="0" value="0" style="width:100%">'
-    +'</div>'
-    +'<button class="est-add-submit" id="est-ab" style="align-self:flex-end">Adicionar</button>'
-    +'</div>'
-    +'<div class="est-add-hint">Quantidade atual começa em 0 &bull; defina o mínimo</div>'
-    +'<button class="est-del-cat-btn" id="est-dcat">&#128465; Excluir categoria: '+escHtml(cat.nome)+'</button>';
-  el.innerHTML='';
-  el.appendChild(div);
-
-  document.getElementById('est-ab').onclick=function(){
-    var nomeVal=(document.getElementById('est-ai').value||'').trim();
-    var minVal=parseFloat(document.getElementById('est-am').value)||0;
-    if(!nomeVal){showToast('Informe o nome do produto!','#f7a34f');document.getElementById('est-ai').focus();return;}
-    cat.itens=cat.itens||[];
-    var newItem={id:gerarId(),nome:nomeVal,qtd:0,min:minVal};
-    cat.itens.push(newItem);
-    estSalvar();
-    document.getElementById('est-ai').value='';
-    document.getElementById('est-am').value='0';
-    document.getElementById('est-ai').focus();
-    showToast('Produto adicionado!');
-    estRenderItens();
-    estRenderCatPills();
-    estAtualizarBadge();
-  };
-  document.getElementById('est-ai').addEventListener('keydown',function(e){ if(e.key==='Enter') document.getElementById('est-ab').click(); });
-  document.getElementById('est-dcat').onclick=function(){
-    cvtConfirm('Excluir categoria "'+cat.nome+'" e todos os produtos?',function(){
-      estData.cats=estData.cats.filter(function(c){return c.id!==cat.id;});
-      estCatAtiva='__all__';
-      estSalvar();
-      estRenderCatPills();
-      estRenderAddForm();
-      estRenderItens();
-      showToast('Categoria excluída!','#f75a5a');
-    });
-  };
+  el.innerHTML=''; return;
 }
 
 function estRenderItens(){
@@ -1773,7 +1722,6 @@ function estRenderItens(){
   var q=(document.getElementById('est-busca')||{}).value||'';
   q=q.toLowerCase();
 
-  // Determine which cats to show
   var catsToShow=[];
   if(estCatAtiva==='__all__'||estCatAtiva==='__baixo__'){
     catsToShow=estData.cats;
@@ -1788,7 +1736,6 @@ function estRenderItens(){
     return;
   }
 
-  var totalItens=0;
   catsToShow.forEach(function(cat){
     var itens=(cat.itens||[]).filter(function(item){
       var baixo=Number(item.qtd)<=Number(item.min);
@@ -1803,14 +1750,53 @@ function estRenderItens(){
     // Category header
     var catHeader=document.createElement('div');
     catHeader.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:6px 0 8px;margin-top:4px;border-bottom:1px solid var(--border2);margin-bottom:10px;';
-    var b=itens.filter(function(i){return Number(i.qtd)<=Number(i.min);}).length;
+    var b=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);}).length;
+    var catSpan=document.createElement('span');
+    catSpan.style.cssText='font-size:1rem;letter-spacing:0.06em;color:var(--accent);font-weight:700;display:flex;align-items:center;gap:8px;';
+    catSpan.textContent=cat.nome;
+    if(b){var bb=document.createElement('span');bb.style.cssText='background:var(--danger);color:#fff;border-radius:8px;padding:1px 6px;font-size:0.62rem;';bb.textContent=b+' baixo';catSpan.appendChild(bb);}
+    catHeader.appendChild(catSpan);
 
+    // Add form inline (above items)
+    el.appendChild(catHeader);
 
-    // Delete cat button  
-    var delCatBtn=document.createElement('button');
-    delCatBtn.innerHTML='&#128465;';
-    delCatBtn.style.cssText='background:none;border:none;color:var(--muted);font-size:0.85rem;cursor:pointer;padding:4px;';
-    delCatBtn.onclick=function(){
+    var addWrap=document.createElement('div');
+    addWrap.className='est-add-form';
+    addWrap.style.marginBottom='12px';
+    addWrap.innerHTML='<div class="est-add-title">+ Adicionar produto em '+escHtml(cat.nome)+'</div>'
+      +'<div style="margin-bottom:8px"><input type="text" class="est-add-inp" placeholder="Nome do produto..." style="width:100%"></div>'
+      +'<div class="est-add-row">'
+        +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
+          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd mínima</label>'
+          +'<input type="number" class="est-add-min" placeholder="0" min="0" value="0" style="width:100%">'
+        +'</div>'
+        +'<button class="est-add-submit" style="align-self:flex-end">Adicionar</button>'
+      +'</div>'
+      +'<div style="margin-top:8px;text-align:right">'
+        +'<button class="est-del-cat-btn">&#128465; Excluir categoria: '+escHtml(cat.nome)+'</button>'
+      +'</div>';
+
+    var nomeInp=addWrap.querySelector('.est-add-inp');
+    var minInp=addWrap.querySelector('.est-add-min');
+    var addBtn=addWrap.querySelector('.est-add-submit');
+    var delBtn=addWrap.querySelector('.est-del-cat-btn');
+
+    (function(cat2,ni,mi){
+      function add(){
+        var nome=(ni.value||'').trim();
+        var min=parseFloat(mi.value)||0;
+        if(!nome){showToast('Informe o nome!','#f7a34f');ni.focus();return;}
+        cat2.itens=cat2.itens||[];
+        cat2.itens.push({id:gerarId(),nome:nome,qtd:0,min:min});
+        estSalvar(); ni.value=''; mi.value='0'; ni.focus();
+        showToast('Produto adicionado!');
+        estRenderItens(); estRenderCatPills(); estAtualizarBadge(); estRenderPedidoBtns();
+      }
+      addBtn.onclick=add;
+      ni.addEventListener('keydown',function(e){ if(e.key==='Enter') add(); });
+    })(cat,nomeInp,minInp);
+
+    delBtn.onclick=function(){
       cvtConfirm('Excluir categoria "'+cat.nome+'" e todos os produtos?',function(){
         estData.cats=estData.cats.filter(function(c){return c.id!==cat.id;});
         if(estCatAtiva===cat.id) estCatAtiva='__all__';
@@ -1818,12 +1804,11 @@ function estRenderItens(){
         showToast('Categoria excluída!','#f75a5a');
       });
     };
-    catHeader.appendChild(delCatBtn);
-    el.appendChild(catHeader);
+
+    el.appendChild(addWrap);
 
     // Items
     itens.forEach(function(item){
-      totalItens++;
       var baixo=Number(item.qtd)<=Number(item.min);
       var card=document.createElement('div');
       card.className='est-card'+(baixo?' baixo':'');
@@ -1873,55 +1858,17 @@ function estRenderItens(){
       };
       el.appendChild(card);
     });
-
-    // Inline add form per category (always visible)
-    var addWrap=document.createElement('div');
-    addWrap.className='est-add-form';
-    addWrap.style.marginBottom='18px';
-    addWrap.innerHTML='<div class="est-add-title">+ Adicionar produto em '+escHtml(cat.nome)+'</div>'
-      +'<div style="margin-bottom:8px"><input type="text" class="est-add-inp" placeholder="Nome do produto..." style="width:100%"></div>'
-      +'<div class="est-add-row">'
-        +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
-          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd mínima</label>'
-          +'<input type="number" class="est-add-min" placeholder="0" min="0" value="0" style="width:100%">'
-        +'</div>'
-        +'<button class="est-add-submit" style="align-self:flex-end">Adicionar</button>'
-      +'</div>';
-
-    var nomeInp=addWrap.querySelector('.est-add-inp');
-    var minInp=addWrap.querySelector('.est-add-min');
-    var addBtn=addWrap.querySelector('.est-add-submit');
-
-    function adicionarNestaCat(){
-      var nome=(nomeInp.value||'').trim();
-      var min=parseFloat(minInp.value)||0;
-      if(!nome){showToast('Informe o nome!','#f7a34f');nomeInp.focus();return;}
-      cat.itens=cat.itens||[];
-      cat.itens.push({id:gerarId(),nome:nome,qtd:0,min:min});
-      estSalvar();
-      nomeInp.value=''; minInp.value='0'; nomeInp.focus();
-      showToast('Produto adicionado!');
-      estRenderItens(); estRenderCatPills(); estAtualizarBadge();
-    }
-
-    addBtn.onclick=adicionarNestaCat;
-    nomeInp.addEventListener('keydown',function(e){ if(e.key==='Enter') adicionarNestaCat(); });
-    el.appendChild(addWrap);
   });
 }
 
-
-function estAtualizarCard(card, item){
+function estAtualizarCard(card,item){
   var baixo=Number(item.qtd)<=Number(item.min);
   card.className='est-card'+(baixo?' baixo':'');
   var qtdEl=document.getElementById('estqtd-'+item.id);
   if(qtdEl){ qtdEl.textContent=item.qtd; qtdEl.className='est-qtd-num '+(baixo?'baixo':'ok'); }
-  // Update baixo tag
   var tag=card.querySelector('.est-baixo-tag');
-  if(baixo&&!tag){
-    var t=document.createElement('div'); t.className='est-baixo-tag'; t.innerHTML='&#9888;&#65039; Estoque baixo';
-    card.appendChild(t);
-  } else if(!baixo&&tag){ tag.remove(); }
+  if(baixo&&!tag){var t=document.createElement('div');t.className='est-baixo-tag';t.innerHTML='&#9888;&#65039; Estoque baixo';card.appendChild(t);}
+  else if(!baixo&&tag){tag.remove();}
   estAtualizarBadge(); estRenderCatPills();
 }
 
@@ -1941,16 +1888,41 @@ function estCriarCat(){
   showToast('Categoria "'+nome+'" criada!');
 }
 
-function estGerarPedido(){
+function estRenderPedidoBtns(){
+  var el=document.getElementById('est-pedido-btns');
+  if(!el) return;
+  el.innerHTML='';
+  // Button for ALL categories with baixo items
+  estData.cats.forEach(function(cat){
+    var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
+    if(!baixos.length) return;
+    var btn=document.createElement('button');
+    btn.className='est-pedido-btn';
+    btn.style.marginBottom='8px';
+    btn.innerHTML='&#128203; Pedido PDF &#8212; '+escHtml(cat.nome)+' <span style="background:var(--danger);color:#fff;border-radius:8px;padding:1px 6px;font-size:0.7rem;margin-left:4px">'+baixos.length+'</span>';
+    btn.onclick=function(){ estGerarPedido(cat.id); };
+    el.appendChild(btn);
+  });
+  // Show message if no baixos
+  var totalBaixos=0;
+  estData.cats.forEach(function(cat){(cat.itens||[]).forEach(function(i){if(Number(i.qtd)<=Number(i.min))totalBaixos++;});});
+  if(!totalBaixos){
+    el.innerHTML='<div style="text-align:center;padding:12px;color:var(--muted);font-size:0.8rem">Nenhum item com estoque baixo.</div>';
+  }
+}
+
+function estGerarPedido(catId){
   var baixos=[];
   estData.cats.forEach(function(cat){
+    if(catId && cat.id!==catId) return;
     (cat.itens||[]).forEach(function(item){
-      if(Number(item.qtd)<=Number(item.min)) baixos.push({nome:item.nome,cat:cat.nome,qtd:item.qtd,min:item.min,pedir:Math.max(0,Number(item.min)-Number(item.qtd)+Number(item.min))});
+      if(Number(item.qtd)<=Number(item.min)) baixos.push({nome:item.nome,cat:cat.nome,pedir:Math.max(0,Number(item.min)-Number(item.qtd)+Number(item.min))});
     });
   });
+  var catNome = catId ? (estData.cats.find(function(c){return c.id===catId;})||{}).nome||'' : 'Geral';
   if(!baixos.length){showToast('Nenhum item com estoque baixo!','#f7a34f');return;}
   var hoje=new Date().toLocaleDateString('pt-BR');
-  var rows=baixos.map(function(b,i){
+  var rows=baixos.map(function(b){
     return '<tr><td>'+escHtml(b.nome)+'</td>'
       +'<td style="text-align:center"><input type="number" value="'+b.pedir+'" min="0" style="width:80px;border:1px solid #374151;border-radius:4px;padding:6px;text-align:center;font-size:14px;background:#1f2937;color:#e2e8f0"></td></tr>';
   }).join('');
@@ -1966,8 +1938,8 @@ function estGerarPedido(){
     +'.ft{text-align:center;font-size:10px;color:#4b5563;margin-top:12px}'
     +'@page{margin:0}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{background:#0f172a!important}.btn{display:none!important}}'
     +'</style></head><body><div class="page">'
-    +'<button class="btn" onclick="window.print()">📄 Salvar como PDF</button>'
-    +'<div class="hdr"><h1>GESTÃO BÁVARO</h1><p>PEDIDO AO FORNECEDOR &bull; '+hoje+'</p></div>'
+    +'<button class="btn" onclick="window.print()">&#128196; Salvar como PDF</button>'
+    +'<div class="hdr"><h1>GESTÃO BÁVARO</h1><p>PEDIDO: '+escHtml(catNome).toUpperCase()+' &bull; '+hoje+'</p></div>'
     +'<table><thead><tr><th>Produto</th><th style="text-align:center">Qtd a Pedir</th></tr></thead>'
     +'<tbody>'+rows+'</tbody></table>'
     +'<div class="ft">'+baixos.length+' item(s) com estoque baixo &bull; Gestão Bávaro</div>'
@@ -1976,52 +1948,6 @@ function estGerarPedido(){
   var url=URL.createObjectURL(blob);
   window.open(url,'_blank');
   setTimeout(function(){URL.revokeObjectURL(url);},10000);
-}
-
-function estPedirQtd(titulo, callback){
-  // Reuse confirm overlay with a custom input
-  var overlay = document.getElementById('cvt-confirm-overlay');
-  var msg = document.getElementById('cvt-confirm-msg');
-  var btns = document.querySelector('.cvt-confirm-btns');
-  
-  msg.innerHTML = '<div style="font-weight:600;margin-bottom:10px">'+escHtml(titulo)+'</div>'
-    +'<input type="number" id="est-qtd-input" value="1" min="1" step="1" '
-    +'style="width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:8px;color:var(--text);font-size:1.1rem;padding:10px;outline:none;text-align:center;-webkit-appearance:none;">';
-  
-  overlay.classList.add('open');
-  setTimeout(function(){
-    var inp = document.getElementById('est-qtd-input');
-    if(inp){ try{inp.focus();inp.select();}catch(e){} }
-  }, 100);
-
-  // Override confirm buttons temporarily
-  var okBtn = overlay.querySelector('.cvt-confirm-ok');
-  var cancelBtn = overlay.querySelector('.cvt-confirm-cancel');
-  
-  function confirmar(){
-    var inp = document.getElementById('est-qtd-input');
-    var n = parseFloat(inp ? inp.value : 1);
-    overlay.classList.remove('open');
-    // Restore default confirm behavior
-    msg.innerHTML = 'Confirmar?';
-    if(isNaN(n)||n<=0){ showToast('Quantidade inválida','#f7a34f'); return; }
-    callback(n);
-  }
-  
-  function cancelar(){
-    overlay.classList.remove('open');
-    msg.innerHTML = 'Confirmar?';
-  }
-  
-  var _oldOk = okBtn.onclick, _oldCancel = cancelBtn.onclick;
-  okBtn.onclick = confirmar;
-  cancelBtn.onclick = cancelar;
-  
-  // Allow Enter key
-  setTimeout(function(){
-    var inp = document.getElementById('est-qtd-input');
-    if(inp) inp.addEventListener('keydown', function(e){ if(e.key==='Enter') confirmar(); });
-  }, 150);
 }
 
 estCarregar();

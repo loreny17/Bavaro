@@ -472,6 +472,15 @@ textarea{resize:vertical;min-height:80px;}
 .est-cat-arrow.open{transform:rotate(180deg);}
 .est-cat-body{border-top:1px solid var(--border2);padding:10px 12px 4px;}
 .est-cat-body.hidden{display:none;}
+
+/* ESTOQUE OPÇÕES COLAPSÁVEL */
+.est-opcoes-wrap{margin-bottom:12px;}
+.est-opcoes-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;font-weight:600;padding:10px 14px;cursor:pointer;transition:border-color 0.2s;}
+.est-opcoes-toggle:hover{border-color:var(--accent);color:var(--text);}
+.est-opcoes-arrow{font-size:0.7rem;transition:transform 0.25s;}
+.est-opcoes-arrow.open{transform:rotate(180deg);}
+.est-opcoes-body{padding:0 2px;}
+.est-opcoes-body.hidden{display:none;}
 </style>
 </head>
 <body>
@@ -675,22 +684,31 @@ textarea{resize:vertical;min-height:80px;}
   <div class="est-page-title">Controle de Estoque</div>
   <div class="est-page-sub" id="est-sub">—</div>
 
+  <!-- Categorias sempre visíveis -->
   <div class="est-cats-scroll" id="est-cat-pills"></div>
 
-  <div class="est-nova-cat-row">
-    <input type="text" class="est-nova-cat-inp" id="est-nova-cat-inp" placeholder="Nova categoria...">
-    <button class="est-nova-cat-btn" onclick="estCriarCat()">+ Criar</button>
-  </div>
-
-  <div class="est-search-bar">
-    <div class="search-wrapper" style="flex:1;margin:0">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="est-busca" placeholder="Buscar produto..." oninput="estRenderItens()" style="margin:0">
+  <!-- Menu colapsável Opções -->
+  <div class="est-opcoes-wrap" id="est-opcoes-wrap">
+    <button class="est-opcoes-toggle" id="est-opcoes-toggle" onclick="estToggleOpcoes()">
+      <span>⚙️ Opções</span>
+      <span class="est-opcoes-arrow" id="est-opcoes-arrow">&#9660;</span>
+    </button>
+    <div class="est-opcoes-body hidden" id="est-opcoes-body">
+      <div class="est-nova-cat-row" style="margin-top:10px">
+        <input type="text" class="est-nova-cat-inp" id="est-nova-cat-inp" placeholder="Nova categoria...">
+        <button class="est-nova-cat-btn" onclick="estCriarCat()">+ Criar</button>
+      </div>
+      <div class="est-search-bar">
+        <div class="search-wrapper" style="flex:1;margin:0">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="est-busca" placeholder="Buscar produto..." oninput="estRenderItens()" style="margin:0">
+        </div>
+      </div>
+      <div class="est-sort-row">
+        <button class="est-sort-btn ativo" id="est-ord-nome" onclick="estOrdem='nome';estRenderItens();estSetOrdem('nome')">Por Nome</button>
+        <button class="est-sort-btn" id="est-ord-baixo" onclick="estOrdem='baixo';estRenderItens();estSetOrdem('baixo')">&#9888; Estoque Baixo</button>
+      </div>
     </div>
-  </div>
-  <div class="est-sort-row">
-    <button class="est-sort-btn ativo" id="est-ord-nome" onclick="estOrdem='nome';estRenderItens();estSetOrdem('nome')">Por Nome</button>
-    <button class="est-sort-btn" id="est-ord-baixo" onclick="estOrdem='baixo';estRenderItens();estSetOrdem('baixo')">&#9888; Estoque Baixo</button>
   </div>
 
   <div id="est-add-form-wrap"></div>
@@ -1710,10 +1728,13 @@ function estRenderCatPills(){
   estData.cats.forEach(function(cat){
     var b=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);}).length;
     totalBaixo+=b;
-    pill(cat.nome, cat.id, estCatAtiva===cat.id, b||0);
   });
   pill('Todos','__all__',estCatAtiva==='__all__','');
   if(totalBaixo){ pill('⚠️ Baixo ('+totalBaixo+')','__baixo__',estCatAtiva==='__baixo__',''); }
+  estData.cats.forEach(function(cat){
+    var b=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);}).length;
+    pill(cat.nome, cat.id, estCatAtiva===cat.id, b||0);
+  });
 
   // Render PDF buttons per category
   estRenderPedidoBtns();
@@ -1987,6 +2008,14 @@ function estGerarPedido(catId){
   var url=URL.createObjectURL(blob);
   window.open(url,'_blank');
   setTimeout(function(){URL.revokeObjectURL(url);},10000);
+}
+
+function estToggleOpcoes(){
+  var body = document.getElementById('est-opcoes-body');
+  var arrow = document.getElementById('est-opcoes-arrow');
+  var open = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !open);
+  arrow.classList.toggle('open', open);
 }
 
 estCarregar();

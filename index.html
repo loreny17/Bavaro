@@ -957,118 +957,12 @@ function gerarPDF(funcIdOuNull){
 '<tfoot><tr><td>TOTAL</td><td class="td-val">R$ '+totalGeralV.toFixed(2).replace('.',',')+'</td><td class="td-fal" style="text-align:center">'+totalGeralF+'</td></tr></tfoot>'+
 '</table></div><div class="rodape">Gerado em '+hoje+' • Gestão de Funcionários</div></div></body></html>';
 
-    var nomeArq=(funcIdOuNull?'Relatorio_Individual_'+sanitize(linhas[0]?linhas[0].nome:'func'):'Relatorio_Geral')+'_'+vfYear+'_'+pad(vfMonth);
-    gerarPDFComJsPDF(titulo, mesNome, hoje, linhas, totalGeralV, totalGeralF, nomeArq, btn, funcIdOuNull);
-  }catch(err){console.error(err);showToast('❌ Erro ao gerar','#f75a5a');if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';}}
-}
-
-function gerarPDFComJsPDF(titulo, mesNome, hoje, linhas, totalGeralV, totalGeralF, nomeArq, btn, isIndividual){
-  try{
-    var jsPDF = window.jspdf ? window.jspdf.jsPDF : (window.jsPDF || (typeof jsPDF !== 'undefined' ? jsPDF : null));
-    if(!jsPDF){ showToast('⚠️ PDF lib não carregou','#f7a34f'); if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';} return; }
-
-    // Tamanho personalizado: largura A4, altura baseada no conteúdo
-    var pw = 210; // A4 width mm
-    var margin = 12;
-    var rowH = 8;
-    var headerH = 28;
-    var tableHeaderH = 8;
-    var footerH = 10;
-    var rodapeH = 10;
-    var totalH = headerH + tableHeaderH + (linhas.length * rowH) + footerH + rodapeH + 10;
-    var ph = Math.max(totalH, 80); // altura mínima
-
-    var doc = new jsPDF({orientation:'portrait', unit:'mm', format:[pw, ph]});
-    var y = 0;
-
-    // ── Cabeçalho ──
-    doc.setFillColor(20,30,50);
-    doc.rect(0, 0, pw, headerH, 'F');
-    doc.setFontSize(16);
-    doc.setTextColor(79,207,142);
-    doc.setFont('helvetica','bold');
-    doc.text('GESTÃO BÁVARO', pw/2, 11, {align:'center'});
-    doc.setFontSize(9);
-    doc.setTextColor(160,174,192);
-    doc.setFont('helvetica','normal');
-    doc.text(titulo.toUpperCase()+' — Vales e Faltas', pw/2, 18, {align:'center'});
-    doc.text('Período: '+mesNome, pw/2, 24, {align:'center'});
-    y = headerH + 2;
-
-    // ── Cabeçalho tabela ──
-    doc.setFillColor(20,50,30);
-    doc.rect(margin, y, pw-margin*2, tableHeaderH, 'F');
-    doc.setFontSize(8);
-    doc.setTextColor(79,207,142);
-    doc.setFont('helvetica','bold');
-    doc.text('FUNCIONÁRIO', margin+2, y+5.5);
-    doc.text('TOTAL VALES', pw-margin-46, y+5.5);
-    doc.text('FALTAS', pw-margin-14, y+5.5, {align:'right'});
-    y += tableHeaderH;
-
-    // ── Linhas ──
-    doc.setFont('helvetica','normal');
-    linhas.forEach(function(l, i){
-      var bg = i%2===0 ? [22,22,40] : [28,32,46];
-      doc.setFillColor(bg[0],bg[1],bg[2]);
-      doc.rect(margin, y, pw-margin*2, rowH, 'F');
-      doc.setTextColor(220,228,238);
-      doc.setFontSize(8.5);
-      doc.text(l.nome.substring(0,35), margin+2, y+5.5);
-      doc.setTextColor(200,200,200);
-      var valStr = 'R$ '+l.tv.toFixed(2).replace('.',',');
-      doc.text(valStr, pw-margin-46, y+5.5);
-      doc.setTextColor(248,113,113);
-      doc.text(l.fStr.substring(0,18), pw-margin-2, y+5.5, {align:'right'});
-      y += rowH;
-    });
-
-    // ── Linha total ──
-    doc.setFillColor(15,40,20);
-    doc.rect(margin, y, pw-margin*2, footerH, 'F');
-    doc.setFontSize(9);
-    doc.setTextColor(79,207,142);
-    doc.setFont('helvetica','bold');
-    doc.text('TOTAL', margin+2, y+6.5);
-    doc.text('R$ '+totalGeralV.toFixed(2).replace('.',','), pw-margin-46, y+6.5);
-    doc.setTextColor(248,113,113);
-    doc.text(String(totalGeralF), pw-margin-2, y+6.5, {align:'right'});
-    y += footerH + 4;
-
-    // ── Rodapé ──
-    doc.setFontSize(7);
-    doc.setTextColor(120,130,150);
-    doc.setFont('helvetica','normal');
-    doc.text('Gerado em '+hoje+' • Gestão Bávaro', pw/2, y, {align:'center'});
-
-    // ── Compartilhar ou baixar ──
-    var pdfBlob = doc.output('blob');
-    var pdfFile = new File([pdfBlob], nomeArq+'.pdf', {type:'application/pdf'});
-
-    if(navigator.share && navigator.canShare && navigator.canShare({files:[pdfFile]})){
-      navigator.share({
-        title: titulo+' — Vales e Faltas',
-        text: 'Relatório Gestão Bávaro. Período: '+mesNome,
-        files:[pdfFile]
-      }).then(function(){
-        showToast('✅ Compartilhado!');
-      }).catch(function(e){
-        if(e.name!=='AbortError') baixarPDF(doc, nomeArq);
-      });
-    } else {
-      baixarPDF(doc, nomeArq);
-    }
-  }catch(e){
-    console.error('jsPDF erro:', e);
-    showToast('❌ Erro ao gerar PDF','#f75a5a');
-  } finally {
-    if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';}
-  }
-}
-
-function baixarPDF(doc, nome){
-  doc.save(nome+'.pdf');
-  showToast('📄 PDF baixado!');
+    var w=window.open('','_blank');
+    w.document.write(html);
+    w.document.close();
+    showToast('📄 Relatório aberto!');
+  }catch(err){console.error(err);showToast('❌ Erro ao gerar','#f75a5a');}
+  finally{if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';}}
 }
 
 // ═══ BACKUP ═══
@@ -1698,7 +1592,6 @@ function atualizarHomeBadges(){
 }
 
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <!-- Firebase carrega depois do app -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>

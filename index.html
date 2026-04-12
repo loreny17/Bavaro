@@ -957,15 +957,41 @@ function gerarPDF(funcIdOuNull){
 '<tfoot><tr><td>TOTAL</td><td class="td-val">R$ '+totalGeralV.toFixed(2).replace('.',',')+'</td><td class="td-fal" style="text-align:center">'+totalGeralF+'</td></tr></tfoot>'+
 '</table></div><div class="rodape">Gerado em '+hoje+' • Gestão de Funcionários</div></div></body></html>';
 
+    var nomeArq=(funcIdOuNull?'Relatorio_Individual_'+sanitize(linhas[0]?linhas[0].nome:'func'):'Relatorio_Geral')+'_'+vfYear+'_'+pad(vfMonth)+'.html';
     var blob=new Blob([html],{type:'text/html;charset=utf-8'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');a.href=url;
-    a.download=(funcIdOuNull?'Relatorio_Individual_'+sanitize(linhas[0]?linhas[0].nome:'func'):'Relatorio_Geral')+'_'+vfYear+'_'+pad(vfMonth)+'.html';
-    document.body.appendChild(a);a.click();
-    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},500);
-    showToast('📄 Arquivo baixado!','#4f8ef7');
+
+    // Tenta Web Share API (compartilhar direto - funciona no celular)
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[new File([blob],nomeArq,{type:'text/html'})]})){
+      var file=new File([blob],nomeArq,{type:'text/html'});
+      navigator.share({
+        title: funcIdOuNull?'Relatório Individual':'Relatório Geral — Vales e Faltas',
+        text: 'Relatório gerado pelo Gestão Bávaro',
+        files:[file]
+      }).then(function(){
+        showToast('✅ Compartilhado!','var(--success)');
+      }).catch(function(e){
+        if(e.name!=='AbortError') baixarArquivo(blob,nomeArq);
+      });
+    } else {
+      // Fallback: download direto
+      baixarArquivo(blob,nomeArq);
+      showToast('📄 Arquivo baixado!');
+    }
   }catch(err){console.error(err);showToast('❌ Erro ao gerar','#f75a5a');}
   finally{if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';}}
+}
+
+function baixarArquivo(blob,nome){
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download=nome;
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },300);
 }
 
 // ═══ BACKUP ═══

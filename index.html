@@ -498,6 +498,16 @@ textarea{resize:vertical;min-height:80px;}
 .admin-badge.hidden{display:none;}
 .admin-login-btn{position:fixed;bottom:80px;right:14px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:20px;font-family:'Space Grotesk',sans-serif;font-size:0.72rem;font-weight:600;padding:6px 12px;cursor:pointer;z-index:50;}
 .admin-login-btn.hidden{display:none;}
+
+/* ANIVERSÁRIO */
+.bday-banner{background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.05));border:1.5px solid rgba(212,168,67,0.4);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;display:none;}
+.bday-banner.show{display:block;}
+.bday-title{font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.06em;color:var(--accent);margin-bottom:6px;}
+.bday-list{display:flex;flex-direction:column;gap:4px;}
+.bday-item{font-size:0.82rem;color:var(--text);display:flex;align-items:center;gap:6px;}
+.bday-item .bday-icon{font-size:1rem;}
+.bday-item .bday-name{font-weight:600;}
+.bday-item .bday-info{color:var(--muted);font-size:0.75rem;}
 </style>
 </head>
 <body>
@@ -571,7 +581,7 @@ textarea{resize:vertical;min-height:80px;}
   <div class="form-group"><label>Cargo / Função</label><input type="text" id="f-cargo" placeholder="Ex: Auxiliar de serviços"></div>
   <div class="form-row">
     <div><label>CPF</label><input type="text" id="f-cpf" placeholder="000.000.000-00" maxlength="14"></div>
-    <div><label>RG</label><input type="text" id="f-rg" placeholder="00.000.000-0"></div>
+    <div><label>Data de Nascimento</label><input type="date" id="f-nascimento"></div>
   </div>
   <div class="form-group"><label>Telefone</label><input type="tel" id="f-tel" placeholder="(11) 99999-9999"></div>
   <div class="form-group"><label>Data de admissão</label><input type="date" id="f-admissao"></div>
@@ -579,18 +589,25 @@ textarea{resize:vertical;min-height:80px;}
   <div class="divider"></div>
   <div class="section-title">🏦 Dados Bancários</div>
   <div class="form-row">
-    <div><label>Banco</label><input type="text" id="f-banco" placeholder="Ex: Itaú, Nubank"></div>
-    <div><label>Tipo Pix</label>
-      <select id="f-pix-tipo">
-        <option value="">Selecione</option>
-        <option value="CPF">CPF</option>
-        <option value="Telefone">Telefone</option>
-        <option value="E-mail">E-mail</option>
-        <option value="Aleatória">Chave aleatória</option>
+    <div><label>Agência Itaú</label><input type="text" id="f-agencia" placeholder="Ex: 1234" oninput="atualizarBotaoCopiaItau()"></div>
+    <div><label>Conta Itaú</label><input type="text" id="f-conta" placeholder="Ex: 12345-6" oninput="atualizarBotaoCopiaItau()"></div>
+  </div>
+  <div class="form-group" id="f-copy-itau-wrap" style="display:none">
+    <button type="button" onclick="copiarDadosItauForm()" style="width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:var(--radius);color:var(--accent);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.85rem;padding:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+      📋 Copiar dados Itaú (Agência + Conta + CPF)
+    </button>
+  </div>
+  <div class="form-group">
+    <label>Cartão Transporte</label>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" id="f-cartao-num" placeholder="Número do cartão" style="flex:1">
+      <select id="f-cartao-tipo" style="width:140px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:10px 8px;outline:none;font-size:0.85rem">
+        <option value="">Tipo</option>
+        <option value="Urbs">Urbs</option>
+        <option value="Metrocard">Metrocard</option>
       </select>
     </div>
   </div>
-  <div class="form-group"><label>Chave Pix</label><input type="text" id="f-pix" placeholder="Chave Pix"></div>
 
   <div class="divider"></div>
   <div class="section-title">⚠️ Pendências</div>
@@ -621,7 +638,11 @@ textarea{resize:vertical;min-height:80px;}
     <div class="dl-bar-label"><strong>⬇️ Download Geral</strong>Todos os funcionários em ZIP</div>
     <button class="dl-all-btn" id="btn-dl-all" onclick="downloadTodos()">📦 Baixar ZIP</button>
   </div>
-  <button onclick="abrirCadastro()" style="width:100%;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.88rem;padding:12px;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px;">➕ Novo Funcionário</button>
+  <button onclick="abrirCadastro()" style="width:100%;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.88rem;padding:12px;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:8px;">➕ Novo Funcionário</button>
+  <div style="display:flex;gap:8px;margin-bottom:10px;">
+    <button onclick="gerarPdfAdmissao()" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 PDF Admissão</button>
+    <button onclick="gerarPdfDocumentos()" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 PDF Documentos</button>
+  </div>
   <div class="lista-toolbar">
     <div class="search-wrapper" style="margin:0;flex:1">
       <span class="search-icon">🔍</span>
@@ -631,6 +652,12 @@ textarea{resize:vertical;min-height:80px;}
     <button class="filter-btn" id="btn-filtro-vt" onclick="toggleFiltro('vt')" title="Filtrar Cartão V.T">🚌</button>
   </div>
   <div id="lista-container"></div>
+
+  <!-- ANIVERSÁRIOS -->
+  <div class="bday-banner" id="bday-banner" style="margin-top:16px">
+    <div class="bday-title">🎂 Aniversários Próximos</div>
+    <div class="bday-list" id="bday-list"></div>
+  </div>
 </div>
 
 <!-- TAB VALES & FALTAS -->
@@ -829,7 +856,7 @@ function showTab(tab){
   document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.toggle('active',['lista','vf','cvt','estoque'][i]===tab);});
   document.querySelectorAll('.tab-content').forEach(function(c){c.classList.remove('active');});
   document.getElementById('tab-'+tab).classList.add('active');
-  if(tab==='lista')renderLista();
+  if(tab==='lista'){renderLista(); verificarAniversarios();}
   if(tab==='vf')renderVF();
   if(tab==='cvt')renderCVT();
   if(tab==='estoque'){estRenderCatPills();estRenderAddForm();estRenderItens();}
@@ -850,12 +877,13 @@ function salvarFuncionario(){
     id:editingId||Date.now(),nome:nome,
     cargo:document.getElementById('f-cargo').value.trim(),
     cpf:document.getElementById('f-cpf').value.trim(),
-    rg:document.getElementById('f-rg').value.trim(),
+    nascimento:document.getElementById('f-nascimento').value,
     tel:document.getElementById('f-tel').value.trim(),
     admissao:document.getElementById('f-admissao').value,
-    banco:document.getElementById('f-banco').value.trim(),
-    pixTipo:document.getElementById('f-pix-tipo').value,
-    pix:document.getElementById('f-pix').value.trim(),
+    agencia:document.getElementById('f-agencia').value.trim(),
+    conta:document.getElementById('f-conta').value.trim(),
+    cartaoNum:document.getElementById('f-cartao-num').value.trim(),
+    cartaoTipo:document.getElementById('f-cartao-tipo').value,
     pendencias:{itau:document.getElementById('p-itau').checked,vt:document.getElementById('p-vt').checked},
     arquivos:currentFiles.slice(),
     obs:document.getElementById('f-obs').value.trim(),
@@ -869,9 +897,9 @@ function salvarFuncionario(){
   }).catch(function(){showToast('❌ Erro ao salvar','#f75a5a');});
 }
 function limparForm(){
-  ['f-nome','f-cargo','f-cpf','f-rg','f-tel','f-banco','f-pix','f-obs'].forEach(function(id){document.getElementById(id).value='';}); 
+  ['f-nome','f-cargo','f-cpf','f-nascimento','f-tel','f-agencia','f-conta','f-cartao-num','f-obs'].forEach(function(id){document.getElementById(id).value='';});  
   document.getElementById('f-admissao').value='';
-  document.getElementById('f-pix-tipo').value='';
+  document.getElementById('f-cartao-tipo').value='';
   document.getElementById('p-itau').checked=false;document.getElementById('p-vt').checked=false;
   currentFiles=[];renderFilePreviews();editingId=null;
 }
@@ -921,19 +949,20 @@ function abrirModal(id){
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px"><div class="employee-avatar" style="width:50px;height:50px;font-size:1.1rem">'+ini+'</div><div><div class="modal-title">'+f.nome+'</div><div class="modal-sub">'+(f.cargo||'Sem cargo')+' • '+adm+'</div></div></div>'+
     '<div class="detail-section"><div class="detail-section-title">📋 Dados</div>'+
     (f.cpf?'<div class="detail-row"><span>CPF</span><span>'+f.cpf+'</span></div>':'')+
-    (f.rg?'<div class="detail-row"><span>RG</span><span>'+f.rg+'</span></div>':'')+
+    (f.nascimento?'<div class="detail-row"><span>Nascimento</span><span>'+fmtDataBR(f.nascimento)+'</span></div>':'')+
     (f.tel?'<div class="detail-row"><span>Telefone</span><span>'+f.tel+'</span></div>':'')+
     '</div>'+
-    ((f.banco||f.pix)?'<div class="detail-section"><div class="detail-section-title">🏦 Dados Bancários</div>'+
-    (f.banco?'<div class="detail-row"><span>Banco</span><span>'+f.banco+'</span></div>':'')+
-    (f.pixTipo?'<div class="detail-row"><span>Tipo Pix</span><span>'+f.pixTipo+'</span></div>':'')+
-    (f.pix?'<div class="detail-row"><span>Chave Pix</span><span style="word-break:break-all;text-align:right;max-width:60%">'+f.pix+'</span></div>':'')+
+    ((f.agencia||f.conta||f.cartaoNum)?'<div class="detail-section"><div class="detail-section-title">🏦 Dados Bancários / Transporte</div>'+
+    (f.agencia?'<div class="detail-row"><span>Agência Itaú</span><span>'+f.agencia+'</span></div>':'')+
+    (f.conta?'<div class="detail-row"><span>Conta Itaú</span><span>'+f.conta+'</span></div>':'')+
+    ((f.agencia&&f.conta)?'<div style="padding:6px 0"><button onclick="copiarDadosItau(this)" data-cpf="'+escHtml(f.cpf||'')+'" data-agencia="'+escHtml(f.agencia||'')+'" data-conta="'+escHtml(f.conta||'')+'" style="background:var(--accent);border:none;border-radius:6px;color:#000;font-size:0.72rem;font-weight:700;padding:6px 12px;cursor:pointer;width:100%">📋 Copiar dados Itaú</button></div>':'')+
+    (f.cartaoNum?'<div class="detail-row"><span>Cartão ('+( f.cartaoTipo||'Transporte')+')</span><span>'+f.cartaoNum+'</span></div>':'')+
     '</div>':'')+
     '<div class="detail-section"><div class="detail-section-title">⚠️ Pendências</div>'+pRows+'</div>'+
     gal+obs+
     '<div class="detail-section"><div class="detail-section-title">⬇️ Download individual</div><div class="dl-row"><button class="btn btn-success" onclick="downloadIndividual('+id+',\'html\')">🗂️ Ficha HTML</button><button class="btn btn-warning" onclick="downloadIndividual('+id+',\'txt\')">📄 Relatório TXT</button></div></div>'+
-    '<button class="btn btn-outline" onclick="editarFuncionario('+id+')">✏️ Editar</button>'+
-    '<button class="btn btn-danger" onclick="excluirFuncionario('+id+')">🗑️ Excluir funcionário</button>';
+    (_isAdmin?'<button class="btn btn-outline" onclick="editarFuncionario('+id+')">✏️ Editar</button>':'')+
+    (_isAdmin?'<button class="btn btn-danger" onclick="excluirFuncionario('+id+')">🗑️ Excluir funcionário</button>':'');
   document.getElementById('modal-overlay').classList.add('open');
 }
 function fecharModalClick(e){if(e.target===document.getElementById('modal-overlay'))document.getElementById('modal-overlay').classList.remove('open');}
@@ -943,12 +972,13 @@ function editarFuncionario(id){
   document.getElementById('f-nome').value=f.nome;
   document.getElementById('f-cargo').value=f.cargo||'';
   document.getElementById('f-cpf').value=f.cpf||'';
-  document.getElementById('f-rg').value=f.rg||'';
+  document.getElementById('f-nascimento').value=f.nascimento||'';
   document.getElementById('f-tel').value=f.tel||'';
   document.getElementById('f-admissao').value=f.admissao||'';
-  document.getElementById('f-banco').value=f.banco||'';
-  document.getElementById('f-pix-tipo').value=f.pixTipo||'';
-  document.getElementById('f-pix').value=f.pix||'';
+  document.getElementById('f-agencia').value=f.agencia||''; setTimeout(atualizarBotaoCopiaItau,50);
+  document.getElementById('f-conta').value=f.conta||'';
+  document.getElementById('f-cartao-num').value=f.cartaoNum||'';
+  document.getElementById('f-cartao-tipo').value=f.cartaoTipo||'';
   document.getElementById('p-itau').checked=f.pendencias.itau;
   document.getElementById('p-vt').checked=f.pendencias.vt;
   document.getElementById('f-obs').value=f.obs||'';
@@ -1169,13 +1199,13 @@ function gerarFichaHTML(f){
   var iT=f.pendencias.itau?'⚠️ PENDENTE':'✅ OK',vT=f.pendencias.vt?'⚠️ PENDENTE':'✅ OK';
   var arqH=(f.arquivos&&f.arquivos.length)?f.arquivos.map(function(a){if(a.type.startsWith('image/'))return'<div style="display:inline-block;margin:6px;vertical-align:top;text-align:center"><img src="'+a.dataUrl+'" style="width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0"><div style="font-size:10px;color:#718096;margin-top:3px">'+a.name+'</div></div>';return'<div style="display:inline-block;margin:6px;text-align:center;width:70px"><div style="font-size:1.8rem">'+fileIcon(a.name)+'</div><div style="font-size:10px;color:#718096">'+a.name+'</div></div>';}).join(''):'<p style="color:#a0aec0;font-size:13px">Nenhum arquivo.</p>';
   var obsH=f.obs?'<p style="margin:0;line-height:1.6;font-size:14px">'+f.obs.replace(/\n/g,'<br>')+'</p>':'<p style="color:#a0aec0;font-size:13px">Sem observações.</p>';
-  var bancRow=(f.banco||f.pix)?'<div class="section"><div class="st">🏦 Dados Bancários</div>'+(f.banco?'<div class="row"><span class="lbl">Banco</span><span>'+f.banco+'</span></div>':'')+(f.pixTipo?'<div class="row"><span class="lbl">Tipo Pix</span><span>'+f.pixTipo+'</span></div>':'')+(f.pix?'<div class="row"><span class="lbl">Chave Pix</span><span style="word-break:break-all">'+f.pix+'</span></div>':'')+'</div>':'';
-  return'<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Ficha - '+f.nome+'</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"><style>body{font-family:"DM Sans",sans-serif;background:#f7fafc;color:#2d3748;margin:0;padding:20px}.card{background:#fff;border-radius:16px;max-width:640px;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden}.card-header{background:linear-gradient(135deg,#1a365d,#2b6cb0);color:#fff;padding:28px}.card-header h1{font-family:"Syne",sans-serif;font-size:1.5rem;font-weight:800;margin:0 0 4px}.sub{font-size:.9rem;opacity:.8}.card-body{padding:24px}.section{margin-bottom:20px}.st{font-family:"Syne",sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#718096;margin-bottom:9px}.row{display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:14px;gap:10px}.row:last-child{border-bottom:none}.lbl{color:#718096;flex-shrink:0}.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}.badge-ok{background:#f0fff4;color:#276749;border:1px solid #c6f6d5}.badge-pend{background:#fff5f5;color:#c53030;border:1px solid #fed7d7}.footer{background:#f7fafc;border-top:1px solid #e2e8f0;padding:14px 24px;font-size:11px;color:#a0aec0}@media print{body{padding:0}.card{box-shadow:none}}</style></head><body><div class="card"><div class="card-header"><div class="sub">FICHA DO FUNCIONÁRIO</div><h1>'+f.nome+'</h1><div class="sub">'+(f.cargo||'Sem cargo')+'</div></div><div class="card-body"><div class="section"><div class="st">📋 Dados</div><div class="row"><span class="lbl">Nome</span><span>'+f.nome+'</span></div><div class="row"><span class="lbl">Cargo</span><span>'+(f.cargo||'—')+'</span></div>'+(f.cpf?'<div class="row"><span class="lbl">CPF</span><span>'+f.cpf+'</span></div>':'')+(f.rg?'<div class="row"><span class="lbl">RG</span><span>'+f.rg+'</span></div>':'')+(f.tel?'<div class="row"><span class="lbl">Telefone</span><span>'+f.tel+'</span></div>':'')+'<div class="row"><span class="lbl">Admissão</span><span>'+adm+'</span></div></div>'+bancRow+'<div class="section"><div class="st">⚠️ Pendências</div><div class="row"><span class="lbl">Conta Itaú</span><span class="badge '+iC+'">'+iT+'</span></div><div class="row"><span class="lbl">Cartão V.T</span><span class="badge '+vC+'">'+vT+'</span></div></div><div class="section"><div class="st">📎 Arquivos</div>'+arqH+'</div><div class="section"><div class="st">💬 Observações</div>'+obsH+'</div></div><div class="footer">Gerado em '+new Date().toLocaleString('pt-BR')+'</div></div></body></html>';
+  var bancRow=(f.agencia||f.conta||f.cartaoNum)?'<div class="section"><div class="st">🏦 Dados Bancários / Transporte</div>'+(f.agencia?'<div class="row"><span class="lbl">Agência Itaú</span><span>'+f.agencia+'</span></div>':'')+(f.conta?'<div class="row"><span class="lbl">Conta Itaú</span><span>'+f.conta+'</span></div>':'')+(f.cartaoNum?'<div class="row"><span class="lbl">Cartão ('+(f.cartaoTipo||'Transporte')+')</span><span>'+f.cartaoNum+'</span></div>':'')+'</div>':'';
+  return'<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Ficha - '+f.nome+'</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"><style>body{font-family:"DM Sans",sans-serif;background:#f7fafc;color:#2d3748;margin:0;padding:20px}.card{background:#fff;border-radius:16px;max-width:640px;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden}.card-header{background:linear-gradient(135deg,#1a365d,#2b6cb0);color:#fff;padding:28px}.card-header h1{font-family:"Syne",sans-serif;font-size:1.5rem;font-weight:800;margin:0 0 4px}.sub{font-size:.9rem;opacity:.8}.card-body{padding:24px}.section{margin-bottom:20px}.st{font-family:"Syne",sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#718096;margin-bottom:9px}.row{display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:14px;gap:10px}.row:last-child{border-bottom:none}.lbl{color:#718096;flex-shrink:0}.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}.badge-ok{background:#f0fff4;color:#276749;border:1px solid #c6f6d5}.badge-pend{background:#fff5f5;color:#c53030;border:1px solid #fed7d7}.footer{background:#f7fafc;border-top:1px solid #e2e8f0;padding:14px 24px;font-size:11px;color:#a0aec0}@media print{body{padding:0}.card{box-shadow:none}}</style></head><body><div class="card"><div class="card-header"><div class="sub">FICHA DO FUNCIONÁRIO</div><h1>'+f.nome+'</h1><div class="sub">'+(f.cargo||'Sem cargo')+'</div></div><div class="card-body"><div class="section"><div class="st">📋 Dados</div><div class="row"><span class="lbl">Nome</span><span>'+f.nome+'</span></div><div class="row"><span class="lbl">Cargo</span><span>'+(f.cargo||'—')+'</span></div>'+(f.cpf?'<div class="row"><span class="lbl">CPF</span><span>'+f.cpf+'</span></div>':'')+(f.nascimento?'<div class="row"><span class="lbl">Nascimento</span><span>'+fmtDataBR(f.nascimento)+'</span></div>':'')+(f.tel?'<div class="row"><span class="lbl">Telefone</span><span>'+f.tel+'</span></div>':'')+'<div class="row"><span class="lbl">Admissão</span><span>'+adm+'</span></div></div>'+bancRow+'<div class="section"><div class="st">⚠️ Pendências</div><div class="row"><span class="lbl">Conta Itaú</span><span class="badge '+iC+'">'+iT+'</span></div><div class="row"><span class="lbl">Cartão V.T</span><span class="badge '+vC+'">'+vT+'</span></div></div><div class="section"><div class="st">📎 Arquivos</div>'+arqH+'</div><div class="section"><div class="st">💬 Observações</div>'+obsH+'</div></div><div class="footer">Gerado em '+new Date().toLocaleString('pt-BR')+'</div></div></body></html>';
 }
 function gerarFichaTXT(f){
   var sep='==================================================\n',line='--------------------------------------------------\n';
   var arqs=(f.arquivos&&f.arquivos.length)?f.arquivos.map(function(a,i){return'  '+(i+1)+'. '+a.name;}).join('\n'):'  Nenhum.';
-  return sep+'  FICHA DO FUNCIONARIO\n'+sep+'\nDados\n'+line+'Nome: '+f.nome+'\nCargo: '+(f.cargo||'—')+'\nCPF: '+(f.cpf||'—')+'\nRG: '+(f.rg||'—')+'\nTelefone: '+(f.tel||'—')+'\nAdmissao: '+fmtData(f.admissao)+'\n\nDados Bancarios\n'+line+'Banco: '+(f.banco||'—')+'\nTipo Pix: '+(f.pixTipo||'—')+'\nChave Pix: '+(f.pix||'—')+'\n\nPendencias\n'+line+'Itau: '+(f.pendencias.itau?'PENDENTE':'OK')+'\nVT: '+(f.pendencias.vt?'PENDENTE':'OK')+'\n\nArquivos\n'+line+arqs+'\n\nObservacoes\n'+line+(f.obs||'Sem obs.')+'\n\n'+sep+'Gerado: '+new Date().toLocaleString('pt-BR')+'\n'+sep;
+  return sep+'  FICHA DO FUNCIONARIO\n'+sep+'\nDados\n'+line+'Nome: '+f.nome+'\nCargo: '+(f.cargo||'—')+'\nCPF: '+(f.cpf||'—')+'\nNascimento: '+(f.nascimento?fmtDataBR(f.nascimento):'—')+'\nTelefone: '+(f.tel||'—')+'\nAdmissao: '+fmtData(f.admissao)+'\n\nDados Bancarios\n'+line+'Agencia Itau: '+(f.agencia||'—')+'\nConta Itau: '+(f.conta||'—')+'\nCartao Transporte: '+(f.cartaoNum||'—')+' ('+(f.cartaoTipo||'—')+')\n\nPendencias\n'+line+'Itau: '+(f.pendencias.itau?'PENDENTE':'OK')+'\nVT: '+(f.pendencias.vt?'PENDENTE':'OK')+'\n\nArquivos\n'+line+arqs+'\n\nObservacoes\n'+line+(f.obs||'Sem obs.')+'\n\n'+sep+'Gerado: '+new Date().toLocaleString('pt-BR')+'\n'+sep;
 }
 function downloadIndividual(id,tipo){
   var f=funcionarios.find(function(x){return x.id===id;});if(!f)return;
@@ -2108,6 +2138,207 @@ function adminAtualizarUI(){
   document.getElementById('admin-login-btn').classList.toggle('hidden',_isAdmin);
 }
 
+
+// ═══ ANIVERSÁRIOS ═══
+function verificarAniversarios(){
+  var banner = document.getElementById('bday-banner');
+  var lista = document.getElementById('bday-list');
+  if(!banner || !lista) return;
+
+  var hoje = new Date();
+  var diaHoje = hoje.getDate();
+  var mesHoje = hoje.getMonth() + 1;
+
+  var aniversariantes = [];
+  funcionarios.forEach(function(f){
+    if(!f.nascimento) return;
+    var parts = f.nascimento.split('-');
+    if(parts.length < 3) return;
+    var mesNasc = parseInt(parts[1]);
+    var diaNasc = parseInt(parts[2]);
+
+    var diff = 0; // dias até aniversário
+    var dataAniv = new Date(hoje.getFullYear(), mesNasc - 1, diaNasc);
+    if(dataAniv < hoje) dataAniv.setFullYear(hoje.getFullYear() + 1);
+    diff = Math.round((dataAniv - hoje) / (1000*60*60*24));
+
+    if(diff <= 7){ // próximos 7 dias
+      var label = '';
+      if(diaNasc === diaHoje && mesNasc === mesHoje){
+        label = '🎉 Hoje!';
+      } else if(diff === 1){
+        label = 'Amanhã';
+      } else {
+        label = 'Em ' + diff + ' dias';
+      }
+      aniversariantes.push({f:f, label:label, diff:diff});
+    }
+  });
+
+  aniversariantes.sort(function(a,b){ return a.diff - b.diff; });
+
+  if(aniversariantes.length > 0){
+    lista.innerHTML = aniversariantes.map(function(a){
+      var partes = a.f.nascimento.split('-');
+      var anoNasc = parseInt(partes[0]);
+      var idade = hoje.getFullYear() - anoNasc + (a.diff === 0 ? 0 : -1);
+      return '<div class="bday-item">'
+        + '<span class="bday-icon">🎂</span>'
+        + '<span class="bday-name">' + escHtml(a.f.nome.split(' ')[0]) + '</span>'
+        + '<span class="bday-info">' + a.label + ' • ' + idade + ' anos</span>'
+        + '</div>';
+    }).join('');
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+function copiarDadosItau(cpf, agencia, conta){
+  var texto = 'Banco: Itaú\nAgência: ' + agencia + '\nConta: ' + conta + (cpf ? '\nCPF: ' + cpf : '');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(texto).then(function(){
+      showToast('📋 Dados copiados!');
+    }).catch(function(){
+      copiarFallback(texto);
+    });
+  } else {
+    copiarFallback(texto);
+  }
+}
+function copiarFallback(texto){
+  var ta = document.createElement('textarea');
+  ta.value = texto;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try{ document.execCommand('copy'); showToast('📋 Dados copiados!'); }
+  catch(e){ showToast('Erro ao copiar','#f75a5a'); }
+  document.body.removeChild(ta);
+}
+
+function copiarDadosItau(btn){
+  var cpf = btn.getAttribute('data-cpf');
+  var agencia = btn.getAttribute('data-agencia');
+  var conta = btn.getAttribute('data-conta');
+  var texto = 'Banco: Itaú' + '\nAgência: ' + agencia + '\nConta: ' + conta + (cpf ? '\nCPF: ' + cpf : '');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(texto).then(function(){
+      showToast('📋 Dados copiados!');
+    }).catch(function(){ _copiarFallback(texto); });
+  } else {
+    _copiarFallback(texto);
+  }
+}
+function _copiarFallback(texto){
+  var ta = document.createElement('textarea');
+  ta.value = texto; ta.style.cssText = 'position:fixed;opacity:0;';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  try{ document.execCommand('copy'); showToast('📋 Dados copiados!'); }
+  catch(e){ showToast('Erro ao copiar','#f75a5a'); }
+  document.body.removeChild(ta);
+}
+
+function atualizarBotaoCopiaItau(){
+  var ag = (document.getElementById('f-agencia')||{}).value||'';
+  var ct = (document.getElementById('f-conta')||{}).value||'';
+  var wrap = document.getElementById('f-copy-itau-wrap');
+  if(wrap) wrap.style.display = (ag && ct) ? 'block' : 'none';
+}
+
+function copiarDadosItauForm(){
+  var cpf = (document.getElementById('f-cpf')||{}).value||'';
+  var ag  = (document.getElementById('f-agencia')||{}).value||'';
+  var ct  = (document.getElementById('f-conta')||{}).value||'';
+  var txt = 'Banco: Itaú\nAgência: '+ag+'\nConta: '+ct+(cpf?'\nCPF: '+cpf:'');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ showToast('📋 Dados copiados!'); }).catch(function(){ _copiarFallback(txt); });
+  } else { _copiarFallback(txt); }
+}
+
+function gerarPdfAdmissao(){
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    +'<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
+    +'<title>Solicitação de Dados — Admissão</title>'
+    +'<style>'
+    +'*{box-sizing:border-box;margin:0;padding:0}'
+    +'body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0}'
+    +'.page{max-width:600px;margin:0 auto;padding:16px}'
+    +'.hdr{background:linear-gradient(135deg,#1e3a5f,#0f2744);border-radius:10px;padding:18px;text-align:center;margin-bottom:14px}'
+    +'.hdr h1{font-size:16px;color:#4ade80;font-weight:700;margin-bottom:4px}'
+    +'.hdr p{font-size:11px;color:#94a3b8}'
+    +'.btn{display:block;width:100%;background:#4ade80;color:#0a2214;border:none;border-radius:8px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:14px}'
+    +'.card{background:#1e293b;border-radius:10px;padding:16px;margin-bottom:10px}'
+    +'.card h2{font-size:13px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px}'
+    +'.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #334155}'
+    +'.item:last-child{border-bottom:none}'
+    +'.dot{width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0}'
+    +'.item-text{font-size:14px;color:#e2e8f0}'
+    +'.note{font-size:11px;color:#64748b;margin-top:14px;text-align:center}'
+    +'@page{margin:0}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{background:#0f172a!important}.btn{display:none!important}}'
+    +'</style></head><body>'
+    +'<div class="page">'
+    +'<button class="btn" onclick="window.print()">📄 Salvar como PDF</button>'
+    +'<div class="hdr"><h1>GESTÃO BÁVARO</h1><p>Solicitação de dados para exame de admissão</p></div>'
+    +'<div class="card"><h2>📋 Dados necessários</h2>'
+    +'<div class="item"><div class="dot"></div><div class="item-text">Nome completo</div></div>'
+    +'<div class="item"><div class="dot"></div><div class="item-text">Data de nascimento</div></div>'
+    +'<div class="item"><div class="dot"></div><div class="item-text">CPF</div></div>'
+    +'</div>'
+    +'<div class="note">Gerado em '+hoje+' • Gestão Bávaro</div>'
+    +'</div></body></html>';
+  var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(function(){URL.revokeObjectURL(url);},10000);
+}
+
+function gerarPdfDocumentos(){
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  var docs = [
+    'Comprovante de residência',
+    'Carteira digital (CNH ou RG digital)',
+    'Conta Itaú (agência e número da conta)',
+    'Cartão Urbs (transporte)',
+    'Certidão de nascimento do(s) filho(s) — se houver',
+    'PIS'
+  ];
+  var itens = docs.map(function(d){
+    return '<div class="item"><div class="dot"></div><div class="item-text">'+d+'</div></div>';
+  }).join('');
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    +'<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
+    +'<title>Lista de Documentos — Admissão</title>'
+    +'<style>'
+    +'*{box-sizing:border-box;margin:0;padding:0}'
+    +'body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0}'
+    +'.page{max-width:600px;margin:0 auto;padding:16px}'
+    +'.hdr{background:linear-gradient(135deg,#1e3a5f,#0f2744);border-radius:10px;padding:18px;text-align:center;margin-bottom:14px}'
+    +'.hdr h1{font-size:16px;color:#4ade80;font-weight:700;margin-bottom:4px}'
+    +'.hdr p{font-size:11px;color:#94a3b8}'
+    +'.btn{display:block;width:100%;background:#4ade80;color:#0a2214;border:none;border-radius:8px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:14px}'
+    +'.card{background:#1e293b;border-radius:10px;padding:16px;margin-bottom:10px}'
+    +'.card h2{font-size:13px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px}'
+    +'.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #334155}'
+    +'.item:last-child{border-bottom:none}'
+    +'.dot{width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0}'
+    +'.item-text{font-size:14px;color:#e2e8f0}'
+    +'.note{font-size:11px;color:#64748b;margin-top:14px;text-align:center}'
+    +'@page{margin:0}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{background:#0f172a!important}.btn{display:none!important}}'
+    +'</style></head><body>'
+    +'<div class="page">'
+    +'<button class="btn" onclick="window.print()">📄 Salvar como PDF</button>'
+    +'<div class="hdr"><h1>GESTÃO BÁVARO</h1><p>Documentos necessários para registro</p></div>'
+    +'<div class="card"><h2>📁 Documentos necessários</h2>'+itens+'</div>'
+    +'<div class="note">Gerado em '+hoje+' • Gestão Bávaro</div>'
+    +'</div></body></html>';
+  var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(function(){URL.revokeObjectURL(url);},10000);
+}
 
 // ── SERVICE WORKER (PWA) ──
 if('serviceWorker' in navigator){

@@ -2332,41 +2332,43 @@ function estRenderItens(){
     // Toggle open/close + long press for grupo menu
     (function(cat, header, body){
       var pressTimer=null;
-      var didLongPress=false;
+      var longPressed=false;
+      var touchHandled=false;
 
-      function startPress(e){
-        didLongPress=false;
+      header.addEventListener('touchstart', function(e){
+        longPressed=false;
+        touchHandled=false;
         pressTimer=setTimeout(function(){
-          didLongPress=true;
-          // vibrate if supported
+          longPressed=true;
           if(navigator.vibrate) navigator.vibrate(40);
           estAbrirCtxCat(cat);
-        }, 500);
-      }
-      function cancelPress(){
-        clearTimeout(pressTimer);
-      }
+        }, 600);
+      },{passive:true});
 
-      header.addEventListener('touchstart', startPress, {passive:true});
       header.addEventListener('touchend', function(e){
-        cancelPress();
-        if(didLongPress){ e.preventDefault(); return; }
+        clearTimeout(pressTimer);
+        if(longPressed){ longPressed=false; return; }
+        touchHandled=true;
+        // Toggle
+        var open=body.classList.contains('hidden');
+        window._estOpen[cat.id]=open;
+        body.classList.toggle('hidden',!open);
+        header.querySelector('.est-cat-arrow').classList.toggle('open',open);
+      },{passive:true});
+
+      header.addEventListener('touchmove', function(){
+        clearTimeout(pressTimer);
+        longPressed=false;
+      },{passive:true});
+
+      // Desktop only — skip if already handled by touch
+      header.addEventListener('click', function(){
+        if(touchHandled){ touchHandled=false; return; }
         var open=body.classList.contains('hidden');
         window._estOpen[cat.id]=open;
         body.classList.toggle('hidden',!open);
         header.querySelector('.est-cat-arrow').classList.toggle('open',open);
       });
-      header.addEventListener('touchmove', cancelPress, {passive:true});
-      header.addEventListener('mousedown', startPress);
-      header.addEventListener('mouseup', cancelPress);
-      header.addEventListener('mouseleave', cancelPress);
-      header.onclick=function(e){
-        if(didLongPress){ didLongPress=false; return; }
-        var open=body.classList.contains('hidden');
-        window._estOpen[cat.id]=open;
-        body.classList.toggle('hidden',!open);
-        header.querySelector('.est-cat-arrow').classList.toggle('open',open);
-      };
     })(cat, header, body);
 
     block.appendChild(header);

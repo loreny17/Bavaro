@@ -578,7 +578,7 @@ textarea{resize:vertical;min-height:80px;}
       </div>
       <div class="home-card-arrow">›</div>
     </div>
-    <div class="home-card" onclick="irParaAba('vf')">
+<div class="home-card" onclick="irParaAba('vf')">
       <div class="home-card-icon">💰</div>
       <div class="home-card-info">
         <div class="home-card-title">VALES E FALTAS</div>
@@ -599,6 +599,14 @@ textarea{resize:vertical;min-height:80px;}
       <div class="home-card-info">
         <div class="home-card-title">ESTOQUE</div>
         <div class="home-card-desc">Controle de produtos e pedidos</div>
+      </div>
+      <div class="home-card-arrow">›</div>
+    </div>
+    <div class="home-card" onclick="irParaAba('checklist')">
+      <div class="home-card-icon">✅</div>
+      <div class="home-card-info">
+        <div class="home-card-title">CHECKLISTS <span class="home-card-badge" id="home-badge-cl">0</span></div>
+        <div class="home-card-desc">Tarefas e listas por funcionário</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
@@ -695,8 +703,8 @@ textarea{resize:vertical;min-height:80px;}
   </div>
   <button onclick="abrirCadastro()" style="width:100%;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.88rem;padding:12px;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:8px;">➕ Novo Funcionário</button>
   <div style="display:flex;gap:8px;margin-bottom:10px;">
-    <button onclick="gerarPdfAdmissao()" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 PDF Admissão</button>
-    <button onclick="gerarPdfDocumentos()" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 PDF Documentos</button>
+    <button onclick="compartilharPdfWA('admissao')" style="flex:1;background:rgba(37,211,102,0.12);border:1.5px solid rgba(37,211,102,0.4);border-radius:var(--radius);color:#25d366;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📲 WA Admissão</button>
+    <button onclick="compartilharPdfWA('documentos')" style="flex:1;background:rgba(37,211,102,0.12);border:1.5px solid rgba(37,211,102,0.4);border-radius:var(--radius);color:#25d366;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.78rem;padding:10px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📲 WA Documentos</button>
   </div>
   <div class="lista-toolbar">
     <div class="search-wrapper" style="margin:0;flex:1">
@@ -1268,7 +1276,8 @@ function gerarPDF(funcIdOuNull){
       +'</table>'
       +'<div class="footer">Gerado em '+hoje+' • Gestão Bávaro</div>'
       +'</div>'
-      +'</body></html>'
+      +'<script>function compartilharWA(){'+'  var titulo=document.title||"Relatório Gestão Bávaro";'+'  if(navigator.share){navigator.share({title:titulo,text:"Segue o relatório: "+titulo}).catch(function(){});} '+'  else{window.open("https://wa.me/?text="+encodeURIComponent(titulo+" - Salve o PDF e envie no WhatsApp"),"_blank");}'+'}<\/script>'
+    +'</body></html>'
     var blob = new Blob([html], {type:'text/html;charset=utf-8'});
     var url = URL.createObjectURL(blob);
     window.open(url, '_blank');
@@ -2457,7 +2466,7 @@ function clSalvar(){
   var funcObj=funcionarios.find(function(f){return String(f.id)===String(funcId);})||{};
   var novo={id:gerarId(),titulo:titulo,funcId:funcId,funcNome:funcObj.nome||'',itens:itens,criadoEm:new Date().toISOString()};
   clData.push(novo);
-  clPersistir();
+  clPersistir(); atualizarHomeBadges();
   document.getElementById('cl-titulo').value='';
   document.getElementById('cl-func-select').value='';
   document.getElementById('cl-items-builder').innerHTML='';
@@ -2750,6 +2759,15 @@ function funcToggleItem(clId, itemId, feito, funcId, targetClId){
 
 clCarregar();
 
+function compartilharPdfWA(tipo){
+  var msgs = {
+    admissao: '📋 *Dados para exame de admissão*\n\nPreciso dos seguintes dados:\n\n• Nome completo\n• Data de nascimento\n• CPF\n\n_Gestão Bávaro_',
+    documentos: '📁 *Documentos necessários para registro*\n\nPreciso dos seguintes documentos:\n\n• Comprovante de residência\n• Carteira digital (CNH ou RG digital)\n• Conta Itaú (agência e número)\n• Cartão Urbs\n• Certidão de nascimento do(s) filho(s) — se houver\n• PIS\n\n_Gestão Bávaro_'
+  };
+  var msg = msgs[tipo] || '';
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
 // ── SERVICE WORKER (PWA) ──
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
@@ -2788,6 +2806,7 @@ function criarParticulas(){
 // 4. Pulso no badge
 function pulsarBadge(){
   var b = document.getElementById('home-badge-func');
+  var clBadge=document.getElementById('home-badge-cl'); if(clBadge){ var clPend=clData.filter(function(cl){var f=cl.itens.filter(function(i){return i.feito;}).length; return f<cl.itens.length;}).length; clBadge.textContent=clPend; clBadge.style.display=clPend?'':'none'; }
   if(!b) return;
   b.classList.remove('pulse');
   void b.offsetWidth; // reflow
@@ -2845,6 +2864,7 @@ window.addEventListener('load', function(){
 });
 function atualizarHomeBadges(){
   var b=document.getElementById('home-badge-func');
+  var clBadge=document.getElementById('home-badge-cl'); if(clBadge){ var clPend=clData.filter(function(cl){var f=cl.itens.filter(function(i){return i.feito;}).length; return f<cl.itens.length;}).length; clBadge.textContent=clPend; clBadge.style.display=clPend?'':'none'; }
   if(!b) return;
   var prev=b.textContent;
   b.textContent=funcionarios.length;

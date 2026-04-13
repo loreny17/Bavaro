@@ -575,6 +575,17 @@ textarea{resize:vertical;min-height:80px;}
 .cl-link-row{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border2);}
 .cl-link-btn{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.72rem;padding:6px 8px;cursor:pointer;text-align:center;}
 .cl-link-btn:hover{border-color:var(--accent);color:var(--accent);}
+.cl-edit-btn{background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.72rem;padding:6px 10px;cursor:pointer;}
+.cl-edit-btn:hover{border-color:var(--accent);color:var(--accent);}
+.cl-edit-modal{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:450;display:flex;align-items:flex-end;justify-content:center;}
+.cl-edit-sheet{background:var(--surface);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;}
+.cl-edit-label{font-size:0.68rem;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.06em;margin-bottom:5px;font-family:'Space Grotesk',sans-serif;}
+.cl-edit-inp{width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.9rem;padding:10px 12px;outline:none;box-sizing:border-box;margin-bottom:12px;}
+.cl-edit-inp:focus{border-color:var(--accent);}
+.cl-edit-item-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+.cl-edit-save{width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;margin-top:4px;}
+.cl-edit-add-item{width:100%;background:var(--surface2);border:1.5px dashed var(--border2);border-radius:8px;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.82rem;padding:9px;cursor:pointer;margin-bottom:10px;}
+.cl-edit-add-item:hover{border-color:var(--accent);color:var(--accent);}
 
 /* TELA DO FUNCIONÁRIO */
 .func-screen{display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;overflow-y:auto;}
@@ -3179,13 +3190,16 @@ function clRender(){
     card.insertAdjacentHTML('beforeend', itensHtml);
 
     var linkRow=document.createElement('div'); linkRow.className='cl-link-row';
+    var editBtn=document.createElement('button'); editBtn.className='cl-edit-btn';
+    editBtn.textContent='✏️ Editar';
+    (function(id){ editBtn.onclick=function(){ clAbrirEditor(id); }; })(cl.id);
     var copyBtn=document.createElement('button'); copyBtn.className='cl-link-btn';
     copyBtn.textContent='🔗 Copiar link';
     (function(fid,cid){ copyBtn.onclick=function(){ clCopiarLink(fid,cid); }; })(cl.funcId,cl.id);
     var waBtn=document.createElement('button'); waBtn.className='cl-link-btn';
     waBtn.textContent='📲 WhatsApp';
     (function(fid,cid,tit,nom){ waBtn.onclick=function(){ clAbrirWhatsApp(fid,cid,tit,nom); }; })(cl.funcId,cl.id,cl.titulo,func.nome);
-    linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
+    linkRow.appendChild(editBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
     card.appendChild(linkRow);
 
     // Re-attach checkbox listeners (innerHTML loses them)
@@ -3206,6 +3220,121 @@ function clToggleItem(clId, itemId, feito){
   item.feito=feito;
   clPersistir();
   clRender();
+}
+
+function clAbrirEditor(clId){
+  var cl=clData.find(function(x){return x.id===clId;});
+  if(!cl) return;
+
+  var overlay=document.createElement('div');
+  overlay.className='cl-edit-modal';
+  var sheet=document.createElement('div');
+  sheet.className='cl-edit-sheet';
+
+  // Working copy of itens
+  var itensEdit=cl.itens.map(function(i){return {id:i.id,texto:i.texto,feito:i.feito};});
+
+  function render(){
+    sheet.innerHTML='';
+
+    // Header
+    var hdrDiv=document.createElement('div');
+    hdrDiv.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;';
+    var titleH=document.createElement('div');
+    titleH.style.cssText='font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:var(--text);';
+    titleH.textContent='✏️ Editar Checklist';
+    var closeBtn=document.createElement('button');
+    closeBtn.style.cssText='background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;';
+    closeBtn.innerHTML='✕';
+    closeBtn.onclick=function(){ document.body.removeChild(overlay); };
+    hdrDiv.appendChild(titleH); hdrDiv.appendChild(closeBtn);
+    sheet.appendChild(hdrDiv);
+
+    // Título
+    var lblTitulo=document.createElement('div'); lblTitulo.className='cl-edit-label'; lblTitulo.textContent='Título';
+    sheet.appendChild(lblTitulo);
+    var inpTitulo=document.createElement('input'); inpTitulo.className='cl-edit-inp';
+    inpTitulo.type='text'; inpTitulo.value=cl.titulo; inpTitulo.placeholder='Título do checklist...';
+    sheet.appendChild(inpTitulo);
+
+    // Funcionário
+    var lblFunc=document.createElement('div'); lblFunc.className='cl-edit-label'; lblFunc.textContent='Funcionário';
+    sheet.appendChild(lblFunc);
+    var selFunc=document.createElement('select'); selFunc.className='cl-edit-inp';
+    selFunc.style.cursor='pointer';
+    var optVazio=document.createElement('option'); optVazio.value=''; optVazio.textContent='Selecionar funcionário...';
+    selFunc.appendChild(optVazio);
+    funcionarios.forEach(function(f){
+      var opt=document.createElement('option');
+      opt.value=f.id; opt.textContent=f.nome;
+      if(String(f.id)===String(cl.funcId)) opt.selected=true;
+      selFunc.appendChild(opt);
+    });
+    sheet.appendChild(selFunc);
+
+    // Itens
+    var lblItens=document.createElement('div'); lblItens.className='cl-edit-label'; lblItens.textContent='Itens';
+    sheet.appendChild(lblItens);
+
+    itensEdit.forEach(function(item, idx){
+      var row=document.createElement('div'); row.className='cl-edit-item-row';
+      var inp=document.createElement('input'); inp.className='cl-edit-inp';
+      inp.type='text'; inp.value=item.texto; inp.placeholder='Item...';
+      inp.style.marginBottom='0';
+      inp.oninput=function(){ itensEdit[idx].texto=this.value; };
+      var delBtn=document.createElement('button');
+      delBtn.style.cssText='background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:4px;flex-shrink:0;';
+      delBtn.innerHTML='✕';
+      (function(i){ delBtn.onclick=function(){ itensEdit.splice(i,1); render(); }; })(idx);
+      row.appendChild(inp); row.appendChild(delBtn);
+      sheet.appendChild(row);
+    });
+
+    // Botão adicionar item
+    var addBtn=document.createElement('button'); addBtn.className='cl-edit-add-item';
+    addBtn.textContent='+ Adicionar item';
+    addBtn.onclick=function(){
+      itensEdit.push({id:gerarId(),texto:'',feito:false});
+      render();
+      // Focus last input
+      setTimeout(function(){
+        var inps=sheet.querySelectorAll('.cl-edit-item-row input');
+        if(inps.length) inps[inps.length-1].focus();
+      },50);
+    };
+    sheet.appendChild(addBtn);
+
+    // Salvar
+    var saveBtn=document.createElement('button'); saveBtn.className='cl-edit-save';
+    saveBtn.textContent='✔ Salvar alterações';
+    saveBtn.onclick=function(){
+      var novoTitulo=(inpTitulo.value||'').trim();
+      if(!novoTitulo){ showToast('Informe o título!','#f7a34f'); inpTitulo.focus(); return; }
+      var novoFuncId=selFunc.value;
+      var novoFuncNome='';
+      if(novoFuncId){
+        var fEncontrado=funcionarios.find(function(f){return String(f.id)===String(novoFuncId);});
+        if(fEncontrado) novoFuncNome=fEncontrado.nome;
+      }
+      // Update itens — remove empty
+      var itensValidos=itensEdit.filter(function(i){return (i.texto||'').trim();});
+      if(!itensValidos.length){ showToast('Adicione pelo menos 1 item!','#f7a34f'); return; }
+      cl.titulo=novoTitulo;
+      cl.funcId=novoFuncId;
+      cl.funcNome=novoFuncNome;
+      cl.itens=itensValidos.map(function(i){return {id:i.id,texto:i.texto.trim(),feito:i.feito};});
+      clPersistir();
+      clRender();
+      document.body.removeChild(overlay);
+      showToast('Checklist atualizado!');
+    };
+    sheet.appendChild(saveBtn);
+  }
+
+  render();
+  overlay.appendChild(sheet);
+  overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+  document.body.appendChild(overlay);
 }
 
 function clExcluir(clId){

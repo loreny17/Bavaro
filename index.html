@@ -908,7 +908,7 @@ textarea{resize:vertical;min-height:80px;}
 <div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px 2px;">
     <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.04em;">PEDIDOS PDF</span>
-    <button id="est-pdf-arrow" onclick="estTogglePdfBar()" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;">▼</button>
+    <button id="est-pdf-arrow" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;">▼</button>
   </div>
   <div id="est-pdf-btns-body" style="padding:4px 14px 10px;"></div>
 </div>
@@ -2190,7 +2190,11 @@ function estRenderItens(){
   q=q.toLowerCase();
 
   var catsToShow = estCatAtiva==='__all__'||estCatAtiva==='__baixo__'
-    ? estData.cats
+    ? (function(){
+        var catsEmGrupo={};
+        (estData.grupos||[]).forEach(function(g){ (g.catIds||[]).forEach(function(cid){ catsEmGrupo[cid]=true; }); });
+        return estData.cats.filter(function(c){ return !catsEmGrupo[c.id]; });
+      })()
     : estCatAtiva.startsWith('__g__')
       ? (function(){ var gid=estCatAtiva.replace('__g__',''); var g=(estData.grupos||[]).find(function(x){return x.id===gid;}); return g ? (g.catIds||[]).map(function(cid){return estData.cats.find(function(c){return c.id===cid;});}).filter(Boolean) : []; })()
       : estData.cats.filter(function(c){return c.id===estCatAtiva;});
@@ -2756,12 +2760,32 @@ function estRenderPedidoBtns(){
   });
 
   el.style.display='block';
+  estInitPdfToggle();
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);
 }
 var _estPdfBarOpen=true;
-function estInitPdfToggle(){}
+function estInitPdfToggle(){
+  var btn=document.getElementById('est-pdf-arrow');
+  if(!btn||btn._inited) return;
+  btn._inited=true;
+  var sy=0, moved=false;
+  btn.addEventListener('touchstart',function(e){
+    sy=e.touches[0].clientY;
+    moved=false;
+    e.stopPropagation();
+  },{passive:true});
+  btn.addEventListener('touchmove',function(e){
+    if(Math.abs(e.touches[0].clientY-sy)>6) moved=true;
+    e.stopPropagation();
+  },{passive:true});
+  btn.addEventListener('touchend',function(e){
+    e.stopPropagation();
+    e.preventDefault();
+    if(!moved) estTogglePdfBar();
+  },{passive:false});
+}
 function estTogglePdfBar(){
   _estPdfBarOpen=!_estPdfBarOpen;
   var body=document.getElementById('est-pdf-btns-body');

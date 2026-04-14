@@ -3140,17 +3140,56 @@ function clRender(){
   el.innerHTML='';
   // Sort by newest
   var sorted=clData.slice().sort(function(a,b){ return b.criadoEm.localeCompare(a.criadoEm); });
+  if(!window._clOpen) window._clOpen={};
   sorted.forEach(function(cl){
     var func=funcionarios.find(function(f){return String(f.id)===String(cl.funcId);})||{nome:cl.funcNome||'Funcionário removido'};
     var total=cl.itens.length;
     var feitos=cl.itens.filter(function(i){return i.feito;}).length;
     var pct=total?Math.round(feitos/total*100):0;
     var concluido=feitos===total;
+    var isOpen=window._clOpen[cl.id]!==false;
 
     var card=document.createElement('div');
     card.className='cl-card';
     card.style.borderColor=concluido?'rgba(34,197,94,0.4)':feitos>0?'rgba(212,168,67,0.3)':'var(--border2)';
 
+    // Header (clicável para colapsar)
+    var hdr=document.createElement('div'); hdr.className='cl-card-header'; hdr.style.cursor='pointer';
+    var hdrLeft=document.createElement('div'); hdrLeft.style.flex='1';
+    var titleDiv=document.createElement('div'); titleDiv.className='cl-card-title';
+    titleDiv.textContent=cl.titulo+(concluido?' ✅':'');
+    var funcDiv=document.createElement('div'); funcDiv.className='cl-card-func';
+    funcDiv.textContent='👤 '+func.nome;
+    hdrLeft.appendChild(titleDiv); hdrLeft.appendChild(funcDiv);
+
+    var hdrRight=document.createElement('div');
+    hdrRight.style.cssText='display:flex;align-items:center;gap:6px;flex-shrink:0;';
+    var pctBadge=document.createElement('span');
+    pctBadge.style.cssText='font-size:0.7rem;color:'+(concluido?'var(--success)':'var(--muted)')+';font-family:\'Space Grotesk\',sans-serif;font-weight:700;';
+    pctBadge.textContent=pct+'%';
+    var arrowSpan=document.createElement('span');
+    arrowSpan.style.cssText='color:var(--muted);font-size:0.75rem;transition:transform 0.2s;display:inline-block;';
+    arrowSpan.style.transform=isOpen?'rotate(0deg)':'rotate(-90deg)';
+    arrowSpan.innerHTML='&#9660;';
+    var delBtn=document.createElement('button'); delBtn.className='cl-card-del'; delBtn.innerHTML='🗑️';
+    (function(id){ delBtn.onclick=function(e){ e.stopPropagation(); clExcluir(id); }; })(cl.id);
+    hdrRight.appendChild(pctBadge); hdrRight.appendChild(arrowSpan); hdrRight.appendChild(delBtn);
+    hdr.appendChild(hdrLeft); hdr.appendChild(hdrRight);
+    card.appendChild(hdr);
+
+    // Body colapsável
+    var bodyDiv=document.createElement('div');
+    bodyDiv.style.display=isOpen?'block':'none';
+
+    var progBar=document.createElement('div'); progBar.className='cl-progress-bar';
+    var progFill=document.createElement('div'); progFill.className='cl-progress-fill';
+    progFill.style.width=pct+'%'; progBar.appendChild(progFill);
+    bodyDiv.appendChild(progBar);
+    var progTxt=document.createElement('div'); progTxt.className='cl-progress-text';
+    progTxt.textContent=feitos+' de '+total+' itens concluídos ('+pct+'%)';
+    bodyDiv.appendChild(progTxt);
+
+    // Itens
     var itensHtml='';
     cl.itens.forEach(function(item){
       var done=item.feito;
@@ -3160,54 +3199,42 @@ function clRender(){
         +' data-clid="'+cl.id+'" data-iid="'+item.id+'">'
         +'<span>'+escHtml(item.texto)+'</span></label>';
     });
+    bodyDiv.insertAdjacentHTML('beforeend', itensHtml);
 
-    // Link para o funcionário
-    var linkUrl = window.location.href.split('?')[0]+'?func='+cl.funcId+'&cl='+cl.id;
-
-    // Build card with DOM to avoid quote issues
-    var hdr=document.createElement('div'); hdr.className='cl-card-header';
-    var hdrLeft=document.createElement('div');
-    var titleDiv=document.createElement('div'); titleDiv.className='cl-card-title';
-    titleDiv.textContent=cl.titulo+(concluido?' ✅':'');
-    var funcDiv=document.createElement('div'); funcDiv.className='cl-card-func';
-    funcDiv.textContent='👤 '+func.nome;
-    hdrLeft.appendChild(titleDiv); hdrLeft.appendChild(funcDiv);
-    var delBtn=document.createElement('button'); delBtn.className='cl-card-del';
-    delBtn.innerHTML='🗑️';
-    (function(id){ delBtn.onclick=function(){ clExcluir(id); }; })(cl.id);
-    hdr.appendChild(hdrLeft); hdr.appendChild(delBtn);
-    card.appendChild(hdr);
-
-    var progBar=document.createElement('div'); progBar.className='cl-progress-bar';
-    var progFill=document.createElement('div'); progFill.className='cl-progress-fill';
-    progFill.style.width=pct+'%'; progBar.appendChild(progFill);
-    card.appendChild(progBar);
-
-    var progTxt=document.createElement('div'); progTxt.className='cl-progress-text';
-    progTxt.textContent=feitos+' de '+total+' itens concluídos ('+pct+'%)';
-    card.appendChild(progTxt);
-
-    card.insertAdjacentHTML('beforeend', itensHtml);
-
+    // Botões
     var linkRow=document.createElement('div'); linkRow.className='cl-link-row';
     var editBtn=document.createElement('button'); editBtn.className='cl-edit-btn';
     editBtn.textContent='✏️ Editar';
     (function(id){ editBtn.onclick=function(){ clAbrirEditor(id); }; })(cl.id);
     var copyBtn=document.createElement('button'); copyBtn.className='cl-link-btn';
-    copyBtn.textContent='🔗 Copiar link';
+    copyBtn.textContent='🔗 Link';
     (function(fid,cid){ copyBtn.onclick=function(){ clCopiarLink(fid,cid); }; })(cl.funcId,cl.id);
     var waBtn=document.createElement('button'); waBtn.className='cl-link-btn';
+    var telFunc=(func.tel||'').replace(/\D/g,'');
+    if(telFunc){ waBtn.style.borderColor='rgba(37,211,102,0.4)'; waBtn.style.color='#25d366'; }
     waBtn.textContent='📲 WhatsApp';
-    (function(fid,cid,tit,nom){ waBtn.onclick=function(){ clAbrirWhatsApp(fid,cid,tit,nom); }; })(cl.funcId,cl.id,cl.titulo,func.nome);
+    (function(fid,cid,tit,nom,tel){ waBtn.onclick=function(){ clAbrirWhatsApp(fid,cid,tit,nom,tel); }; })(cl.funcId,cl.id,cl.titulo,func.nome,telFunc);
     linkRow.appendChild(editBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
-    card.appendChild(linkRow);
+    bodyDiv.appendChild(linkRow);
 
-    // Re-attach checkbox listeners (innerHTML loses them)
-    card.querySelectorAll('.cl-checkbox[data-clid]').forEach(function(chk){
+    bodyDiv.querySelectorAll('.cl-checkbox[data-clid]').forEach(function(chk){
       chk.addEventListener('change',function(){
         clToggleItem(this.getAttribute('data-clid'),this.getAttribute('data-iid'),this.checked);
       });
     });
+
+    card.appendChild(bodyDiv);
+
+    // Toggle collapse
+    (function(cl,bodyDiv,arrowSpan){
+      hdr.addEventListener('click',function(){
+        var open=bodyDiv.style.display==='none';
+        window._clOpen[cl.id]=open;
+        bodyDiv.style.display=open?'block':'none';
+        arrowSpan.style.transform=open?'rotate(0deg)':'rotate(-90deg)';
+      });
+    })(cl,bodyDiv,arrowSpan);
+
     el.appendChild(card);
   });
 }
@@ -3352,10 +3379,17 @@ function clCopiarLink(funcId, clId){
   } else { _copiarFallback(url); }
 }
 
-function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc){
+function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
   var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId;
   var msg='Olá '+nomeFunc+'! Segue o link do seu checklist: *'+titulo+'*\n'+url;
-  window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+  var tel=(telFunc||'').replace(/\D/g,'');
+  // Se tem número BR, adiciona 55 se necessário
+  if(tel && tel.length>=10){
+    if(!tel.startsWith('55')) tel='55'+tel;
+    window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
+  } else {
+    window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+  }
 }
 
 // ── MODO FUNCIONÁRIO ──

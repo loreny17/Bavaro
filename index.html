@@ -906,11 +906,11 @@ textarea{resize:vertical;min-height:80px;}
 
 <!-- ESTOQUE PDF FIXED BAR -->
 <div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);">
-  <div id="est-pdf-toggle-row" onclick="estTogglePdfBar()" style="display:flex;align-items:center;justify-content:center;padding:6px 14px 2px;cursor:pointer;gap:6px;">
+  <div id="est-pdf-toggle-row" style="display:flex;align-items:center;justify-content:center;padding:6px 14px 2px;cursor:pointer;gap:6px;">
     <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:600;">PEDIDOS PDF</span>
-    <span id="est-pdf-arrow" style="color:var(--muted);font-size:0.8rem;transition:transform 0.2s;">&#9660;</span>
+    <span id="est-pdf-arrow" style="color:var(--muted);font-size:0.8rem;transition:transform 0.2s;transform:rotate(-90deg);">&#9660;</span>
   </div>
-  <div id="est-pdf-btns-body" style="padding:4px 14px 12px;"></div>
+  <div id="est-pdf-btns-body" style="padding:4px 14px 12px;display:none;"></div>
 </div>
 
 <!-- MODAL -->
@@ -2249,10 +2249,15 @@ function estRenderItens(){
       +'<div style="margin-bottom:8px"><input type="text" class="est-add-inp" placeholder="Nome do produto..." style="width:100%"></div>'
       +'<div class="est-add-row">'
         +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
-          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd mínima</label>'
+          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd m\u00ednima</label>'
           +'<input type="number" class="est-add-min" placeholder="0" min="0" value="0" style="width:100%">'
         +'</div>'
         +'<button class="est-add-submit" style="align-self:flex-end">Adicionar</button>'
+      +'</div>'
+      +'<div style="margin-top:10px;display:flex;align-items:center;gap:6px">'
+        +'<span style="font-size:0.75rem;color:var(--muted);flex-shrink:0">\u260e\ufe0f</span>'
+        +'<input type="tel" class="est-cat-tel-inp" placeholder="WhatsApp fornecedor..." style="flex:1;font-size:0.78rem;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);outline:none;">'
+        +'<button class="est-cat-tel-save" style="background:var(--surface2);border:1.5px solid #25d366;border-radius:8px;color:#25d366;font-size:0.72rem;padding:7px 10px;cursor:pointer;flex-shrink:0;">Salvar</button>'
       +'</div>'
       +'<div style="margin-top:6px;text-align:right">'
         +'<button class="est-del-cat-btn">&#128465; Excluir categoria</button>'
@@ -2260,7 +2265,13 @@ function estRenderItens(){
 
     var nomeInp=addWrap.querySelector('.est-add-inp');
     var minInp=addWrap.querySelector('.est-add-min');
-    (function(cat2,ni,mi){
+    var telInp=addWrap.querySelector('.est-cat-tel-inp');
+    var telSave=addWrap.querySelector('.est-cat-tel-save');
+    (function(cat2,ni,mi,ti,ts){
+      ti.value=cat2.tel||'';
+      function saveTel(){ cat2.tel=(ti.value||'').trim(); estSalvar(); estRenderPedidoBtns(); ts.textContent='\u2714'; setTimeout(function(){ ts.textContent='Salvar'; },1500); }
+      ts.onclick=saveTel;
+      ti.addEventListener('keydown',function(e){ if(e.key==='Enter') saveTel(); });
       function add(){
         var nome=(ni.value||'').trim(), min=parseFloat(mi.value)||0;
         if(!nome){showToast('Informe o nome!','#f7a34f');ni.focus();return;}
@@ -2277,10 +2288,10 @@ function estRenderItens(){
           estData.cats=estData.cats.filter(function(c){return c.id!==cat2.id;});
           if(estCatAtiva===cat2.id) estCatAtiva='__all__';
           estSalvar(); estRenderCatPills(); estRenderAddForm(); estRenderItens(); estRenderPedidoBtns();
-          showToast('Categoria excluída!','#f75a5a');
+          showToast('Categoria exclu\u00edda!','#f75a5a');
         });
       };
-    })(cat,nomeInp,minInp);
+    })(cat,nomeInp,minInp,telInp,telSave);
     body.appendChild(addWrap);
 
     // Items
@@ -2745,13 +2756,6 @@ function estRenderPedidoBtns(){
     return;
   }
 
-  // Se está num grupo com telefone, adicionar botão WhatsApp
-  var grupoAtivo=null;
-  if(estCatAtiva.startsWith('__g__')){
-    var gidAtivo=estCatAtiva.replace('__g__','');
-    grupoAtivo=estData.grupos.find(function(x){return x.id===gidAtivo;});
-  }
-
   catsParaPdf.forEach(function(cat){
     var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
     if(!baixos.length) return;
@@ -2765,34 +2769,46 @@ function estRenderPedidoBtns(){
     btn.onclick=function(){ estGerarPedido(cat.id); };
     row.appendChild(btn);
 
-    // Botão WhatsApp se grupo tem tel
-    if(grupoAtivo&&grupoAtivo.tel){
+    // Botão WhatsApp se a categoria tem tel próprio
+    if(cat.tel){
       var waBtn=document.createElement('button');
       waBtn.style.cssText='background:#25d366;color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:1.1rem;cursor:pointer;flex-shrink:0;';
       waBtn.innerHTML='📲';
-      waBtn.title='Enviar pedido por WhatsApp';
-      (function(cat2,g){ waBtn.onclick=function(){ estEnviarPedidoWA(cat2.id, g); }; })(cat, grupoAtivo);
+      waBtn.title='Enviar para '+escHtml(cat.nome)+' ('+cat.tel+')';
+      (function(cat2){ waBtn.onclick=function(){ estEnviarPedidoWACat(cat2); }; })(cat);
       row.appendChild(waBtn);
     }
 
     body.appendChild(row);
   });
 
-  // Se grupo tem tel, mostrar info do fornecedor no topo
-  if(grupoAtivo&&grupoAtivo.tel){
-    var fornInfo=document.createElement('div');
-    fornInfo.style.cssText='text-align:center;font-size:0.7rem;color:#25d366;font-family:\'Space Grotesk\',sans-serif;margin-bottom:6px;';
-    fornInfo.textContent='📞 Fornecedor: '+grupoAtivo.tel+' · 📲 = enviar direto';
-    body.insertBefore(fornInfo, body.firstChild);
-  }
-
   el.style.display='block';
+  estInitPdfToggle();
+  // keep body visibility consistent with current state
+  var bodyEl=document.getElementById('est-pdf-btns-body');
+  if(bodyEl) bodyEl.style.display=_estPdfBarOpen?'block':'none';
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);
 }
+function estInitPdfToggle(){
+  var row=document.getElementById('est-pdf-toggle-row');
+  if(!row||row._pdfInited) return;
+  row._pdfInited=true;
+  var touchStartY=0;
+  row.addEventListener('touchstart',function(e){ touchStartY=e.touches[0].clientY; },{passive:true});
+  row.addEventListener('touchend',function(e){
+    var dy=Math.abs(e.changedTouches[0].clientY-touchStartY);
+    if(dy>10) return; // foi scroll, ignora
+    estTogglePdfBar();
+  },{passive:true});
+  row.addEventListener('click',function(e){
+    // só desktop
+    if(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents) return;
+    estTogglePdfBar();
+  });
+}
 
-var _estPdfBarOpen=true;
 function estTogglePdfBar(){
   _estPdfBarOpen=!_estPdfBarOpen;
   var body=document.getElementById('est-pdf-btns-body');
@@ -2806,24 +2822,16 @@ function estTogglePdfBar(){
   },80);
 }
 
-function estEnviarPedidoWA(catId, grupo){
-  var cat=estData.cats.find(function(c){return c.id===catId;});
-  if(!cat) return;
+function estEnviarPedidoWACat(cat){
   var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
   if(!baixos.length){ showToast('Nenhum item com estoque baixo!','#f7a34f'); return; }
-
   var hoje=new Date().toLocaleDateString('pt-BR');
   var linhas=baixos.map(function(item){
-    var pedir=Math.max(0, Number(item.min)-Number(item.qtd)+Number(item.min));
-    return '▪ '+item.nome+' — pedir: *'+pedir+'*';
+    var pedir=Math.max(0,Number(item.min)-Number(item.qtd)+Number(item.min));
+    return '\u25aa '+item.nome+' \u2014 pedir: *'+pedir+'*';
   }).join('\n');
-
-  var msg='📦 *PEDIDO BÁVARO — '+cat.nome.toUpperCase()+'*\n'
-    +'📅 '+hoje+'\n\n'
-    +linhas+'\n\n'
-    +'_Gestão Bávaro_';
-
-  var tel=(grupo.tel||'').replace(/\D/g,'');
+  var msg='\ud83d\udce6 *PEDIDO B\u00c1VARO \u2014 '+cat.nome.toUpperCase()+'*\n\ud83d\udcc5 '+hoje+'\n\n'+linhas+'\n\n_Gest\u00e3o B\u00e1varo_';
+  var tel=(cat.tel||'').replace(/\D/g,'');
   if(tel&&tel.length>=10){
     if(!tel.startsWith('55')) tel='55'+tel;
     window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
@@ -2831,6 +2839,8 @@ function estEnviarPedidoWA(catId, grupo){
     window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
   }
 }
+
+function estEnviarPedidoWA(catId, grupo){ /* deprecated */ }
 
 function estGerarPedido(catId){
   var baixos=[];

@@ -2406,19 +2406,23 @@ function estAbrirCtxGrupo(grupoId){
 
   var sub=document.createElement('div');
   sub.className='est-ctx-sub';
-  sub.textContent=(g.catIds||[]).length+' subcategoria(s)';
+  sub.textContent=(g.catIds||[]).length+' subcategoria(s)'+(g.tel?' · 📞 '+g.tel:'');
   sheet.appendChild(sub);
 
   function close(){ document.body.removeChild(overlay); }
+
+  // Fornecedor / telefone
+  var btnForn=document.createElement('button');
+  btnForn.className='est-ctx-btn';
+  btnForn.innerHTML='<span class="ctx-icon">📞</span><div class="ctx-info"><div class="ctx-label">'+(g.tel?'Editar fornecedor':'Adicionar fornecedor')+'</div><div class="ctx-desc">'+(g.tel?'Número: '+g.tel:'Salvar WhatsApp do fornecedor para envio direto')+'</div></div>';
+  btnForn.onclick=function(){ close(); estEditarFornecedor(grupoId); };
+  sheet.appendChild(btnForn);
 
   // Renomear grupo
   var btnRename=document.createElement('button');
   btnRename.className='est-ctx-btn';
   btnRename.innerHTML='<span class="ctx-icon">✏️</span><div class="ctx-info"><div class="ctx-label">Renomear grupo</div><div class="ctx-desc">Alterar o nome "'+escHtml(g.nome)+'"</div></div>';
-  btnRename.onclick=function(){
-    close();
-    estRenomearGrupo(grupoId);
-  };
+  btnRename.onclick=function(){ close(); estRenomearGrupo(grupoId); };
   sheet.appendChild(btnRename);
 
   // Excluir grupo (mantém cats)
@@ -2445,6 +2449,64 @@ function estAbrirCtxGrupo(grupoId){
   overlay.appendChild(sheet);
   overlay.onclick=function(e){ if(e.target===overlay) close(); };
   document.body.appendChild(overlay);
+}
+
+function estEditarFornecedor(grupoId){
+  var g=estData.grupos.find(function(x){return x.id===grupoId;});
+  if(!g) return;
+
+  var overlay=document.createElement('div');
+  overlay.className='est-ctx-menu';
+  var sheet=document.createElement('div');
+  sheet.className='est-ctx-sheet';
+
+  sheet.innerHTML='<div class="est-ctx-title">📞 Fornecedor</div><div class="est-ctx-sub">Grupo: '+escHtml(g.nome)+'</div>';
+
+  var lbl=document.createElement('div');
+  lbl.style.cssText='font-size:0.68rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:5px;font-family:\'Space Grotesk\',sans-serif;';
+  lbl.textContent='WhatsApp do fornecedor';
+  sheet.appendChild(lbl);
+
+  var inp=document.createElement('input');
+  inp.type='tel';
+  inp.placeholder='(41) 99999-9999';
+  inp.value=g.tel||'';
+  inp.style.cssText='width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:10px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:1rem;padding:12px 14px;outline:none;box-sizing:border-box;margin-bottom:10px;';
+  sheet.appendChild(inp);
+
+  function close(){ document.body.removeChild(overlay); }
+
+  var saveBtn=document.createElement('button');
+  saveBtn.style.cssText='width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:8px;';
+  saveBtn.textContent='✔ Salvar';
+  saveBtn.onclick=function(){
+    g.tel=(inp.value||'').trim();
+    estSalvar();
+    estRenderPedidoBtns();
+    estRenderCatPills();
+    close();
+    showToast(g.tel?'Fornecedor salvo!':'Número removido.');
+  };
+  sheet.appendChild(saveBtn);
+
+  if(g.tel){
+    var removeBtn=document.createElement('button');
+    removeBtn.style.cssText='width:100%;background:var(--danger-dim);border:1px solid rgba(255,68,68,0.3);color:var(--danger);border-radius:10px;padding:10px;font-family:\'Space Grotesk\',sans-serif;font-weight:600;font-size:0.82rem;cursor:pointer;margin-bottom:8px;';
+    removeBtn.textContent='🗑 Remover número';
+    removeBtn.onclick=function(){ g.tel=''; estSalvar(); estRenderPedidoBtns(); close(); showToast('Número removido.'); };
+    sheet.appendChild(removeBtn);
+  }
+
+  var cancelBtn=document.createElement('button');
+  cancelBtn.className='est-ctx-cancel';
+  cancelBtn.textContent='Cancelar';
+  cancelBtn.onclick=close;
+  sheet.appendChild(cancelBtn);
+
+  overlay.appendChild(sheet);
+  overlay.onclick=function(e){ if(e.target===overlay) close(); };
+  document.body.appendChild(overlay);
+  setTimeout(function(){ inp.focus(); },100);
 }
 
 function estRenomearGrupo(grupoId){
@@ -2683,16 +2745,46 @@ function estRenderPedidoBtns(){
     return;
   }
 
+  // Se está num grupo com telefone, adicionar botão WhatsApp
+  var grupoAtivo=null;
+  if(estCatAtiva.startsWith('__g__')){
+    var gidAtivo=estCatAtiva.replace('__g__','');
+    grupoAtivo=estData.grupos.find(function(x){return x.id===gidAtivo;});
+  }
+
   catsParaPdf.forEach(function(cat){
     var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
     if(!baixos.length) return;
+    var row=document.createElement('div');
+    row.style.cssText='display:flex;gap:6px;margin-bottom:6px;';
+
     var btn=document.createElement('button');
     btn.className='est-pedido-btn';
-    btn.style.marginBottom='6px';
+    btn.style.cssText='flex:1;margin-bottom:0;';
     btn.innerHTML='&#128203; Pedido PDF &#8212; '+escHtml(cat.nome)+' <span style="background:var(--danger);color:#fff;border-radius:8px;padding:1px 6px;font-size:0.7rem;margin-left:4px">'+baixos.length+'</span>';
     btn.onclick=function(){ estGerarPedido(cat.id); };
-    body.appendChild(btn);
+    row.appendChild(btn);
+
+    // Botão WhatsApp se grupo tem tel
+    if(grupoAtivo&&grupoAtivo.tel){
+      var waBtn=document.createElement('button');
+      waBtn.style.cssText='background:#25d366;color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:1.1rem;cursor:pointer;flex-shrink:0;';
+      waBtn.innerHTML='📲';
+      waBtn.title='Enviar pedido por WhatsApp';
+      (function(cat2,g){ waBtn.onclick=function(){ estEnviarPedidoWA(cat2.id, g); }; })(cat, grupoAtivo);
+      row.appendChild(waBtn);
+    }
+
+    body.appendChild(row);
   });
+
+  // Se grupo tem tel, mostrar info do fornecedor no topo
+  if(grupoAtivo&&grupoAtivo.tel){
+    var fornInfo=document.createElement('div');
+    fornInfo.style.cssText='text-align:center;font-size:0.7rem;color:#25d366;font-family:\'Space Grotesk\',sans-serif;margin-bottom:6px;';
+    fornInfo.textContent='📞 Fornecedor: '+grupoAtivo.tel+' · 📲 = enviar direto';
+    body.insertBefore(fornInfo, body.firstChild);
+  }
 
   el.style.display='block';
   setTimeout(function(){
@@ -2712,6 +2804,32 @@ function estTogglePdfBar(){
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);
+}
+
+function estEnviarPedidoWA(catId, grupo){
+  var cat=estData.cats.find(function(c){return c.id===catId;});
+  if(!cat) return;
+  var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
+  if(!baixos.length){ showToast('Nenhum item com estoque baixo!','#f7a34f'); return; }
+
+  var hoje=new Date().toLocaleDateString('pt-BR');
+  var linhas=baixos.map(function(item){
+    var pedir=Math.max(0, Number(item.min)-Number(item.qtd)+Number(item.min));
+    return '▪ '+item.nome+' — pedir: *'+pedir+'*';
+  }).join('\n');
+
+  var msg='📦 *PEDIDO BÁVARO — '+cat.nome.toUpperCase()+'*\n'
+    +'📅 '+hoje+'\n\n'
+    +linhas+'\n\n'
+    +'_Gestão Bávaro_';
+
+  var tel=(grupo.tel||'').replace(/\D/g,'');
+  if(tel&&tel.length>=10){
+    if(!tel.startsWith('55')) tel='55'+tel;
+    window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
+  } else {
+    window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+  }
 }
 
 function estGerarPedido(catId){

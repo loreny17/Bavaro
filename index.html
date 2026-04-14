@@ -408,7 +408,7 @@ textarea{resize:vertical;min-height:80px;}
 /* ══ ESTOQUE V2 ══ */
 .est-page-title{font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:0.04em;color:var(--text);margin-bottom:2px;}
 .est-page-sub{font-size:0.78rem;color:var(--muted);margin-bottom:14px;}
-.est-cats-scroll{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;scrollbar-width:none;}
+.est-cats-scroll{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;scrollbar-width:none;touch-action:pan-x;}
 .est-cats-scroll::-webkit-scrollbar{display:none;}
 .est-cat-pill{background:var(--surface2);border:1.5px solid var(--border2);border-radius:20px;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.8rem;font-weight:600;padding:7px 16px;cursor:pointer;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:6px;transition:all 0.2s;}
 .est-cat-pill.ativa{background:var(--accent);color:#000;border-color:var(--accent);}
@@ -906,11 +906,11 @@ textarea{resize:vertical;min-height:80px;}
 
 <!-- ESTOQUE PDF FIXED BAR -->
 <div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);">
-  <div id="est-pdf-toggle-row" style="display:flex;align-items:center;justify-content:center;padding:6px 14px 2px;cursor:pointer;gap:6px;">
-    <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:600;">PEDIDOS PDF</span>
-    <span id="est-pdf-arrow" style="color:var(--muted);font-size:0.8rem;transition:transform 0.2s;transform:rotate(-90deg);">&#9660;</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px 2px;">
+    <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.04em;">PEDIDOS PDF</span>
+    <button id="est-pdf-arrow" onclick="estTogglePdfBar()" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;">▼</button>
   </div>
-  <div id="est-pdf-btns-body" style="padding:4px 14px 12px;display:none;"></div>
+  <div id="est-pdf-btns-body" style="padding:4px 14px 10px;"></div>
 </div>
 
 <!-- MODAL -->
@@ -1969,8 +1969,7 @@ function estRenderCatPills(){
     totalBaixo+=b;
   });
 
-  pill('Todos','__all__',estCatAtiva==='__all__','');
-  if(totalBaixo){ pill('⚠️ Baixo ('+totalBaixo+')','__baixo__',estCatAtiva==='__baixo__',''); }
+  pill('Todos','__all__',estCatAtiva==='__all__'||estCatAtiva==='__baixo__','');
 
   // Pills de grupos
   estData.grupos.forEach(function(g){
@@ -2757,51 +2756,12 @@ function estRenderPedidoBtns(){
   });
 
   el.style.display='block';
-  estInitPdfToggle();
-  // Always start closed - user must tap to open
-  _estPdfBarOpen=false;
-  var bodyEl=document.getElementById('est-pdf-btns-body');
-  var arrowEl=document.getElementById('est-pdf-arrow');
-  if(bodyEl) bodyEl.style.display='none';
-  if(arrowEl) arrowEl.style.transform='rotate(-90deg)';
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);
 }
-function estInitPdfToggle(){
-  var row=document.getElementById('est-pdf-toggle-row');
-  if(!row||row._pdfInited) return;
-  row._pdfInited=true;
-  var touchStartY=0;
-  var touchStartedOnRow=false;
-
-  row.addEventListener('touchstart',function(e){
-    touchStartedOnRow=true;
-    touchStartY=e.touches[0].clientY;
-  },{passive:true});
-
-  // If finger moves significantly, cancel
-  row.addEventListener('touchmove',function(e){
-    if(Math.abs(e.touches[0].clientY-touchStartY)>8){
-      touchStartedOnRow=false;
-    }
-  },{passive:true});
-
-  row.addEventListener('touchend',function(e){
-    if(!touchStartedOnRow) return;
-    touchStartedOnRow=false;
-    var dy=Math.abs(e.changedTouches[0].clientY-touchStartY);
-    if(dy>8) return;
-    estTogglePdfBar();
-  },{passive:true});
-
-  // Desktop only
-  row.addEventListener('click',function(e){
-    if(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents) return;
-    estTogglePdfBar();
-  });
-}
-
+var _estPdfBarOpen=true;
+function estInitPdfToggle(){}
 function estTogglePdfBar(){
   _estPdfBarOpen=!_estPdfBarOpen;
   var body=document.getElementById('est-pdf-btns-body');
@@ -2809,7 +2769,7 @@ function estTogglePdfBar(){
   var spacer=document.getElementById('est-pedido-btns-spacer');
   var el=document.getElementById('est-pedido-btns');
   if(body) body.style.display=_estPdfBarOpen?'block':'none';
-  if(arrow) arrow.style.transform=_estPdfBarOpen?'rotate(0deg)':'rotate(-90deg)';
+  if(arrow) arrow.textContent=_estPdfBarOpen?'▼':'▶';
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);

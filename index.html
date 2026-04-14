@@ -2758,9 +2758,12 @@ function estRenderPedidoBtns(){
 
   el.style.display='block';
   estInitPdfToggle();
-  // keep body visibility consistent with current state
+  // Always start closed - user must tap to open
+  _estPdfBarOpen=false;
   var bodyEl=document.getElementById('est-pdf-btns-body');
-  if(bodyEl) bodyEl.style.display=_estPdfBarOpen?'block':'none';
+  var arrowEl=document.getElementById('est-pdf-arrow');
+  if(bodyEl) bodyEl.style.display='none';
+  if(arrowEl) arrowEl.style.transform='rotate(-90deg)';
   setTimeout(function(){
     if(spacer&&el) spacer.style.height=(el.offsetHeight+4)+'px';
   },80);
@@ -2770,14 +2773,30 @@ function estInitPdfToggle(){
   if(!row||row._pdfInited) return;
   row._pdfInited=true;
   var touchStartY=0;
-  row.addEventListener('touchstart',function(e){ touchStartY=e.touches[0].clientY; },{passive:true});
+  var touchStartedOnRow=false;
+
+  row.addEventListener('touchstart',function(e){
+    touchStartedOnRow=true;
+    touchStartY=e.touches[0].clientY;
+  },{passive:true});
+
+  // If finger moves significantly, cancel
+  row.addEventListener('touchmove',function(e){
+    if(Math.abs(e.touches[0].clientY-touchStartY)>8){
+      touchStartedOnRow=false;
+    }
+  },{passive:true});
+
   row.addEventListener('touchend',function(e){
+    if(!touchStartedOnRow) return;
+    touchStartedOnRow=false;
     var dy=Math.abs(e.changedTouches[0].clientY-touchStartY);
-    if(dy>10) return; // foi scroll, ignora
+    if(dy>8) return;
     estTogglePdfBar();
   },{passive:true});
+
+  // Desktop only
   row.addEventListener('click',function(e){
-    // só desktop
     if(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents) return;
     estTogglePdfBar();
   });

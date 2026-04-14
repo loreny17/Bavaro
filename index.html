@@ -2249,15 +2249,10 @@ function estRenderItens(){
       +'<div style="margin-bottom:8px"><input type="text" class="est-add-inp" placeholder="Nome do produto..." style="width:100%"></div>'
       +'<div class="est-add-row">'
         +'<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
-          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd m\u00ednima</label>'
+          +'<label style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Qtd mínima</label>'
           +'<input type="number" class="est-add-min" placeholder="0" min="0" value="0" style="width:100%">'
         +'</div>'
         +'<button class="est-add-submit" style="align-self:flex-end">Adicionar</button>'
-      +'</div>'
-      +'<div style="margin-top:10px;display:flex;align-items:center;gap:6px">'
-        +'<span style="font-size:0.75rem;color:var(--muted);flex-shrink:0">\u260e\ufe0f</span>'
-        +'<input type="tel" class="est-cat-tel-inp" placeholder="WhatsApp fornecedor..." style="flex:1;font-size:0.78rem;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);outline:none;">'
-        +'<button class="est-cat-tel-save" style="background:var(--surface2);border:1.5px solid #25d366;border-radius:8px;color:#25d366;font-size:0.72rem;padding:7px 10px;cursor:pointer;flex-shrink:0;">Salvar</button>'
       +'</div>'
       +'<div style="margin-top:6px;text-align:right">'
         +'<button class="est-del-cat-btn">&#128465; Excluir categoria</button>'
@@ -2265,13 +2260,7 @@ function estRenderItens(){
 
     var nomeInp=addWrap.querySelector('.est-add-inp');
     var minInp=addWrap.querySelector('.est-add-min');
-    var telInp=addWrap.querySelector('.est-cat-tel-inp');
-    var telSave=addWrap.querySelector('.est-cat-tel-save');
-    (function(cat2,ni,mi,ti,ts){
-      ti.value=cat2.tel||'';
-      function saveTel(){ cat2.tel=(ti.value||'').trim(); estSalvar(); estRenderPedidoBtns(); ts.textContent='\u2714'; setTimeout(function(){ ts.textContent='Salvar'; },1500); }
-      ts.onclick=saveTel;
-      ti.addEventListener('keydown',function(e){ if(e.key==='Enter') saveTel(); });
+    (function(cat2,ni,mi){
       function add(){
         var nome=(ni.value||'').trim(), min=parseFloat(mi.value)||0;
         if(!nome){showToast('Informe o nome!','#f7a34f');ni.focus();return;}
@@ -2288,10 +2277,10 @@ function estRenderItens(){
           estData.cats=estData.cats.filter(function(c){return c.id!==cat2.id;});
           if(estCatAtiva===cat2.id) estCatAtiva='__all__';
           estSalvar(); estRenderCatPills(); estRenderAddForm(); estRenderItens(); estRenderPedidoBtns();
-          showToast('Categoria exclu\u00edda!','#f75a5a');
+          showToast('Categoria excluída!','#f75a5a');
         });
       };
-    })(cat,nomeInp,minInp,telInp,telSave);
+    })(cat,nomeInp,minInp);
     body.appendChild(addWrap);
 
     // Items
@@ -2759,27 +2748,12 @@ function estRenderPedidoBtns(){
   catsParaPdf.forEach(function(cat){
     var baixos=(cat.itens||[]).filter(function(i){return Number(i.qtd)<=Number(i.min);});
     if(!baixos.length) return;
-    var row=document.createElement('div');
-    row.style.cssText='display:flex;gap:6px;margin-bottom:6px;';
-
     var btn=document.createElement('button');
     btn.className='est-pedido-btn';
-    btn.style.cssText='flex:1;margin-bottom:0;';
+    btn.style.marginBottom='6px';
     btn.innerHTML='&#128203; Pedido PDF &#8212; '+escHtml(cat.nome)+' <span style="background:var(--danger);color:#fff;border-radius:8px;padding:1px 6px;font-size:0.7rem;margin-left:4px">'+baixos.length+'</span>';
     btn.onclick=function(){ estGerarPedido(cat.id); };
-    row.appendChild(btn);
-
-    // Botão WhatsApp se a categoria tem tel próprio
-    if(cat.tel){
-      var waBtn=document.createElement('button');
-      waBtn.style.cssText='background:#25d366;color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:1.1rem;cursor:pointer;flex-shrink:0;';
-      waBtn.innerHTML='📲';
-      waBtn.title='Enviar para '+escHtml(cat.nome)+' ('+cat.tel+')';
-      (function(cat2){ waBtn.onclick=function(){ estEnviarPedidoWACat(cat2); }; })(cat);
-      row.appendChild(waBtn);
-    }
-
-    body.appendChild(row);
+    body.appendChild(btn);
   });
 
   el.style.display='block';

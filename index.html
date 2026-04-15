@@ -896,12 +896,21 @@ textarea{resize:vertical;min-height:80px;}
 <!-- TELA DO FUNCIONÁRIO (modo ?func=ID) -->
 </div><!-- /app -->
 <div class="func-screen" id="func-screen">
-  <div class="func-screen-inner">
+  <div class="func-screen-inner" id="func-screen-inner" style="padding-bottom:70px;">
     <div class="func-screen-header">
       <div class="func-screen-logo">GESTÃO BÁVARO</div>
       <div class="func-screen-name" id="func-screen-name"></div>
     </div>
+    <div id="func-pts-top" style="margin-bottom:12px;"></div>
     <div id="func-cl-content"></div>
+  </div>
+  <!-- Barra fixa de recompensas -->
+  <div id="func-recomp-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);border-top:2px solid rgba(212,168,67,0.4);z-index:100;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px 4px;pointer-events:none;">
+      <span style="color:var(--accent);font-size:0.78rem;font-family:'Space Grotesk',sans-serif;font-weight:700;">🎁 RECOMPENSAS</span>
+      <button id="func-recomp-arrow" onclick="funcToggleRecomp()" style="background:var(--surface2);border:1px solid rgba(212,168,67,0.4);border-radius:6px;color:var(--accent);font-size:0.75rem;padding:3px 10px;cursor:pointer;pointer-events:auto;">▲</button>
+    </div>
+    <div id="func-recomp-body" style="display:none;padding:6px 16px 14px;max-height:50vh;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -3617,6 +3626,52 @@ function clCriarRecompensa(){
   showToast('Recompensa criada!');
 }
 
+var _funcRecompOpen=false;
+function funcToggleRecomp(){
+  _funcRecompOpen=!_funcRecompOpen;
+  var body=document.getElementById('func-recomp-body');
+  var arrow=document.getElementById('func-recomp-arrow');
+  if(body) body.style.display=_funcRecompOpen?'block':'none';
+  if(arrow) arrow.textContent=_funcRecompOpen?'▼':'▲';
+}
+
+function funcRenderRecompBar(funcId, pontos){
+  var bar=document.getElementById('func-recomp-bar');
+  var body=document.getElementById('func-recomp-body');
+  if(!bar||!body) return;
+  if(!recompensas.length){ bar.style.display='none'; return; }
+  bar.style.display='block';
+  body.innerHTML='';
+  recompensas.forEach(function(r){
+    var card=document.createElement('div'); card.className='recomp-card';
+    var podResgatar=pontos>=r.pts;
+    card.innerHTML='<div class="recomp-pts">'+r.pts+'<div style="font-size:0.55rem;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">pts</div></div>'
+      +'<div class="recomp-info"><div class="recomp-nome">'+escHtml(r.nome)+'</div>'
+      +'<div class="recomp-desc">'+(podResgatar?'Você pode resgatar!':'Faltam '+(r.pts-pontos)+' pts')+'</div></div>';
+    var btn=document.createElement('button'); btn.className='recomp-resgatar';
+    btn.textContent=podResgatar?'Resgatar':'🔒';
+    btn.disabled=!podResgatar;
+    (function(rid,fid){
+      btn.onclick=function(){
+        // Busca func pelo funcId diretamente ou usa pontos passados
+        var funcObj=funcionarios.find(function(f){return String(f.id)===String(fid);});
+        var recomp=recompensas.find(function(x){return x.id===rid;});
+        if(!recomp){showToast('Recompensa não encontrada!','#f7a34f');return;}
+        var ptsAtual=funcObj?(funcObj.pontos||0):pontos;
+        if(ptsAtual<recomp.pts){showToast('Pontos insuficientes!','#f7a34f');return;}
+        var funcNome=funcObj?funcObj.nome:'Funcionário';
+        resgates.push({id:gerarId(),funcId:fid,funcNome:funcNome,recompId:rid,recompNome:recomp.nome,pts:recomp.pts,data:new Date().toISOString(),status:'pendente'});
+        clSalvarRecomp();
+        showToast('✅ Resgate solicitado! Aguarde o responsável.');
+        btn.textContent='⏳ Solicitado';
+        btn.disabled=true;
+      };
+    })(r.id,funcId);
+    card.appendChild(btn);
+    body.appendChild(card);
+  });
+}
+
 function clSolicitarResgate(recompId, funcId){
   var r=recompensas.find(function(x){return x.id===recompId;});
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);});
@@ -3819,34 +3874,17 @@ function clRenderFuncScreen(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(!content) return;
 
-  // Badge de pontos + recompensas disponíveis
+  // Badge de pontos no topo
   var pontos=(func&&func.pontos)||0;
-  var ptsBadge=document.getElementById('func-pts-badge');
-  if(!ptsBadge){
-    ptsBadge=document.createElement('div');
-    ptsBadge.id='func-pts-badge';
-    ptsBadge.style.cssText='margin-bottom:12px;';
-    content.parentNode.insertBefore(ptsBadge,content);
+  var ptsTop=document.getElementById('func-pts-top');
+  if(ptsTop){
+    ptsTop.innerHTML=recompensas.length||pontos>0
+      ? '<div class="func-pts-badge">⭐ '+pontos+' pontos</div>'
+      : '';
   }
-  if(pontos>0||recompensas.length){
-    ptsBadge.innerHTML='<div class="func-pts-badge">⭐ '+pontos+' pontos</div>';
-    if(recompensas.length){
-      ptsBadge.innerHTML+='<div style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;margin:6px 0 4px;text-transform:uppercase;font-weight:700;">🎁 Resgatar recompensa</div>';
-      recompensas.forEach(function(r){
-        var card=document.createElement('div'); card.className='recomp-card';
-        var podResgatar=pontos>=r.pts;
-        card.innerHTML='<div class="recomp-pts">'+r.pts+'<div style="font-size:0.55rem;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">pts</div></div><div class="recomp-info"><div class="recomp-nome">'+escHtml(r.nome)+'</div></div>';
-        var btn=document.createElement('button'); btn.className='recomp-resgatar';
-        btn.textContent=podResgatar?'Resgatar':'Faltam '+(r.pts-pontos)+' pts';
-        btn.disabled=!podResgatar;
-        (function(rid,fid){ btn.onclick=function(){ clSolicitarResgate(rid,fid); clRenderFuncScreen(fid,clId); }; })(r.id,funcId);
-        card.appendChild(btn);
-        ptsBadge.appendChild(card);
-      });
-    }
-  } else {
-    ptsBadge.innerHTML='';
-  }
+
+  // Barra de recompensas no fundo
+  funcRenderRecompBar(funcId, pontos);
 
   // Get checklists for this func (filter by clId if provided)
   var listas=clData.filter(function(cl){

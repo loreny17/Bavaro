@@ -905,12 +905,12 @@ textarea{resize:vertical;min-height:80px;}
 </div>
 
 <!-- ESTOQUE PDF FIXED BAR -->
-<div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);">
+<div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);pointer-events:none;">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px 2px;">
     <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.04em;">PEDIDOS PDF</span>
-    <button id="est-pdf-arrow" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;">▼</button>
+    <button id="est-pdf-arrow" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;pointer-events:auto;">▼</button>
   </div>
-  <div id="est-pdf-btns-body" style="padding:4px 14px 10px;"></div>
+  <div id="est-pdf-btns-body" style="padding:4px 14px 10px;pointer-events:auto;"></div>
 </div>
 
 <!-- MODAL -->
@@ -2231,7 +2231,7 @@ function estRenderItens(){
     header.className='est-cat-header';
     header.innerHTML=
       '<div class="est-cat-header-info">'
-        +'<div class="est-cat-header-nome">'+escHtml(cat.nome)+'</div>'
+        +'<div class="est-cat-header-nome" id="estnomcat-'+cat.id+'">'+escHtml(cat.nome)+'</div>'
         +'<div class="est-cat-header-sub">'+allItens.length+' produto'+(allItens.length!==1?'s':'')+'</div>'
       +'</div>'
       +'<div class="est-cat-header-badges">'
@@ -2239,6 +2239,34 @@ function estRenderItens(){
         +'<span class="est-cat-badge-total">'+allItens.length+'</span>'
       +'</div>'
       +'<span class="est-cat-arrow'+(isOpen?' open':'')+'">&#9660;</span>';
+
+    // Toque no nome para renomear (admin)
+    if(_isAdmin){
+      (function(cat2){
+        var nomeEl=header.querySelector('#estnomcat-'+cat2.id);
+        if(!nomeEl) return;
+        nomeEl.style.cursor='text';
+        nomeEl.addEventListener('click',function(e){
+          e.stopPropagation();
+          var inp=document.createElement('input');
+          inp.type='text';
+          inp.value=cat2.nome;
+          inp.style.cssText='background:var(--surface2);border:1.5px solid var(--accent);border-radius:6px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:1rem;font-weight:700;padding:2px 8px;outline:none;width:100%;';
+          nomeEl.replaceWith(inp);
+          inp.focus(); inp.select();
+          function save(){
+            var v=(inp.value||'').trim();
+            if(v) cat2.nome=v;
+            estSalvar(); estRenderCatPills(); estRenderItens();
+          }
+          inp.addEventListener('blur',save);
+          inp.addEventListener('keydown',function(e){
+            if(e.key==='Enter') inp.blur();
+            if(e.key==='Escape'){ inp.removeEventListener('blur',save); estRenderItens(); }
+          });
+        });
+      })(cat);
+    }
 
     // Body
     var body=document.createElement('div');

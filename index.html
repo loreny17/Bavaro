@@ -3386,7 +3386,7 @@ function clRender(){
       statusBadge.className='cl-status-badge cl-status-'+(cl.status||'pendente');
       statusBadge.textContent=cl.status==='aguardando'?'⏳ Aguardando aprovação':cl.status==='aprovado'?'✅ Aprovado (+5 pts)':'❌ Reprovado';
       statusRow.appendChild(statusBadge);
-      if(cl.status==='aguardando'&&_isAdmin){
+      if(cl.status==='aguardando'){
         var apvRow=document.createElement('div'); apvRow.className='cl-aprovacao-row';
         var apvBtn=document.createElement('button'); apvBtn.className='cl-aprovar-btn'; apvBtn.textContent='✅ Aprovar';
         var repBtn=document.createElement('button'); repBtn.className='cl-reprovar-btn'; repBtn.textContent='❌ Reprovar';
@@ -3643,16 +3643,63 @@ function clRenderRecompSection(){
   sec.style.display=_isAdmin?'block':'none';
   if(!_isAdmin) return;
 
-  // Ranking
+  // Ranking / editar pontos
   var rankEl=document.getElementById('cl-ranking');
   if(rankEl){
-    var comPontos=funcionarios.filter(function(f){return (f.pontos||0)>0;}).sort(function(a,b){return (b.pontos||0)-(a.pontos||0);});
-    if(!comPontos.length){ rankEl.innerHTML='<div style="color:var(--muted);font-size:0.8rem;margin-bottom:4px;">Nenhum funcionário com pontos ainda.</div>'; }
-    else {
-      rankEl.innerHTML='<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:6px;">🏅 Ranking de pontos</div>';
-      comPontos.slice(0,5).forEach(function(f,i){
-        var row=document.createElement('div'); row.className='pts-ranking-row';
-        row.innerHTML='<div class="pts-rank-num">'+(i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'º')+'</div><div class="pts-rank-nome">'+escHtml(f.nome)+'</div><div class="pts-rank-pts">⭐ '+(f.pontos||0)+' pts</div>';
+    rankEl.innerHTML='<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:6px;">🏅 Pontos dos funcionários</div>';
+
+    // Botão resetar todos
+    var resetBtn=document.createElement('button');
+    resetBtn.style.cssText='width:100%;background:rgba(255,68,68,0.1);border:1.5px solid rgba(255,68,68,0.3);border-radius:8px;color:var(--danger);font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;font-weight:700;padding:8px;cursor:pointer;margin-bottom:10px;';
+    resetBtn.textContent='🔄 Resetar pontos de todos';
+    resetBtn.onclick=function(){
+      cvtConfirm('Zerar pontos de TODOS os funcionários?',function(){
+        funcionarios.forEach(function(f){ f.pontos=0; fbSalvar(f); });
+        clRenderRecompSection();
+        showToast('Pontos zerados!','#f75a5a');
+      });
+    };
+    rankEl.appendChild(resetBtn);
+
+    if(!funcionarios.length){
+      var empty=document.createElement('div');
+      empty.style.cssText='color:var(--muted);font-size:0.8rem;margin-bottom:4px;';
+      empty.textContent='Nenhum funcionário cadastrado.';
+      rankEl.appendChild(empty);
+    } else {
+      var sorted=funcionarios.slice().sort(function(a,b){return (b.pontos||0)-(a.pontos||0);});
+      sorted.forEach(function(f){
+        var row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:10px;margin-bottom:6px;';
+
+        var nome=document.createElement('div');
+        nome.style.cssText='flex:1;font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;font-weight:600;color:var(--text);';
+        nome.textContent=f.nome;
+        row.appendChild(nome);
+
+        // Input de pontos
+        var inp=document.createElement('input');
+        inp.type='number'; inp.min='0';
+        inp.value=f.pontos||0;
+        inp.style.cssText='width:60px;background:var(--surface);border:1.5px solid var(--border2);border-radius:6px;color:var(--accent);font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.88rem;padding:4px 8px;text-align:center;outline:none;';
+        inp.addEventListener('focus',function(){ this.style.borderColor='var(--accent)'; });
+        inp.addEventListener('blur',function(){ this.style.borderColor='var(--border2)'; });
+        row.appendChild(inp);
+
+        // Botão salvar
+        var saveBtn=document.createElement('button');
+        saveBtn.style.cssText='background:var(--accent);color:#000;border:none;border-radius:6px;padding:4px 10px;font-family:\'Space Grotesk\',sans-serif;font-size:0.75rem;font-weight:700;cursor:pointer;';
+        saveBtn.textContent='✔';
+        (function(func2,inpEl){
+          saveBtn.onclick=function(){
+            func2.pontos=Math.max(0,parseInt(inpEl.value)||0);
+            fbSalvar(func2);
+            showToast('Pontos de '+func2.nome+' atualizados!');
+            clRenderRecompSection();
+          };
+        })(f,inp);
+        row.appendChild(saveBtn);
+
         rankEl.appendChild(row);
       });
     }

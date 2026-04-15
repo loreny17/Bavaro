@@ -3858,17 +3858,37 @@ function clRenderFuncScreen(funcId, clId){
         aprovarBtn.innerHTML='🏆 Enviar para aprovação';
         (function(cl2,funcId2){
           aprovarBtn.onclick=function(){
-            cl2.status='aguardando';
-            if(fbDb) fbDb.collection('configuracoes').doc('clData').set({data:clData}).catch(function(){});
-            else localStorage.setItem('clData',JSON.stringify(clData));
-            // WhatsApp para o responsável
-            var nomeF=func?func.nome:'Funcionário';
-            var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\nAbra o app para aprovar ou reprovar. 👆';
-            window.open('https://wa.me/5541999724252?text='+encodeURIComponent(msg),'_blank');
-            aprovarBtn.innerHTML='⏳ Aguardando aprovação...';
             aprovarBtn.disabled=true;
-            aprovarBtn.style.opacity='0.6';
-            aprovarBtn.style.animation='none';
+            aprovarBtn.innerHTML='⏳ Enviando...';
+            function doSend(){
+              var nomeF=func?func.nome:'Funcionário';
+              var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\nAbra o app para aprovar ou reprovar. 👆';
+              window.open('https://wa.me/5541999724252?text='+encodeURIComponent(msg),'_blank');
+              aprovarBtn.innerHTML='⏳ Aguardando aprovação...';
+              aprovarBtn.style.opacity='0.6';
+              aprovarBtn.style.animation='none';
+            }
+            if(fbDb){
+              // Ler clData completo, atualizar só este checklist
+              fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
+                var fullData=clData.slice();
+                if(doc&&doc.exists&&doc.data()&&doc.data().data){
+                  fullData=doc.data().data;
+                }
+                for(var i=0;i<fullData.length;i++){
+                  if(fullData[i].id===cl2.id){ fullData[i].status='aguardando'; break; }
+                }
+                fbDb.collection('configuracoes').doc('clData').set({data:fullData}).then(doSend).catch(function(){
+                  aprovarBtn.disabled=false; aprovarBtn.innerHTML='🏆 Enviar para aprovação';
+                });
+              }).catch(function(){
+                aprovarBtn.disabled=false; aprovarBtn.innerHTML='🏆 Enviar para aprovação';
+              });
+            } else {
+              cl2.status='aguardando';
+              localStorage.setItem('clData',JSON.stringify(clData));
+              doSend();
+            }
           };
         })(cl,funcId);
         card.appendChild(aprovarBtn);

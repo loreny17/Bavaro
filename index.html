@@ -545,6 +545,9 @@ textarea{resize:vertical;min-height:80px;}
 
 .cl-create-box{background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:14px;margin-bottom:14px;}
 .cl-create-title{font-size:0.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;}
+.cl-dia-btn{background:var(--surface2);border:1.5px solid var(--border2);border-radius:20px;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.78rem;font-weight:600;padding:5px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+.cl-dia-btn.active{background:var(--accent);color:#000;border-color:var(--accent);}
+.cl-dia-badge{display:inline-block;background:rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;font-size:0.65rem;font-weight:700;padding:1px 6px;margin-left:4px;font-family:'Space Grotesk',sans-serif;}
 .cl-inp{width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.9rem;padding:10px 12px;outline:none;margin-bottom:8px;}
 .cl-inp:focus{border-color:var(--accent);}
 .cl-select{width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:8px;color:var(--text);font-size:0.88rem;padding:10px 12px;outline:none;margin-bottom:8px;}
@@ -858,21 +861,61 @@ textarea{resize:vertical;min-height:80px;}
     <div class="cl-header-sub" id="cl-sub">Crie e gerencie listas para seus funcionários</div>
   </div>
 
-  <!-- Criar novo checklist -->
-  <div class="cl-create-box" id="cl-create-box">
-    <div class="cl-create-title">+ Novo Checklist</div>
-    <input type="text" class="cl-inp" id="cl-titulo" placeholder="Título do checklist (ex: Abertura de conta)">
-    <select class="cl-select" id="cl-func-select">
-      <option value="">Selecionar funcionário...</option>
-    </select>
-    <div class="cl-items-builder" id="cl-items-builder"></div>
-    <button class="cl-add-item-btn" onclick="clAddItemRow()">+ Adicionar item</button>
-    <button class="cl-submit-btn" onclick="clSalvar()">✅ Criar Checklist</button>
+  <!-- Filtro por dia -->
+  <div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px;scrollbar-width:none;" id="cl-dias-filter">
+    <button class="cl-dia-btn active" data-dia="todos" onclick="clFiltrarDia('todos')">Todos</button>
+    <button class="cl-dia-btn" data-dia="segunda" onclick="clFiltrarDia('segunda')">Seg</button>
+    <button class="cl-dia-btn" data-dia="terca" onclick="clFiltrarDia('terca')">Ter</button>
+    <button class="cl-dia-btn" data-dia="quarta" onclick="clFiltrarDia('quarta')">Qua</button>
+    <button class="cl-dia-btn" data-dia="quinta" onclick="clFiltrarDia('quinta')">Qui</button>
+    <button class="cl-dia-btn" data-dia="sexta" onclick="clFiltrarDia('sexta')">Sex</button>
+    <button class="cl-dia-btn" data-dia="sabado" onclick="clFiltrarDia('sabado')">Sáb</button>
+  </div>
+
+  <!-- Criar novo checklist (colapsável) -->
+  <div class="cl-create-box" id="cl-create-box" style="margin-bottom:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="clToggleCreate()">
+      <div class="cl-create-title" style="margin-bottom:0;">+ Novo Checklist</div>
+      <span id="cl-create-arrow" style="color:var(--muted);font-size:0.75rem;transition:transform 0.2s;transform:rotate(-90deg);">▼</span>
+    </div>
+    <div id="cl-create-body" style="display:none;margin-top:12px;">
+      <input type="text" class="cl-inp" id="cl-titulo" placeholder="Título do checklist...">
+      <select class="cl-select" id="cl-func-select">
+        <option value="">Selecionar funcionário...</option>
+      </select>
+      <!-- Dia da semana -->
+      <select class="cl-select" id="cl-dia-select" style="margin-bottom:8px;">
+        <option value="">Dia da semana (opcional)</option>
+        <option value="segunda">Segunda-feira</option>
+        <option value="terca">Terça-feira</option>
+        <option value="quarta">Quarta-feira</option>
+        <option value="quinta">Quinta-feira</option>
+        <option value="sexta">Sexta-feira</option>
+        <option value="sabado">Sábado</option>
+      </select>
+      <div class="cl-items-builder" id="cl-items-builder"></div>
+      <button class="cl-add-item-btn" onclick="clAddItemRow()">+ Adicionar item</button>
+      <button class="cl-submit-btn" onclick="clSalvar()">✅ Criar Checklist</button>
+    </div>
   </div>
 
   <!-- Recompensas (admin) -->
   <div id="cl-recomp-section" style="display:none;margin-bottom:16px;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--text);margin-bottom:8px;">🏆 Recompensas & Pontos</div>
+
+    <!-- Números de aprovação -->
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:12px;">
+      <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-bottom:8px;">📲 Números para aprovação</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+        <span style="font-size:0.75rem;color:var(--muted);width:24px;flex-shrink:0;">1º</span>
+        <input type="tel" id="cl-num1" placeholder="Ex: 41999724252" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;padding:8px 10px;outline:none;">
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+        <span style="font-size:0.75rem;color:var(--muted);width:24px;flex-shrink:0;">2º</span>
+        <input type="tel" id="cl-num2" placeholder="Opcional" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;padding:8px 10px;outline:none;">
+      </div>
+      <button onclick="clSalvarNumsForm()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:8px;padding:9px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.82rem;cursor:pointer;">💾 Salvar números</button>
+    </div>
     <div id="cl-ranking" style="margin-bottom:12px;"></div>
     <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-bottom:6px;">Resgates pendentes</div>
     <div id="cl-resgates"></div>
@@ -1915,7 +1958,7 @@ abrirDB().then(migrarLocalStorage)
   .then(function(r){
     funcionarios=r[0]||[];
     document.getElementById('loading-screen').classList.add('hidden');
-    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clCarregarRecomp();clAddItemRow();clVerificarModoFunc();
+    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clCarregarRecomp();clCarregarNums();clAddItemRow();clVerificarModoFunc();
     // CVT loaded via carregarCVT()
   })
   .catch(function(err){
@@ -3230,12 +3273,33 @@ function clCarregar(){
   catch(e){ clData=[]; }
 }
 
+var _clDiaAtivo='todos';
+
+function clToggleCreate(){
+  var body=document.getElementById('cl-create-body');
+  var arrow=document.getElementById('cl-create-arrow');
+  if(!body) return;
+  var open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arrow) arrow.style.transform=open?'rotate(0deg)':'rotate(-90deg)';
+}
+
+function clFiltrarDia(dia){
+  _clDiaAtivo=dia;
+  document.querySelectorAll('.cl-dia-btn').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-dia')===dia);
+  });
+  clRender();
+}
+
 function clSalvar(){
   // Validate
   var titulo=(document.getElementById('cl-titulo').value||'').trim();
   var funcId=document.getElementById('cl-func-select').value;
   if(!titulo){ showToast('Informe o título!','#f7a34f'); return; }
   if(!funcId){ showToast('Selecione um funcionário!','#f7a34f'); return; }
+
+  var dia=(document.getElementById('cl-dia-select')||{}).value||'';
 
   var itensRows=document.querySelectorAll('.cl-item-inp');
   var itens=[];
@@ -3246,11 +3310,12 @@ function clSalvar(){
   if(!itens.length){ showToast('Adicione pelo menos um item!','#f7a34f'); return; }
 
   var funcObj=funcionarios.find(function(f){return String(f.id)===String(funcId);})||{};
-  var novo={id:gerarId(),titulo:titulo,funcId:funcId,funcNome:funcObj.nome||'',itens:itens,criadoEm:new Date().toISOString()};
+  var novo={id:gerarId(),titulo:titulo,funcId:funcId,funcNome:funcObj.nome||'',dia:dia,itens:itens,itensBase:itens.map(function(i){return {id:gerarId(),texto:i.texto,feito:false};}),criadoEm:new Date().toISOString()};
   clData.push(novo);
   clPersistir(); atualizarHomeBadges();
   document.getElementById('cl-titulo').value='';
   document.getElementById('cl-func-select').value='';
+  if(document.getElementById('cl-dia-select')) document.getElementById('cl-dia-select').value='';
   document.getElementById('cl-items-builder').innerHTML='';
   clAddItemRow();
   clRender();
@@ -3325,8 +3390,11 @@ function clRender(){
   }
 
   el.innerHTML='';
-  // Sort by newest
+  // Sort by newest + filter by dia
   var sorted=clData.slice().sort(function(a,b){ return b.criadoEm.localeCompare(a.criadoEm); });
+  if(_clDiaAtivo&&_clDiaAtivo!=='todos'){
+    sorted=sorted.filter(function(cl){ return cl.dia===_clDiaAtivo; });
+  }
   if(!window._clOpen) window._clOpen={};
   sorted.forEach(function(cl){
     var func=funcionarios.find(function(f){return String(f.id)===String(cl.funcId);})||{nome:cl.funcNome||'Funcionário removido'};
@@ -3334,7 +3402,7 @@ function clRender(){
     var feitos=cl.itens.filter(function(i){return i.feito;}).length;
     var pct=total?Math.round(feitos/total*100):0;
     var concluido=feitos===total;
-    var isOpen=window._clOpen[cl.id]!==false;
+    var isOpen=window._clOpen[cl.id]===true; // default fechado
 
     var card=document.createElement('div');
     card.className='cl-card';
@@ -3344,11 +3412,22 @@ function clRender(){
     var hdr=document.createElement('div'); hdr.className='cl-card-header'; hdr.style.cursor='pointer';
     var hdrLeft=document.createElement('div'); hdrLeft.style.flex='1';
     var titleDiv=document.createElement('div'); titleDiv.className='cl-card-title';
-    titleDiv.textContent=cl.titulo+(concluido?' ✅':'');
+    var diasNome={segunda:'Seg',terca:'Ter',quarta:'Qua',quinta:'Qui',sexta:'Sex',sabado:'S\u00e1b'};
+    titleDiv.textContent=cl.titulo+(concluido?' \u2705':'');
+    if(cl.dia&&diasNome[cl.dia]){
+      var diaBadge=document.createElement('span'); diaBadge.className='cl-dia-badge';
+      diaBadge.textContent=diasNome[cl.dia];
+      titleDiv.appendChild(diaBadge);
+    }
+    (function(cl2,td){
+      var pt=null;
+      td.addEventListener('touchstart',function(){ pt=setTimeout(function(){ clRenomear(cl2.id); },600); },{passive:true});
+      td.addEventListener('touchend',function(){ clearTimeout(pt); },{passive:true});
+      td.addEventListener('touchmove',function(){ clearTimeout(pt); },{passive:true});
+    })(cl,titleDiv);
     var funcDiv=document.createElement('div'); funcDiv.className='cl-card-func';
-    funcDiv.textContent='👤 '+func.nome;
+    funcDiv.textContent='\ud83d\udc64 '+func.nome;
     hdrLeft.appendChild(titleDiv); hdrLeft.appendChild(funcDiv);
-
     var hdrRight=document.createElement('div');
     hdrRight.style.cssText='display:flex;align-items:center;gap:6px;flex-shrink:0;';
     var pctBadge=document.createElement('span');
@@ -3358,7 +3437,7 @@ function clRender(){
     arrowSpan.style.cssText='color:var(--muted);font-size:0.75rem;transition:transform 0.2s;display:inline-block;';
     arrowSpan.style.transform=isOpen?'rotate(0deg)':'rotate(-90deg)';
     arrowSpan.innerHTML='&#9660;';
-    var delBtn=document.createElement('button'); delBtn.className='cl-card-del'; delBtn.innerHTML='🗑️';
+    var delBtn=document.createElement('button'); delBtn.className='cl-card-del'; delBtn.innerHTML='\ud83d\uddd1\ufe0f';
     (function(id){ delBtn.onclick=function(e){ e.stopPropagation(); clExcluir(id); }; })(cl.id);
     hdrRight.appendChild(pctBadge); hdrRight.appendChild(arrowSpan); hdrRight.appendChild(delBtn);
     hdr.appendChild(hdrLeft); hdr.appendChild(hdrRight);
@@ -3410,10 +3489,17 @@ function clRender(){
     }
 
     // Botões
-    var linkRow=document.createElement('div'); linkRow.className='cl-link-row';
+    var linkRow=document.createElement('div'); linkRow.className='cl-link-row'; linkRow.style.flexWrap='wrap';
     var editBtn=document.createElement('button'); editBtn.className='cl-edit-btn';
     editBtn.textContent='✏️ Editar';
     (function(id){ editBtn.onclick=function(){ clAbrirEditor(id); }; })(cl.id);
+    var renameBtn=document.createElement('button'); renameBtn.className='cl-edit-btn';
+    renameBtn.textContent='✍️ Renomear';
+    (function(id){ renameBtn.onclick=function(){ clRenomear(id); }; })(cl.id);
+    var resetBtn=document.createElement('button'); resetBtn.className='cl-edit-btn';
+    resetBtn.style.cssText+='border-color:rgba(212,168,67,0.4);color:var(--accent);';
+    resetBtn.textContent='🔄 Resetar';
+    (function(id){ resetBtn.onclick=function(){ clResetar(id); }; })(cl.id);
     var copyBtn=document.createElement('button'); copyBtn.className='cl-link-btn';
     copyBtn.textContent='🔗 Link';
     (function(fid,cid){ copyBtn.onclick=function(){ clCopiarLink(fid,cid); }; })(cl.funcId,cl.id);
@@ -3422,7 +3508,7 @@ function clRender(){
     if(telFunc){ waBtn.style.borderColor='rgba(37,211,102,0.4)'; waBtn.style.color='#25d366'; }
     waBtn.textContent='📲 WhatsApp';
     (function(fid,cid,tit,nom,tel){ waBtn.onclick=function(){ clAbrirWhatsApp(fid,cid,tit,nom,tel); }; })(cl.funcId,cl.id,cl.titulo,func.nome,telFunc);
-    linkRow.appendChild(editBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
+    linkRow.appendChild(editBtn); linkRow.appendChild(renameBtn); linkRow.appendChild(resetBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
     bodyDiv.appendChild(linkRow);
 
     bodyDiv.querySelectorAll('.cl-checkbox[data-clid]').forEach(function(chk){
@@ -3596,6 +3682,31 @@ function clSalvarRecomp(){
   if(fbDb) fbDb.collection('configuracoes').doc('clRecomp').set({data:d}).catch(function(){});
 }
 
+// ── Números de aprovação ──
+var _clNums={n1:'5541999724252',n2:''};
+
+function _clGetNumeros(){
+  var n1=(_clNums.n1||'5541999724252').replace(/\D/g,'');
+  var n2=(_clNums.n2||'').replace(/\D/g,'');
+  if(n1&&!n1.startsWith('55')) n1='55'+n1;
+  if(n2&&!n2.startsWith('55')) n2='55'+n2;
+  return [n1, n2||null];
+}
+
+function clCarregarNums(){
+  try{ var s=localStorage.getItem('clNums'); if(s) _clNums=JSON.parse(s); }catch(e){}
+  if(fbDb){
+    fbDb.collection('configuracoes').doc('clNums').get().then(function(doc){
+      if(doc&&doc.exists&&doc.data()) _clNums=doc.data();
+    }).catch(function(){});
+  }
+}
+
+function clSalvarNums(){
+  localStorage.setItem('clNums',JSON.stringify(_clNums));
+  if(fbDb) fbDb.collection('configuracoes').doc('clNums').set(_clNums).catch(function(){});
+}
+
 function clAprovar(clId){
   var cl=clData.find(function(x){return x.id===clId;});
   if(!cl) return;
@@ -3603,8 +3714,10 @@ function clAprovar(clId){
   // Adicionar 5 pontos ao funcionário
   var func=funcionarios.find(function(f){return String(f.id)===String(cl.funcId);});
   if(func){ func.pontos=(func.pontos||0)+5; fbSalvar(func); }
+  // Auto-resetar itens para próxima vez
+  _clResetarItens(cl);
   clPersistir(); clRender(); clRenderRecompSection();
-  showToast('✅ Aprovado! +5 pontos para '+( func?func.nome:'funcionário')+'!');
+  showToast('✅ Aprovado! +5 pts para '+(func?func.nome:'funcionário')+'. Tarefas resetadas!');
 }
 
 function clReprovar(clId){
@@ -3613,6 +3726,53 @@ function clReprovar(clId){
   cl.status='reprovado';
   clPersistir(); clRender();
   showToast('❌ Reprovado — sem pontos.','#f75a5a');
+}
+
+function _clResetarItens(cl){
+  // Reseta itens para feito=false e limpa status
+  cl.itens=cl.itens.map(function(i){ return {id:i.id,texto:i.texto,feito:false}; });
+  cl.status='';
+}
+
+function clResetar(clId){
+  cvtConfirm('Resetar tarefas deste checklist?\nTodos os itens voltam para não concluído.',function(){
+    var cl=clData.find(function(x){return x.id===clId;});
+    if(!cl) return;
+    _clResetarItens(cl);
+    clPersistir(); clRender();
+    showToast('🔄 Tarefas resetadas!');
+  });
+}
+
+function clRenomear(clId){
+  var cl=clData.find(function(x){return x.id===clId;});
+  if(!cl) return;
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;display:flex;align-items:flex-end;justify-content:center;';
+  var sheet=document.createElement('div');
+  sheet.style.cssText='background:var(--surface);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;';
+  sheet.innerHTML='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;color:var(--text);margin-bottom:12px;">✍️ Renomear checklist</div>';
+  var inp=document.createElement('input');
+  inp.type='text'; inp.value=cl.titulo;
+  inp.style.cssText='width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:10px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:1rem;padding:11px 13px;outline:none;box-sizing:border-box;margin-bottom:10px;';
+  sheet.appendChild(inp);
+  var saveBtn=document.createElement('button');
+  saveBtn.style.cssText='width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;';
+  saveBtn.textContent='✔ Salvar';
+  saveBtn.onclick=function(){
+    var v=(inp.value||'').trim();
+    if(!v){ showToast('Informe um título!','#f7a34f'); return; }
+    cl.titulo=v;
+    clPersistir(); clRender();
+    document.body.removeChild(overlay);
+    showToast('Título atualizado!');
+  };
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter') saveBtn.click(); });
+  sheet.appendChild(saveBtn);
+  overlay.appendChild(sheet);
+  overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+  document.body.appendChild(overlay);
+  setTimeout(function(){ inp.focus(); inp.select(); },100);
 }
 
 function clCriarRecompensa(){
@@ -3692,11 +3852,23 @@ function clAprovarResgate(resgateId){
   showToast('Resgate aprovado! -'+res.pts+' pts de '+res.funcNome);
 }
 
+function clSalvarNumsForm(){
+  _clNums.n1=(document.getElementById('cl-num1').value||'').trim();
+  _clNums.n2=(document.getElementById('cl-num2').value||'').trim();
+  clSalvarNums();
+  showToast('Números salvos!');
+}
+
 function clRenderRecompSection(){
   var sec=document.getElementById('cl-recomp-section');
   if(!sec) return;
   sec.style.display=_isAdmin?'block':'none';
   if(!_isAdmin) return;
+  // Preencher números
+  var n1El=document.getElementById('cl-num1');
+  var n2El=document.getElementById('cl-num2');
+  if(n1El) n1El.value=_clNums.n1||'';
+  if(n2El) n2El.value=_clNums.n2||'';
 
   // Ranking / editar pontos
   var rankEl=document.getElementById('cl-ranking');
@@ -3948,7 +4120,13 @@ function clRenderFuncScreen(funcId, clId){
             function doSend(){
               var nomeF=func?func.nome:'Funcionário';
               var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\nAbra o app para aprovar ou reprovar. 👆';
-              window.open('https://wa.me/5541999724252?text='+encodeURIComponent(msg),'_blank');
+              var nums=_clGetNumeros();
+              window.open('https://wa.me/'+nums[0]+'?text='+encodeURIComponent(msg),'_blank');
+              if(nums[1]){
+                setTimeout(function(){
+                  window.open('https://wa.me/'+nums[1]+'?text='+encodeURIComponent(msg),'_blank');
+                },800);
+              }
               aprovarBtn.innerHTML='⏳ Aguardando aprovação...';
               aprovarBtn.style.opacity='0.6';
               aprovarBtn.style.animation='none';

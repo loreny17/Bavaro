@@ -710,6 +710,7 @@ textarea{resize:vertical;min-height:80px;}
   <button class="tab-btn" onclick="showTab('cvt')"><span class="icon">🚌</span>VT/Taxas</button>
   <button class="tab-btn" onclick="showTab('checklist')"><span class="icon">✅</span><span id="cl-tab-label">Checklist</span></button>
   <button class="tab-btn" onclick="showTab('estoque')" id="btn-tab-estoque"><span class="icon">📦</span><span id="estoque-badge-tab">Estoque</span></button>
+  <button class="tab-btn" onclick="showTab('faltas')"><span class="icon">⚠️</span><span id="faltas-tab-label">Faltas</span></button>
 </div>
 
 <!-- TAB CADASTRO -->
@@ -1014,6 +1015,13 @@ textarea{resize:vertical;min-height:80px;}
   <div id="est-pdf-btns-body" style="padding:4px 14px 10px;pointer-events:auto;"></div>
 </div>
 
+<!-- TAB FALTAS -->
+<div class="tab-content" id="tab-faltas">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--text);margin-bottom:4px;">Faltas Reportadas</div>
+  <div style="font-size:0.8rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;margin-bottom:16px;">O que os funcionários reportaram como faltando</div>
+  <div id="faltas-lista"></div>
+</div>
+
 <!-- MODAL -->
 <div class="modal-overlay" id="modal-overlay" onclick="fecharModalClick(event)">
   <div class="modal-sheet"><div class="modal-handle"></div><div id="modal-content"></div></div>
@@ -1106,7 +1114,7 @@ function abrirCadastro(){
 }
 
 function showTab(tab){
-  document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.toggle('active',['lista','vf','cvt','checklist','estoque'][i]===tab);});
+  document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.toggle('active',['lista','vf','cvt','checklist','estoque','faltas'][i]===tab);});
   document.querySelectorAll('.tab-content').forEach(function(c){c.classList.remove('active');});
   document.getElementById('tab-'+tab).classList.add('active');
   if(tab==='lista'){renderLista(); verificarAniversarios();}
@@ -1114,6 +1122,7 @@ function showTab(tab){
   if(tab==='cvt')renderCVT();
   if(tab==='checklist')clRender();
   if(tab==='estoque'){estRenderCatPills();estRenderAddForm();estRenderItens();estRenderReports();}
+  if(tab==='faltas') faltasRender();
   // Hide PDF fixed bar when not in estoque
   if(tab!=='estoque'){
     var bar=document.getElementById('est-pedido-btns');
@@ -3714,21 +3723,97 @@ function _clGetNumeros(){
 // ══ REPORTS DE FALTA ══
 var estReports=[];
 
+function faltasRender(){
+  var el=document.getElementById('faltas-lista');
+  if(!el) return;
+  el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.85rem;">Carregando...</div>';
+
+  function renderLista(lista){
+    el.innerHTML='';
+    if(!lista||!lista.length){
+      el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">📦 Nenhuma falta reportada ainda.</div>';
+      return;
+    }
+    // Badge na aba
+    var naoVistos=lista.filter(function(r){return !r.visto;});
+    var tabLabel=document.getElementById('faltas-tab-label');
+    if(tabLabel) tabLabel.innerHTML='Faltas'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem;">'+naoVistos.length+'</span>':'');
+
+    // Botão limpar vistos
+    if(lista.some(function(r){return r.visto;})){
+      var limparBtn=document.createElement('button');
+      limparBtn.style.cssText='width:100%;background:rgba(255,68,68,0.1);border:1.5px solid rgba(255,68,68,0.3);border-radius:8px;color:var(--danger);font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;font-weight:700;padding:8px;cursor:pointer;margin-bottom:10px;';
+      limparBtn.textContent='🗑 Limpar vistos';
+      limparBtn.onclick=function(){
+        cvtConfirm('Remover todos os reports marcados como visto?',function(){
+          var novos=lista.filter(function(r){return !r.visto;});
+          if(fbDb) fbDb.collection('configuracoes').doc('estReports').set({data:novos}).then(function(){ faltasRender(); });
+        });
+      };
+      el.appendChild(limparBtn);
+    }
+
+    var sorted=lista.slice().sort(function(a,b){return b.data.localeCompare(a.data);});
+    sorted.forEach(function(r){
+      var card=document.createElement('div');
+      card.style.cssText='background:var(--surface);border:1.5px solid '+(r.visto?'var(--border2)':'rgba(251,146,60,0.4)')+';border-radius:12px;padding:12px 14px;margin-bottom:8px;opacity:'+(r.visto?'0.5':'1')+';';
+      var hdr=document.createElement('div');
+      hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;';
+      var left=document.createElement('div');
+      left.innerHTML='<div style="font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.85rem;color:var(--text);">👤 '+escHtml(r.funcNome)+'</div>'
+        +'<div style="font-size:0.68rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;">'+new Date(r.data).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</div>';
+      var vistoBtn=document.createElement('button');
+      vistoBtn.style.cssText='background:'+(r.visto?'var(--surface2)':'rgba(34,197,94,0.15)')+';border:1px solid '+(r.visto?'var(--border2)':'rgba(34,197,94,0.4)')+';border-radius:6px;color:'+(r.visto?'var(--muted)':'#22c55e')+';font-size:0.72rem;font-weight:700;padding:4px 10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;';
+      vistoBtn.textContent=r.visto?'↩ Reabrir':'✓ Visto';
+      (function(rid){
+        vistoBtn.onclick=function(){
+          if(!fbDb){showToast('Sem conexão','#f75a5a');return;}
+          fbDb.collection('configuracoes').doc('estReports').get().then(function(doc){
+            if(doc&&doc.exists&&doc.data()&&doc.data().data){
+              var l=doc.data().data;
+              var rep=l.find(function(x){return x.id===rid;});
+              if(rep) rep.visto=!rep.visto;
+              fbDb.collection('configuracoes').doc('estReports').set({data:l}).then(function(){ faltasRender(); });
+            }
+          });
+        };
+      })(r.id);
+      hdr.appendChild(left); hdr.appendChild(vistoBtn);
+      var texto=document.createElement('div');
+      texto.style.cssText='font-size:0.88rem;color:var(--text);font-family:\'Space Grotesk\',sans-serif;line-height:1.5;white-space:pre-wrap;';
+      texto.textContent=r.texto;
+      card.appendChild(hdr); card.appendChild(texto);
+      el.appendChild(card);
+    });
+  }
+
+  // Lê diretamente do Firebase
+  if(fbDb){
+    fbDb.collection('configuracoes').doc('estReports').get().then(function(doc){
+      var lista=[];
+      if(doc&&doc.exists&&doc.data()&&doc.data().data) lista=doc.data().data||[];
+      renderLista(lista);
+    }).catch(function(){ renderLista([]); });
+  } else {
+    // Tenta por até 10s
+    var t=0;
+    var iv=setInterval(function(){
+      t++;
+      if(fbDb){ clearInterval(iv); faltasRender(); }
+      else if(t>20){ clearInterval(iv); renderLista([]); }
+    },500);
+  }
+}
+
 function estCarregarReports(){
-  try{ var s=localStorage.getItem('estReports'); if(s) estReports=JSON.parse(s); if(!Array.isArray(estReports)) estReports=[]; }catch(e){ estReports=[]; }
-  estRenderReports();
   if(fbDb){
     fbDb.collection('configuracoes').doc('estReports').onSnapshot(function(doc){
       if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        estReports=doc.data().data||[];
-        localStorage.setItem('estReports',JSON.stringify(estReports));
+        var lista=doc.data().data||[];
+        var naoVistos=lista.filter(function(r){return !r.visto;});
+        var tabLabel=document.getElementById('faltas-tab-label');
+        if(tabLabel) tabLabel.innerHTML='Faltas'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem;">'+naoVistos.length+'</span>':'');
       }
-      // Atualiza badge e seção sempre, mesmo sem estar na aba estoque
-      estRenderReports();
-      // Atualiza badge da aba
-      var naoVistos=estReports.filter(function(r){return !r.visto;});
-      var tabBadge=document.getElementById('estoque-badge-tab');
-      if(tabBadge) tabBadge.innerHTML='Estoque'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem">'+naoVistos.length+'</span>':'');
     },function(){});
   }
 }

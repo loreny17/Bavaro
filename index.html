@@ -2983,21 +2983,19 @@ var _isAdmin = false;
 
 function adminInit(){
   try{ if(sessionStorage.getItem('bavaro_admin')==='1'){ _isAdmin=true; adminAtualizarUI(); } }catch(e){}
-  var inp=document.getElementById('admin-inp');
-  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') adminConfirmar(); });
-  // Secret tap: 5 taps on funcionarios tab OR header title
+  // 7 toques na aba Funcionários ativa/desativa admin
   function bindSecretTap(elId){
     var tapCount=0, tapTimer=null;
     var el=document.getElementById(elId);
     if(!el) return;
-    el.addEventListener('click',function(e){
+    el.addEventListener('click',function(){
       tapCount++;
       clearTimeout(tapTimer);
-      tapTimer=setTimeout(function(){ tapCount=0; },1500);
-      if(tapCount>=5){
+      tapTimer=setTimeout(function(){ tapCount=0; },2000);
+      if(tapCount>=7){
         tapCount=0;
         clearTimeout(tapTimer);
-        if(_isAdmin){ adminLogout(); } else { adminAbrirOverlay(); }
+        if(_isAdmin){ adminLogout(); } else { adminAtivar(); }
       }
     });
   }
@@ -3005,33 +3003,18 @@ function adminInit(){
   bindSecretTap('tab-btn-funcionarios');
 }
 
-function adminAbrirOverlay(){
-  document.getElementById('admin-overlay').classList.remove('hidden');
-  document.getElementById('admin-inp').value='';
-  document.getElementById('admin-err').style.display='none';
-  setTimeout(function(){ document.getElementById('admin-inp').focus(); },100);
+function adminAtivar(){
+  _isAdmin=true;
+  try{ sessionStorage.setItem('bavaro_admin','1'); }catch(e){}
+  adminAtualizarUI();
+  showToast('👑 Modo admin ativado!','var(--accent)');
+  var tab=document.querySelector('.tab-btn.active');
+  if(tab) tab.click();
 }
 
-function adminFecharOverlay(){
-  document.getElementById('admin-overlay').classList.add('hidden');
-}
-
-function adminConfirmar(){
-  var v=document.getElementById('admin-inp').value;
-  if(v==='123loreny'){
-    _isAdmin=true;
-    try{ sessionStorage.setItem('bavaro_admin','1'); }catch(e){}
-    adminFecharOverlay();
-    adminAtualizarUI();
-    showToast('&#128081; Modo admin ativado!','var(--accent)');
-    var tab=document.querySelector('.tab-btn.active');
-    if(tab) tab.click();
-  } else {
-    document.getElementById('admin-err').style.display='block';
-    document.getElementById('admin-inp').value='';
-    document.getElementById('admin-inp').focus();
-  }
-}
+function adminAbrirOverlay(){ /* removido */ }
+function adminFecharOverlay(){ /* removido */ }
+function adminConfirmar(){ /* removido */ }
 
 function adminLogout(){
   cvtConfirm('Sair do modo admin?',function(){
@@ -3045,8 +3028,8 @@ function adminLogout(){
 }
 
 function adminAtualizarUI(){
-  document.getElementById('admin-badge').classList.toggle('hidden',!_isAdmin);
-  document.getElementById('admin-login-btn').classList.toggle('hidden',_isAdmin);
+  var badge=document.getElementById('admin-badge');
+  if(badge) badge.classList.toggle('hidden',!_isAdmin);
 }
 
 
@@ -3939,7 +3922,30 @@ function clRenderRecompSection(){
   // Ranking / editar pontos
   var rankEl=document.getElementById('cl-ranking');
   if(rankEl){
-    rankEl.innerHTML='<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:6px;">🏅 Pontos dos funcionários</div>';
+    rankEl.innerHTML='';
+
+    // Header colapsável
+    var rankHeader=document.createElement('div');
+    rankHeader.style.cssText='display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:6px;';
+    rankHeader.innerHTML='<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;">🏅 Pontos dos funcionários</div>';
+    var rankArrow=document.createElement('span');
+    rankArrow.id='cl-ranking-arrow';
+    rankArrow.style.cssText='color:var(--muted);font-size:0.75rem;padding:2px 8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;';
+    rankArrow.textContent='▶';
+    rankHeader.appendChild(rankArrow);
+    rankEl.appendChild(rankHeader);
+
+    // Body colapsável - começa fechado
+    var rankBody=document.createElement('div');
+    rankBody.id='cl-ranking-body';
+    rankBody.style.display='none';
+
+    // Toggle
+    rankHeader.onclick=function(){
+      var open=rankBody.style.display==='none';
+      rankBody.style.display=open?'block':'none';
+      rankArrow.textContent=open?'▼':'▶';
+    };
 
     // Botão resetar todos
     var resetBtn=document.createElement('button');
@@ -3952,13 +3958,13 @@ function clRenderRecompSection(){
         showToast('Pontos zerados!','#f75a5a');
       });
     };
-    rankEl.appendChild(resetBtn);
+    rankBody.appendChild(resetBtn);
 
     if(!funcionarios.length){
       var empty=document.createElement('div');
       empty.style.cssText='color:var(--muted);font-size:0.8rem;margin-bottom:4px;';
       empty.textContent='Nenhum funcionário cadastrado.';
-      rankEl.appendChild(empty);
+      rankBody.appendChild(empty);
     } else {
       var sorted=funcionarios.slice().sort(function(a,b){return (b.pontos||0)-(a.pontos||0);});
       sorted.forEach(function(f){
@@ -3993,9 +3999,10 @@ function clRenderRecompSection(){
         })(f,inp);
         row.appendChild(saveBtn);
 
-        rankEl.appendChild(row);
+        rankBody.appendChild(row);
       });
     }
+    rankEl.appendChild(rankBody);
   }
 
   // Resgates pendentes
@@ -4573,19 +4580,7 @@ var _fbInterval = setInterval(function(){
   }
 }, 500);
 </script>
-<div class="admin-lock-overlay hidden" id="admin-overlay">
-  <div class="admin-lock-box">
-    <div class="admin-lock-icon">&#128272;</div>
-    <div class="admin-lock-title">Acesso Admin</div>
-    <div class="admin-lock-sub">Digite a senha para modo administrador</div>
-    <input type="password" class="admin-lock-inp" id="admin-inp" placeholder="senha">
-    <div class="admin-lock-err" id="admin-err">Senha incorreta</div>
-    <button class="admin-lock-btn" onclick="adminConfirmar()">Entrar como Admin</button>
-    <button class="admin-lock-cancel" onclick="adminFecharOverlay()">Cancelar</button>
-  </div>
-</div>
 <button class="admin-badge hidden" id="admin-badge" onclick="adminLogout()">&#128081; Admin &#8212; Sair</button>
-<button class="admin-login-btn hidden" id="admin-login-btn" style="display:none!important"></button>
 </body>
 </html>
 

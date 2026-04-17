@@ -886,6 +886,7 @@ textarea{resize:vertical;min-height:80px;}
       <!-- Dia da semana -->
       <select class="cl-select" id="cl-dia-select" style="margin-bottom:8px;">
         <option value="">Dia da semana (opcional)</option>
+        <option value="todos">Todos os dias</option>
         <option value="segunda">Segunda-feira</option>
         <option value="terca">Terça-feira</option>
         <option value="quarta">Quarta-feira</option>
@@ -3398,8 +3399,14 @@ function clRender(){
   }
 
   el.innerHTML='';
-  // Sort by newest + filter by dia
-  var sorted=clData.slice().sort(function(a,b){ return b.criadoEm.localeCompare(a.criadoEm); });
+  // Sort por ordem dos dias da semana, depois por data de criação
+  var diaOrdem={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};
+  var sorted=clData.slice().sort(function(a,b){
+    var dA=diaOrdem[a.dia||'']||7;
+    var dB=diaOrdem[b.dia||'']||7;
+    if(dA!==dB) return dA-dB;
+    return b.criadoEm.localeCompare(a.criadoEm);
+  });
   if(_clDiaAtivo&&_clDiaAtivo!=='todos'){
     sorted=sorted.filter(function(cl){ return cl.dia===_clDiaAtivo; });
   }
@@ -3421,7 +3428,7 @@ function clRender(){
     var hdr=document.createElement('div'); hdr.className='cl-card-header'; hdr.style.cursor='pointer';
     var hdrLeft=document.createElement('div'); hdrLeft.style.flex='1';
     var titleDiv=document.createElement('div'); titleDiv.className='cl-card-title';
-    var diasNome={segunda:'Seg',terca:'Ter',quarta:'Qua',quinta:'Qui',sexta:'Sex',sabado:'S\u00e1b'};
+    var diasNome={todos:'Todos',segunda:'Seg',terca:'Ter',quarta:'Qua',quinta:'Qui',sexta:'Sex',sabado:'Sáb'};
     titleDiv.textContent=cl.titulo+(concluido?' \u2705':'');
     if(cl.dia&&diasNome[cl.dia]){
       var diaBadge=document.createElement('span'); diaBadge.className='cl-dia-badge';
@@ -4079,7 +4086,11 @@ function clVerificarModoFunc(){
 function clRenderFuncScreen(funcId, clId){
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);})||null;
   var nameEl=document.getElementById('func-screen-name');
-  if(nameEl) nameEl.textContent=func?func.nome:'';
+  if(nameEl){
+    var diasNomePT={segunda:'Segunda-feira',terca:'Terça-feira',quarta:'Quarta-feira',quinta:'Quinta-feira',sexta:'Sexta-feira',sabado:'Sábado',domingo:'Domingo'};
+    nameEl.innerHTML=(func?escHtml(func.nome):'')
+      +'<div style="font-size:0.72rem;color:var(--accent);margin-top:3px;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">📅 '+(diasNomePT[hojeNome]||hojeNome)+'</div>';
+  }
 
   var content=document.getElementById('func-cl-content');
   if(!content) return;
@@ -4097,12 +4108,28 @@ function clRenderFuncScreen(funcId, clId){
   funcRenderRecompBar(funcId, pontos);
 
   // Get checklists for this func (filter by clId if provided)
+  // Descobrir o dia de hoje
+  var diasSemana=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var hojeIdx=new Date().getDay(); // 0=dom, 1=seg...
+  var hojeNome=diasSemana[hojeIdx];
+
   var listas=clData.filter(function(cl){
-    return String(cl.funcId)===String(funcId) && (!clId || cl.id===clId);
+    if(String(cl.funcId)!==String(funcId)) return false;
+    if(clId && cl.id!==clId) return false;
+    // Mostrar se não tem dia definido (geral) OU dia bate com hoje OU é "todos os dias"
+    return !cl.dia || cl.dia===hojeNome || cl.dia==='todos';
+  });
+  var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};
+  listas.sort(function(a,b){
+    var dA=diaOrdemF[a.dia||'']||7;
+    var dB=diaOrdemF[b.dia||'']||7;
+    if(dA!==dB) return dA-dB;
+    return (a.criadoEm||'').localeCompare(b.criadoEm||'');
   });
 
   if(!listas.length){
-    content.innerHTML='<div class="func-empty">📋<br><br>Nenhum checklist disponível no momento.</div>';
+    var diasNomePT2={segunda:'segunda-feira',terca:'terça-feira',quarta:'quarta-feira',quinta:'quinta-feira',sexta:'sexta-feira',sabado:'sábado',domingo:'domingo'};
+    content.innerHTML='<div class="func-empty">📋<br><br>Nenhuma tarefa para hoje<br><span style="font-size:0.8rem;color:var(--accent);">('+( diasNomePT2[hojeNome]||hojeNome)+')</span></div>';
     return;
   }
 

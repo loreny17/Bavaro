@@ -3414,6 +3414,7 @@ function clRender(){
 
     var card=document.createElement('div');
     card.className='cl-card';
+    card.id='clcard-'+cl.id;
     card.style.borderColor=concluido?'rgba(34,197,94,0.4)':feitos>0?'rgba(212,168,67,0.3)':'var(--border2)';
 
     // Header (clicável para colapsar)
@@ -4025,6 +4026,20 @@ function clVerificarModoFunc(){
   var params=new URLSearchParams(window.location.search);
   var funcId=params.get('func');
   var clId=params.get('cl');
+  var checklistId=params.get('checklist');
+
+  // Se veio com ?checklist=ID, abrir aba checklist e expandir o card
+  if(checklistId && !funcId){
+    showTab('checklist');
+    // Expandir o card específico após renderizar
+    window._clOpen[checklistId]=true;
+    setTimeout(function(){
+      var card=document.getElementById('clcard-'+checklistId);
+      if(card) card.scrollIntoView({behavior:'smooth',block:'start'});
+    },400);
+    return;
+  }
+
   if(!funcId) return;
 
   window._funcMode = funcId;
@@ -4162,8 +4177,8 @@ function clRenderFuncScreen(funcId, clId){
       card.appendChild(obsWrap);
     }
 
-    // Botão enviar para aprovação se tudo concluído
-    if(feitos===total){
+    // Botão enviar para aprovação - sempre visível
+    if(true){
       if(!statusAtual){
         var aprovarBtn=document.createElement('button');
         aprovarBtn.className='func-aprovar-btn';
@@ -4176,7 +4191,9 @@ function clRenderFuncScreen(funcId, clId){
               var nomeF=func?func.nome:'Funcionário';
               var motivo=(document.getElementById('motivo-'+cl2.id)||{}).value||cl2.motivo||'';
               var obs=(document.getElementById('obs-'+cl2.id)||{}).value||cl2.obsExtra||'';
-              var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\nAbra o app para aprovar ou reprovar. 👆';
+              var appLink=window.location.href.split('?')[0]+'?checklist='+cl2.id;
+              var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\n'
+                +'🔗 Abrir no app: '+appLink+'\n\nAbra o app para aprovar ou reprovar. 👆';
               if(motivo) msg+='\n\n⚠️ *Motivo não concluídos:*\n'+motivo;
               if(obs) msg+='\n\n📝 *Observações:*\n'+obs;
               var nums=_clGetNumeros();

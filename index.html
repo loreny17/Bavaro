@@ -3716,7 +3716,6 @@ var estReports=[];
 
 function estCarregarReports(){
   try{ var s=localStorage.getItem('estReports'); if(s) estReports=JSON.parse(s); if(!Array.isArray(estReports)) estReports=[]; }catch(e){ estReports=[]; }
-  // Renderiza imediatamente com localStorage
   estRenderReports();
   if(fbDb){
     fbDb.collection('configuracoes').doc('estReports').onSnapshot(function(doc){
@@ -3724,7 +3723,12 @@ function estCarregarReports(){
         estReports=doc.data().data||[];
         localStorage.setItem('estReports',JSON.stringify(estReports));
       }
+      // Atualiza badge e seção sempre, mesmo sem estar na aba estoque
       estRenderReports();
+      // Atualiza badge da aba
+      var naoVistos=estReports.filter(function(r){return !r.visto;});
+      var tabBadge=document.getElementById('estoque-badge-tab');
+      if(tabBadge) tabBadge.innerHTML='Estoque'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem">'+naoVistos.length+'</span>':'');
     },function(){});
   }
 }
@@ -3806,7 +3810,18 @@ function funcRenderReportBtn(funcId, funcNome){
       if(!txt){showToast('Escreva o que está faltando!','#f7a34f');ta.focus();return;}
       enviarBtn.disabled=true; enviarBtn.textContent='Enviando...';
       var novoReport={id:gerarId(),funcId:funcId,funcNome:funcNome,texto:txt,data:new Date().toISOString(),visto:false};
-      if(fbDb){
+
+      function doEnviar(){
+        if(!fbDb){
+          // Tenta de novo em 500ms por até 15s
+          var tentativas=0;
+          var timer=setInterval(function(){
+            tentativas++;
+            if(fbDb){ clearInterval(timer); doEnviar(); }
+            else if(tentativas>30){ clearInterval(timer); showToast('Sem conexão. Tente novamente.','#f75a5a'); enviarBtn.disabled=false; enviarBtn.textContent='📤 Enviar report'; }
+          },500);
+          return;
+        }
         fbDb.collection('configuracoes').doc('estReports').get().then(function(doc){
           var lista=[];
           if(doc&&doc.exists&&doc.data()&&doc.data().data) lista=doc.data().data||[];
@@ -3816,12 +3831,8 @@ function funcRenderReportBtn(funcId, funcNome){
             box.innerHTML='<div style="text-align:center;padding:12px;color:#fb923c;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">✅ Falta reportada com sucesso!</div>';
           }).catch(function(){ enviarBtn.disabled=false; enviarBtn.textContent='📤 Enviar report'; showToast('Erro ao enviar.','#f75a5a'); });
         }).catch(function(){ enviarBtn.disabled=false; enviarBtn.textContent='📤 Enviar report'; });
-      } else {
-        estReports.push(novoReport);
-        estSalvarReports();
-        showToast('✅ Report enviado!');
-        box.innerHTML='<div style="text-align:center;padding:12px;color:#fb923c;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">✅ Falta reportada com sucesso!</div>';
       }
+      doEnviar();
     };
     box.appendChild(ta); box.appendChild(enviarBtn);
     wrap.appendChild(box);

@@ -941,14 +941,6 @@ textarea{resize:vertical;min-height:80px;}
     <div id="func-pts-top" style="margin-bottom:12px;"></div>
     <div id="func-cl-content"></div>
   </div>
-  <!-- Barra fixa de recompensas -->
-  <div id="func-recomp-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);border-top:2px solid rgba(212,168,67,0.4);z-index:100;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px 4px;pointer-events:none;">
-      <span style="color:var(--accent);font-size:0.78rem;font-family:'Space Grotesk',sans-serif;font-weight:700;">🎁 RECOMPENSAS</span>
-      <button id="func-recomp-arrow" onclick="funcToggleRecomp()" style="background:var(--surface2);border:1px solid rgba(212,168,67,0.4);border-radius:6px;color:var(--accent);font-size:0.75rem;padding:3px 10px;cursor:pointer;pointer-events:auto;">▲</button>
-    </div>
-    <div id="func-recomp-body" style="display:none;padding:6px 16px 14px;max-height:50vh;overflow-y:auto;"></div>
-  </div>
 </div>
 
 <!-- TAB ESTOQUE -->
@@ -3816,16 +3808,39 @@ function funcToggleRecomp(){
   var body=document.getElementById('func-recomp-body');
   var arrow=document.getElementById('func-recomp-arrow');
   if(body) body.style.display=_funcRecompOpen?'block':'none';
-  if(arrow) arrow.textContent=_funcRecompOpen?'▼':'▲';
+  if(arrow) arrow.textContent=_funcRecompOpen?'▼':'▶';
 }
 
 function funcRenderRecompBar(funcId, pontos){
-  var bar=document.getElementById('func-recomp-bar');
-  var body=document.getElementById('func-recomp-body');
-  if(!bar||!body) return;
-  if(!recompensas.length){ bar.style.display='none'; return; }
-  bar.style.display='block';
-  body.innerHTML='';
+  // Remove existing inline section if any
+  var old=document.getElementById('func-recomp-bar');
+  if(old) old.parentNode.removeChild(old);
+  if(!recompensas.length) return;
+
+  var content=document.getElementById('func-cl-content');
+  if(!content) return;
+
+  // Build inline collapsible section
+  var bar=document.createElement('div');
+  bar.id='func-recomp-bar';
+  bar.style.cssText='background:var(--surface);border:1.5px solid rgba(212,168,67,0.4);border-radius:14px;margin-top:16px;overflow:hidden;';
+
+  var header=document.createElement('div');
+  header.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer;';
+  header.innerHTML='<span style="color:var(--accent);font-size:0.85rem;font-family:\'Space Grotesk\',sans-serif;font-weight:700;">🎁 Recompensas</span>';
+  var arrow=document.createElement('button');
+  arrow.id='func-recomp-arrow';
+  arrow.style.cssText='background:var(--surface2);border:1px solid rgba(212,168,67,0.4);border-radius:6px;color:var(--accent);font-size:0.75rem;padding:3px 10px;cursor:pointer;';
+  arrow.textContent='▶';
+  arrow.onclick=function(e){ e.stopPropagation(); funcToggleRecomp(); };
+  header.onclick=function(){ funcToggleRecomp(); };
+  header.appendChild(arrow);
+  bar.appendChild(header);
+
+  var body=document.createElement('div');
+  body.id='func-recomp-body';
+  body.style.cssText='display:none;padding:6px 14px 14px;';
+
   recompensas.forEach(function(r){
     var card=document.createElement('div'); card.className='recomp-card';
     var podResgatar=pontos>=r.pts;
@@ -3837,7 +3852,6 @@ function funcRenderRecompBar(funcId, pontos){
     btn.disabled=!podResgatar;
     (function(rid,fid){
       btn.onclick=function(){
-        // Busca func pelo funcId diretamente ou usa pontos passados
         var funcObj=funcionarios.find(function(f){return String(f.id)===String(fid);});
         var recomp=recompensas.find(function(x){return x.id===rid;});
         if(!recomp){showToast('Recompensa não encontrada!','#f7a34f');return;}
@@ -3854,6 +3868,9 @@ function funcRenderRecompBar(funcId, pontos){
     card.appendChild(btn);
     body.appendChild(card);
   });
+
+  bar.appendChild(body);
+  content.parentNode.appendChild(bar);
 }
 
 function clSolicitarResgate(recompId, funcId){

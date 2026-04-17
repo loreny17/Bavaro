@@ -3387,7 +3387,7 @@ function clRender(){
     if(feitos<total) pendentes++;
   });
   var badge=document.getElementById('cl-tab-label');
-  if(badge) badge.innerHTML='Checklist'+(pendentes?' <span style="background:var(--danger);color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem">'+pendentes+'</span>':'');
+  if(badge) badge.innerHTML='Checklist';
 
   if(!clData.length){
     el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.85rem">Nenhum checklist criado ainda.</div>';
@@ -3723,6 +3723,12 @@ function _clGetNumeros(){
 // ══ REPORTS DE FALTA ══
 var estReports=[];
 
+function atualizarFaltasBadge(lista){
+  var naoVistos=(lista||[]).filter(function(r){return !r.visto;});
+  var tabLabel=document.getElementById('faltas-tab-label');
+  if(tabLabel) tabLabel.innerHTML='Faltas'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem;">'+naoVistos.length+'</span>':'');
+}
+
 function faltasRender(){
   var el=document.getElementById('faltas-lista');
   if(!el) return;
@@ -3730,6 +3736,7 @@ function faltasRender(){
 
   function renderLista(lista){
     el.innerHTML='';
+    atualizarFaltasBadge(lista);
     if(!lista||!lista.length){
       el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">📦 Nenhuma falta reportada ainda.</div>';
       return;
@@ -3827,12 +3834,9 @@ function faltasRender(){
 function estCarregarReports(){
   if(fbDb){
     fbDb.collection('configuracoes').doc('estReports').onSnapshot(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        var lista=doc.data().data||[];
-        var naoVistos=lista.filter(function(r){return !r.visto;});
-        var tabLabel=document.getElementById('faltas-tab-label');
-        if(tabLabel) tabLabel.innerHTML='Faltas'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem;">'+naoVistos.length+'</span>':'');
-      }
+      var lista=[];
+      if(doc&&doc.exists&&doc.data()&&doc.data().data) lista=doc.data().data||[];
+      atualizarFaltasBadge(lista);
     },function(){});
   }
 }

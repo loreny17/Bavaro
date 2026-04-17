@@ -4092,9 +4092,12 @@ function clVerificarModoFunc(){
 
 function clRenderFuncScreen(funcId, clId){
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);})||null;
+  // Definir dia de hoje primeiro
+  var _diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var hojeNome=_diasSem[new Date().getDay()];
+  var diasNomePT={segunda:'Segunda-feira',terca:'Terça-feira',quarta:'Quarta-feira',quinta:'Quinta-feira',sexta:'Sexta-feira',sabado:'Sábado',domingo:'Domingo'};
   var nameEl=document.getElementById('func-screen-name');
   if(nameEl){
-    var diasNomePT={segunda:'Segunda-feira',terca:'Terça-feira',quarta:'Quarta-feira',quinta:'Quinta-feira',sexta:'Sexta-feira',sabado:'Sábado',domingo:'Domingo'};
     nameEl.innerHTML=(func?escHtml(func.nome):'')
       +'<div style="font-size:0.72rem;color:var(--accent);margin-top:3px;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">📅 '+(diasNomePT[hojeNome]||hojeNome)+'</div>';
   }
@@ -4102,24 +4105,36 @@ function clRenderFuncScreen(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(!content) return;
 
-  // Badge de pontos no topo
+  // Badge de pontos no topo - sempre visível, clicável para recompensas
   var pontos=(func&&func.pontos)||0;
   var ptsTop=document.getElementById('func-pts-top');
   if(ptsTop){
-    ptsTop.innerHTML=recompensas.length||pontos>0
-      ? '<div class="func-pts-badge">⭐ '+pontos+' pontos</div>'
-      : '';
+    ptsTop.innerHTML='';
+    var ptsBadgeEl=document.createElement('div');
+    ptsBadgeEl.className='func-pts-badge';
+    ptsBadgeEl.style.cursor=recompensas.length?'pointer':'default';
+    ptsBadgeEl.innerHTML='⭐ '+pontos+' pontos'+(recompensas.length?' &nbsp;🎁':'');
+    if(recompensas.length){
+      ptsBadgeEl.title='Toque para ver recompensas';
+      ptsBadgeEl.onclick=function(){
+        var bar=document.getElementById('func-recomp-bar');
+        if(bar){
+          _funcRecompOpen=!_funcRecompOpen;
+          var body=document.getElementById('func-recomp-body');
+          var arrow=document.getElementById('func-recomp-arrow');
+          if(body) body.style.display=_funcRecompOpen?'block':'none';
+          if(arrow) arrow.textContent=_funcRecompOpen?'▼':'▶';
+          if(_funcRecompOpen) bar.scrollIntoView({behavior:'smooth',block:'nearest'});
+        }
+      };
+    }
+    ptsTop.appendChild(ptsBadgeEl);
   }
 
-  // Barra de recompensas no fundo
+  // Seção de recompensas inline
   funcRenderRecompBar(funcId, pontos);
 
   // Get checklists for this func (filter by clId if provided)
-  // Descobrir o dia de hoje
-  var diasSemana=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
-  var hojeIdx=new Date().getDay(); // 0=dom, 1=seg...
-  var hojeNome=diasSemana[hojeIdx];
-
   var listas=clData.filter(function(cl){
     if(String(cl.funcId)!==String(funcId)) return false;
     if(clId && cl.id!==clId) return false;

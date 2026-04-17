@@ -893,7 +893,7 @@ textarea{resize:vertical;min-height:80px;}
         <option value="sexta">Sexta-feira</option>
         <option value="sabado">Sábado</option>
       </select>
-      <div class="cl-items-builder" id="cl-items-builder"></div>
+      <div class="cl-items-builder" id="cl-items-builder" style="max-height:200px;overflow-y:auto;"></div>
       <button class="cl-add-item-btn" onclick="clAddItemRow()">+ Adicionar item</button>
       <button class="cl-submit-btn" onclick="clSalvar()">✅ Criar Checklist</button>
     </div>
@@ -3347,12 +3347,20 @@ function clCarregarFirebase(){
 
 function clAddItemRow(texto){
   var builder=document.getElementById('cl-items-builder');
+  if(!builder) return;
   var row=document.createElement('div');
   row.className='cl-item-row';
   row.innerHTML='<input type="text" class="cl-item-inp" placeholder="Item do checklist..." value="'+(texto||'')+'">'
     +'<button class="cl-item-del" onclick="this.parentNode.remove()">✕</button>';
   builder.appendChild(row);
-  row.querySelector('.cl-item-inp').focus();
+  var inp=row.querySelector('.cl-item-inp');
+  // Enter adiciona nova linha
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){ e.preventDefault(); clAddItemRow(); }
+  });
+  // Só foca se o painel estiver visível
+  var body=document.getElementById('cl-create-body');
+  if(body&&body.style.display!=='none') inp.focus();
 }
 
 function clPopularSelectFuncionarios(){
@@ -3469,7 +3477,7 @@ function clRender(){
 
     // Status de aprovação
     if(cl.status==='aguardando'||cl.status==='aprovado'||cl.status==='reprovado'){
-      var statusRow=document.createElement('div'); statusRow.style.cssText='margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;';
+      var statusRow=document.createElement('div'); statusRow.style.cssText='margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;';
       var statusBadge=document.createElement('span');
       statusBadge.className='cl-status-badge cl-status-'+(cl.status||'pendente');
       statusBadge.textContent=cl.status==='aguardando'?'⏳ Aguardando aprovação':cl.status==='aprovado'?'✅ Aprovado (+5 pts)':'❌ Reprovado';
@@ -3486,6 +3494,21 @@ function clRender(){
         statusRow.appendChild(apvRow);
       }
       bodyDiv.appendChild(statusRow);
+      // Mostrar motivo e obs se existirem
+      if(cl.motivo){
+        var motivoDiv=document.createElement('div');
+        motivoDiv.style.cssText='background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.2);border-radius:8px;padding:8px 10px;margin-top:6px;';
+        motivoDiv.innerHTML='<div style="font-size:0.62rem;color:var(--danger);font-weight:700;text-transform:uppercase;font-family:\'Space Grotesk\',sans-serif;margin-bottom:3px;">⚠️ Motivo não concluídos</div>'
+          +'<div style="font-size:0.82rem;color:var(--text);font-family:\'Space Grotesk\',sans-serif;">'+escHtml(cl.motivo)+'</div>';
+        bodyDiv.appendChild(motivoDiv);
+      }
+      if(cl.obsExtra){
+        var obsDiv=document.createElement('div');
+        obsDiv.style.cssText='background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:8px;padding:8px 10px;margin-top:6px;';
+        obsDiv.innerHTML='<div style="font-size:0.62rem;color:var(--accent);font-weight:700;text-transform:uppercase;font-family:\'Space Grotesk\',sans-serif;margin-bottom:3px;">📝 Observações extras</div>'
+          +'<div style="font-size:0.82rem;color:var(--text);font-family:\'Space Grotesk\',sans-serif;">'+escHtml(cl.obsExtra)+'</div>';
+        bodyDiv.appendChild(obsDiv);
+      }
     }
 
     // Botões
@@ -4106,9 +4129,41 @@ function clRenderFuncScreen(funcId, clId){
       });
     });
 
+    var statusAtual=cl.status||'';
+
+    // Campos de motivo e observação (sempre visíveis, exceto se já aprovado/aguardando)
+    if(!statusAtual || statusAtual==='reprovado'){
+      // Itens não concluídos
+      var naoFeitos=cl.itens.filter(function(i){return !i.feito;});
+      if(naoFeitos.length){
+        var motivoWrap=document.createElement('div');
+        motivoWrap.style.cssText='margin-top:10px;';
+        motivoWrap.innerHTML='<div style="font-size:0.68rem;color:var(--danger);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:5px;">⚠️ Motivo dos não concluídos</div>';
+        var motivoInp=document.createElement('textarea');
+        motivoInp.id='motivo-'+cl.id;
+        motivoInp.placeholder='Ex: Faltou produto, cliente ainda estava, etc...';
+        motivoInp.value=cl.motivo||'';
+        motivoInp.style.cssText='width:100%;background:var(--surface2);border:1px solid rgba(255,68,68,0.3);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:9px 11px;outline:none;resize:none;box-sizing:border-box;min-height:60px;';
+        motivoInp.addEventListener('input',function(){ cl.motivo=this.value; });
+        motivoWrap.appendChild(motivoInp);
+        card.appendChild(motivoWrap);
+      }
+
+      var obsWrap=document.createElement('div');
+      obsWrap.style.cssText='margin-top:8px;';
+      obsWrap.innerHTML='<div style="font-size:0.68rem;color:var(--accent);text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:5px;">📝 Observações extras</div>';
+      var obsInp=document.createElement('textarea');
+      obsInp.id='obs-'+cl.id;
+      obsInp.placeholder='Ex: Fiz algo a mais, observações do dia...';
+      obsInp.value=cl.obsExtra||'';
+      obsInp.style.cssText='width:100%;background:var(--surface2);border:1px solid rgba(212,168,67,0.2);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:9px 11px;outline:none;resize:none;box-sizing:border-box;min-height:60px;';
+      obsInp.addEventListener('input',function(){ cl.obsExtra=this.value; });
+      obsWrap.appendChild(obsInp);
+      card.appendChild(obsWrap);
+    }
+
     // Botão enviar para aprovação se tudo concluído
     if(feitos===total){
-      var statusAtual=cl.status||'';
       if(!statusAtual){
         var aprovarBtn=document.createElement('button');
         aprovarBtn.className='func-aprovar-btn';
@@ -4119,7 +4174,11 @@ function clRenderFuncScreen(funcId, clId){
             aprovarBtn.innerHTML='⏳ Enviando...';
             function doSend(){
               var nomeF=func?func.nome:'Funcionário';
+              var motivo=(document.getElementById('motivo-'+cl2.id)||{}).value||cl2.motivo||'';
+              var obs=(document.getElementById('obs-'+cl2.id)||{}).value||cl2.obsExtra||'';
               var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\nAbra o app para aprovar ou reprovar. 👆';
+              if(motivo) msg+='\n\n⚠️ *Motivo não concluídos:*\n'+motivo;
+              if(obs) msg+='\n\n📝 *Observações:*\n'+obs;
               var nums=_clGetNumeros();
               window.open('https://wa.me/'+nums[0]+'?text='+encodeURIComponent(msg),'_blank');
               if(nums[1]){
@@ -4132,14 +4191,18 @@ function clRenderFuncScreen(funcId, clId){
               aprovarBtn.style.animation='none';
             }
             if(fbDb){
-              // Ler clData completo, atualizar só este checklist
               fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
                 var fullData=clData.slice();
                 if(doc&&doc.exists&&doc.data()&&doc.data().data){
                   fullData=doc.data().data;
                 }
                 for(var i=0;i<fullData.length;i++){
-                  if(fullData[i].id===cl2.id){ fullData[i].status='aguardando'; break; }
+                  if(fullData[i].id===cl2.id){
+                    fullData[i].status='aguardando';
+                    fullData[i].motivo=cl2.motivo||'';
+                    fullData[i].obsExtra=cl2.obsExtra||'';
+                    break;
+                  }
                 }
                 fbDb.collection('configuracoes').doc('clData').set({data:fullData}).then(doSend).catch(function(){
                   aprovarBtn.disabled=false; aprovarBtn.innerHTML='🏆 Enviar para aprovação';

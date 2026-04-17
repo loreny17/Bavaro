@@ -3858,11 +3858,37 @@ function funcRenderRecompBar(funcId, pontos){
         var ptsAtual=funcObj?(funcObj.pontos||0):pontos;
         if(ptsAtual<recomp.pts){showToast('Pontos insuficientes!','#f7a34f');return;}
         var funcNome=funcObj?funcObj.nome:'Funcionário';
-        resgates.push({id:gerarId(),funcId:fid,funcNome:funcNome,recompId:rid,recompNome:recomp.nome,pts:recomp.pts,data:new Date().toISOString(),status:'pendente'});
-        clSalvarRecomp();
-        showToast('✅ Resgate solicitado! Aguarde o responsável.');
-        btn.textContent='⏳ Solicitado';
+        btn.textContent='⏳ Enviando...';
         btn.disabled=true;
+        var novoResgate={id:gerarId(),funcId:fid,funcNome:funcNome,recompId:rid,recompNome:recomp.nome,pts:recomp.pts,data:new Date().toISOString(),status:'pendente'};
+        if(fbDb){
+          // Ler resgates atuais do Firebase antes de salvar
+          fbDb.collection('configuracoes').doc('clRecomp').get().then(function(doc){
+            var fullRecomp={recompensas:recompensas,resgates:[]};
+            if(doc&&doc.exists&&doc.data()&&doc.data().data){
+              fullRecomp=doc.data().data;
+              fullRecomp.recompensas=fullRecomp.recompensas||recompensas;
+              fullRecomp.resgates=fullRecomp.resgates||[];
+            }
+            fullRecomp.resgates.push(novoResgate);
+            resgates=fullRecomp.resgates;
+            fbDb.collection('configuracoes').doc('clRecomp').set({data:fullRecomp}).then(function(){
+              showToast('✅ Resgate solicitado! Aguarde o responsável.');
+              btn.textContent='⏳ Solicitado';
+            }).catch(function(){
+              showToast('Erro ao solicitar. Tente novamente.','#f75a5a');
+              btn.disabled=false; btn.textContent='Resgatar';
+            });
+          }).catch(function(){
+            showToast('Erro de conexão.','#f75a5a');
+            btn.disabled=false; btn.textContent='Resgatar';
+          });
+        } else {
+          resgates.push(novoResgate);
+          clSalvarRecomp();
+          showToast('✅ Resgate solicitado! Aguarde o responsável.');
+          btn.textContent='⏳ Solicitado';
+        }
       };
     })(r.id,funcId);
     card.appendChild(btn);

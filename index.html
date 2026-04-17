@@ -603,6 +603,13 @@ textarea{resize:vertical;min-height:80px;}
 @keyframes pulse-gold{0%,100%{box-shadow:0 0 0 0 rgba(212,168,67,0.4);}50%{box-shadow:0 0 0 10px rgba(212,168,67,0);}}
 .func-pts-badge{background:rgba(212,168,67,0.15);border:1.5px solid rgba(212,168,67,0.4);border-radius:20px;padding:6px 14px;font-family:'Space Grotesk',sans-serif;font-size:0.82rem;font-weight:700;color:var(--accent);display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;}
 .func-aguard-badge{width:100%;background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);border-radius:12px;padding:12px;font-family:'Space Grotesk',sans-serif;font-size:0.85rem;font-weight:600;color:var(--accent);text-align:center;margin-top:10px;}
+.func-report-btn{width:100%;background:rgba(251,146,60,0.12);border:1.5px solid rgba(251,146,60,0.4);border-radius:12px;padding:13px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.95rem;color:#fb923c;cursor:pointer;margin-top:16px;text-align:center;}
+.report-card{background:var(--surface);border:1.5px solid rgba(251,146,60,0.3);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+.report-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.report-card-nome{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.85rem;color:var(--text);}
+.report-card-data{font-size:0.68rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;}
+.report-card-texto{font-size:0.82rem;color:var(--text);font-family:'Space Grotesk',sans-serif;line-height:1.4;}
+.report-visto-btn{background:none;border:none;color:var(--muted);font-size:0.75rem;cursor:pointer;font-family:'Space Grotesk',sans-serif;padding:2px 6px;}
 .cl-aprovacao-row{display:flex;gap:8px;margin-top:8px;}
 .cl-aprovar-btn{flex:1;background:rgba(34,197,94,0.15);border:1.5px solid rgba(34,197,94,0.4);border-radius:8px;color:#22c55e;font-family:'Space Grotesk',sans-serif;font-size:0.8rem;font-weight:700;padding:8px;cursor:pointer;}
 .cl-reprovar-btn{flex:1;background:rgba(255,68,68,0.1);border:1.5px solid rgba(255,68,68,0.3);border-radius:8px;color:var(--danger);font-family:'Space Grotesk',sans-serif;font-size:0.8rem;font-weight:700;padding:8px;cursor:pointer;}
@@ -940,6 +947,7 @@ textarea{resize:vertical;min-height:80px;}
     </div>
     <div id="func-pts-top" style="margin-bottom:12px;"></div>
     <div id="func-cl-content"></div>
+    <div id="func-report-wrap" style="margin-top:8px;padding-bottom:20px;"></div>
   </div>
 </div>
 
@@ -947,6 +955,17 @@ textarea{resize:vertical;min-height:80px;}
 <div class="tab-content" id="tab-estoque">
   <div class="est-page-title">Controle de Estoque</div>
   <div class="est-page-sub" id="est-sub">—</div>
+
+  <!-- Reports de falta dos funcionários -->
+  <div id="est-reports-section" style="display:none;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;background:rgba(251,146,60,0.08);border:1.5px solid rgba(251,146,60,0.3);border-radius:12px;padding:10px 14px;" onclick="estToggleReports()">
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.85rem;color:#fb923c;">📦 Faltas reportadas pelos funcionários</span>
+      <span id="est-reports-badge" style="background:#fb923c;color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-right:6px;"></span>
+      <span id="est-reports-arrow" style="color:#fb923c;font-size:0.75rem;">▶</span>
+    </div>
+    <div id="est-reports-body" style="display:none;margin-top:8px;"></div>
+  </div>
+
   <div id="est-grupo-bar" style="display:none;margin-bottom:10px;"></div>
 
   <!-- Categorias sempre visíveis -->
@@ -1944,7 +1963,7 @@ abrirDB().then(migrarLocalStorage)
   .then(function(r){
     funcionarios=r[0]||[];
     document.getElementById('loading-screen').classList.add('hidden');
-    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clCarregarRecomp();clCarregarNums();clAddItemRow();clVerificarModoFunc();
+    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clCarregarRecomp();clCarregarNums();estCarregarReports();clAddItemRow();clVerificarModoFunc();
     // CVT loaded via carregarCVT()
   })
   .catch(function(err){
@@ -3692,6 +3711,121 @@ function _clGetNumeros(){
   return [n1, n2||null];
 }
 
+// ══ REPORTS DE FALTA ══
+var estReports=[];
+
+function estCarregarReports(){
+  try{ var s=localStorage.getItem('estReports'); if(s) estReports=JSON.parse(s); if(!Array.isArray(estReports)) estReports=[]; }catch(e){ estReports=[]; }
+  if(fbDb){
+    fbDb.collection('configuracoes').doc('estReports').onSnapshot(function(doc){
+      if(doc&&doc.exists&&doc.data()&&doc.data().data){
+        estReports=doc.data().data||[];
+      }
+      estRenderReports();
+    },function(){});
+  }
+}
+
+function estSalvarReports(){
+  localStorage.setItem('estReports',JSON.stringify(estReports));
+  if(fbDb) fbDb.collection('configuracoes').doc('estReports').set({data:estReports}).catch(function(){});
+}
+
+function estToggleReports(){
+  var body=document.getElementById('est-reports-body');
+  var arrow=document.getElementById('est-reports-arrow');
+  if(!body) return;
+  var open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arrow) arrow.textContent=open?'▼':'▶';
+}
+
+function estRenderReports(){
+  var sec=document.getElementById('est-reports-section');
+  var body=document.getElementById('est-reports-body');
+  var badge=document.getElementById('est-reports-badge');
+  if(!sec||!body) return;
+  var naoVistos=estReports.filter(function(r){return !r.visto;});
+  if(!estReports.length){ sec.style.display='none'; return; }
+  sec.style.display='block';
+  if(badge) badge.textContent=naoVistos.length||'';
+  body.innerHTML='';
+  // Mais recentes primeiro
+  var sorted=estReports.slice().sort(function(a,b){return b.data.localeCompare(a.data);});
+  sorted.forEach(function(r){
+    var card=document.createElement('div');
+    card.className='report-card';
+    if(r.visto) card.style.opacity='0.5';
+    var hdr=document.createElement('div'); hdr.className='report-card-header';
+    var nome=document.createElement('div'); nome.className='report-card-nome';
+    nome.textContent='👤 '+escHtml(r.funcNome);
+    var right=document.createElement('div'); right.style.cssText='display:flex;align-items:center;gap:8px;';
+    var data=document.createElement('div'); data.className='report-card-data';
+    data.textContent=new Date(r.data).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    var vistoBtn=document.createElement('button'); vistoBtn.className='report-visto-btn';
+    vistoBtn.textContent=r.visto?'↩ Reabrir':'✓ Visto';
+    (function(rid){ vistoBtn.onclick=function(){
+      var rep=estReports.find(function(x){return x.id===rid;});
+      if(rep){ rep.visto=!rep.visto; estSalvarReports(); estRenderReports(); }
+    }; })(r.id);
+    right.appendChild(data); right.appendChild(vistoBtn);
+    hdr.appendChild(nome); hdr.appendChild(right);
+    var texto=document.createElement('div'); texto.className='report-card-texto';
+    texto.textContent=r.texto;
+    card.appendChild(hdr); card.appendChild(texto);
+    body.appendChild(card);
+  });
+  // Badge na aba estoque
+  var tabBadge=document.getElementById('estoque-badge-tab');
+  if(tabBadge) tabBadge.innerHTML='Estoque'+(naoVistos.length?' <span style="background:#fb923c;color:#fff;border-radius:8px;padding:1px 5px;font-size:0.58rem">'+naoVistos.length+'</span>':'');
+}
+
+function funcRenderReportBtn(funcId, funcNome){
+  var wrap=document.getElementById('func-report-wrap');
+  if(!wrap) return;
+  wrap.innerHTML='';
+  var btn=document.createElement('button');
+  btn.className='func-report-btn';
+  btn.innerHTML='📦 Reportar falta de produto';
+  btn.onclick=function(){
+    btn.style.display='none';
+    var box=document.createElement('div');
+    box.style.cssText='background:var(--surface);border:1.5px solid rgba(251,146,60,0.4);border-radius:12px;padding:14px;margin-top:8px;';
+    box.innerHTML='<div style="font-size:0.7rem;color:#fb923c;text-transform:uppercase;font-weight:700;font-family:\'Space Grotesk\',sans-serif;margin-bottom:8px;">📦 O que está faltando?</div>';
+    var ta=document.createElement('textarea');
+    ta.placeholder='Ex: Faltando copo 300ml, ketchup, sal...';
+    ta.style.cssText='width:100%;background:var(--surface2);border:1px solid rgba(251,146,60,0.3);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;padding:10px;outline:none;resize:none;min-height:80px;box-sizing:border-box;margin-bottom:10px;';
+    var enviarBtn=document.createElement('button');
+    enviarBtn.style.cssText='width:100%;background:#fb923c;color:#fff;border:none;border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.92rem;cursor:pointer;';
+    enviarBtn.textContent='📤 Enviar report';
+    enviarBtn.onclick=function(){
+      var txt=(ta.value||'').trim();
+      if(!txt){showToast('Escreva o que está faltando!','#f7a34f');ta.focus();return;}
+      enviarBtn.disabled=true; enviarBtn.textContent='Enviando...';
+      var novoReport={id:gerarId(),funcId:funcId,funcNome:funcNome,texto:txt,data:new Date().toISOString(),visto:false};
+      if(fbDb){
+        fbDb.collection('configuracoes').doc('estReports').get().then(function(doc){
+          var lista=[];
+          if(doc&&doc.exists&&doc.data()&&doc.data().data) lista=doc.data().data||[];
+          lista.push(novoReport);
+          fbDb.collection('configuracoes').doc('estReports').set({data:lista}).then(function(){
+            showToast('✅ Report enviado!');
+            box.innerHTML='<div style="text-align:center;padding:12px;color:#fb923c;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">✅ Falta reportada com sucesso!</div>';
+          }).catch(function(){ enviarBtn.disabled=false; enviarBtn.textContent='📤 Enviar report'; showToast('Erro ao enviar.','#f75a5a'); });
+        }).catch(function(){ enviarBtn.disabled=false; enviarBtn.textContent='📤 Enviar report'; });
+      } else {
+        estReports.push(novoReport);
+        estSalvarReports();
+        showToast('✅ Report enviado!');
+        box.innerHTML='<div style="text-align:center;padding:12px;color:#fb923c;font-family:\'Space Grotesk\',sans-serif;font-weight:600;">✅ Falta reportada com sucesso!</div>';
+      }
+    };
+    box.appendChild(ta); box.appendChild(enviarBtn);
+    wrap.appendChild(box);
+  };
+  wrap.appendChild(btn);
+}
+
 function clCarregarNums(){
   try{ var s=localStorage.getItem('clNums'); if(s) _clNums=JSON.parse(s); }catch(e){}
   if(fbDb){
@@ -4333,6 +4467,8 @@ function clRenderFuncScreen(funcId, clId){
 
     content.appendChild(card);
   });
+  // Botão reportar falta
+  funcRenderReportBtn(funcId, func?func.nome:'Funcionário');
 }
 
 function funcToggleItem(clId, itemId, feito, funcId, targetClId){

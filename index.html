@@ -4578,14 +4578,21 @@ function clRenderFuncScreen(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(!content) return;
 
-  // Get checklists for this func (filter by clId if provided)
+  // Get checklists for this func
   var listas=clData.filter(function(cl){
-    var pertence=(cl.funcIds&&cl.funcIds.length>0)
-      ? cl.funcIds.some(function(fid){return String(fid)===String(funcId);})
-      : String(cl.funcId)===String(funcId);
+    // Checklist pertence ao funcionário?
+    var pertence=false;
+    if(cl.funcIds&&cl.funcIds.length>0){
+      pertence=cl.funcIds.some(function(fid){return String(fid)===String(funcId);});
+    } else {
+      pertence=String(cl.funcId)===String(funcId);
+    }
     if(!pertence) return false;
+    // Se veio com ?cl=ID específico, mostrar só esse
     if(clId && String(cl.id)!==String(clId)) return false;
-    return !cl.dia || cl.dia===hojeNome || cl.dia==='todos';
+    // Filtro de dia: mostrar se não tem dia, é 'todos', ou bate com hoje
+    if(!cl.dia || cl.dia==='' || cl.dia==='todos') return true;
+    return cl.dia===hojeNome;
   });
   var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};
   listas.sort(function(a,b){
@@ -4597,7 +4604,8 @@ function clRenderFuncScreen(funcId, clId){
 
   if(!listas.length){
     var diasNomePT2={segunda:'segunda-feira',terca:'terça-feira',quarta:'quarta-feira',quinta:'quinta-feira',sexta:'sexta-feira',sabado:'sábado',domingo:'domingo'};
-    content.innerHTML='<div class="func-empty">📋<br><br>Nenhuma tarefa para hoje<br><span style="font-size:0.8rem;color:var(--accent);">('+( diasNomePT2[hojeNome]||hojeNome)+')</span></div>';
+    var debugInfo='funcId='+funcId+' clData='+clData.length+' hoje='+hojeNome;
+    content.innerHTML='<div class="func-empty">📋<br><br>Nenhuma tarefa para hoje<br><span style="font-size:0.8rem;color:var(--accent);">('+( diasNomePT2[hojeNome]||hojeNome)+')</span><br><span style="font-size:0.65rem;color:var(--muted);margin-top:8px;display:block;">'+debugInfo+'</span></div>';
     return;
   }
 

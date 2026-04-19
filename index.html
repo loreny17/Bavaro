@@ -891,6 +891,7 @@ textarea{resize:vertical;min-height:80px;}
       <!-- Seleção múltipla de funcionários -->
       <div style="margin-bottom:8px;">
         <div style="font-size:0.7rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-weight:600;text-transform:uppercase;margin-bottom:6px;">👥 Funcionários</div>
+        <input type="text" id="cl-func-search" placeholder="🔍 Buscar funcionário..." oninput="clFiltrarCheckboxes(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.82rem;padding:7px 10px;outline:none;box-sizing:border-box;margin-bottom:6px;">
         <div id="cl-func-checkboxes" style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px;max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
       </div>
       <!-- Dia da semana -->
@@ -3459,6 +3460,16 @@ function clAddItemRow(texto){
   if(body&&body.style.display!=='none') inp.focus();
 }
 
+function clFiltrarCheckboxes(busca){
+  var box=document.getElementById('cl-func-checkboxes');
+  if(!box) return;
+  var q=(busca||'').toLowerCase().trim();
+  box.querySelectorAll('label').forEach(function(lbl){
+    var nome=lbl.textContent.toLowerCase();
+    lbl.style.display=(!q||nome.includes(q))?'':'none';
+  });
+}
+
 function clPopularSelectFuncionarios(){
   var box=document.getElementById('cl-func-checkboxes');
   if(!box) return;
@@ -3643,12 +3654,33 @@ function clRender(){
     (function(id){ resetBtn.onclick=function(){ clResetar(id); }; })(cl.id);
     var copyBtn=document.createElement('button'); copyBtn.className='cl-link-btn';
     copyBtn.textContent='🔗 Link';
-    (function(fid,cid){ copyBtn.onclick=function(){ clCopiarLink(fid,cid); }; })(cl.funcId,cl.id);
+    (function(cl2){ copyBtn.onclick=function(){
+      // Se multi-func, mostrar opções
+      var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
+      if(ids.length===1){ clCopiarLink(ids[0],cl2.id); return; }
+      var base=window.location.href.split('?')[0];
+      var links=ids.map(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
+        return (fo.nome||fid)+': '+base+'?func='+fid+'&cl='+cl2.id;
+      }).join('\n');
+      _copiarFallback(links);
+      showToast('🔗 Links copiados!');
+    }; })(cl);
     var waBtn=document.createElement('button'); waBtn.className='cl-link-btn';
     var telFunc=(func.tel||'').replace(/\D/g,'');
     if(telFunc){ waBtn.style.borderColor='rgba(37,211,102,0.4)'; waBtn.style.color='#25d366'; }
     waBtn.textContent='📲 WhatsApp';
-    (function(fid,cid,tit,nom,tel){ waBtn.onclick=function(){ clAbrirWhatsApp(fid,cid,tit,nom,tel); }; })(cl.funcId,cl.id,cl.titulo,func.nome,telFunc);
+    (function(cl2,tit,nom,tel){ waBtn.onclick=function(){
+      var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
+      var base=window.location.href.split('?')[0];
+      if(ids.length===1){ clAbrirWhatsApp(ids[0],cl2.id,tit,nom,tel); return; }
+      var links=ids.map(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
+        return '*'+escHtml(fo.nome||fid)+'*: '+base+'?func='+fid+'&cl='+cl2.id;
+      }).join('\n');
+      var msg='📋 *'+tit+'*\n\n'+links+'\n\n_Gestão Bávaro_';
+      window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(msg),'_blank');
+    }; })(cl,cl.titulo,func.nome,telFunc);
     linkRow.appendChild(editBtn); linkRow.appendChild(renameBtn); linkRow.appendChild(resetBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
     bodyDiv.appendChild(linkRow);
 
@@ -4529,7 +4561,7 @@ function clRenderFuncScreen(funcId, clId){
       ? cl.funcIds.some(function(fid){return String(fid)===String(funcId);})
       : String(cl.funcId)===String(funcId);
     if(!pertence) return false;
-    if(clId && cl.id!==clId) return false;
+    if(clId && String(cl.id)!==String(clId)) return false;
     return !cl.dia || cl.dia===hojeNome || cl.dia==='todos';
   });
   var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};

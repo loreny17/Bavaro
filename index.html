@@ -911,32 +911,8 @@ textarea{resize:vertical;min-height:80px;}
   </div>
 
   <!-- Recompensas (admin) -->
-  <div id="cl-recomp-section" style="display:none;margin-bottom:16px;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--text);margin-bottom:8px;">🏆 Recompensas & Pontos</div>
 
-    <!-- Número de aprovação -->
-    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:12px;">
-      <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-bottom:8px;">📲 Número para aprovação</div>
-      <input type="tel" id="cl-num1" placeholder="Ex: 41999724252" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;padding:8px 10px;outline:none;box-sizing:border-box;margin-bottom:8px;">
-      <button onclick="clSalvarNumsForm()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:8px;padding:9px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.82rem;cursor:pointer;">💾 Salvar número</button>
-    </div>
-    <div id="cl-ranking" style="margin-bottom:12px;"></div>
-    <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-bottom:6px;">Resgates pendentes</div>
-    <div id="cl-resgates"></div>
-    <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;font-family:'Space Grotesk',sans-serif;margin:10px 0 6px;">Catálogo de recompensas</div>
-    <div id="cl-recomp-lista"></div>
-    <div class="nova-recomp-row">
-      <div style="flex:1">
-        <input type="text" id="recomp-nome-inp" placeholder="Nome da recompensa..." style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;padding:9px 11px;outline:none;box-sizing:border-box;">
-      </div>
-      <div style="width:70px">
-        <input type="number" id="recomp-pts-inp" placeholder="Pts" min="1" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.85rem;padding:9px 11px;outline:none;box-sizing:border-box;">
-      </div>
-      <button onclick="clCriarRecompensa()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:9px 14px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.82rem;cursor:pointer;flex-shrink:0;">+ Criar</button>
-    </div>
-  </div>
-
-  <!-- Lista de checklists -->
+    <!-- Lista de checklists -->
   <div id="cl-lista"></div>
 </div>
 
@@ -948,7 +924,6 @@ textarea{resize:vertical;min-height:80px;}
       <div class="func-screen-logo">GESTÃO BÁVARO</div>
       <div class="func-screen-name" id="func-screen-name"></div>
     </div>
-    <div id="func-pts-top" style="margin-bottom:12px;"></div>
     <div id="func-cl-content"></div>
     <div id="func-report-wrap" style="margin-top:8px;padding-bottom:20px;"></div>
   </div>
@@ -2080,7 +2055,7 @@ abrirDB().then(migrarLocalStorage)
   .then(function(r){
     funcionarios=r[0]||[];
     document.getElementById('loading-screen').classList.add('hidden');
-    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clCarregarRecomp();clCarregarNums();clAddItemRow();clVerificarModoFunc();
+    renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clAddItemRow();clVerificarModoFunc();
     // CVT loaded via carregarCVT()
   })
   .catch(function(err){
@@ -3505,7 +3480,6 @@ function clPopularSelectFuncionarios(){
 
 function clRender(){
   clPopularSelectFuncionarios();
-  clRenderRecompSection();
   var el=document.getElementById('cl-lista');
   if(!el) return;
 
@@ -3611,10 +3585,11 @@ function clRender(){
     cl.itens.forEach(function(item){
       var done=item.feito;
       var chkId='chk-'+cl.id+'-'+item.id;
+      var marcadoPor=done&&item.feitoBy?'<span style="font-size:0.62rem;color:var(--accent);margin-left:6px;">✓ '+escHtml(item.feitoBy)+(item.feitoEm?' '+item.feitoEm:'')+'</span>':'';
       itensHtml+='<label class="cl-check-item'+(done?' done':'')+'" style="cursor:pointer">'
         +'<input type="checkbox" class="cl-checkbox" id="'+chkId+'"'+(done?' checked':'')
         +' data-clid="'+cl.id+'" data-iid="'+item.id+'">'
-        +'<span>'+escHtml(item.texto)+'</span></label>';
+        +'<span>'+escHtml(item.texto)+marcadoPor+'</span></label>';
     });
     bodyDiv.insertAdjacentHTML('beforeend', itensHtml);
 
@@ -4536,7 +4511,6 @@ function clVerificarModoFunc(){
 
 function clRenderFuncScreen(funcId, clId){
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);})||null;
-  // Definir dia de hoje primeiro
   var _diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
   var hojeNome=_diasSem[new Date().getDay()];
   var diasNomePT={segunda:'Segunda-feira',terca:'Terça-feira',quarta:'Quarta-feira',quinta:'Quinta-feira',sexta:'Sexta-feira',sabado:'Sábado',domingo:'Domingo'};
@@ -4548,36 +4522,6 @@ function clRenderFuncScreen(funcId, clId){
 
   var content=document.getElementById('func-cl-content');
   if(!content) return;
-
-  // Badge de pontos
-  var pontos=(func&&func.pontos)||0;
-
-  // Seção de recompensas inline - renderiza ANTES do badge para existir no DOM
-  funcRenderRecompBar(funcId, pontos);
-
-  // Badge de pontos no topo - sempre visível, clicável para recompensas
-  var ptsTop=document.getElementById('func-pts-top');
-  if(ptsTop){
-    ptsTop.innerHTML='';
-    var ptsBadgeEl=document.createElement('div');
-    ptsBadgeEl.className='func-pts-badge';
-    ptsBadgeEl.style.cursor='pointer';
-    ptsBadgeEl.style.webkitUserSelect='none';
-    ptsBadgeEl.style.userSelect='none';
-    ptsBadgeEl.innerHTML='⭐ '+pontos+' pontos'+(recompensas.length?' &nbsp;🎁 <span style="font-size:0.7rem;opacity:0.7;">ver recompensas</span>':'');
-    ptsBadgeEl.onclick=function(){
-      _funcRecompOpen=!_funcRecompOpen;
-      var body=document.getElementById('func-recomp-body');
-      var arrow=document.getElementById('func-recomp-arrow');
-      var bar=document.getElementById('func-recomp-bar');
-      if(body) body.style.display=_funcRecompOpen?'block':'none';
-      if(arrow) arrow.textContent=_funcRecompOpen?'▼':'▶';
-      if(_funcRecompOpen&&bar){
-        try{ bar.scrollIntoView({block:'nearest'}); }catch(e){ bar.scrollIntoView(false); }
-      }
-    };
-    ptsTop.appendChild(ptsBadgeEl);
-  }
 
   // Get checklists for this func (filter by clId if provided)
   var listas=clData.filter(function(cl){
@@ -4611,16 +4555,16 @@ function clRenderFuncScreen(funcId, clId){
     var card=document.createElement('div');
     card.className='func-cl-card';
 
+
     var itensHtml=''; cl.itens.forEach(function(item){
       var done2=item.feito;
       var chkId2='fchk-'+cl.id+'-'+item.id;
       var marcadoPor=done2&&item.feitoBy?'<span style="font-size:0.65rem;color:var(--accent);margin-left:6px;">\u2713 '+escHtml(item.feitoBy)+(item.feitoEm?' '+item.feitoEm:'')+'</span>':'';
-      itensHtml+='<label class="cl-check-item'+(done2?' done':'')+(cl.funcIds&&cl.funcIds.length>1?' shared-item':'')+" style=\"cursor:pointer;padding:12px 0\">"
+      itensHtml+='<label class="cl-check-item'+(done2?' done':'')+(cl.funcIds&&cl.funcIds.length>1?' shared-item':'')+'" style="cursor:pointer;padding:12px 0">'
         +'<input type="checkbox" class="cl-checkbox" id="'+chkId2+'"'+(done2?' checked':'')
         +' data-clid="'+cl.id+'" data-iid="'+item.id+'" data-funcid="'+funcId+'" data-targetclid="'+(clId||'')+'">' 
         +'<span>'+escHtml(item.texto)+marcadoPor+'</span></label>';
     });
-    var titleEl=document.createElement('div'); titleEl.className='func-cl-title';
     titleEl.textContent=cl.titulo+(feitos===total?' ✅':'');
     card.appendChild(titleEl);
     var subEl=document.createElement('div'); subEl.className='func-cl-sub';

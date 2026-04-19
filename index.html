@@ -878,6 +878,7 @@ textarea{resize:vertical;min-height:80px;}
     <button class="cl-dia-btn" data-dia="quinta" onclick="clFiltrarDia('quinta')">Qui</button>
     <button class="cl-dia-btn" data-dia="sexta" onclick="clFiltrarDia('sexta')">Sex</button>
     <button class="cl-dia-btn" data-dia="sabado" onclick="clFiltrarDia('sabado')">Sáb</button>
+    <button class="cl-dia-btn" data-dia="domingo" onclick="clFiltrarDia('domingo')">Dom</button>
   </div>
 
   <!-- Criar novo checklist (colapsável) -->
@@ -904,6 +905,7 @@ textarea{resize:vertical;min-height:80px;}
         <option value="quinta">Quinta-feira</option>
         <option value="sexta">Sexta-feira</option>
         <option value="sabado">Sábado</option>
+        <option value="domingo">Domingo</option>
       </select>
       <div class="cl-items-builder" id="cl-items-builder" style="max-height:200px;overflow-y:auto;"></div>
       <button class="cl-add-item-btn" onclick="clAddItemRow()">+ Adicionar item</button>
@@ -4532,25 +4534,45 @@ function clVerificarModoFunc(){
   document.getElementById('app').style.display='none';
   document.getElementById('func-screen').classList.add('show');
 
-  function renderQuandoPronto(){
-    clRenderFuncScreen(funcId, clId);
+  // Mostrar loading enquanto Firebase carrega
+  var content=document.getElementById('func-cl-content');
+  if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
+
+  if(!fbDb){
+    // Sem Firebase, esperar ele conectar
+    var tentativas=0;
+    var iv=setInterval(function(){
+      tentativas++;
+      if(fbDb){ clearInterval(iv); _funcCarregarERendar(funcId,clId); }
+      else if(tentativas>30){ clearInterval(iv); clRenderFuncScreen(funcId,clId); }
+    },500);
+    return;
+  }
+  _funcCarregarERendar(funcId, clId);
+}
+
+function _funcCarregarERendar(funcId, clId){
+  var clOk=false, funcOk=false;
+
+  function tentar(){
+    if(clOk && funcOk) clRenderFuncScreen(funcId, clId);
   }
 
-  if(fbDb){
-    // Carregar clData
-    fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data) clData=doc.data().data||[];
-      renderQuandoPronto();
-    }).catch(function(){ renderQuandoPronto(); });
+  // Carregar clData
+  fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
+    if(doc&&doc.exists&&doc.data()&&doc.data().data) clData=doc.data().data||[];
+    clOk=true; tentar();
+  }).catch(function(){ clOk=true; tentar(); });
 
-    // Carregar funcionarios
-    fbDb.collection('funcionarios').get().then(function(snap){
-      funcionarios=[];
-      snap.forEach(function(doc){ if(doc.exists){var d=doc.data();if(d&&d.id) funcionarios.push(d);} });
-      renderQuandoPronto();
-    }).catch(function(){});
+  // Carregar funcionarios
+  fbDb.collection('funcionarios').get().then(function(snap){
+    funcionarios=[];
+    snap.forEach(function(doc){ if(doc.exists){var d=doc.data();if(d&&d.id) funcionarios.push(d);} });
+    funcOk=true; tentar();
+  }).catch(function(){ funcOk=true; tentar(); });
 
-    // Listener tempo real
+  // Listener tempo real após carregar
+  setTimeout(function(){
     if(!window._clLiveUnsubscribe){
       window._clLiveUnsubscribe = fbDb.collection('configuracoes').doc('clData').onSnapshot(function(doc){
         if(doc&&doc.exists&&doc.data()&&doc.data().data){
@@ -4559,9 +4581,7 @@ function clVerificarModoFunc(){
         }
       },function(){});
     }
-  } else {
-    renderQuandoPronto();
-  }
+  },2000);
 }
 
 function clRenderFuncScreen(funcId, clId){
@@ -4590,8 +4610,11 @@ function clRenderFuncScreen(funcId, clId){
     if(!pertence) return false;
     // Se veio com ?cl=ID específico, mostrar só esse
     if(clId && String(cl.id)!==String(clId)) return false;
-    // Filtro de dia: mostrar se não tem dia, é 'todos', ou bate com hoje
-    if(!cl.dia || cl.dia==='' || cl.dia==='todos') return true;
+    // Sem dia definido = aparece sempre
+    if(!cl.dia || cl.dia==='') return true;
+    // 'todos' = aparece todos os dias incluindo domingo
+    if(cl.dia==='todos') return true;
+    // Dia específico = só no dia certo
     return cl.dia===hojeNome;
   });
   var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};

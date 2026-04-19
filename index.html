@@ -888,9 +888,11 @@ textarea{resize:vertical;min-height:80px;}
     </div>
     <div id="cl-create-body" style="display:none;margin-top:12px;">
       <input type="text" class="cl-inp" id="cl-titulo" placeholder="Título do checklist...">
-      <select class="cl-select" id="cl-func-select">
-        <option value="">Selecionar funcionário...</option>
-      </select>
+      <!-- Seleção múltipla de funcionários -->
+      <div style="margin-bottom:8px;">
+        <div style="font-size:0.7rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-weight:600;text-transform:uppercase;margin-bottom:6px;">👥 Funcionários</div>
+        <div id="cl-func-checkboxes" style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px;max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+      </div>
       <!-- Dia da semana -->
       <select class="cl-select" id="cl-dia-select" style="margin-bottom:8px;">
         <option value="">Dia da semana (opcional)</option>
@@ -3396,30 +3398,46 @@ function clFiltrarDia(dia){
 }
 
 function clSalvar(){
-  // Validate
   var titulo=(document.getElementById('cl-titulo').value||'').trim();
-  var funcId=document.getElementById('cl-func-select').value;
   if(!titulo){ showToast('Informe o título!','#f7a34f'); return; }
-  if(!funcId){ showToast('Selecione um funcionário!','#f7a34f'); return; }
+
+  // Ler funcionários selecionados via checkboxes
+  var checkboxes=document.querySelectorAll('#cl-func-checkboxes input[type=checkbox]:checked');
+  var funcIds=[];
+  checkboxes.forEach(function(cb){ funcIds.push(cb.value); });
+  if(!funcIds.length){ showToast('Selecione pelo menos um funcionário!','#f7a34f'); return; }
 
   var dia=(document.getElementById('cl-dia-select')||{}).value||'';
-
   var itensRows=document.querySelectorAll('.cl-item-inp');
   var itens=[];
   itensRows.forEach(function(inp){
     var txt=(inp.value||'').trim();
-    if(txt) itens.push({id:gerarId(),texto:txt,feito:false});
+    if(txt) itens.push({id:gerarId(),texto:txt,feito:false,feitoBy:'',feitoEm:''});
   });
   if(!itens.length){ showToast('Adicione pelo menos um item!','#f7a34f'); return; }
 
-  var funcObj=funcionarios.find(function(f){return String(f.id)===String(funcId);})||{};
-  var novo={id:gerarId(),titulo:titulo,funcId:funcId,funcNome:funcObj.nome||'',dia:dia,itens:itens,itensBase:itens.map(function(i){return {id:gerarId(),texto:i.texto,feito:false};}),criadoEm:new Date().toISOString()};
+  // Compatibilidade: funcId = primeiro selecionado, funcIds = todos
+  var funcObj=funcionarios.find(function(f){return String(f.id)===String(funcIds[0]);})||{};
+  var funcNomes=funcIds.map(function(fid){
+    var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
+    return fo.nome||'';
+  });
+
+  var novo={
+    id:gerarId(),titulo:titulo,
+    funcId:funcIds[0], funcNome:funcObj.nome||'',
+    funcIds:funcIds, funcNomes:funcNomes,
+    dia:dia,itens:itens,
+    itensBase:itens.map(function(i){return {id:gerarId(),texto:i.texto,feito:false,feitoBy:'',feitoEm:''};} ),
+    criadoEm:new Date().toISOString()
+  };
   clData.push(novo);
   clPersistir(); atualizarHomeBadges();
   document.getElementById('cl-titulo').value='';
-  document.getElementById('cl-func-select').value='';
   if(document.getElementById('cl-dia-select')) document.getElementById('cl-dia-select').value='';
   document.getElementById('cl-items-builder').innerHTML='';
+  // Desmarcar checkboxes
+  document.querySelectorAll('#cl-func-checkboxes input[type=checkbox]').forEach(function(cb){ cb.checked=false; });
   clAddItemRow();
   clRender();
   showToast('✅ Checklist criado!');
@@ -3467,16 +3485,22 @@ function clAddItemRow(texto){
 }
 
 function clPopularSelectFuncionarios(){
-  var sel=document.getElementById('cl-func-select');
-  if(!sel) return;
-  var val=sel.value;
-  sel.innerHTML='<option value="">Selecionar funcionário...</option>';
-  funcionarios.forEach(function(f){
-    var opt=document.createElement('option');
-    opt.value=f.id; opt.textContent=f.nome;
-    sel.appendChild(opt);
+  var box=document.getElementById('cl-func-checkboxes');
+  if(!box) return;
+  // Guardar selecionados atuais
+  var selecionados={};
+  box.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.checked) selecionados[cb.value]=true; });
+  box.innerHTML='';
+  if(!funcionarios.length){
+    box.innerHTML='<div style="color:var(--muted);font-size:0.78rem;padding:4px;">Nenhum funcionário cadastrado.</div>';
+    return;
+  }
+  funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');}).forEach(function(f){
+    var lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;font-family:"Space Grotesk",sans-serif;font-size:0.82rem;color:var(--text);';
+    lbl.innerHTML='<input type="checkbox" value="'+f.id+'" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer;"'+(selecionados[f.id]?' checked':'')+'> '+escHtml(f.nome);
+    box.appendChild(lbl);
   });
-  sel.value=val;
 }
 
 function clRender(){
@@ -3544,7 +3568,16 @@ function clRender(){
       td.addEventListener('touchmove',function(){ clearTimeout(pt); },{passive:true});
     })(cl,titleDiv);
     var funcDiv=document.createElement('div'); funcDiv.className='cl-card-func';
-    funcDiv.textContent='\ud83d\udc64 '+func.nome;
+    // Mostrar todos os nomes se for checklist compartilhado
+    if(cl.funcIds&&cl.funcIds.length>1){
+      var nomes=cl.funcIds.map(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
+        return fo.nome||(cl.funcNomes&&cl.funcNomes[cl.funcIds.indexOf(fid)])||'';
+      }).filter(Boolean);
+      funcDiv.textContent='👥 '+nomes.join(', ');
+    } else {
+      funcDiv.textContent='👤 '+func.nome;
+    }
     hdrLeft.appendChild(titleDiv); hdrLeft.appendChild(funcDiv);
     var hdrRight=document.createElement('div');
     hdrRight.style.cssText='display:flex;align-items:center;gap:6px;flex-shrink:0;';
@@ -4460,6 +4493,20 @@ function clVerificarModoFunc(){
   var screen=document.getElementById('func-screen');
   screen.classList.add('show');
 
+  // Listener em tempo real para checklists compartilhados
+  if(fbDb && !window._clLiveUnsubscribe){
+    window._clLiveUnsubscribe = fbDb.collection('configuracoes').doc('clData').onSnapshot(function(doc){
+      if(doc&&doc.exists&&doc.data()&&doc.data().data){
+        var cloud=doc.data().data;
+        if(Array.isArray(cloud)){
+          clData=cloud;
+          // Só re-renderiza se não há checkbox sendo marcado agora
+          if(!window._clItemChanging) clRenderFuncScreen(funcId, clId);
+        }
+      }
+    },function(){});
+  }
+
   // Load from Firebase then render
   if(fbDb){
     fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
@@ -4534,9 +4581,11 @@ function clRenderFuncScreen(funcId, clId){
 
   // Get checklists for this func (filter by clId if provided)
   var listas=clData.filter(function(cl){
-    if(String(cl.funcId)!==String(funcId)) return false;
+    var pertence=(cl.funcIds&&cl.funcIds.length>0)
+      ? cl.funcIds.some(function(fid){return String(fid)===String(funcId);})
+      : String(cl.funcId)===String(funcId);
+    if(!pertence) return false;
     if(clId && cl.id!==clId) return false;
-    // Mostrar se não tem dia definido (geral) OU dia bate com hoje OU é "todos os dias"
     return !cl.dia || cl.dia===hojeNome || cl.dia==='todos';
   });
   var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};
@@ -4565,12 +4614,12 @@ function clRenderFuncScreen(funcId, clId){
     var itensHtml=''; cl.itens.forEach(function(item){
       var done2=item.feito;
       var chkId2='fchk-'+cl.id+'-'+item.id;
-      itensHtml+='<label class="cl-check-item'+(done2?' done':'')+'" style="cursor:pointer;padding:12px 0">'
+      var marcadoPor=done2&&item.feitoBy?'<span style="font-size:0.65rem;color:var(--accent);margin-left:6px;">\u2713 '+escHtml(item.feitoBy)+(item.feitoEm?' '+item.feitoEm:'')+'</span>':'';
+      itensHtml+='<label class="cl-check-item'+(done2?' done':'')+(cl.funcIds&&cl.funcIds.length>1?' shared-item':'')+" style=\"cursor:pointer;padding:12px 0\">"
         +'<input type="checkbox" class="cl-checkbox" id="'+chkId2+'"'+(done2?' checked':'')
-        +' data-clid="'+cl.id+'" data-iid="'+item.id+'" data-funcid="'+funcId+'" data-targetclid="'+(clId||'')+'">'
-        +'<span>'+escHtml(item.texto)+'</span></label>';
+        +' data-clid="'+cl.id+'" data-iid="'+item.id+'" data-funcid="'+funcId+'" data-targetclid="'+(clId||'')+'">' 
+        +'<span>'+escHtml(item.texto)+marcadoPor+'</span></label>';
     });
-
     var titleEl=document.createElement('div'); titleEl.className='func-cl-title';
     titleEl.textContent=cl.titulo+(feitos===total?' ✅':'');
     card.appendChild(titleEl);
@@ -4705,6 +4754,15 @@ function funcToggleItem(clId, itemId, feito, funcId, targetClId){
   var item=cl.itens.find(function(x){return x.id===itemId;});
   if(!item) return;
   item.feito=feito;
+  // Registrar quem marcou e quando
+  var funcObj=funcionarios.find(function(f){return String(f.id)===String(funcId);})||{};
+  if(feito){
+    item.feitoBy=funcObj.nome||'Funcionário';
+    item.feitoEm=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  } else {
+    item.feitoBy='';
+    item.feitoEm='';
+  }
   // Save to Firebase directly
   if(fbDb){
     fbDb.collection('configuracoes').doc('clData').set({data:clData}).then(function(){

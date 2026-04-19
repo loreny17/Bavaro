@@ -1314,6 +1314,7 @@ function renderVFFuncSelecionado(){
   var totF=(d.faltas||[]).length;
   var vLista=(d.vales||[]).length?'<div class="item-list">'+(d.vales||[]).map(function(v){return'<div class="item-chip"><span class="chip-val money">'+fmtMoney(v.val)+'</span><span class="chip-date">'+fmtDataBR(v.data)+'</span><span class="chip-desc">'+(v.desc||'')+'</span><button class="chip-remove" onclick="removerVale('+f.id+',\''+v.id+'\')">✕</button></div>';}).join('')+'</div>':'';
   var fLista=(d.faltas||[]).length?'<div class="item-list">'+(d.faltas||[]).map(function(fa){return'<div class="item-chip"><span class="chip-val falta">Falta</span><span class="chip-date">'+fmtDataBR(fa.data)+'</span><span class="chip-desc">'+(fa.desc||'')+'</span><button class="chip-remove" onclick="removerFalta('+f.id+',\''+fa.id+'\')">✕</button></div>';}).join('')+'</div>':'';
+  var ferLista=(d.feriados||[]).length?'<div class="item-list">'+(d.feriados||[]).map(function(fe){return'<div class="item-chip"><span class="chip-val" style="background:rgba(245,158,11,0.15);color:#f59e0b;border-color:rgba(245,158,11,0.4)">🏛️</span><span class="chip-date">'+fmtDataBR(fe.data)+'</span><span class="chip-desc">'+(fe.desc||'')+'</span><button class="chip-remove" onclick="removerFeriado('+f.id+',\''+fe.id+'\')">✕</button></div>';}).join('')+'</div>':'';
   el.innerHTML=
     '<div class="vf-func-card">'+
     '<div class="vf-func-card-header"><div class="employee-avatar" style="width:36px;height:36px;font-size:0.82rem">'+ini+'</div>'+
@@ -1331,6 +1332,10 @@ function renderVFFuncSelecionado(){
     '<div class="add-grid"><div><label style="font-size:0.62rem">Data da falta</label><input type="date" id="falta-data-'+f.id+'"></div>'+
     '<div><label style="font-size:0.62rem">Motivo</label><input type="text" id="falta-desc-'+f.id+'" placeholder="opcional"></div></div>'+
     '<button class="add-submit falta-btn" onclick="adicionarFalta('+f.id+')">+ Registrar Falta</button>'+fLista+'</div>'+
+    '<div class="add-block"><div class="add-block-title" style="color:#f59e0b;border-color:rgba(245,158,11,0.3)">🏛️ Feriado Trabalhado</div>'+
+    '<div class="add-grid"><div><label style="font-size:0.62rem">Data do feriado</label><input type="date" id="fer-data-'+f.id+'"></div>'+
+    '<div><label style="font-size:0.62rem">Nome do feriado</label><input type="text" id="fer-desc-'+f.id+'" placeholder="ex: Tiradentes"></div></div>'+
+    '<button class="add-submit" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);color:#f59e0b" onclick="adicionarFeriado('+f.id+')">+ Registrar Feriado</button>'+ferLista+'</div>'+
     '</div></div>';
 }
 
@@ -1361,8 +1366,18 @@ function adicionarFalta(funcId){
   d.faltas.push({id:'f'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():''});
   saveVF().then(function(){dI.value='';if(dsI)dsI.value='';renderVF();showToast('❌ Falta registrada!','#f75a5a');});
 }
+function adicionarFeriado(funcId){
+  var dI=document.getElementById('fer-data-'+funcId),dsI=document.getElementById('fer-desc-'+funcId);
+  if(!dI.value){showToast('⚠️ Informe a data!','#f7a34f');return;}
+  var d=getVF(funcId);
+  if(!d.feriados) d.feriados=[];
+  if(d.feriados.some(function(fe){return fe.data===dI.value;})){showToast('⚠️ Feriado já registrado nessa data!','#f7a34f');return;}
+  d.feriados.push({id:'fe'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():''});
+  saveVF().then(function(){dI.value='';if(dsI)dsI.value='';renderVF();showToast('🏛️ Feriado registrado!','#f59e0b');});
+}
 function removerVale(fid,vid){var d=getVF(fid);d.vales=d.vales.filter(function(v){return v.id!==vid;});saveVF().then(renderVF);}
 function removerFalta(fid,faid){var d=getVF(fid);d.faltas=d.faltas.filter(function(fa){return fa.id!==faid;});saveVF().then(renderVF);}
+function removerFeriado(fid,feid){var d=getVF(fid);d.feriados=(d.feriados||[]).filter(function(fe){return fe.id!==feid;});saveVF().then(renderVF);}
 
 // ═══ PDF — geral ou individual ═══
 function gerarPDF(funcIdOuNull){
@@ -1373,27 +1388,31 @@ function gerarPDF(funcIdOuNull){
     var mesNome=meses[vfMonth-1].toLowerCase()+' de '+vfYear;
     var k=vfKey(),hoje=new Date().toLocaleDateString('pt-BR');
     var lista=funcIdOuNull?funcionarios.filter(function(f){return f.id===funcIdOuNull;}):funcionarios;
-    var totalGeralV=0,totalGeralF=0,linhas=[];
+    var totalGeralV=0,totalGeralF=0,totalGeralFer=0,linhas=[];
     lista.forEach(function(f){
       var d=vfData[k]&&vfData[k][f.id];
       var tv=d?(d.vales||[]).reduce(function(s,v){return s+parseFloat(v.val||0);},0):0;
       var faltas=d?(d.faltas||[]):[];
+      var feriados=d?(d.feriados||[]):[];
       var tf=faltas.length;
-      if(funcIdOuNull||(tv>0||tf>0)){
-        totalGeralV+=tv;totalGeralF+=tf;
+      var tfe=feriados.length;
+      if(funcIdOuNull||(tv>0||tf>0||tfe>0)){
+        totalGeralV+=tv;totalGeralF+=tf;totalGeralFer+=tfe;
         var fStr=tf===0?'-':tf+' - '+faltas.slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fa){var p=fa.data.split('-');var dt=new Date(fa.data+'T12:00:00');var sab=dt.getDay()===6?' (Sábado)':'';return p[2]+'/'+p[1]+sab;}).join(', ');
-        linhas.push({nome:f.nome,tv:tv,tf:tf,fStr:fStr});
+        var ferStr=tfe===0?'-':feriados.slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fe){var p=fe.data.split('-');return p[2]+'/'+p[1]+(fe.desc?' ('+fe.desc+')':'');}).join(', ');
+        linhas.push({nome:f.nome,tv:tv,tf:tf,fStr:fStr,ferStr:ferStr,tfe:tfe});
       }
     });
-    var trs=linhas.map(function(l){return'<tr><td class="td-nome">'+l.nome+'</td><td class="td-val">'+(l.tv>0?'R$ '+l.tv.toFixed(2).replace('.',','):'R$ 0,00')+'</td><td class="td-fal">'+l.fStr+'</td></tr>';}).join('');
-    if(!trs)trs='<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:20px">Nenhum registro para este período</td></tr>';
+    var trs=linhas.map(function(l){return'<tr><td class="td-nome">'+l.nome+'</td><td class="td-val">'+(l.tv>0?'R$ '+l.tv.toFixed(2).replace('.',','):'R$ 0,00')+'</td><td class="td-fal">'+l.fStr+'</td><td class="td-fer">'+l.ferStr+'</td></tr>';}).join('');
+    if(!trs)trs='<tr><td colspan="4" style="text-align:center;color:#6b7280;font-style:italic;padding:20px">Nenhum registro para este período</td></tr>';
     var titulo = funcIdOuNull ? 'Relatório Individual' : 'Relatório Consolidado';
     var trs = linhas.map(function(l){
       return '<tr><td>'+l.nome+'</td>'
         +'<td style="text-align:right;color:#4ade80;font-weight:600">'+(l.tv>0?'R$ '+l.tv.toFixed(2).replace('.',','):'R$ 0,00')+'</td>'
-        +'<td style="text-align:center;color:'+(l.tf>0?'#f87171':'#9ca3af')+'">'+l.fStr+'</td></tr>';
+        +'<td style="text-align:left;color:'+(l.tf>0?'#f87171':'#9ca3af')+'">'+l.fStr+'</td>'
+        +'<td style="text-align:left;color:'+(l.tfe>0?'#f59e0b':'#9ca3af')+'">'+l.ferStr+'</td></tr>';
     }).join('');
-    if(!trs) trs='<tr><td colspan="3" style="text-align:center;color:#6b7280;padding:16px;font-style:italic">Nenhum registro para este período</td></tr>';
+    if(!trs) trs='<tr><td colspan="4" style="text-align:center;color:#6b7280;padding:16px;font-style:italic">Nenhum registro para este período</td></tr>';
 
     var html = '<!DOCTYPE html><html lang="pt-BR"><head>'
       +'<meta charset="UTF-8">'
@@ -1412,14 +1431,14 @@ function gerarPDF(funcIdOuNull){
       +'thead tr{background:#1e3a2f}'
       +'th{padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#4ade80;text-transform:uppercase;letter-spacing:0.06em}'
       +'th:nth-child(2){text-align:right}'
-      +'th:nth-child(3){text-align:center}'
       +'tbody tr:nth-child(odd){background:#111827}'
       +'tbody tr:nth-child(even){background:#1a2235}'
-      +'td{padding:10px 12px;font-size:13px;border-top:1px solid #1e293b}'
+      +'td{padding:10px 12px;font-size:13px;border-top:1px solid #1e293b;word-break:break-word;vertical-align:top}'
+      +'td:nth-child(2){text-align:right;white-space:nowrap}'
+      +'td:nth-child(1){white-space:nowrap}'
       +'tfoot tr{background:#0d2b1a;border-top:2px solid #4ade80}'
       +'tfoot td{padding:10px 12px;font-size:13px;font-weight:700;color:#4ade80}'
       +'tfoot td:nth-child(2){text-align:right}'
-      +'tfoot td:nth-child(3){text-align:center;color:#f87171}'
       +'.footer{text-align:center;font-size:10px;color:#4b5563;margin-top:14px}'
       +'@page{margin:0;padding:0}'
       +'@media print{'
@@ -1437,11 +1456,12 @@ function gerarPDF(funcIdOuNull){
       +'<p>Período: '+mesNome+'</p>'
       +'</div>'
       +'<table>'
-      +'<thead><tr><th>Funcionário</th><th style="text-align:right">Total Vales</th><th style="text-align:center">Faltas</th></tr></thead>'
+      +'<thead><tr><th>Funcionário</th><th style="text-align:right">Total Vales</th><th>Faltas</th><th style="color:#f59e0b">Feriados Trabalhados</th></tr></thead>'
       +'<tbody>'+trs+'</tbody>'
       +'<tfoot><tr><td>TOTAL</td>'
       +'<td style="text-align:right">R$ '+totalGeralV.toFixed(2).replace('.',',')+'</td>'
-      +'<td style="text-align:center;color:#f87171">'+totalGeralF+'</td>'
+      +'<td style="color:#f87171">'+totalGeralF+'</td>'
+      +'<td style="color:#f59e0b">'+totalGeralFer+'</td>'
       +'</tr></tfoot>'
       +'</table>'
       +'<div class="footer">Gerado em '+hoje+' • Gestão Bávaro</div>'

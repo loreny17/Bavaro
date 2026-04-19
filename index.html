@@ -50,6 +50,13 @@ header{background:rgba(8,8,8,0.97);backdrop-filter:blur(20px);-webkit-backdrop-f
 .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
 .tab-content{display:none;padding:14px 14px 80px;}
 .tab-content.active{display:block;}
+/* Swipe animation */
+#tab-swipe-wrap{position:relative;overflow:hidden;width:100%;}
+#tab-swipe-wrap .tab-content{position:absolute;top:0;left:0;width:100%;display:block;transform:translateX(100%);transition:none;will-change:transform;min-height:200px;}
+#tab-swipe-wrap .tab-content.active{position:relative;transform:translateX(0);}
+#tab-swipe-wrap .tab-content.swipe-prev{transform:translateX(-100%);}
+#tab-swipe-wrap .tab-content.swipe-next{transform:translateX(100%);}
+#tab-swipe-wrap .tab-content.swipe-anim{transition:transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94);}
 
 /* LOADING */
 .loading-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:16px;}
@@ -721,6 +728,7 @@ textarea{resize:vertical;min-height:80px;}
   <button class="tab-btn" onclick="showTab('faltas')"><span class="icon">⚠️</span><span id="faltas-tab-label">Faltas</span></button>
 </div>
 
+<div id="tab-swipe-wrap">
 <!-- TAB CADASTRO -->
 <div class="tab-content" id="tab-cadastro">
   <div class="section-title">📝 Dados do Funcionário</div>
@@ -1022,6 +1030,7 @@ textarea{resize:vertical;min-height:80px;}
   <div style="font-size:0.8rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;margin-bottom:16px;">O que os funcionários reportaram como faltando</div>
   <div id="faltas-lista"></div>
 </div>
+</div><!-- /tab-swipe-wrap -->
 
 <!-- MODAL -->
 <div class="modal-overlay" id="modal-overlay" onclick="fecharModalClick(event)">
@@ -5111,6 +5120,137 @@ var _fbInterval = setInterval(function(){
     console.warn('Firebase nao carregou apos 30s');
   }
 }, 500);
+
+// ── SWIPE ENTRE ABAS COM ANIMAÇÃO ──
+(function(){
+  var _tabs=['lista','vf','cvt','checklist','estoque','faltas'];
+  var _sx=0,_sy=0,_sTime=0,_dragging=false,_curIdx=0,_nextIdx=-1,_dir=0;
+  var _W=window.innerWidth;
+
+  window.addEventListener('resize',function(){ _W=window.innerWidth; });
+
+  function _getEl(i){ return document.getElementById('tab-'+_tabs[i]); }
+
+  function _tabAtual(){
+    for(var i=0;i<_tabs.length;i++){
+      var el=_getEl(i);
+      if(el&&el.classList.contains('active')) return i;
+    }
+    return 0;
+  }
+
+  function _setTransform(el,x,anim){
+    if(!el) return;
+    el.style.transition=anim?'transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94)':'none';
+    el.style.transform='translateX('+x+'px)';
+  }
+
+  function _showForDrag(cur,nxt,dir){
+    // Mostrar aba atual e próxima sem transição
+    var curEl=_getEl(cur);
+    var nxtEl=_getEl(nxt);
+    if(!curEl||!nxtEl) return;
+    // Aba atual: posição 0
+    curEl.style.display='block';
+    curEl.style.position='absolute';
+    curEl.style.top='0';curEl.style.left='0';curEl.style.width='100%';
+    _setTransform(curEl,0,false);
+    // Próxima aba: posição à direita ou esquerda
+    nxtEl.style.display='block';
+    nxtEl.style.position='absolute';
+    nxtEl.style.top='0';nxtEl.style.left='0';nxtEl.style.width='100%';
+    _setTransform(nxtEl,dir*_W,false);
+    // Wrapper precisa de altura
+    var wrap=document.getElementById('tab-swipe-wrap');
+    if(wrap) wrap.style.height=Math.max(curEl.scrollHeight,window.innerHeight)+'px';
+  }
+
+  function _commitSwipe(cur,nxt,dir){
+    var curEl=_getEl(cur);
+    var nxtEl=_getEl(nxt);
+    if(!curEl||!nxtEl) return;
+    // Animar para posição final
+    _setTransform(curEl,-dir*_W,true);
+    _setTransform(nxtEl,0,true);
+    setTimeout(function(){
+      // Limpar e ativar nova aba
+      curEl.classList.remove('active');
+      curEl.style.cssText='';
+      nxtEl.classList.add('active');
+      nxtEl.style.cssText='';
+      var wrap=document.getElementById('tab-swipe-wrap');
+      if(wrap) wrap.style.height='';
+      // Chamar a lógica da aba
+      showTab(_tabs[nxt]);
+    },300);
+  }
+
+  function _cancelSwipe(cur,nxt){
+    var curEl=_getEl(cur);
+    var nxtEl=_getEl(nxt);
+    _setTransform(curEl,0,true);
+    if(nxtEl) _setTransform(nxtEl,_dir*_W,true);
+    setTimeout(function(){
+      if(curEl) curEl.style.cssText='';
+      if(nxtEl){ nxtEl.style.display='none'; nxtEl.style.cssText=''; }
+      var wrap=document.getElementById('tab-swipe-wrap');
+      if(wrap) wrap.style.height='';
+    },300);
+  }
+
+  document.addEventListener('touchstart',function(e){
+    if(document.getElementById('func-screen')&&document.getElementById('func-screen').classList.contains('show')) return;
+    var tag=e.target.tagName;
+    if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||tag==='BUTTON') return;
+    _sx=e.touches[0].clientX;
+    _sy=e.touches[0].clientY;
+    _sTime=Date.now();
+    _dragging=false;
+    _curIdx=_tabAtual();
+    _nextIdx=-1;
+    _dir=0;
+  },{passive:true});
+
+  document.addEventListener('touchmove',function(e){
+    if(!_sx) return;
+    if(document.getElementById('func-screen')&&document.getElementById('func-screen').classList.contains('show')) return;
+    var dx=e.touches[0].clientX-_sx;
+    var dy=e.touches[0].clientY-_sy;
+    // Só ativar swipe horizontal
+    if(!_dragging){
+      if(Math.abs(dy)>Math.abs(dx)) return; // scroll vertical
+      if(Math.abs(dx)<10) return;
+      // Determinar direção e aba vizinha
+      _dir=dx>0?1:-1; // 1=direita(prev), -1=esquerda(next)
+      var nxt=_curIdx+(-_dir);
+      if(nxt<0||nxt>=_tabs.length) return;
+      _nextIdx=nxt;
+      _dragging=true;
+      _showForDrag(_curIdx,_nextIdx,_dir*-1);
+    }
+    if(!_dragging||_nextIdx<0) return;
+    var dx2=e.touches[0].clientX-_sx;
+    var curEl=_getEl(_curIdx);
+    var nxtEl=_getEl(_nextIdx);
+    _setTransform(curEl,dx2,false);
+    _setTransform(nxtEl,dx2+(_dir*-1)*_W,false);
+  },{passive:true});
+
+  document.addEventListener('touchend',function(e){
+    if(!_dragging||_nextIdx<0){ _sx=0; _dragging=false; return; }
+    var dx=e.changedTouches[0].clientX-_sx;
+    var dt=Date.now()-_sTime;
+    var threshold=_W*0.3; // 30% da tela para confirmar
+    var fast=dt<350&&Math.abs(dx)>40;
+    if(Math.abs(dx)>threshold||fast){
+      _commitSwipe(_curIdx,_nextIdx,_dir*-1);
+    } else {
+      _cancelSwipe(_curIdx,_nextIdx);
+    }
+    _sx=0; _dragging=false; _nextIdx=-1;
+  },{passive:true});
+})();
+
 </script>
 <button class="admin-badge hidden" id="admin-badge" onclick="adminLogout()">&#128081; Admin &#8212; Sair</button>
 </body>

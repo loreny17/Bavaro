@@ -792,18 +792,17 @@ textarea{resize:vertical;min-height:80px;}
     </div>
     <button class="filter-btn" id="btn-filtro-itau" onclick="toggleFiltro('itau')" title="Filtrar Conta Itaú">🏦</button>
     <button class="filter-btn" id="btn-filtro-vt" onclick="toggleFiltro('vt')" title="Filtrar Cartão V.T">🚌</button>
-    <button class="filter-btn" onclick="abrirMenuWA()" title="Enviar via WhatsApp" style="color:#25d366;border-color:rgba(37,211,102,0.4);">📲</button>
-    <button class="filter-btn" onclick="downloadTodos()" title="Baixar ZIP" style="color:var(--accent);border-color:rgba(212,168,67,0.3);">📦</button>
+    <button class="filter-btn" onclick="abrirMenuWA(this)" title="Enviar via WhatsApp" style="color:#25d366;border-color:rgba(37,211,102,0.4);">📲</button>
   </div>
   <div id="lista-container"></div>
 </div>
 
 <!-- FAB - Novo Funcionário -->
-<button class="fab-btn" id="fab-novo-func" onclick="abrirCadastro()" title="Novo Funcionário" style="display:none;">+</button>
+<button class="fab-btn" id="fab-novo-func" onclick="abrirCadastro()" title="Novo Funcionário" style="display:flex;">+</button>
 
 <!-- Menu WA dropdown -->
 <div id="wa-menu-overlay" style="display:none;position:fixed;inset:0;z-index:9990;" onclick="fecharMenuWA()"></div>
-<div id="wa-menu" style="display:none;position:fixed;bottom:140px;right:16px;background:var(--surface);border:1.5px solid rgba(37,211,102,0.4);border-radius:12px;padding:8px;z-index:9991;min-width:200px;">
+<div id="wa-menu" style="display:none;position:fixed;z-index:9991;background:var(--surface);border:1.5px solid rgba(37,211,102,0.4);border-radius:12px;padding:8px;min-width:200px;">
   <div style="font-size:0.68rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-weight:700;text-transform:uppercase;padding:4px 8px 8px;">📲 Enviar via WhatsApp</div>
   <button onclick="compartilharPdfWA('admissao');fecharMenuWA();" style="display:block;width:100%;background:none;border:none;color:#25d366;font-family:'Space Grotesk',sans-serif;font-size:0.82rem;font-weight:600;padding:8px 12px;cursor:pointer;text-align:left;border-radius:8px;">📋 Dados de Admissão</button>
   <button onclick="compartilharPdfWA('documentos');fecharMenuWA();" style="display:block;width:100%;background:none;border:none;color:#25d366;font-family:'Space Grotesk',sans-serif;font-size:0.82rem;font-weight:600;padding:8px 12px;cursor:pointer;text-align:left;border-radius:8px;">📁 Lista de Documentos</button>
@@ -1108,9 +1107,9 @@ function showTab(tab){
   document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.toggle('active',['lista','vf','cvt','checklist','estoque','faltas'][i]===tab);});
   document.querySelectorAll('.tab-content').forEach(function(c){c.classList.remove('active');});
   document.getElementById('tab-'+tab).classList.add('active');
-  // FAB só aparece na aba funcionários
+  // FAB visível na aba funcionários para todos
   var fab=document.getElementById('fab-novo-func');
-  if(fab) fab.style.display=(tab==='lista'&&_isAdmin)?'flex':'none';
+  if(fab) fab.style.display=(tab==='lista')?'flex':'none';
   if(tab==='lista'){renderLista(); verificarAniversarios();}
   if(tab==='vf')renderVF();
   if(tab==='cvt')renderCVT();
@@ -1235,7 +1234,7 @@ function abrirModal(id){
     '<div class="detail-section"><div class="detail-section-title">⚠️ Pendências</div>'+pRows+'</div>'+
     gal+obs+
     '<div class="detail-section"><div class="detail-section-title">⬇️ Download individual</div><div class="dl-row"><button class="btn btn-success" onclick="downloadIndividual('+id+',\'html\')">🗂️ Ficha HTML</button><button class="btn btn-warning" onclick="downloadIndividual('+id+',\'txt\')">📄 Relatório TXT</button></div></div>'+
-    (_isAdmin?'<button class="btn btn-outline" onclick="editarFuncionario('+id+')">✏️ Editar</button>':'')+
+    '<button class="btn btn-outline" onclick="editarFuncionario('+id+')">✏️ Editar</button>'+
     (_isAdmin?'<button class="btn btn-danger" onclick="excluirFuncionario('+id+')">🗑️ Excluir funcionário</button>':'');
   document.getElementById('modal-overlay').classList.add('open');
 }
@@ -3168,15 +3167,31 @@ function adminLogout(){
 function adminAtualizarUI(){
   var badge=document.getElementById('admin-badge');
   if(badge) badge.classList.toggle('hidden',!_isAdmin);
-  // FAB só visível para admin na aba funcionários
+  // FAB sempre visível na aba funcionários
   var fab=document.getElementById('fab-novo-func');
   var tabLista=document.getElementById('tab-lista');
-  if(fab) fab.style.display=(_isAdmin&&tabLista&&tabLista.classList.contains('active'))?'flex':'none';
+  if(fab) fab.style.display=(tabLista&&tabLista.classList.contains('active'))?'flex':'none';
 }
 
-function abrirMenuWA(){
-  document.getElementById('wa-menu').style.display='block';
+function abrirMenuWA(btn){
+  var menu=document.getElementById('wa-menu');
+  menu.style.display='block';
   document.getElementById('wa-menu-overlay').style.display='block';
+  // Posicionar acima do botão clicado
+  if(btn){
+    var rect=btn.getBoundingClientRect();
+    menu.style.right=(window.innerWidth-rect.right)+'px';
+    menu.style.top=(rect.top-menu.offsetHeight-8)+'px';
+    // Ajuste após render
+    setTimeout(function(){
+      var mh=menu.offsetHeight;
+      menu.style.top=(rect.top-mh-8)+'px';
+    },10);
+  } else {
+    menu.style.right='16px';
+    menu.style.top='auto';
+    menu.style.bottom='140px';
+  }
 }
 function fecharMenuWA(){
   document.getElementById('wa-menu').style.display='none';

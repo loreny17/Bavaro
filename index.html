@@ -3736,6 +3736,10 @@ function clRender(){
     var renameBtn=document.createElement('button'); renameBtn.className='cl-edit-btn';
     renameBtn.textContent='✍️ Renomear';
     (function(id){ renameBtn.onclick=function(){ clRenomear(id); }; })(cl.id);
+    var funcBtn=document.createElement('button'); funcBtn.className='cl-edit-btn';
+    funcBtn.textContent='👥 Funcionários';
+    funcBtn.style.cssText+='border-color:rgba(99,179,237,0.4);color:#63b3ed;';
+    (function(id){ funcBtn.onclick=function(){ clEditarFuncionarios(id); }; })(cl.id);
     var resetBtn=document.createElement('button'); resetBtn.className='cl-edit-btn';
     resetBtn.style.cssText+='border-color:rgba(212,168,67,0.4);color:var(--accent);';
     resetBtn.textContent='🔄 Resetar';
@@ -3806,7 +3810,7 @@ function clRender(){
       overlay.appendChild(menu);
       document.body.appendChild(overlay);
     }; })(cl,cl.titulo);
-    linkRow.appendChild(editBtn); linkRow.appendChild(renameBtn); linkRow.appendChild(resetBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
+    linkRow.appendChild(editBtn); linkRow.appendChild(renameBtn); linkRow.appendChild(funcBtn); linkRow.appendChild(resetBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
     bodyDiv.appendChild(linkRow);
 
     bodyDiv.querySelectorAll('.cl-checkbox[data-clid]').forEach(function(chk){
@@ -3876,20 +3880,44 @@ function clAbrirEditor(clId){
     inpTitulo.type='text'; inpTitulo.value=cl.titulo; inpTitulo.placeholder='Título do checklist...';
     sheet.appendChild(inpTitulo);
 
-    // Funcionário
-    var lblFunc=document.createElement('div'); lblFunc.className='cl-edit-label'; lblFunc.textContent='Funcionário';
+    // Funcionários — checkboxes com busca
+    var lblFunc=document.createElement('div'); lblFunc.className='cl-edit-label'; lblFunc.textContent='Funcionários';
     sheet.appendChild(lblFunc);
-    var selFunc=document.createElement('select'); selFunc.className='cl-edit-inp';
-    selFunc.style.cursor='pointer';
-    var optVazio=document.createElement('option'); optVazio.value=''; optVazio.textContent='Selecionar funcionário...';
-    selFunc.appendChild(optVazio);
-    funcionarios.forEach(function(f){
-      var opt=document.createElement('option');
-      opt.value=f.id; opt.textContent=f.nome;
-      if(String(f.id)===String(cl.funcId)) opt.selected=true;
-      selFunc.appendChild(opt);
-    });
-    sheet.appendChild(selFunc);
+
+    // IDs atualmente selecionados
+    var selectedIds=(cl.funcIds&&cl.funcIds.length>0)?cl.funcIds.map(String):[String(cl.funcId)];
+
+    var searchFunc=document.createElement('input');
+    searchFunc.type='text'; searchFunc.placeholder='🔍 Buscar funcionário...';
+    searchFunc.style.cssText='width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:7px 10px;outline:none;box-sizing:border-box;margin-bottom:6px;';
+    sheet.appendChild(searchFunc);
+
+    var funcBox=document.createElement('div');
+    funcBox.style.cssText='background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px;max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:10px;';
+
+    function renderFuncCheckboxes(q){
+      funcBox.innerHTML='';
+      var lista=funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+      if(q) lista=lista.filter(function(f){return (f.nome||'').toLowerCase().includes(q.toLowerCase());});
+      lista.forEach(function(f){
+        var lbl=document.createElement('label');
+        lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;color:var(--text);';
+        var checked=selectedIds.some(function(id){return id===String(f.id);});
+        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=f.id;
+        cb.style.cssText='accent-color:var(--accent);width:15px;height:15px;cursor:pointer;';
+        if(checked) cb.checked=true;
+        cb.addEventListener('change',function(){
+          if(this.checked){ if(!selectedIds.includes(String(f.id))) selectedIds.push(String(f.id)); }
+          else { selectedIds=selectedIds.filter(function(id){return id!==String(f.id);}); }
+        });
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(f.nome));
+        funcBox.appendChild(lbl);
+      });
+    }
+    renderFuncCheckboxes('');
+    searchFunc.addEventListener('input',function(){ renderFuncCheckboxes(this.value); });
+    sheet.appendChild(funcBox);
 
     // Itens
     var lblItens=document.createElement('div'); lblItens.className='cl-edit-label'; lblItens.textContent='Itens';
@@ -3929,18 +3957,18 @@ function clAbrirEditor(clId){
     saveBtn.onclick=function(){
       var novoTitulo=(inpTitulo.value||'').trim();
       if(!novoTitulo){ showToast('Informe o título!','#f7a34f'); inpTitulo.focus(); return; }
-      var novoFuncId=selFunc.value;
-      var novoFuncNome='';
-      if(novoFuncId){
-        var fEncontrado=funcionarios.find(function(f){return String(f.id)===String(novoFuncId);});
-        if(fEncontrado) novoFuncNome=fEncontrado.nome;
-      }
-      // Update itens — remove empty
+      if(!selectedIds.length){ showToast('Selecione pelo menos 1 funcionário!','#f7a34f'); return; }
       var itensValidos=itensEdit.filter(function(i){return (i.texto||'').trim();});
       if(!itensValidos.length){ showToast('Adicione pelo menos 1 item!','#f7a34f'); return; }
       cl.titulo=novoTitulo;
-      cl.funcId=novoFuncId;
-      cl.funcNome=novoFuncNome;
+      cl.funcIds=selectedIds;
+      cl.funcId=selectedIds[0];
+      var funcNomes=selectedIds.map(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===fid;})||{};
+        return fo.nome||'';
+      });
+      cl.funcNomes=funcNomes;
+      cl.funcNome=funcNomes[0]||'';
       cl.itens=itensValidos.map(function(i){return {id:i.id,texto:i.texto.trim(),feito:i.feito};});
       clPersistir();
       clRender();
@@ -4283,7 +4311,7 @@ function clRenomear(clId){
   inp.style.cssText='width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:10px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:1rem;padding:11px 13px;outline:none;box-sizing:border-box;margin-bottom:10px;';
   sheet.appendChild(inp);
   var saveBtn=document.createElement('button');
-  saveBtn.style.cssText='width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;';
+  saveBtn.style.cssText="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:12px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;";
   saveBtn.textContent='✔ Salvar';
   saveBtn.onclick=function(){
     var v=(inp.value||'').trim();
@@ -4299,6 +4327,95 @@ function clRenomear(clId){
   overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
   document.body.appendChild(overlay);
   setTimeout(function(){ inp.focus(); inp.select(); },100);
+}
+
+function clEditarFuncionarios(clId){
+  var cl=clData.find(function(x){return x.id===clId;});
+  if(!cl) return;
+
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;display:flex;align-items:flex-end;justify-content:center;';
+
+  var sheet=document.createElement('div');
+  sheet.style.cssText='background:var(--surface);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;';
+
+  // Título
+  var title=document.createElement('div');
+  title.style.cssText='font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;color:var(--text);margin-bottom:4px;';
+  title.textContent='👥 Funcionários — '+cl.titulo;
+  sheet.appendChild(title);
+
+  var sub=document.createElement('div');
+  sub.style.cssText='font-size:0.72rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;margin-bottom:14px;';
+  sub.textContent='Selecione quem deve ver este checklist';
+  sheet.appendChild(sub);
+
+  // Busca
+  var searchInp=document.createElement('input');
+  searchInp.type='text';
+  searchInp.placeholder='🔍 Buscar funcionário...';
+  searchInp.style.cssText='width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:8px 10px;outline:none;box-sizing:border-box;margin-bottom:8px;';
+  sheet.appendChild(searchInp);
+
+  // Lista de checkboxes
+  var listBox=document.createElement('div');
+  listBox.style.cssText='background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px;max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:14px;';
+
+  // IDs atualmente selecionados
+  var currentIds=(cl.funcIds&&cl.funcIds.length>0)?cl.funcIds:[cl.funcId];
+
+  function renderCheckboxes(q){
+    listBox.innerHTML='';
+    var lista=funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+    if(q) lista=lista.filter(function(f){return (f.nome||'').toLowerCase().includes(q.toLowerCase());});
+    if(!lista.length){
+      listBox.innerHTML='<div style="color:var(--muted);font-size:0.78rem;padding:4px;">Nenhum funcionário encontrado.</div>';
+      return;
+    }
+    lista.forEach(function(f){
+      var lbl=document.createElement('label');
+      lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.83rem;color:var(--text);';
+      var checked=currentIds.some(function(id){return String(id)===String(f.id);});
+      lbl.innerHTML='<input type="checkbox" value="'+f.id+'" '+(checked?'checked':'')+' style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;"> '+escHtml(f.nome);
+      lbl.querySelector('input').addEventListener('change',function(){
+        if(this.checked){
+          if(!currentIds.some(function(id){return String(id)===String(f.id);})) currentIds.push(String(f.id));
+        } else {
+          currentIds=currentIds.filter(function(id){return String(id)!==String(f.id);});
+        }
+      });
+      listBox.appendChild(lbl);
+    });
+  }
+
+  renderCheckboxes('');
+  searchInp.addEventListener('input',function(){ renderCheckboxes(this.value); });
+  sheet.appendChild(listBox);
+
+  // Botão salvar
+  var saveBtn=document.createElement('button');
+  saveBtn.style.cssText='width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;';
+  saveBtn.textContent='✔ Salvar';
+  saveBtn.onclick=function(){
+    if(!currentIds.length){ showToast('Selecione pelo menos 1 funcionário!','#f7a34f'); return; }
+    cl.funcIds=currentIds.map(String);
+    cl.funcId=cl.funcIds[0];
+    var funcNomes=cl.funcIds.map(function(fid){
+      var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
+      return fo.nome||'';
+    });
+    cl.funcNomes=funcNomes;
+    cl.funcNome=funcNomes[0]||'';
+    clPersistir(); clRender();
+    document.body.removeChild(overlay);
+    showToast('✅ Funcionários atualizados!');
+  };
+  sheet.appendChild(saveBtn);
+
+  overlay.appendChild(sheet);
+  overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+  document.body.appendChild(overlay);
+  setTimeout(function(){ searchInp.focus(); },100);
 }
 
 function clCriarRecompensa(){

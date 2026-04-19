@@ -3655,32 +3655,69 @@ function clRender(){
     var copyBtn=document.createElement('button'); copyBtn.className='cl-link-btn';
     copyBtn.textContent='🔗 Link';
     (function(cl2){ copyBtn.onclick=function(){
-      // Se multi-func, mostrar opções
       var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
       if(ids.length===1){ clCopiarLink(ids[0],cl2.id); return; }
+      // Multi-func: mostrar menu de seleção
       var base=window.location.href.split('?')[0];
-      var links=ids.map(function(fid){
-        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
-        return (fo.nome||fid)+': '+base+'?func='+fid+'&cl='+cl2.id;
-      }).join('\n');
-      _copiarFallback(links);
-      showToast('🔗 Links copiados!');
+      var menu=document.createElement('div');
+      menu.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid var(--accent);border-radius:12px;padding:16px;z-index:9999;min-width:260px;max-width:90vw;';
+      menu.innerHTML='<div style="font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.85rem;margin-bottom:12px;color:var(--accent);">🔗 Copiar link para:</div>';
+      ids.forEach(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{nome:fid};
+        var btn2=document.createElement('button');
+        btn2.style.cssText='display:block;width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:9px 12px;cursor:pointer;margin-bottom:6px;text-align:left;';
+        btn2.textContent='👤 '+(fo.nome||fid);
+        btn2.onclick=function(){ _copiarFallback(base+'?func='+fid+'&cl='+cl2.id); showToast('🔗 Link copiado!'); document.body.removeChild(overlay); };
+        menu.appendChild(btn2);
+      });
+      var cancelBtn=document.createElement('button');
+      cancelBtn.style.cssText='display:block;width:100%;background:none;border:none;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;padding:6px;cursor:pointer;margin-top:4px;';
+      cancelBtn.textContent='Cancelar';
+      cancelBtn.onclick=function(){ document.body.removeChild(overlay); };
+      menu.appendChild(cancelBtn);
+      var overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;';
+      overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+      overlay.appendChild(menu);
+      document.body.appendChild(overlay);
     }; })(cl);
     var waBtn=document.createElement('button'); waBtn.className='cl-link-btn';
     var telFunc=(func.tel||'').replace(/\D/g,'');
     if(telFunc){ waBtn.style.borderColor='rgba(37,211,102,0.4)'; waBtn.style.color='#25d366'; }
     waBtn.textContent='📲 WhatsApp';
-    (function(cl2,tit,nom,tel){ waBtn.onclick=function(){
+    (function(cl2,tit){ waBtn.onclick=function(){
       var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
       var base=window.location.href.split('?')[0];
-      if(ids.length===1){ clAbrirWhatsApp(ids[0],cl2.id,tit,nom,tel); return; }
-      var links=ids.map(function(fid){
-        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{};
-        return '*'+escHtml(fo.nome||fid)+'*: '+base+'?func='+fid+'&cl='+cl2.id;
-      }).join('\n');
-      var msg='📋 *'+tit+'*\n\n'+links+'\n\n_Gestão Bávaro_';
-      window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(msg),'_blank');
-    }; })(cl,cl.titulo,func.nome,telFunc);
+      if(ids.length===1){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(ids[0]);})||{};
+        var tel=(fo.tel||'').replace(/\D/g,'');
+        clAbrirWhatsApp(ids[0],cl2.id,tit,fo.nome||'',tel);
+        return;
+      }
+      // Multi-func: mostrar menu
+      var menu=document.createElement('div');
+      menu.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid rgba(37,211,102,0.4);border-radius:12px;padding:16px;z-index:9999;min-width:260px;max-width:90vw;';
+      menu.innerHTML='<div style="font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.85rem;margin-bottom:12px;color:#25d366;">📲 Enviar link para:</div>';
+      ids.forEach(function(fid){
+        var fo=funcionarios.find(function(f){return String(f.id)===String(fid);})||{nome:fid};
+        var tel=(fo.tel||'').replace(/\D/g,'');
+        var btn2=document.createElement('button');
+        btn2.style.cssText='display:block;width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;padding:9px 12px;cursor:pointer;margin-bottom:6px;text-align:left;';
+        btn2.textContent='👤 '+(fo.nome||fid)+(tel?'':' ⚠️ sem tel');
+        btn2.onclick=function(){ clAbrirWhatsApp(fid,cl2.id,tit,fo.nome||'',tel); document.body.removeChild(overlay); };
+        menu.appendChild(btn2);
+      });
+      var cancelBtn=document.createElement('button');
+      cancelBtn.style.cssText='display:block;width:100%;background:none;border:none;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;padding:6px;cursor:pointer;margin-top:4px;';
+      cancelBtn.textContent='Cancelar';
+      cancelBtn.onclick=function(){ document.body.removeChild(overlay); };
+      menu.appendChild(cancelBtn);
+      var overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;';
+      overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+      overlay.appendChild(menu);
+      document.body.appendChild(overlay);
+    }; })(cl,cl.titulo);
     linkRow.appendChild(editBtn); linkRow.appendChild(renameBtn); linkRow.appendChild(resetBtn); linkRow.appendChild(copyBtn); linkRow.appendChild(waBtn);
     bodyDiv.appendChild(linkRow);
 
@@ -4479,10 +4516,8 @@ function clVerificarModoFunc(){
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
 
-  // Se veio com ?checklist=ID, abrir aba checklist e expandir o card
   if(checklistId && !funcId){
     showTab('checklist');
-    // Expandir o card específico após renderizar
     window._clOpen[checklistId]=true;
     setTimeout(function(){
       var card=document.getElementById('clcard-'+checklistId);
@@ -4494,50 +4529,38 @@ function clVerificarModoFunc(){
   if(!funcId) return;
 
   window._funcMode = funcId;
-
-  // Hide main app, show func screen
   document.getElementById('app').style.display='none';
-  var screen=document.getElementById('func-screen');
-  screen.classList.add('show');
+  document.getElementById('func-screen').classList.add('show');
 
-  // Listener em tempo real para checklists compartilhados
-  if(fbDb && !window._clLiveUnsubscribe){
-    window._clLiveUnsubscribe = fbDb.collection('configuracoes').doc('clData').onSnapshot(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        var cloud=doc.data().data;
-        if(Array.isArray(cloud)){
-          clData=cloud;
-          // Só re-renderiza se não há checkbox sendo marcado agora
-          if(!window._clItemChanging) clRenderFuncScreen(funcId, clId);
-        }
-      }
-    },function(){});
+  function renderQuandoPronto(){
+    clRenderFuncScreen(funcId, clId);
   }
 
-  // Load from Firebase then render
   if(fbDb){
+    // Carregar clData
     fbDb.collection('configuracoes').doc('clData').get().then(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        clData=doc.data().data;
-      }
-      clRenderFuncScreen(funcId, clId);
-    }).catch(function(){
-      clRenderFuncScreen(funcId, clId);
-    });
-    // Also load funcionarios from Firebase
+      if(doc&&doc.exists&&doc.data()&&doc.data().data) clData=doc.data().data||[];
+      renderQuandoPronto();
+    }).catch(function(){ renderQuandoPronto(); });
+
+    // Carregar funcionarios
     fbDb.collection('funcionarios').get().then(function(snap){
-      snap.forEach(function(doc){ if(doc.exists){ var d=doc.data(); if(d&&d.id) funcionarios.push(d); } });
-      clRenderFuncScreen(funcId, clId);
+      funcionarios=[];
+      snap.forEach(function(doc){ if(doc.exists){var d=doc.data();if(d&&d.id) funcionarios.push(d);} });
+      renderQuandoPronto();
     }).catch(function(){});
-    // Load recompensas
-    fbDb.collection('configuracoes').doc('clRecomp').get().then(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        var d=doc.data().data; recompensas=d.recompensas||[]; resgates=d.resgates||[];
-      }
-      clRenderFuncScreen(funcId, clId);
-    }).catch(function(){});
+
+    // Listener tempo real
+    if(!window._clLiveUnsubscribe){
+      window._clLiveUnsubscribe = fbDb.collection('configuracoes').doc('clData').onSnapshot(function(doc){
+        if(doc&&doc.exists&&doc.data()&&doc.data().data){
+          clData=doc.data().data||[];
+          if(!window._clItemChanging) clRenderFuncScreen(funcId, clId);
+        }
+      },function(){});
+    }
   } else {
-    clRenderFuncScreen(funcId, clId);
+    renderQuandoPronto();
   }
 }
 

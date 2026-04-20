@@ -49,7 +49,8 @@ header{background:rgba(8,8,8,0.97);backdrop-filter:blur(20px);-webkit-backdrop-f
 .tab-btn .icon{font-size:1rem;}
 .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
 .tab-content{display:none;padding:16px 14px;}
-.tab-content.active{display:block;}
+.tab-content.active{display:block;animation:tabFadeIn 0.18s ease-out;}
+@keyframes tabFadeIn{from{opacity:0;}to{opacity:1;}}
 
 /* LOADING */
 .loading-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:16px;}
@@ -3819,7 +3820,6 @@ function clAbrirEditor(clId){
   // Working copy of itens
   var itensEdit=cl.itens.map(function(i){return {id:i.id,texto:i.texto,feito:i.feito};});
 
-  // IDs selecionados — fora do render() para persistir entre re-renders
   var selectedIds=(cl.funcIds&&cl.funcIds.length>0)?cl.funcIds.map(String):[cl.funcId?String(cl.funcId):''];
 
   function render(){
@@ -3916,7 +3916,6 @@ function clAbrirEditor(clId){
       var novoTitulo=(inpTitulo.value||'').trim();
       if(!novoTitulo){ showToast('Informe o título!','#f7a34f'); inpTitulo.focus(); return; }
       if(!selectedIds.length){ showToast('Selecione pelo menos 1 funcionário!','#f7a34f'); return; }
-      // Update itens — remove empty
       var itensValidos=itensEdit.filter(function(i){return (i.texto||'').trim();});
       if(!itensValidos.length){ showToast('Adicione pelo menos 1 item!','#f7a34f'); return; }
       cl.titulo=novoTitulo;
@@ -4600,7 +4599,6 @@ function clVerificarModoFunc(){
   if(!funcId) return;
 
   window._funcMode = funcId;
-  // Esconder home-screen que fica na frente
   var homeEl=document.getElementById('home-screen');
   if(homeEl){ homeEl.classList.add('hidden'); homeEl.style.display='none'; }
   document.getElementById('app').style.display='none';
@@ -5106,6 +5104,56 @@ var _fbInterval = setInterval(function(){
     console.warn('Firebase nao carregou apos 30s');
   }
 }, 500);
+
+// ── SWIPE ENTRE ABAS ──
+(function(){
+  var TABS=['lista','vf','cvt','checklist','estoque','faltas'];
+  var sx=0, sy=0, st=0, moved=false;
+
+  function curIdx(){
+    for(var i=0;i<TABS.length;i++){
+      var el=document.getElementById('tab-'+TABS[i]);
+      if(el&&el.classList.contains('active')) return i;
+    }
+    return 0;
+  }
+
+  document.addEventListener('touchstart',function(e){
+    var fs=document.getElementById('func-screen');
+    if(fs&&fs.classList.contains('show')) return;
+    var tag=e.target.tagName;
+    if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||tag==='BUTTON') return;
+    sx=e.touches[0].clientX;
+    sy=e.touches[0].clientY;
+    st=Date.now();
+    moved=false;
+  },{passive:true});
+
+  document.addEventListener('touchmove',function(e){
+    if(!sx) return;
+    var dx=Math.abs(e.touches[0].clientX-sx);
+    var dy=Math.abs(e.touches[0].clientY-sy);
+    if(dx>dy&&dx>10) moved=true;
+  },{passive:true});
+
+  document.addEventListener('touchend',function(e){
+    if(!sx||!moved){sx=0;moved=false;return;}
+    var dx=e.changedTouches[0].clientX-sx;
+    var dy=e.changedTouches[0].clientY-sy;
+    var dt=Date.now()-st;
+    sx=0;moved=false;
+    if(Math.abs(dx)<50||Math.abs(dy)>Math.abs(dx)*0.7||dt>500) return;
+    var ci=curIdx();
+    var root=document.documentElement;
+    if(dx<0&&ci<TABS.length-1){
+      root.style.setProperty('--fade-dir','20px');
+      showTab(TABS[ci+1]);
+    } else if(dx>0&&ci>0){
+      root.style.setProperty('--fade-dir','-20px');
+      showTab(TABS[ci-1]);
+    }
+  },{passive:true});
+})();
 </script>
 <button class="admin-badge hidden" id="admin-badge" onclick="adminLogout()">&#128081; Admin &#8212; Sair</button>
 </body>

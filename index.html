@@ -3750,7 +3750,7 @@ function clRender(){
       var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
       if(ids.length===1){ clCopiarLink(ids[0],cl2.id); return; }
       // Multi-func: mostrar menu de seleção
-      var base=window.location.href.split('?')[0];
+      var base=window.location.href.split('?')[0].split('#')[0];
       var menu=document.createElement('div');
       menu.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1.5px solid var(--accent);border-radius:12px;padding:16px;z-index:9999;min-width:260px;max-width:90vw;';
       menu.innerHTML='<div style="font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.85rem;margin-bottom:12px;color:var(--accent);">🔗 Copiar link para:</div>';
@@ -3779,7 +3779,7 @@ function clRender(){
     waBtn.textContent='📲 WhatsApp';
     (function(cl2,tit){ waBtn.onclick=function(){
       var ids=cl2.funcIds&&cl2.funcIds.length>1?cl2.funcIds:[cl2.funcId];
-      var base=window.location.href.split('?')[0];
+      var base=window.location.href.split('?')[0].split('#')[0];
       if(ids.length===1){
         var fo=funcionarios.find(function(f){return String(f.id)===String(ids[0]);})||{};
         var tel=(fo.tel||'').replace(/\D/g,'');
@@ -4693,14 +4693,14 @@ function clExcluir(clId){
 }
 
 function clCopiarLink(funcId, clId){
-  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId;
+  var url=window.location.href.split('?')[0].split('#')[0]+'?func='+funcId+'&cl='+clId;
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(url).then(function(){ showToast('🔗 Link copiado!'); }).catch(function(){ _copiarFallback(url); });
   } else { _copiarFallback(url); }
 }
 
 function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
-  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId;
+  var url=window.location.href.split('?')[0].split('#')[0]+'?func='+funcId+'&cl='+clId;
   var msg='Olá '+nomeFunc+'! Segue o link do seu checklist: *'+titulo+'*\n'+url;
   var tel=(telFunc||'').replace(/\D/g,'');
   // Se tem número BR, adiciona 55 se necessário
@@ -4716,7 +4716,12 @@ function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
 window._funcMode = null;
 
 function clVerificarModoFunc(){
-  var params=new URLSearchParams(window.location.search);
+  // Suporte a query string (?func=) e hash (#func=)
+  var search=window.location.search;
+  var hash=window.location.hash.replace('#','');
+  // Se não tem query mas tem hash, usa hash como query
+  if(!search && hash && hash.includes('func=')) search='?'+hash;
+  var params=new URLSearchParams(search);
   var funcId=params.get('func');
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
@@ -4921,7 +4926,7 @@ function clRenderFuncScreen(funcId, clId){
               var nomeF=func?func.nome:'Funcionário';
               var motivo=(document.getElementById('motivo-'+cl2.id)||{}).value||cl2.motivo||'';
               var obs=(document.getElementById('obs-'+cl2.id)||{}).value||cl2.obsExtra||'';
-              var appLink=window.location.href.split('?')[0]+'?checklist='+cl2.id;
+              var appLink=window.location.href.split('?')[0].split('#')[0]+'?checklist='+cl2.id;
               var msg='✅ *'+nomeF+'* concluiu o checklist *"'+cl2.titulo+'"* e aguarda sua aprovação!\n\n'
                 +'🔗 Abrir no app: '+appLink+'\n\nAbra o app para aprovar ou reprovar. 👆';
               if(motivo) msg+='\n\n⚠️ *Motivo não concluídos:*\n'+motivo;

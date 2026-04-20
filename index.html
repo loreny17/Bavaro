@@ -1325,26 +1325,48 @@ function renderVFFuncSelecionado(){
   var ferLista=(d.feriados||[]).length?'<div class="item-list">'+(d.feriados||[]).map(function(fe){return'<div class="item-chip"><span class="chip-val" style="background:rgba(245,158,11,0.15);color:#f59e0b;border-color:rgba(245,158,11,0.4)">🏛️</span><span class="chip-date">'+fmtDataBR(fe.data)+'</span><span class="chip-desc">'+(fe.desc||'')+'</span><button class="chip-remove" onclick="removerFeriado('+f.id+',\''+fe.id+'\')">✕</button></div>';}).join('')+'</div>':'';
   el.innerHTML=
     '<div class="vf-func-card">'+
-    '<div class="vf-func-card-header"><div class="employee-avatar" style="width:36px;height:36px;font-size:0.82rem">'+ini+'</div>'+
-    '<div style="flex:1;min-width:0"><div class="vfc-name">'+f.nome+'</div><div class="vfc-cargo">'+(f.cargo||'Sem cargo')+'</div></div>'+
-    '<button class="vfc-close" onclick="fecharFuncVF()">✕</button></div>'+
+    '<div class="vf-func-card-header">'+
+      '<div class="employee-avatar" style="width:34px;height:34px;font-size:0.8rem">'+ini+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="vfc-name">'+f.nome+'</div><div class="vfc-cargo">'+(f.cargo||'Sem cargo')+'</div></div>'+
+      '<button onclick="gerarPDF('+f.id+')" title="PDF" style="background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:4px 6px;">📄</button>'+
+      '<button class="vfc-close" onclick="fecharFuncVF()">✕</button>'+
+    '</div>'+
     '<div class="vfc-body">'+
-    '<div class="vfc-totals"><div class="vfc-total money"><div class="tv">'+fmtMoney(totV)+'</div><div class="tl">Total Vales</div></div><div class="vfc-total faltas"><div class="tv">'+totF+'</div><div class="tl">Faltas</div></div></div>'+
-    '<button class="vfc-pdf-btn" onclick="gerarPDF('+f.id+')">📄 PDF individual — '+f.nome.split(' ')[0]+'</button>'+
-    '<div class="add-block"><div class="add-block-title money">💰 Adicionar Vale</div>'+
-    '<div class="add-grid"><div><label style="font-size:0.62rem">Valor (R$)</label><input type="number" id="vale-val-'+f.id+'" placeholder="0,00" min="0" step="0.01"></div>'+
-    '<div><label style="font-size:0.62rem">Data</label><input type="date" id="vale-data-'+f.id+'"></div></div>'+
-    '<div class="add-full"><input type="text" id="vale-desc-'+f.id+'" placeholder="Descrição (opcional)"></div>'+
-    '<button class="add-submit money-btn" onclick="adicionarVale('+f.id+')">+ Adicionar Vale</button>'+vLista+'</div>'+
-    '<div class="add-block"><div class="add-block-title falta">❌ Adicionar Falta</div>'+
-    '<div class="add-grid"><div><label style="font-size:0.62rem">Data da falta</label><input type="date" id="falta-data-'+f.id+'"></div>'+
-    '<div><label style="font-size:0.62rem">Motivo</label><input type="text" id="falta-desc-'+f.id+'" placeholder="opcional"></div></div>'+
-    '<button class="add-submit falta-btn" onclick="adicionarFalta('+f.id+')">+ Registrar Falta</button>'+fLista+'</div>'+
-    '<div class="add-block"><div class="add-block-title" style="color:#f59e0b;border-color:rgba(245,158,11,0.3)">🏛️ Feriado Trabalhado</div>'+
-    '<div class="add-grid"><div><label style="font-size:0.62rem">Data do feriado</label><input type="date" id="fer-data-'+f.id+'"></div>'+
-    '<div><label style="font-size:0.62rem">Nome do feriado</label><input type="text" id="fer-desc-'+f.id+'" placeholder="ex: Tiradentes"></div></div>'+
-    '<button class="add-submit" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);color:#f59e0b" onclick="adicionarFeriado('+f.id+')">+ Registrar Feriado</button>'+ferLista+'</div>'+
+    '<div class="vfc-totals">'+
+      '<div class="vfc-total money"><div class="tv">'+fmtMoney(totV)+'</div><div class="tl">Total Vales</div></div>'+
+      '<div class="vfc-total faltas"><div class="tv">'+totF+'</div><div class="tl">Faltas</div></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px;">'+
+      '<button onclick="vfcToggle(this,\'vale-form-'+f.id+'\')" style="flex:1;background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);border-radius:8px;color:var(--accent);font-family:\'Space Grotesk\',sans-serif;font-size:0.75rem;font-weight:700;padding:8px 4px;cursor:pointer;">💰 Vale ▾</button>'+
+      '<button onclick="vfcToggle(this,\'falta-form-'+f.id+'\')" style="flex:1;background:rgba(255,68,68,0.08);border:1.5px solid rgba(255,68,68,0.25);border-radius:8px;color:var(--danger);font-family:\'Space Grotesk\',sans-serif;font-size:0.75rem;font-weight:700;padding:8px 4px;cursor:pointer;">❌ Falta ▾</button>'+
+      '<button onclick="vfcToggle(this,\'fer-form-'+f.id+'\')" style="flex:1;background:rgba(245,158,11,0.08);border:1.5px solid rgba(245,158,11,0.25);border-radius:8px;color:#f59e0b;font-family:\'Space Grotesk\',sans-serif;font-size:0.75rem;font-weight:700;padding:8px 4px;cursor:pointer;">🏛️ Feriado ▾</button>'+
+    '</div>'+
+    '<div id="vale-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
+      '<div class="add-grid"><div><label style="font-size:0.62rem">Valor (R$)</label><input type="number" id="vale-val-'+f.id+'" placeholder="0,00" min="0" step="0.01"></div>'+
+      '<div><label style="font-size:0.62rem">Data</label><input type="date" id="vale-data-'+f.id+'"></div></div>'+
+      '<div class="add-full"><input type="text" id="vale-desc-'+f.id+'" placeholder="Descrição (opcional)"></div>'+
+      '<button class="add-submit money-btn" onclick="adicionarVale('+f.id+')">+ Adicionar Vale</button>'+
+    '</div>'+
+    '<div id="falta-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
+      '<div class="add-grid"><div><label style="font-size:0.62rem">Data da falta</label><input type="date" id="falta-data-'+f.id+'"></div>'+
+      '<div><label style="font-size:0.62rem">Motivo</label><input type="text" id="falta-desc-'+f.id+'" placeholder="opcional"></div></div>'+
+      '<button class="add-submit falta-btn" onclick="adicionarFalta('+f.id+')">+ Registrar Falta</button>'+
+    '</div>'+
+    '<div id="fer-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
+      '<div class="add-grid"><div><label style="font-size:0.62rem">Data do feriado</label><input type="date" id="fer-data-'+f.id+'"></div>'+
+      '<div><label style="font-size:0.62rem">Nome do feriado</label><input type="text" id="fer-desc-'+f.id+'" placeholder="ex: Tiradentes"></div></div>'+
+      '<button class="add-submit" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);color:#f59e0b" onclick="adicionarFeriado('+f.id+')">+ Registrar Feriado</button>'+
+    '</div>'+
+    vLista+fLista+ferLista+
     '</div></div>';
+}
+
+function vfcToggle(btn, formId){
+  var form=document.getElementById(formId);
+  if(!form) return;
+  var open=form.style.display!=='none';
+  form.style.display=open?'none':'block';
+  btn.style.opacity=open?'1':'0.6';
 }
 
 function fecharFuncVF(){vfFuncSelecionado=null;document.getElementById('vf-search').value='';document.getElementById('vf-func-selected').innerHTML='';}

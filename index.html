@@ -3879,39 +3879,17 @@ function clAbrirEditor(clId){
     // Funcionário
     var lblFunc=document.createElement('div'); lblFunc.className='cl-edit-label'; lblFunc.textContent='Funcionário';
     sheet.appendChild(lblFunc);
-    // IDs selecionados — inicializa fora do render para persistir entre re-renders
-    var selectedIds=(cl.funcIds&&cl.funcIds.length>0)?cl.funcIds.map(String):[cl.funcId?String(cl.funcId):''];
-
-    var searchFunc=document.createElement('input');
-    searchFunc.type='text'; searchFunc.placeholder='\uD83D\uDD0D Buscar funcionário...';
-    searchFunc.className='cl-edit-inp';
-    searchFunc.style.marginBottom='6px';
-    sheet.appendChild(searchFunc);
-
-    var funcBox=document.createElement('div');
-    funcBox.style.cssText='background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px;max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:10px;';
-
-    function renderFuncBox(q){
-      funcBox.innerHTML='';
-      funcionarios.slice().sort(function(a,b){return(a.nome||'').localeCompare(b.nome||'');}).forEach(function(f){
-        if(q&&!(f.nome||'').toLowerCase().includes(q.toLowerCase())) return;
-        var lbl=document.createElement('label');
-        lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:0.83rem;color:var(--text);';
-        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=String(f.id);
-        cb.style.cssText='accent-color:var(--accent);width:15px;height:15px;cursor:pointer;';
-        cb.checked=selectedIds.indexOf(String(f.id))>=0;
-        cb.addEventListener('change',function(){
-          if(this.checked){ if(selectedIds.indexOf(String(f.id))<0) selectedIds.push(String(f.id)); }
-          else { selectedIds=selectedIds.filter(function(id){return id!==String(f.id);}); }
-        });
-        lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(' '+f.nome));
-        funcBox.appendChild(lbl);
-      });
-    }
-    renderFuncBox('');
-    searchFunc.addEventListener('input',function(){ renderFuncBox(this.value); });
-    sheet.appendChild(funcBox);
+    var selFunc=document.createElement('select'); selFunc.className='cl-edit-inp';
+    selFunc.style.cursor='pointer';
+    var optVazio=document.createElement('option'); optVazio.value=''; optVazio.textContent='Selecionar funcionário...';
+    selFunc.appendChild(optVazio);
+    funcionarios.forEach(function(f){
+      var opt=document.createElement('option');
+      opt.value=f.id; opt.textContent=f.nome;
+      if(String(f.id)===String(cl.funcId)) opt.selected=true;
+      selFunc.appendChild(opt);
+    });
+    sheet.appendChild(selFunc);
 
     // Itens
     var lblItens=document.createElement('div'); lblItens.className='cl-edit-label'; lblItens.textContent='Itens';
@@ -3951,15 +3929,18 @@ function clAbrirEditor(clId){
     saveBtn.onclick=function(){
       var novoTitulo=(inpTitulo.value||'').trim();
       if(!novoTitulo){ showToast('Informe o título!','#f7a34f'); inpTitulo.focus(); return; }
-      if(!selectedIds.length){ showToast('Selecione pelo menos 1 funcionário!','#f7a34f'); return; }
+      var novoFuncId=selFunc.value;
+      var novoFuncNome='';
+      if(novoFuncId){
+        var fEncontrado=funcionarios.find(function(f){return String(f.id)===String(novoFuncId);});
+        if(fEncontrado) novoFuncNome=fEncontrado.nome;
+      }
       // Update itens — remove empty
       var itensValidos=itensEdit.filter(function(i){return (i.texto||'').trim();});
       if(!itensValidos.length){ showToast('Adicione pelo menos 1 item!','#f7a34f'); return; }
       cl.titulo=novoTitulo;
-      cl.funcIds=selectedIds;
-      cl.funcId=selectedIds[0];
-      cl.funcNome=funcionarios.reduce(function(n,f){return String(f.id)===selectedIds[0]?f.nome:n;},'');
-      cl.funcNomes=selectedIds.map(function(fid){return funcionarios.reduce(function(n,f){return String(f.id)===fid?f.nome:n;},'');});
+      cl.funcId=novoFuncId;
+      cl.funcNome=novoFuncNome;
       cl.itens=itensValidos.map(function(i){return {id:i.id,texto:i.texto.trim(),feito:i.feito};});
       clPersistir();
       clRender();
@@ -4622,6 +4603,15 @@ function clVerificarModoFunc(){
   var funcId=params.get('func');
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
+  // DEBUG — mostra na tela o que foi detectado
+  console.log('clVerificarModoFunc: search='+window.location.search+' funcId='+funcId+' clId='+clId);
+  if(funcId){
+    var dbg=document.createElement('div');
+    dbg.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;z-index:9999;padding:8px;font-size:12px;font-family:monospace;';
+    dbg.textContent='DEBUG: func='+funcId+' cl='+clId;
+    document.body.appendChild(dbg);
+    setTimeout(function(){document.body.removeChild(dbg);},5000);
+  }
 
   if(checklistId && !funcId){
     showTab('checklist');

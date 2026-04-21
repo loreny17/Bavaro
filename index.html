@@ -44,11 +44,11 @@ header{background:rgba(8,8,8,0.97);backdrop-filter:blur(20px);-webkit-backdrop-f
 .storage-fill.danger{background:var(--danger);}
 
 /* TABS */
-.tabs{display:flex;border-bottom:1px solid var(--border);background:rgba(8,8,8,0.98);backdrop-filter:blur(20px);position:sticky;top:80px;z-index:99;padding:0 4px;}
-.tab-btn{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.58rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:10px 2px 11px;cursor:pointer;transition:color 0.2s,border-color 0.2s;display:flex;flex-direction:column;align-items:center;gap:3px;}
-.tab-btn .icon{font-size:1rem;}
-.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
-.tab-content{display:none;padding:12px 14px 80px;}
+.tabs{display:flex;border-top:1px solid var(--border);background:rgba(8,8,8,0.98);backdrop-filter:blur(20px);position:fixed;bottom:0;left:0;right:0;z-index:99;padding:0 4px;padding-bottom:env(safe-area-inset-bottom);}
+.tab-btn{flex:1;background:none;border:none;border-top:2px solid transparent;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.52rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:8px 2px 10px;cursor:pointer;transition:color 0.2s,border-color 0.2s;display:flex;flex-direction:column;align-items:center;gap:3px;}
+.tab-btn .icon{font-size:1.2rem;}
+.tab-btn.active{color:var(--accent);border-top-color:var(--accent);}
+.tab-content{display:none;padding:12px 14px 90px;}
 .tab-content.active{display:block;animation:tabFadeIn 0.18s ease-out;}
 @keyframes tabFadeIn{from{opacity:0;}to{opacity:1;}}
 
@@ -499,6 +499,8 @@ body.admin-mode .admin-only{display:flex!important;}
 .est-cat-block{background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;margin-bottom:10px;overflow:hidden;transition:border-color 0.2s;}
 .est-cat-block.tem-baixo{border-color:rgba(255,68,68,0.35);}
 .est-cat-header{display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;user-select:none;}
+.est-cat-pdf-btn{background:none;border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.8rem;padding:3px 6px;cursor:pointer;transition:border-color 0.2s,color 0.2s;flex-shrink:0;}
+.est-cat-pdf-btn:hover{border-color:var(--accent);color:var(--accent);}
 .est-cat-header:active{opacity:0.8;}
 .est-cat-header-info{flex:1;min-width:0;}
 .est-cat-header-nome{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1rem;color:var(--text);}
@@ -770,14 +772,6 @@ body.admin-mode .admin-only{display:flex!important;}
   </div>
 </header>
 
-<div class="tabs">
-  <button class="tab-btn active" onclick="showTab('lista')" id="tab-btn-funcionarios"><span class="icon">📋</span><span id="lista-label">Funcionários</span></button>
-  <button class="tab-btn" onclick="showTab('vf')"><span class="icon">💰</span>Vales/Faltas</button>
-  <button class="tab-btn" onclick="showTab('cvt')"><span class="icon">🚌</span>VT/Taxas</button>
-  <button class="tab-btn" onclick="showTab('checklist')"><span class="icon">✅</span><span id="cl-tab-label">Checklist</span></button>
-  <button class="tab-btn" onclick="showTab('estoque')" id="btn-tab-estoque"><span class="icon">📦</span><span id="estoque-badge-tab">Estoque</span></button>
-  <button class="tab-btn" onclick="showTab('faltas')"><span class="icon">⚠️</span><span id="faltas-tab-label">Faltas</span></button>
-</div>
 
 <!-- TAB CADASTRO -->
 <div class="tab-content" id="tab-cadastro">
@@ -1061,17 +1055,6 @@ body.admin-mode .admin-only{display:flex!important;}
 
   <div id="est-add-form-wrap"></div>
   <div id="est-itens-lista"></div>
-
-  <div id="est-pedido-btns-spacer" style="height:0px;"></div>
-</div>
-
-<!-- ESTOQUE PDF FIXED BAR -->
-<div id="est-pedido-btns" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg);z-index:90;border-top:2px solid var(--border2);pointer-events:none;">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px 2px;">
-    <span style="color:var(--muted);font-size:0.72rem;font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.04em;">PEDIDOS PDF</span>
-    <button id="est-pdf-arrow" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:3px 10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;pointer-events:auto;">▼</button>
-  </div>
-  <div id="est-pdf-btns-body" style="padding:4px 14px 10px;pointer-events:auto;"></div>
 </div>
 
 <!-- TAB FALTAS -->
@@ -1183,16 +1166,8 @@ function showTab(tab){
   if(tab==='vf')renderVF();
   if(tab==='cvt')renderCVT();
   if(tab==='checklist')clRender();
-  if(tab==='estoque'){estRenderCatPills();estRenderAddForm();estRenderItens();estRenderReports();}
+  if(tab==='estoque'){estRenderCatPills();estRenderAddForm();estRenderItens();}
   if(tab==='faltas') faltasRender();
-  // Hide PDF fixed bar when not in estoque
-  if(tab!=='estoque'){
-    var bar=document.getElementById('est-pedido-btns');
-    var sp=document.getElementById('est-pedido-btns-spacer');
-    if(bar) bar.style.display='none';
-    if(sp) sp.style.height='0px';
-  }
-  
 }
 
 // ═══ ARQUIVOS ═══
@@ -2173,7 +2148,7 @@ abrirDB().then(migrarLocalStorage)
     funcionarios=r[0]||[];
     document.getElementById('loading-screen').classList.add('hidden');
     renderLista();renderVF();atualizarStorageBar();estCarregar();estAtualizarBadge();atualizarHomeBadges();adminInit();clCarregar();clAddItemRow();clVerificarModoFunc();
-    setTimeout(function(){var h=document.querySelector('header');var t=document.querySelector('.tabs');if(h&&t)t.style.top=h.getBoundingClientRect().height+'px';},100);
+    
     // CVT loaded via carregarCVT()
   })
   .catch(function(err){
@@ -2548,8 +2523,20 @@ function estRenderItens(){
       +'<div class="est-cat-header-badges">'
         +(baixos?'<span class="est-cat-badge-baixo">'+baixos+' baixo</span>':'')
         +'<span class="est-cat-badge-total">'+allItens.length+'</span>'
+        +'<button class="est-cat-pdf-btn" title="Gerar PDF desta categoria">📄</button>'
       +'</div>'
       +'<span class="est-cat-arrow'+(isOpen?' open':'')+'">&#9660;</span>';
+
+    // PDF button click
+    (function(catId){
+      setTimeout(function(){
+        var pdfBtn=header.querySelector('.est-cat-pdf-btn');
+        if(pdfBtn) pdfBtn.addEventListener('click',function(e){
+          e.stopPropagation();
+          estGerarPedido(catId);
+        });
+      },0);
+    })(cat.id);
 
     // Toque no nome para renomear (admin)
     if(_isAdmin){
@@ -3275,7 +3262,7 @@ function adminAtualizarUI(){
   setTimeout(function(){
     var header=document.querySelector('header');
     var tabs=document.querySelector('.tabs');
-    if(header&&tabs) tabs.style.top=header.getBoundingClientRect().height+'px';
+    // tabs agora ficam no rodapé, não precisa ajustar top
   },50);
   var fab=document.getElementById('fab-novo-func');
   var tabLista=document.getElementById('tab-lista');
@@ -5320,6 +5307,14 @@ var _fbInterval = setInterval(function(){
 })();
 </script>
 <button class="admin-badge hidden" id="admin-badge" onclick="adminLogout()">&#128081; Admin &#8212; Sair</button>
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('lista')" id="tab-btn-funcionarios"><span class="icon">📋</span><span id="lista-label">Funcionários</span></button>
+  <button class="tab-btn" onclick="showTab('vf')"><span class="icon">💰</span>Vales/Faltas</button>
+  <button class="tab-btn" onclick="showTab('cvt')"><span class="icon">🚌</span>VT/Taxas</button>
+  <button class="tab-btn" onclick="showTab('checklist')"><span class="icon">✅</span><span id="cl-tab-label">Checklist</span></button>
+  <button class="tab-btn" onclick="showTab('estoque')" id="btn-tab-estoque"><span class="icon">📦</span><span id="estoque-badge-tab">Estoque</span></button>
+  <button class="tab-btn" onclick="showTab('faltas')"><span class="icon">⚠️</span><span id="faltas-tab-label">Faltas</span></button>
+</div>
 </body>
 </html>
 

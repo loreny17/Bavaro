@@ -1370,10 +1370,10 @@ function renderVFFuncSelecionado(){
     '<div class="vf-func-card-header">'+
       '<div class="employee-avatar" style="width:34px;height:34px;font-size:0.8rem">'+ini+'</div>'+
       '<div style="flex:1;min-width:0"><div class="vfc-name">'+f.nome+'</div><div class="vfc-cargo">'+(f.cargo||'Sem cargo')+'</div></div>'+
-      '<button onclick="gerarPDF('+f.id+')" title="PDF" style="background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:4px 6px;">📄</button>'+
       '<button class="vfc-close" onclick="fecharFuncVF()">✕</button>'+
     '</div>'+
     '<div class="vfc-body">'+
+    '<button onclick="gerarPDF('+f.id+')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;background:rgba(220,38,38,0.12);border:1.5px solid rgba(220,38,38,0.35);border-radius:8px;color:#f87171;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;padding:9px;cursor:pointer;margin-bottom:10px;letter-spacing:0.04em;">📄 Gerar PDF Individual</button>'+
     '<div class="vfc-totals">'+
       '<div class="vfc-total money"><div class="tv">'+fmtMoney(totV)+'</div><div class="tl">Total Vales</div></div>'+
       '<div class="vfc-total faltas"><div class="tv">'+totF+'</div><div class="tl">Faltas</div></div>'+
@@ -1548,33 +1548,145 @@ function gerarPDF(funcIdOuNull){
     var meses=nomesMeses();
     var mesNome=meses[vfMonth-1].toLowerCase()+' de '+vfYear;
     var k=vfKey(),hoje=new Date().toLocaleDateString('pt-BR');
-    var lista=funcIdOuNull?funcionarios.filter(function(f){return f.id===funcIdOuNull;}):funcionarios;
+
+    // ── PDF INDIVIDUAL (vermelho) ──
+    if(funcIdOuNull){
+      var f=funcionarios.find(function(x){return x.id===funcIdOuNull;});
+      if(!f){showToast('❌ Funcionário não encontrado','#f75a5a');return;}
+      var d=vfData[k]&&vfData[k][f.id];
+      var vales=d?(d.vales||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
+      var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
+      var feriados=d?(d.feriados||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
+      var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
+      var totF=faltas.length;
+      var totFer=feriados.length;
+
+      var trVales=vales.length
+        ? vales.map(function(v){
+            var p=v.data.split('-');
+            return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+'</td>'
+              +'<td style="text-align:right;color:#4ade80;font-weight:700">R$ '+parseFloat(v.val).toFixed(2).replace('.',',')+'</td>'
+              +'<td style="color:#94a3b8">'+(v.desc||'—')+'</td></tr>';
+          }).join('')
+        : '<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:14px">Nenhum vale neste período</td></tr>';
+
+      var trFaltas=faltas.length
+        ? faltas.map(function(fa){
+            var p=fa.data.split('-');
+            var dt=new Date(fa.data+'T12:00:00');
+            var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];
+            return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+' <span style="color:#94a3b8;font-size:11px">('+dia+')</span></td>'
+              +'<td style="color:#f87171;font-weight:700;text-align:center">Falta</td>'
+              +'<td style="color:#94a3b8">'+(fa.desc||'—')+'</td></tr>';
+          }).join('')
+        : '<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:14px">Nenhuma falta neste período</td></tr>';
+
+      var trFeriados=feriados.length
+        ? feriados.map(function(fe){
+            var p=fe.data.split('-');
+            return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+'</td>'
+              +'<td style="color:#f59e0b;font-weight:700;text-align:center">Feriado</td>'
+              +'<td style="color:#94a3b8">'+(fe.desc||'—')+'</td></tr>';
+          }).join('')
+        : '';
+
+      var html='<!DOCTYPE html><html lang="pt-BR"><head>'
+        +'<meta charset="UTF-8">'
+        +'<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
+        +'<title>'+f.nome+' — '+mesNome+'</title>'
+        +'<style>'
+        +'*{box-sizing:border-box;margin:0;padding:0}'
+        +'body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:0}'
+        +'.page{max-width:600px;margin:0 auto;padding:20px 16px}'
+        +'.header{background:linear-gradient(135deg,#3b0a0a,#1f0505);border:1.5px solid rgba(220,38,38,0.4);border-radius:10px;padding:20px;text-align:center;margin-bottom:16px}'
+        +'.header h1{font-size:22px;font-weight:700;color:#f87171;letter-spacing:0.08em;margin-bottom:2px}'
+        +'.header .cargo{font-size:13px;color:#fca5a5;margin:2px 0 6px}'
+        +'.header p{font-size:12px;color:#94a3b8;margin:2px 0}'
+        +'.totais{display:flex;gap:10px;margin-bottom:16px}'
+        +'.tot-box{flex:1;border-radius:8px;padding:12px;text-align:center;border:1px solid}'
+        +'.tot-vales{background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.25)}'
+        +'.tot-faltas{background:rgba(220,38,38,0.08);border-color:rgba(220,38,38,0.25)}'
+        +'.tot-feriados{background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.25)}'
+        +'.tot-val{font-size:18px;font-weight:700;line-height:1.2}'
+        +'.tot-vales .tot-val{color:#4ade80}'
+        +'.tot-faltas .tot-val{color:#f87171}'
+        +'.tot-feriados .tot-val{color:#f59e0b}'
+        +'.tot-lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-top:3px}'
+        +'.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#f87171;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid rgba(220,38,38,0.25)}'
+        +'.sec{margin-bottom:16px}'
+        +'table{width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden}'
+        +'thead tr{background:#1c0808}'
+        +'th{padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#f87171;text-transform:uppercase;letter-spacing:0.06em}'
+        +'tbody tr:nth-child(odd){background:#111827}'
+        +'tbody tr:nth-child(even){background:#1a2235}'
+        +'td{padding:9px 12px;font-size:13px;border-top:1px solid #1e293b;word-break:break-word;vertical-align:middle}'
+        +'.btn-wrap{margin-bottom:14px}'
+        +'.btn-pdf{display:block;width:100%;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;text-align:center}'
+        +'.footer{text-align:center;font-size:10px;color:#4b5563;margin-top:14px}'
+        +'@page{margin:0;padding:0}'
+        +'@media print{'
+        +'*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}'
+        +'html,body{background:#0f172a!important;color:#e2e8f0!important;margin:0!important;padding:0!important}'
+        +'.page{padding:12px!important}'
+        +'.btn-wrap{display:none!important}'
+        +'}'
+        +'</style></head><body>'
+        +'<div class="page">'
+        +'<div class="btn-wrap"><button class="btn-pdf" onclick="window.print()">📄 Salvar como PDF</button></div>'
+        +'<div class="header">'
+        +'<h1>'+f.nome+'</h1>'
+        +'<div class="cargo">'+(f.cargo||'Sem cargo')+'</div>'
+        +'<p>📅 Período: '+mesNome+'</p>'
+        +'<p>Gerado em '+hoje+' • Gestão Bávaro</p>'
+        +'</div>'
+        +'<div class="totais">'
+        +'<div class="tot-box tot-vales"><div class="tot-val">R$ '+totV.toFixed(2).replace('.',',')+'</div><div class="tot-lbl">Total Vales</div></div>'
+        +'<div class="tot-box tot-faltas"><div class="tot-val">'+totF+'</div><div class="tot-lbl">Faltas</div></div>'
+        +(totFer>0?'<div class="tot-box tot-feriados"><div class="tot-val">'+totFer+'</div><div class="tot-lbl">Feriados</div></div>':'')
+        +'</div>'
+        +'<div class="sec"><div class="sec-title">💰 Vales</div>'
+        +'<table><thead><tr><th>Data</th><th style="text-align:right">Valor</th><th>Descrição</th></tr></thead>'
+        +'<tbody>'+trVales+'</tbody>'
+        +'</table></div>'
+        +'<div class="sec"><div class="sec-title">❌ Faltas'+(totFer>0?' &amp; 🏛️ Feriados':'')+'</div>'
+        +'<table><thead><tr><th>Data</th><th style="text-align:center">Tipo</th><th>Descrição</th></tr></thead>'
+        +'<tbody>'+trFaltas+(feriados.length?trFeriados:'')+'</tbody>'
+        +'</table></div>'
+        +'</div></body></html>';
+
+      var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+      var url=URL.createObjectURL(blob);
+      window.open(url,'_blank');
+      setTimeout(function(){URL.revokeObjectURL(url);},10000);
+      showToast('📄 PDF individual aberto!','#f87171');
+      return;
+    }
+
+    // ── PDF GERAL / CONTABILIDADE (verde) ──
+    var lista=funcionarios;
     var totalGeralV=0,totalGeralF=0,linhas=[];
     lista.forEach(function(f){
       var d=vfData[k]&&vfData[k][f.id];
       var tv=d?(d.vales||[]).reduce(function(s,v){return s+parseFloat(v.val||0);},0):0;
       var faltas=d?(d.faltas||[]):[];
       var tf=faltas.length;
-      if(funcIdOuNull||(tv>0||tf>0)){
+      if(tv>0||tf>0){
         totalGeralV+=tv;totalGeralF+=tf;
-        var fStr=tf===0?'-':tf+' - '+faltas.slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fa){var p=fa.data.split('-');var dt=new Date(fa.data+'T12:00:00');var sab=dt.getDay()===6?' (Sábado)':'';return p[2]+'/'+p[1]+sab;}).join(', ');
+        var fStr=tf===0?'-':tf+' — '+faltas.slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fa){var p=fa.data.split('-');var dt=new Date(fa.data+'T12:00:00');var sab=dt.getDay()===6?' (Sáb)':'';return p[2]+'/'+p[1]+sab;}).join(', ');
         linhas.push({nome:f.nome,tv:tv,tf:tf,fStr:fStr});
       }
     });
-    var trs=linhas.map(function(l){return'<tr><td class="td-nome">'+l.nome+'</td><td class="td-val">'+(l.tv>0?'R$ '+l.tv.toFixed(2).replace('.',','):'R$ 0,00')+'</td><td class="td-fal">'+l.fStr+'</td></tr>';}).join('');
-    if(!trs)trs='<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:20px">Nenhum registro para este período</td></tr>';
-    var titulo = funcIdOuNull ? 'Relatório Individual' : 'Relatório Consolidado';
-    var trs = linhas.map(function(l){
+    var trs=linhas.map(function(l){
       return '<tr><td>'+l.nome+'</td>'
         +'<td style="text-align:right;color:#4ade80;font-weight:600">'+(l.tv>0?'R$ '+l.tv.toFixed(2).replace('.',','):'R$ 0,00')+'</td>'
         +'<td style="text-align:left;color:'+(l.tf>0?'#f87171':'#9ca3af')+'">'+l.fStr+'</td></tr>';
     }).join('');
     if(!trs) trs='<tr><td colspan="3" style="text-align:center;color:#6b7280;padding:16px;font-style:italic">Nenhum registro para este período</td></tr>';
 
-    var html = '<!DOCTYPE html><html lang="pt-BR"><head>'
+    var html='<!DOCTYPE html><html lang="pt-BR"><head>'
       +'<meta charset="UTF-8">'
       +'<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
-      +'<title>'+titulo+' — '+mesNome+'</title>'
+      +'<title>Relatório Consolidado — '+mesNome+'</title>'
       +'<style>'
       +'*{box-sizing:border-box;margin:0;padding:0}'
       +'body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:0}'
@@ -1588,7 +1700,7 @@ function gerarPDF(funcIdOuNull){
       +'thead tr{background:#1e3a2f}'
       +'th{padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#4ade80;text-transform:uppercase;letter-spacing:0.06em}'
       +'th:nth-child(2){text-align:right}'
-      +'th:nth-child(3){text-align:center}'
+      +'th:nth-child(3){text-align:left}'
       +'tbody tr:nth-child(odd){background:#111827}'
       +'tbody tr:nth-child(even){background:#1a2235}'
       +'td{padding:10px 12px;font-size:13px;border-top:1px solid #1e293b;word-break:break-word;vertical-align:top}'
@@ -1609,27 +1721,25 @@ function gerarPDF(funcIdOuNull){
       +'</style></head><body>'
       +'<div class="page">'
       +'<div class="btn-wrap"><button class="btn-pdf" onclick="window.print()">📄 Salvar como PDF</button></div>'
-      +'<div class="header">'
-      +'<h1>GESTÃO BÁVARO</h1>'
-      +'<p>'+titulo.toUpperCase()+' — Vales e Faltas</p>'
+      +'<div class="header"><h1>GESTÃO BÁVARO</h1>'
+      +'<p>RELATÓRIO CONSOLIDADO — VALES E FALTAS</p>'
       +'<p>Período: '+mesNome+'</p>'
       +'</div>'
       +'<table>'
-      +'<thead><tr><th>Funcionário</th><th style="text-align:right">Total Vales</th><th style="text-align:center">Faltas</th></tr></thead>'
+      +'<thead><tr><th>Funcionário</th><th style="text-align:right">Total Vales</th><th>Faltas</th></tr></thead>'
       +'<tbody>'+trs+'</tbody>'
       +'<tfoot><tr><td>TOTAL</td>'
       +'<td style="text-align:right">R$ '+totalGeralV.toFixed(2).replace('.',',')+'</td>'
-      +'<td style="text-align:center;color:#f87171">'+totalGeralF+'</td>'
+      +'<td style="color:#f87171">'+totalGeralF+' falta'+(totalGeralF!==1?'s':'')+'</td>'
       +'</tr></tfoot>'
       +'</table>'
       +'<div class="footer">Gerado em '+hoje+' • Gestão Bávaro</div>'
-      +'</div>'
-      
-    +'</body></html>'
-    var blob = new Blob([html], {type:'text/html;charset=utf-8'});
-    var url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+      +'</div></body></html>';
+
+    var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    var url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    setTimeout(function(){URL.revokeObjectURL(url);},10000);
     showToast('📄 Relatório aberto!');
   }catch(err){console.error(err);showToast('❌ Erro ao gerar','#f75a5a');}
   finally{if(btn){btn.disabled=false;btn.innerHTML='📄 Gerar PDF Geral — Contabilidade';}}

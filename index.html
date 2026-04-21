@@ -359,7 +359,7 @@ body.admin-mode .admin-only{display:flex!important;}
 .vfc-body{padding:12px 14px;}
 .vfc-totals{display:flex;gap:8px;margin-bottom:10px;}
 .vfc-total{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;text-align:center;}
-.vfc-total .tv{font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:1rem;line-height:1.2;}
+.vfc-total .tv{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.78rem;line-height:1.2;}
 .vfc-total .tl{font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;}
 .vfc-total.money .tv{color:var(--accent);}
 .vfc-total.faltas .tv{color:var(--danger);}
@@ -1576,16 +1576,23 @@ function _buildPaginaValesIndividual(f, k, mesNome, hoje, pgLabel){
   var d=vfData[k]&&vfData[k][f.id];
   var vales=d?(d.vales||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
-  var feriados=d?(d.feriados||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-  var totF=faltas.length, totFer=feriados.length;
-  var trVales=vales.length
-    ? vales.map(function(v){var p=v.data.split('-');return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+'</td><td style="text-align:right;color:#4ade80;font-weight:700">R$ '+parseFloat(v.val).toFixed(2).replace('.',',')+'</td><td style="color:#94a3b8">'+(v.desc||'—')+'</td></tr>';}).join('')
-    : '<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:12px">Nenhum vale neste período</td></tr>';
-  var trFaltas=faltas.length
-    ? faltas.map(function(fa){var p=fa.data.split('-');var dt=new Date(fa.data+'T12:00:00');var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+' <span style="color:#94a3b8;font-size:11px">('+dia+')</span></td><td style="color:#f87171;font-weight:700;text-align:center">Falta</td><td style="color:#94a3b8">'+(fa.desc||'—')+'</td></tr>';}).join('')
-    : '<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:12px">Nenhuma falta neste período</td></tr>';
-  var trFeriados=feriados.map(function(fe){var p=fe.data.split('-');return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+'</td><td style="color:#f59e0b;font-weight:700;text-align:center">Feriado</td><td style="color:#94a3b8">'+(fe.desc||'—')+'</td></tr>';}).join('');
+  var totF=faltas.length;
+
+  // Build faltas string same style as general PDF
+  var fStr=totF===0?'—':totF+' — '+faltas.map(function(fa){
+    var p=fa.data.split('-');
+    var dt=new Date(fa.data+'T12:00:00');
+    var sab=dt.getDay()===6?' (Sáb)':'';
+    return p[2]+'/'+p[1]+sab;
+  }).join(', ');
+
+  var tr='<tr>'
+    +'<td style="white-space:nowrap">'+f.nome+'</td>'
+    +'<td style="text-align:right;white-space:nowrap;color:#4ade80;font-weight:600">R$ '+totV.toFixed(2).replace('.',',')+'</td>'
+    +'<td style="color:'+(totF>0?'#f87171':'#9ca3af')+'">'+fStr+'</td>'
+    +'</tr>';
+
   return '<div class="pagina">'
     +'<div class="header" style="background:linear-gradient(135deg,#3b0a0a,#1f0505);border:1.5px solid rgba(220,38,38,0.4)">'
     +'<h1 style="color:#f87171">'+f.nome+'</h1>'
@@ -1593,17 +1600,19 @@ function _buildPaginaValesIndividual(f, k, mesNome, hoje, pgLabel){
     +'<p>📅 Período: '+mesNome+'</p>'
     +'<p>Gerado em '+hoje+' • Gestão Bávaro</p>'
     +'</div>'
-    +'<div class="totais">'
-    +'<div class="tot-box tot-vales"><div class="tot-val">R$ '+totV.toFixed(2).replace('.',',')+'</div><div class="tot-lbl">Total Vales</div></div>'
-    +'<div class="tot-box tot-faltas"><div class="tot-val">'+totF+'</div><div class="tot-lbl">Faltas</div></div>'
-    +(totFer>0?'<div class="tot-box tot-feriados"><div class="tot-val">'+totFer+'</div><div class="tot-lbl">Feriados</div></div>':'')
-    +'</div>'
-    +'<div class="sec"><div class="sec-title red">💰 Vales</div>'
-    +'<table><thead style="background:#1c0808"><tr><th style="color:#f87171">Data</th><th style="color:#f87171;text-align:right">Valor</th><th style="color:#f87171">Descrição</th></tr></thead>'
-    +'<tbody>'+trVales+'</tbody></table></div>'
-    +'<div class="sec"><div class="sec-title red">❌ Faltas'+(totFer>0?' &amp; 🏛️ Feriados':'')+'</div>'
-    +'<table><thead style="background:#1c0808"><tr><th style="color:#f87171">Data</th><th style="color:#f87171;text-align:center">Tipo</th><th style="color:#f87171">Descrição</th></tr></thead>'
-    +'<tbody>'+trFaltas+trFeriados+'</tbody></table></div>'
+    +'<table>'
+    +'<thead style="background:#1c0808"><tr>'
+    +'<th style="color:#f87171">Funcionário</th>'
+    +'<th style="color:#f87171;text-align:right">Total Vales</th>'
+    +'<th style="color:#f87171">Faltas</th>'
+    +'</tr></thead>'
+    +'<tbody>'+tr+'</tbody>'
+    +'<tfoot style="background:#1c0808;border-top:2px solid #f87171"><tr>'
+    +'<td style="padding:10px 12px;font-weight:700;color:#f87171">TOTAL</td>'
+    +'<td style="padding:10px 12px;text-align:right;font-weight:700;color:#f87171">R$ '+totV.toFixed(2).replace('.',',')+'</td>'
+    +'<td style="padding:10px 12px;font-weight:700;color:'+(totF>0?'#f87171':'#9ca3af')+'">'+totF+' falta'+(totF!==1?'s':'')+'</td>'
+    +'</tr></tfoot>'
+    +'</table>'
     +'<div class="footer">'+pgLabel+' • Gerado em '+hoje+' • Gestão Bávaro</div>'
     +'</div>';
 }

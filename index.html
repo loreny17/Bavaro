@@ -72,8 +72,9 @@ header{background:rgba(8,8,8,0.97);backdrop-filter:blur(20px);-webkit-backdrop-f
 .home-card-info{flex:1;}
 .home-card-title{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:0.1em;color:var(--accent);line-height:1.1;display:flex;align-items:center;gap:10px;}
 .home-card-badge{background:rgba(212,168,67,0.18);border:1px solid rgba(212,168,67,0.3);color:var(--accent);font-family:'Space Grotesk',sans-serif;font-size:0.65rem;font-weight:700;padding:2px 8px;border-radius:20px;}
-.home-card-desc{font-size:0.78rem;color:var(--muted);margin-top:5px;line-height:1.4;}
+.home-card-desc{font-size:0.78rem;color:var(--muted);margin-top:5px;line-height:1.4;transition:color 0.2s;}
 .home-card-arrow{color:rgba(212,168,67,0.35);font-size:1.4rem;flex-shrink:0;}
+
 
 /* TYPOGRAPHY */
 .section-title{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:0.06em;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--text);}
@@ -717,7 +718,7 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="home-card-icon">📋</div>
       <div class="home-card-info">
         <div class="home-card-title">FUNCIONÁRIOS <span class="home-card-badge" id="home-badge-func">0</span></div>
-        <div class="home-card-desc">Gestão completa, cadastro e histórico</div>
+        <div class="home-card-desc" id="home-desc-func">Gestão completa, cadastro e histórico</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
@@ -725,7 +726,7 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="home-card-icon">💰</div>
       <div class="home-card-info">
         <div class="home-card-title">VALES E FALTAS</div>
-        <div class="home-card-desc">Registro de adiantamentos e ausências</div>
+        <div class="home-card-desc" id="home-desc-vf">Registro de adiantamentos e ausências</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
@@ -733,7 +734,7 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="home-card-icon">🚌</div>
       <div class="home-card-info">
         <div class="home-card-title">V.T E TAXA</div>
-        <div class="home-card-desc">Transporte e taxas administrativas</div>
+        <div class="home-card-desc" id="home-desc-cvt">Transporte e taxas administrativas</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
@@ -741,7 +742,7 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="home-card-icon">📦</div>
       <div class="home-card-info">
         <div class="home-card-title">ESTOQUE</div>
-        <div class="home-card-desc">Controle de produtos e pedidos</div>
+        <div class="home-card-desc" id="home-desc-est">Controle de produtos e pedidos</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
@@ -749,11 +750,12 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="home-card-icon">✅</div>
       <div class="home-card-info">
         <div class="home-card-title">CHECKLISTS <span class="home-card-badge" id="home-badge-cl">0</span></div>
-        <div class="home-card-desc">Tarefas e listas por funcionário</div>
+        <div class="home-card-desc" id="home-desc-cl">Tarefas e listas por funcionário</div>
       </div>
       <div class="home-card-arrow">›</div>
     </div>
   </div>
+
 </div>
 
 <div id="app">
@@ -5131,11 +5133,69 @@ window.addEventListener('load', function(){
 });
 function atualizarHomeBadges(){
   var b=document.getElementById('home-badge-func');
-  var clBadge=document.getElementById('home-badge-cl'); if(clBadge){ var clPend=clData.filter(function(cl){var f=cl.itens.filter(function(i){return i.feito;}).length; return f<cl.itens.length;}).length; clBadge.textContent=clPend; clBadge.style.display=clPend?'':'none'; }
-  if(!b) return;
-  var prev=b.textContent;
-  b.textContent=funcionarios.length;
-  if(prev!==String(funcionarios.length)) pulsarBadge();
+
+  // ── Funcionários ──
+  var totalFunc=funcionarios.length;
+  if(b){ var prev=b.textContent; b.textContent=totalFunc; if(prev!==String(totalFunc)) pulsarBadge(); }
+  var dFunc=document.getElementById('home-desc-func');
+  if(dFunc){
+    // Faltas hoje: contar funcionários com falta registrada no dia de hoje no mês atual
+    var hoje=new Date(); var mesAtual=hoje.getFullYear()+'-'+(hoje.getMonth()+1<10?'0':'')+(hoje.getMonth()+1);
+    var diaHoje=hoje.getDate();
+    var faltasHoje=0;
+    funcionarios.forEach(function(f){
+      var vfList=(vfData[f.id]||{})[mesAtual]||{};
+      (vfList.faltas||[]).forEach(function(fa){ if(new Date(fa.data).getDate()===diaHoje) faltasHoje++; });
+    });
+    var parts=[totalFunc+' ativo'+(totalFunc!==1?'s':'')];
+    if(faltasHoje>0) parts.push(faltasHoje+' falta'+(faltasHoje!==1?'s':'')+' hoje');
+    dFunc.textContent=parts.join(' · ');
+  }
+
+  // ── Checklists ──
+  var clBadge=document.getElementById('home-badge-cl');
+  var clPend=clData.filter(function(cl){ var f=cl.itens.filter(function(i){return i.feito;}).length; return f<cl.itens.length; }).length;
+  if(clBadge){ clBadge.textContent=clPend; clBadge.style.display=clPend?'':'none'; }
+  var dCl=document.getElementById('home-desc-cl');
+  if(dCl){
+    if(clPend>0) dCl.innerHTML='<span style="color:var(--accent);font-weight:700;">'+clPend+' pendente'+(clPend!==1?'s':'')+'</span>';
+    else dCl.innerHTML='<span style="color:var(--success);">Tudo em dia ✓</span>';
+  }
+
+  // ── Vales/Faltas ──
+  var dVf=document.getElementById('home-desc-vf');
+  if(dVf){
+    var mesAtual2=(new Date()).getFullYear()+'-'+((new Date()).getMonth()+1<10?'0':'')+((new Date()).getMonth()+1);
+    var totalVales=0;
+    Object.keys(vfData).forEach(function(fid){
+      var m=(vfData[fid]||{})[mesAtual2]||{};
+      (m.vales||[]).forEach(function(v){ totalVales+=parseFloat(v.valor||0); });
+    });
+    if(totalVales>0) dVf.innerHTML='<span style="color:var(--accent);font-weight:700;">R$ '+totalVales.toFixed(2).replace('.',',')+'</span> em aberto';
+    else dVf.textContent='Nenhum vale este mês';
+  }
+
+  // ── Estoque ──
+  var dEst=document.getElementById('home-desc-est');
+  if(dEst){
+    var baixos=0;
+    (estData.cats||[]).forEach(function(cat){ (cat.itens||[]).forEach(function(i){ if(Number(i.qtd)<=Number(i.min)) baixos++; }); });
+    if(baixos>0) dEst.innerHTML='<span style="color:var(--danger);font-weight:700;">'+baixos+' item'+(baixos!==1?'s':'')+' baixo'+(baixos!==1?'s':'')+'</span>';
+    else dEst.innerHTML='<span style="color:var(--success);">Estoque OK ✓</span>';
+  }
+
+  // ── VT/Taxas ──
+  var dCvt=document.getElementById('home-desc-cvt');
+  if(dCvt){
+    var mesAtual3=(new Date()).getFullYear()+'-'+((new Date()).getMonth()+1<10?'0':'')+((new Date()).getMonth()+1);
+    var pendVT=0;
+    funcionarios.forEach(function(f){
+      var m=(vfData[f.id]||{})[mesAtual3]||{};
+      if(m.vt && (m.vt.pago!==true)) pendVT++;
+    });
+    if(pendVT>0) dCvt.innerHTML='<span style="color:var(--accent);font-weight:700;">'+pendVT+' pendente'+(pendVT!==1?'s':'')+'</span>';
+    else dCvt.textContent='Transporte e taxas administrativas';
+  }
 }
 
 </script>

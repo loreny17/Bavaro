@@ -696,6 +696,7 @@ body.admin-mode .admin-only{display:flex!important;}
   var funcId=params.get('func');
   var hasAccess=false;
   try{ hasAccess=sessionStorage.getItem('bavaro_acesso')==='1'; }catch(e){}
+  // Se tem ?func= esconde PIN diretamente
   if(funcId){
     document.addEventListener('DOMContentLoaded',function(){
       var bs=document.getElementById('block-screen');
@@ -703,11 +704,22 @@ body.admin-mode .admin-only{display:flex!important;}
     });
     return;
   }
-  // Sessão ativa: esconde PIN apenas — restIniciar() cuida do resto
+  // Se já tem sessão: esconde PIN e mostra restaurante ou app
   if(hasAccess){
     document.addEventListener('DOMContentLoaded',function(){
       var bs=document.getElementById('block-screen');
       if(bs) bs.classList.add('hidden');
+      // Verifica se precisa mostrar seletor de restaurante
+      var lista=[];
+      try{ lista=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]'); }catch(e){}
+      var restSalvo=null;
+      try{ restSalvo=JSON.parse(localStorage.getItem('gestao_rest_ativo')); }catch(e){}
+      if(lista.length>1 && !restSalvo){
+        // Múltiplos restaurantes sem restaurante salvo → mostrar seletor
+        var rs=document.getElementById('rest-screen');
+        if(rs) rs.classList.remove('hidden');
+      }
+      // Se tem restaurante salvo ou só 1 restaurante, o app carrega normalmente
     });
   }
 })();
@@ -3797,11 +3809,11 @@ function clCarregarRestFirebase(restId){
 
 function clCarregarFirebase(){
   if(!fbDb) return;
-  // Em modo funcionário, não usar este listener — _funcCarregarDeLista cuida dos dados
-  if(window._funcMode) return;
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
   if(lista.length===0) lista=[{id:'bavaro',nome:'Bávaro',emoji:'🍺'}];
+  // Inicia seletor visual
   clIniciarSeletorRest();
+  // Carrega todos os restaurantes
   lista.forEach(function(r){ clCarregarRestFirebase(r.id); });
 }
 
@@ -4887,19 +4899,27 @@ function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
   }
 }
 
-// ── MODO FUNCIONÁRIO — detecta antes do Firebase ──
-window._funcMode = (function(){
-  try{
-    var p=new URLSearchParams(window.location.search);
-    return p.get('func')||null;
-  }catch(e){return null;}
-})();
+// ── MODO FUNCIONÁRIO ──
+window._funcMode = null;
 
 function clVerificarModoFunc(){
   var params=new URLSearchParams(window.location.search);
   var funcId=params.get('func');
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
+  var restId=params.get('rest');
+
+  // Se veio com ?rest=, setar restaurante correto antes de carregar dados
+  if(restId && !restauranteAtivo){
+    var lista=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+    var r=lista.find(function(x){return x.id===restId;});
+    if(r) restauranteAtivo=r;
+    else restauranteAtivo={id:restId, nome:'Restaurante', emoji:'🍽️'};
+  }
+  // Sem ?rest=, usa Bávaro (raiz)
+  if(!restauranteAtivo){
+    restauranteAtivo={id:'bavaro', nome:'Bávaro', emoji:'🍺'};
+  }
 
   if(checklistId && !funcId){
     showTab('checklist');
@@ -4922,21 +4942,16 @@ function clVerificarModoFunc(){
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
-  // Espera Firebase estar pronto (até 20 segundos)
-  var tentativas=0;
-  var iv=setInterval(function(){
-    tentativas++;
-    if(fbDb){
-      clearInterval(iv);
-      _funcCarregarERendar(funcId,clId);
-    } else if(tentativas===1){
-      // Tenta inicializar o Firebase se ainda não foi feito
-      try{ iniciarFirebase(); }catch(e){}
-    } else if(tentativas>40){
-      clearInterval(iv);
-      if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">❌ Erro ao conectar. Recarregue a página.</div>';
-    }
-  },500);
+  if(!fbDb){
+    var tentativas=0;
+    var iv=setInterval(function(){
+      tentativas++;
+      if(fbDb){ clearInterval(iv); _funcCarregarERendar(funcId,clId); }
+      else if(tentativas>30){ clearInterval(iv); clRenderFuncScreen(funcId,clId); }
+    },500);
+    return;
+  }
+  _funcCarregarERendar(funcId, clId);
 }
 
 function _funcCarregarERendar(funcId, clId){
@@ -4953,54 +4968,63 @@ function _funcCarregarERendar(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
-  // Busca lista de restaurantes de um documento fixo no Firebase
-  fbDb.collection('configuracoes').doc('restaurantes').get().then(function(doc){
+  // Descobre restaurantes pelo Firebase (não localStorage — funciona no celular do funcionário)
+  fbDb.collection('restaurantes').get().then(function(snap){
     var lista=[{id:'bavaro'}];
-    if(doc&&doc.exists&&doc.data()&&doc.data().lista){
-      doc.data().lista.forEach(function(r){
-        if(r.id&&r.id!=='bavaro') lista.push({id:r.id});
-      });
-    }
+    snap.forEach(function(d){ if(d.id) lista.push({id:d.id}); });
     _funcCarregarDeLista(lista, funcId, clId);
   }).catch(function(){
+    // Sem acesso à coleção restaurantes — tenta só Bávaro
     _funcCarregarDeLista([{id:'bavaro'}], funcId, clId);
   });
 }
 
 function _funcCarregarDeLista(lista, funcId, clId){
   var allCl=[], allFunc=[];
-  var total=lista.length*2, done=0;
-
-  function check(){
-    done++;
-    if(done<total) return;
-    // Tudo carregado — renderiza uma única vez
-    funcionarios=allFunc;
-    clData=allCl;
-    var sel=document.getElementById('func-rest-selector');
-    if(sel) sel.style.display='none';
-    clRenderFuncScreen(funcId,clId);
-  }
+  var total=lista.length, done=0;
 
   lista.forEach(function(r){
-    var col=(r.id==='bavaro')
-      ?fbDb.collection('configuracoes')
-      :fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
-    var colF=(r.id==='bavaro')
-      ?fbDb.collection('funcionarios')
-      :fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
+    var col=(r.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
+    var colF=(r.id==='bavaro')?fbDb.collection('funcionarios'):fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
+    var okCl=false,okF=false;
+
+    function check(){
+      if(!okCl||!okF) return;
+      done++;
+      if(done<total) return;
+      // Todos carregados
+      funcionarios=allFunc;
+      clData=allCl;
+      var sel=document.getElementById('func-rest-selector');
+      if(sel) sel.style.display='none';
+      clRenderFuncScreen(funcId,clId);
+      // Listeners tempo real para todos os restaurantes
+      lista.forEach(function(r2){
+        var col2=(r2.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r2.id).collection('configuracoes');
+        col2.doc('clData').onSnapshot(function(doc){
+          if(doc&&doc.exists&&doc.data()&&doc.data().data){
+            var novos=(doc.data().data||[]).map(function(c){c._restId=r2.id;return c;});
+            // Substitui os deste restaurante no array combinado
+            clData=clData.filter(function(c){return c._restId!==r2.id;}).concat(novos);
+            if(!window._clItemChanging) clRenderFuncScreen(funcId,clId);
+          }
+        },function(){});
+      });
+    }
 
     col.doc('clData').get().then(function(doc){
       if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        (doc.data().data||[]).forEach(function(c){c._restId=r.id; allCl.push(c);});
+        var items=doc.data().data||[];
+        items.forEach(function(c){c._restId=r.id;});
+        allCl=allCl.concat(items);
       }
-      check();
-    }).catch(function(){check();});
+      okCl=true; check();
+    }).catch(function(){okCl=true;check();});
 
-    colF.get().then(function(snap){
-      snap.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
-      check();
-    }).catch(function(){check();});
+    colF.get().then(function(snap2){
+      snap2.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
+      okF=true; check();
+    }).catch(function(){okF=true;check();});
   });
 }
 
@@ -5516,12 +5540,6 @@ function restCancelarNovo(){
   document.getElementById('rest-novo-emoji').value = '';
 }
 
-function _fbSalvarListaRestaurantes(){
-  if(!fbDb) return;
-  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-  fbDb.collection('configuracoes').doc('restaurantes').set({lista: lista}).catch(function(){});
-}
-
 function restConfirmarNovo(){
   var nome = document.getElementById('rest-novo-nome').value.trim();
   var emoji = document.getElementById('rest-novo-emoji').value.trim() || '🍽️';
@@ -5530,7 +5548,6 @@ function restConfirmarNovo(){
   var id = 'rest_' + Date.now();
   lista.push({id: id, nome: nome, emoji: emoji});
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-  _fbSalvarListaRestaurantes();
   restCancelarNovo();
   restRenderTela();
   showToast('✅ ' + nome + ' criado!', 'var(--success)');
@@ -5541,7 +5558,6 @@ function restDeletar(id){
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
   lista = lista.filter(function(r){ return r.id !== id; });
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-  _fbSalvarListaRestaurantes();
   restRenderTela();
 }
 
@@ -5611,48 +5627,27 @@ function restIniciar(){
   if(lista.length === 0){
     lista = [{id: 'bavaro', nome: 'Bávaro', emoji: '🍺'}];
     localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-    _fbSalvarListaRestaurantes();
   }
-
-  var hasAccess = false;
-  try{ hasAccess = sessionStorage.getItem('bavaro_acesso')==='1'; }catch(e){}
-
-  // Sem sessão ativa — PIN vai ser pedido, não faz nada aqui
-  if(!hasAccess) return;
-
-  // Com sessão ativa:
+  // Se só tem um restaurante, seta ativo direto
   if(lista.length === 1){
-    // Só 1 restaurante — entra direto
     restauranteAtivo = lista[0];
     localStorage.setItem('gestao_rest_ativo', JSON.stringify(lista[0]));
     var el = document.getElementById('header-rest-nome');
-    if(el) el.textContent = '— '+lista[0].emoji+' '+lista[0].nome;
+    if(el) el.textContent = '— ' + lista[0].emoji + ' ' + lista[0].nome;
     document.getElementById('rest-screen').classList.add('hidden');
-    document.getElementById('app').style.display = '';
-    var hs = document.getElementById('home-screen');
-    if(hs){ hs.style.display='flex'; setTimeout(function(){ hs.classList.remove('hidden'); initHomeAnims(); },10); }
     return;
   }
-
-  // Múltiplos restaurantes com sessão ativa
+  // Múltiplos restaurantes: se já tem sessão ativa e restaurante salvo, usa ele
+  // (PIN já foi digitado antes — usuário está trocando de restaurante)
   var restSalvo = null;
   try{ restSalvo = JSON.parse(localStorage.getItem('gestao_rest_ativo')); }catch(e){}
-
   if(restSalvo){
-    // Já tinha restaurante selecionado — entra direto
     restauranteAtivo = restSalvo;
     var el2 = document.getElementById('header-rest-nome');
-    if(el2) el2.textContent = '— '+restSalvo.emoji+' '+restSalvo.nome;
+    if(el2) el2.textContent = '— ' + restSalvo.emoji + ' ' + restSalvo.nome;
     document.getElementById('rest-screen').classList.add('hidden');
-    document.getElementById('app').style.display = '';
-    var hs2 = document.getElementById('home-screen');
-    if(hs2){ hs2.style.display='flex'; setTimeout(function(){ hs2.classList.remove('hidden'); initHomeAnims(); },10); }
-  } else {
-    // Sem restaurante salvo — mostra seletor
-    restRenderTela();
-    document.getElementById('rest-screen').classList.remove('hidden');
-    document.getElementById('app').style.display = 'none';
   }
+  // Se não tem restaurante salvo, a tela de seleção será mostrada pelo PIN
 }
 
 // ═══ FIREBASE SYNC ═══
@@ -5704,8 +5699,6 @@ function fbSalvarVF(){
 
 function _iniciarListeners(){
   if(!fbDb || !restauranteAtivo) return;
-  // Em modo funcionário, não iniciar listeners globais
-  if(window._funcMode) return;
 
   // Listener funcionarios
   var u1 = fbCol('funcionarios').onSnapshot(function(snap){
@@ -5745,8 +5738,6 @@ function iniciarFirebase(){
     fbDb = firebase.firestore();
     console.log('Firebase conectado!');
     fbExecutarFila();
-    // Em modo funcionário, não iniciar listeners do gestor
-    if(window._funcMode) return;
     showToast('☁️ Sincronizado', 'var(--surface3)');
     restIniciar();
     _iniciarListeners();

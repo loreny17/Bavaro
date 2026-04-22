@@ -4842,26 +4842,38 @@ function clVerificarModoFunc(){
 }
 
 function _funcCarregarERendar(funcId, clId){
+  // Garante que fbDb está pronto antes de usar fbCol
+  if(!fbDb){
+    var t=0;
+    var iv=setInterval(function(){
+      t++;
+      if(fbDb){ clearInterval(iv); _funcCarregarERendar(funcId,clId); }
+      else if(t>40){ clearInterval(iv); clRenderFuncScreen(funcId,clId); }
+    },300);
+    return;
+  }
+
   var clOk=false, funcOk=false;
 
   function tentar(){
     if(clOk && funcOk) clRenderFuncScreen(funcId, clId);
   }
 
-  // Carregar clData
+  // Carregar clData do restaurante correto
   fbCol('configuracoes').doc('clData').get().then(function(doc){
     if(doc&&doc.exists&&doc.data()&&doc.data().data) clData=doc.data().data||[];
+    else clData=[];
     clOk=true; tentar();
   }).catch(function(){ clOk=true; tentar(); });
 
-  // Carregar funcionarios
+  // Carregar funcionarios do restaurante correto
   fbCol('funcionarios').get().then(function(snap){
     funcionarios=[];
     snap.forEach(function(doc){ if(doc.exists){var d=doc.data();if(d&&d.id) funcionarios.push(d);} });
     funcOk=true; tentar();
   }).catch(function(){ funcOk=true; tentar(); });
 
-  // Listener tempo real após carregar
+  // Listener tempo real
   setTimeout(function(){
     if(!window._clLiveUnsubscribe){
       window._clLiveUnsubscribe = fbCol('configuracoes').doc('clData').onSnapshot(function(doc){
@@ -4873,7 +4885,6 @@ function _funcCarregarERendar(funcId, clId){
     }
   },2000);
 }
-
 function clRenderFuncScreen(funcId, clId){
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);})||null;
   var _diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];

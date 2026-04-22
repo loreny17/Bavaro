@@ -1570,21 +1570,17 @@ function _buildPaginaValesIndividual(f, k, mesNome, hoje, pgLabel){
   var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
   var totF=faltas.length;
-
-  // Build faltas string same style as general PDF
   var fStr=totF===0?'—':totF+' — '+faltas.map(function(fa){
     var p=fa.data.split('-');
     var dt=new Date(fa.data+'T12:00:00');
     var sab=dt.getDay()===6?' (Sáb)':'';
     return p[2]+'/'+p[1]+sab;
   }).join(', ');
-
   var tr='<tr>'
     +'<td style="white-space:nowrap">'+f.nome+'</td>'
     +'<td style="text-align:right;white-space:nowrap;color:#4ade80;font-weight:600">R$ '+totV.toFixed(2).replace('.',',')+'</td>'
     +'<td style="color:'+(totF>0?'#f87171':'#9ca3af')+'">'+fStr+'</td>'
     +'</tr>';
-
   return '<div class="pagina">'
     +'<div class="header" style="background:linear-gradient(135deg,#3b0a0a,#1f0505);border:1.5px solid rgba(220,38,38,0.4)">'
     +'<h1 style="color:#f87171">'+f.nome+'</h1>'
@@ -1613,7 +1609,16 @@ function _buildPaginaFeriadosIndividual(f, k, mesNome, hoje, pgLabel){
   var d=vfData[k]&&vfData[k][f.id];
   var feriados=d?(d.feriados||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var trs=feriados.length
-    ? feriados.map(function(fe){var p=fe.data.split('-');var dt=new Date(fe.data+'T12:00:00');var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];return '<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+' <span style="color:#94a3b8;font-size:11px">('+dia+')</span></td><td style="color:#f59e0b;font-weight:700;text-align:center">'+feriados.length+'</td><td style="color:#94a3b8">'+(fe.desc||'—')+'</td></tr>';}).join('')
+    ? feriados.map(function(fe){
+        var p=fe.data.split('-');
+        var dt=new Date(fe.data+'T12:00:00');
+        var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];
+        return '<tr>'
+          +'<td style="white-space:nowrap">'+p[2]+'/'+p[1]+'/'+p[0]+' <span style="color:#94a3b8;font-size:11px">('+dia+')</span></td>'
+          +'<td style="text-align:center;color:#f59e0b;font-weight:700">1</td>'
+          +'<td style="color:#f59e0b">'+(fe.desc||'—')+'</td>'
+          +'</tr>';
+      }).join('')
     : '<tr><td colspan="3" style="text-align:center;color:#6b7280;font-style:italic;padding:14px">Nenhum feriado trabalhado neste período</td></tr>';
   return '<div class="pagina">'
     +'<div class="header" style="background:linear-gradient(135deg,#2d1f00,#1a1200);border:1.5px solid rgba(245,158,11,0.3)">'
@@ -1622,12 +1627,19 @@ function _buildPaginaFeriadosIndividual(f, k, mesNome, hoje, pgLabel){
     +'<p>🏛️ FERIADOS TRABALHADOS</p>'
     +'<p>Período: '+mesNome+'</p>'
     +'</div>'
-    +'<div class="totais">'
-    +'<div class="tot-box tot-feriados" style="max-width:160px;margin:0 auto 16px"><div class="tot-val">'+feriados.length+'</div><div class="tot-lbl">Feriados Trabalhados</div></div>'
-    +'</div>'
-    +'<div class="sec"><div class="sec-title amber">🏛️ Dias Trabalhados em Feriado</div>'
-    +'<table><thead style="background:#2d1f00"><tr><th style="color:#f59e0b">Data</th><th style="color:#f59e0b;text-align:center">Qtd</th><th style="color:#f59e0b">Nome do Feriado</th></tr></thead>'
-    +'<tbody>'+trs+'</tbody></table></div>'
+    +'<table>'
+    +'<thead style="background:#2d1f00"><tr>'
+    +'<th style="color:#f59e0b">Data</th>'
+    +'<th style="color:#f59e0b;text-align:center">Qtd</th>'
+    +'<th style="color:#f59e0b">Nome do Feriado</th>'
+    +'</tr></thead>'
+    +'<tbody>'+trs+'</tbody>'
+    +'<tfoot style="background:#1a0f00;border-top:2px solid #f59e0b"><tr>'
+    +'<td style="padding:10px 12px;font-weight:700;color:#f59e0b">TOTAL</td>'
+    +'<td style="padding:10px 12px;text-align:center;font-weight:700;color:#f59e0b">'+feriados.length+'</td>'
+    +'<td></td>'
+    +'</tr></tfoot>'
+    +'</table>'
     +'<div class="footer">'+pgLabel+' • Gerado em '+hoje+' • Gestão Bávaro</div>'
     +'</div>';
 }

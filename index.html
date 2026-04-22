@@ -5397,8 +5397,17 @@ function restSelecionar(id){
   if(el) el.textContent = '— ' + r.emoji + ' ' + r.nome;
   // Esconde tela de restaurante
   document.getElementById('rest-screen').classList.add('hidden');
-  // Mostra tela de PIN
-  document.getElementById('block-screen').classList.remove('hidden');
+  // PIN: só pede se ainda não autenticou nesta sessão
+  var jaAutenticou = false;
+  try{ jaAutenticou = sessionStorage.getItem('bavaro_acesso') === '1'; }catch(e){}
+  if(!jaAutenticou){
+    document.getElementById('block-screen').classList.remove('hidden');
+  } else {
+    document.getElementById('block-screen').classList.add('hidden');
+    document.getElementById('app').style.display = '';
+    var hs = document.getElementById('home-screen');
+    if(hs){ hs.style.display='flex'; setTimeout(function(){ hs.classList.remove('hidden'); },10); }
+  }
   // Reinicializa Firebase com novo contexto
   _reiniciarFirebaseParaRestaurante();
 }
@@ -5412,12 +5421,19 @@ function voltarParaRestaurantes(){
   // Limpa dados em memória
   funcionarios = [];
   vfData = {};
+  cvtData = {vts:[], taxas:[]};
+  clData = [];
+  estData = {cats:[], grupos:[]};
+  estReports = [];
   renderLista();
+  // Esconde o app
+  document.getElementById('app').style.display = 'none';
+  var hs = document.getElementById('home-screen');
+  if(hs) hs.style.display = 'none';
   // Mostra tela de seleção
   restRenderTela();
   document.getElementById('rest-screen').classList.remove('hidden');
-  // Volta para tela de PIN ao entrar de novo
-  document.getElementById('block-screen').classList.remove('hidden');
+  document.getElementById('block-screen').classList.add('hidden');
 }
 
 function _reiniciarFirebaseParaRestaurante(){
@@ -5425,30 +5441,38 @@ function _reiniciarFirebaseParaRestaurante(){
   // Desinscreve listeners antigos
   _restListeners.forEach(function(u){ try{ u(); }catch(e){} });
   _restListeners = [];
+  // Limpa dados em memória para não mostrar dados do restaurante anterior
+  funcionarios = [];
+  vfData = {};
+  cvtData = {vts:[], taxas:[]};
+  clData = [];
+  estData = {cats:[], grupos:[]};
+  estReports = [];
+  renderLista();
   // Reinicia todos os listeners com novo contexto
   _iniciarListeners();
 }
 
 function restIniciar(){
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
-  // Migração: cria o Bávaro como padrão se não há lista
   if(lista.length === 0){
     lista = [{id: 'bavaro', nome: 'Bávaro', emoji: '🍺'}];
     localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
   }
-  // Se só tem um restaurante, entra direto (sem mostrar tela de seleção)
+  // Se só tem um restaurante, entra direto sem tela de seleção
   if(lista.length === 1){
     restauranteAtivo = lista[0];
     localStorage.setItem('gestao_rest_ativo', JSON.stringify(lista[0]));
     var el = document.getElementById('header-rest-nome');
     if(el) el.textContent = '— ' + lista[0].emoji + ' ' + lista[0].nome;
     document.getElementById('rest-screen').classList.add('hidden');
-    // PIN permanece visível normalmente
+    // PIN permanece (ou não) conforme sessionStorage — lógica já feita no script inline do head
     return;
   }
-  // Múltiplos restaurantes: mostra tela de seleção, esconde PIN até escolher
+  // Múltiplos restaurantes: mostra tela de seleção
   restRenderTela();
   document.getElementById('block-screen').classList.add('hidden');
+  document.getElementById('rest-screen').classList.remove('hidden');
 }
 
 // ═══ FIREBASE SYNC ═══

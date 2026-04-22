@@ -3689,14 +3689,16 @@ function clPersistir(){
 function clCarregarFirebase(){
   if(!fbDb) return;
   var u = fbCol('configuracoes').doc('clData').onSnapshot(function(doc){
-    if(doc&&doc.exists&&doc.data()&&doc.data().data){
+    if(doc&&doc.exists&&doc.data()&&doc.data().data!==undefined){
       var cloud=doc.data().data;
-      if(Array.isArray(cloud)&&cloud.length>0){
-        clData=cloud;
-        localStorage.setItem('clData',JSON.stringify(clData));
-        clRender();
-        if(window._funcMode) clRenderFuncScreen(window._funcMode);
-      }
+      clData=Array.isArray(cloud)?cloud:[];
+      localStorage.setItem('clData',JSON.stringify(clData));
+      clRender();
+      if(window._funcMode) clRenderFuncScreen(window._funcMode);
+    } else {
+      // Documento não existe neste restaurante — limpa
+      clData=[];
+      clRender();
     }
   },function(){});
   _restListeners.push(u);
@@ -4764,17 +4766,18 @@ function clExcluir(clId){
 }
 
 function clCopiarLink(funcId, clId){
-  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId;
+  var restParam = (restauranteAtivo && restauranteAtivo.id !== 'bavaro') ? '&rest='+restauranteAtivo.id : '';
+  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId+restParam;
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(url).then(function(){ showToast('🔗 Link copiado!'); }).catch(function(){ _copiarFallback(url); });
   } else { _copiarFallback(url); }
 }
 
 function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
-  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId;
+  var restParam = (restauranteAtivo && restauranteAtivo.id !== 'bavaro') ? '&rest='+restauranteAtivo.id : '';
+  var url=window.location.href.split('?')[0]+'?func='+funcId+'&cl='+clId+restParam;
   var msg='Olá '+nomeFunc+'! Segue o link do seu checklist: *'+titulo+'*\n'+url;
   var tel=(telFunc||'').replace(/\D/g,'');
-  // Se tem número BR, adiciona 55 se necessário
   if(tel && tel.length>=10){
     if(!tel.startsWith('55')) tel='55'+tel;
     window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
@@ -4791,6 +4794,19 @@ function clVerificarModoFunc(){
   var funcId=params.get('func');
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
+  var restId=params.get('rest');
+
+  // Se veio com ?rest=, setar restaurante correto antes de carregar dados
+  if(restId && !restauranteAtivo){
+    var lista=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+    var r=lista.find(function(x){return x.id===restId;});
+    if(r) restauranteAtivo=r;
+    else restauranteAtivo={id:restId, nome:'Restaurante', emoji:'🍽️'};
+  }
+  // Sem ?rest=, usa Bávaro (raiz)
+  if(!restauranteAtivo){
+    restauranteAtivo={id:'bavaro', nome:'Bávaro', emoji:'🍺'};
+  }
 
   if(checklistId && !funcId){
     showTab('checklist');
@@ -4810,12 +4826,10 @@ function clVerificarModoFunc(){
   document.getElementById('app').style.display='none';
   document.getElementById('func-screen').classList.add('show');
 
-  // Mostrar loading enquanto Firebase carrega
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
   if(!fbDb){
-    // Sem Firebase, esperar ele conectar
     var tentativas=0;
     var iv=setInterval(function(){
       tentativas++;

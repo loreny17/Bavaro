@@ -977,6 +977,12 @@ body.admin-mode .admin-only{display:flex!important;}
     <div class="cl-header-sub" id="cl-sub">Crie e gerencie listas para seus funcionários</div>
   </div>
 
+  <!-- Seletor de restaurante -->
+  <div id="cl-rest-selector" style="display:none;margin-bottom:12px;">
+    <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;font-family:'Space Grotesk',sans-serif;font-weight:600;">Restaurante</div>
+    <div id="cl-rest-pills" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+  </div>
+
   <!-- Filtro por dia -->
   <div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px;scrollbar-width:none;" id="cl-dias-filter">
     <button class="cl-dia-btn active" data-dia="todos" onclick="clFiltrarDia('todos')">Todos</button>
@@ -3687,26 +3693,109 @@ function clSalvar(){
 function clPersistir(){
   localStorage.setItem('clData', JSON.stringify(clData));
   if(fbDb){
-    fbCol('configuracoes').doc('clData').set({data:clData}).catch(function(){});
+    var restId = _clRestAtivo || (restauranteAtivo?restauranteAtivo.id:'bavaro');
+    var col = (restId==='bavaro')
+      ? fbDb.collection('configuracoes')
+      : fbDb.collection('restaurantes').doc(restId).collection('configuracoes');
+    col.doc('clData').set({data:clData}).catch(function(){});
+    // Atualiza cache local
+    _clRestDados[restId] = clData.slice();
   }
+}
+
+// ═══ CHECKLIST — seletor de restaurante ═══
+var _clRestAtivo = null; // id do restaurante ativo no checklist
+var _clRestListeners = {}; // {restId: unsubscribe}
+var _clRestDados = {}; // {restId: clData[]}
+
+function clIniciarSeletorRest(){
+  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+  if(lista.length===0) lista=[{id:'bavaro',nome:'Bávaro',emoji:'🍺'}];
+
+  var seletor = document.getElementById('cl-rest-selector');
+  var pills = document.getElementById('cl-rest-pills');
+  if(!seletor||!pills) return;
+
+  // Só mostra seletor se há mais de 1 restaurante
+  if(lista.length<=1){
+    seletor.style.display='none';
+    _clRestAtivo = lista[0]?lista[0].id:'bavaro';
+    return;
+  }
+
+  seletor.style.display='block';
+  // Restaurante ativo padrão = restaurante atual do app
+  if(!_clRestAtivo){
+    _clRestAtivo = restauranteAtivo ? restauranteAtivo.id : lista[0].id;
+  }
+
+  pills.innerHTML = lista.map(function(r){
+    var ativo = r.id===_clRestAtivo;
+    return '<button id="cl-rest-pill-'+r.id+'" onclick="clSelecionarRest(\''+r.id+'\')" '
+      +'style="font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;font-weight:700;'
+      +'padding:7px 14px;border-radius:20px;border:1.5px solid '+(ativo?'var(--accent)':'var(--border2)')+';'
+      +'background:'+(ativo?'var(--accent)':'var(--surface2)')+';'
+      +'color:'+(ativo?'#000':'var(--muted)')+';cursor:pointer;">'
+      +r.emoji+' '+r.nome+'</button>';
+  }).join('');
+}
+
+function clSelecionarRest(restId){
+  _clRestAtivo = restId;
+  // Atualiza pills
+  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+  lista.forEach(function(r){
+    var btn = document.getElementById('cl-rest-pill-'+r.id);
+    if(!btn) return;
+    var ativo = r.id===restId;
+    btn.style.background = ativo?'var(--accent)':'var(--surface2)';
+    btn.style.color = ativo?'#000':'var(--muted)';
+    btn.style.borderColor = ativo?'var(--accent)':'var(--border2)';
+  });
+  // Aplica dados do restaurante selecionado
+  if(_clRestDados[restId]!==undefined){
+    clData = _clRestDados[restId];
+    clRender();
+  } else {
+    // Ainda não carregou — busca agora
+    clCarregarRestFirebase(restId);
+  }
+}
+
+function clCarregarRestFirebase(restId){
+  if(!fbDb) return;
+  // Cancelar listener anterior deste restId se existir
+  if(_clRestListeners[restId]){ try{_clRestListeners[restId]();}catch(e){} }
+
+  var col = (restId==='bavaro')
+    ? fbDb.collection('configuracoes')
+    : fbDb.collection('restaurantes').doc(restId).collection('configuracoes');
+
+  var u = col.doc('clData').onSnapshot(function(doc){
+    var dados = [];
+    if(doc&&doc.exists&&doc.data()&&doc.data().data!==undefined){
+      dados = Array.isArray(doc.data().data)?doc.data().data:[];
+    }
+    _clRestDados[restId] = dados;
+    // Se este é o restaurante ativo no seletor, atualiza a tela
+    if(_clRestAtivo===restId){
+      clData = dados;
+      clRender();
+      if(window._funcMode) clRenderFuncScreen(window._funcMode);
+    }
+  },function(){});
+  _clRestListeners[restId] = u;
+  _restListeners.push(u);
 }
 
 function clCarregarFirebase(){
   if(!fbDb) return;
-  var u = fbCol('configuracoes').doc('clData').onSnapshot(function(doc){
-    if(doc&&doc.exists&&doc.data()&&doc.data().data!==undefined){
-      var cloud=doc.data().data;
-      clData=Array.isArray(cloud)?cloud:[];
-      localStorage.setItem('clData',JSON.stringify(clData));
-      clRender();
-      if(window._funcMode) clRenderFuncScreen(window._funcMode);
-    } else {
-      // Documento não existe neste restaurante — limpa
-      clData=[];
-      clRender();
-    }
-  },function(){});
-  _restListeners.push(u);
+  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+  if(lista.length===0) lista=[{id:'bavaro',nome:'Bávaro',emoji:'🍺'}];
+  // Inicia seletor visual
+  clIniciarSeletorRest();
+  // Carrega todos os restaurantes
+  lista.forEach(function(r){ clCarregarRestFirebase(r.id); });
 }
 
 function clAddItemRow(texto){
@@ -4846,11 +4935,6 @@ function clVerificarModoFunc(){
   _funcCarregarERendar(funcId, clId);
 }
 
-// dados por restaurante na tela do funcionário
-window._funcRestData = {}; // {restId: {clData:[], funcionarios:[]}}
-window._funcRestAtivo = null; // restId selecionado
-window._funcNomeResolvido = null; // nome do funcionário resolvido via URL funcId
-
 function _funcCarregarERendar(funcId, clId){
   if(!fbDb){
     var t=0;
@@ -4865,147 +4949,57 @@ function _funcCarregarERendar(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
-  // Lista de todos os restaurantes conhecidos: Bávaro (raiz) + outros
-  var listaRest=[{id:'bavaro', nome:'Bávaro', emoji:'🍺'}];
+  var lista=[{id:'bavaro'}];
   try{
-    var salva=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-    salva.forEach(function(r){
-      if(r.id!=='bavaro') listaRest.push(r);
+    JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]').forEach(function(r){
+      if(r.id!=='bavaro') lista.push({id:r.id});
     });
   }catch(e){}
 
-  window._funcRestData = {};
-  var total = listaRest.length;
-  var carregados = 0;
+  var allCl=[], allFunc=[];
+  var total=lista.length, done=0;
 
-  function onRestCarregado(){
-    carregados++;
-    if(carregados < total) return;
-    // Todos carregados — determinar quais restaurantes têm checklists para este funcionário
-    var restsComCl = listaRest.filter(function(r){
-      var d = window._funcRestData[r.id];
-      if(!d) return false;
-      return d.clData.some(function(cl){
-        if(cl.funcIds&&cl.funcIds.length>0) return cl.funcIds.some(function(fid){return String(fid)===String(funcId);});
-        return String(cl.funcId)===String(funcId);
-      });
-    });
-
-    if(restsComCl.length === 0){
-      // Nenhum restaurante tem checklist para este func — mostra Bávaro por padrão
-      restsComCl = [{id:'bavaro', nome:'Bávaro', emoji:'🍺'}];
-    }
-
-    // Seletor só aparece se há mais de 1 restaurante com checklists
-    var seletor = document.getElementById('func-rest-selector');
-    var pills = document.getElementById('func-rest-pills');
-    if(restsComCl.length > 1 && seletor && pills){
-      seletor.style.display = 'block';
-      window._funcRestAtivo = restsComCl[0].id;
-      pills.innerHTML = restsComCl.map(function(r){
-        return '<button id="func-rest-pill-'+r.id+'" onclick="funcSelecionarRest(\''+r.id+'\',\''+funcId+'\',\''+clId+'\')" '
-          +'style="font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;font-weight:700;padding:7px 14px;border-radius:20px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--muted);cursor:pointer;">'
-          +r.emoji+' '+r.nome+'</button>';
-      }).join('');
-      funcAtivarPill(restsComCl[0].id);
-    } else {
-      if(seletor) seletor.style.display = 'none';
-      window._funcRestAtivo = restsComCl[0].id;
-    }
-
-    // Aplicar dados do restaurante ativo e renderizar
-    _funcAplicarRest(window._funcRestAtivo, funcId, clId);
-
-    // Listener tempo real para o restaurante ativo
-    _funcIniciarListener(window._funcRestAtivo, funcId, clId);
-  }
-
-  listaRest.forEach(function(r){
-    var col = (r.id==='bavaro')
-      ? fbDb.collection('configuracoes')
-      : fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
-    var colFunc = (r.id==='bavaro')
-      ? fbDb.collection('funcionarios')
-      : fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
-
-    window._funcRestData[r.id] = {clData:[], funcionarios:[]};
-    var okCl=false, okFunc=false;
-
-    function check(){ if(okCl&&okFunc) onRestCarregado(); }
-
-    col.doc('clData').get().then(function(doc){
-      if(doc&&doc.exists&&doc.data()&&doc.data().data)
-        window._funcRestData[r.id].clData = doc.data().data||[];
-      okCl=true; check();
-    }).catch(function(){ okCl=true; check(); });
-
-    colFunc.get().then(function(snap){
-      var funcs=[];
-      snap.forEach(function(d){ if(d.exists&&d.data()&&d.data().id) funcs.push(d.data()); });
-      window._funcRestData[r.id].funcionarios = funcs;
-      okFunc=true; check();
-    }).catch(function(){ okFunc=true; check(); });
-  });
-}
-
-function _funcAplicarRest(restId, funcId, clId){
-  var d = window._funcRestData[restId]||{clData:[],funcionarios:[]};
-  clData = d.clData;
-  funcionarios = d.funcionarios;
-  // Garante que o nome do funcionário da URL está resolvido para cross-match
-  // Busca em todos os restaurantes carregados
-  if(!window._funcNomeResolvido){
-    Object.values(window._funcRestData).forEach(function(rd){
-      rd.funcionarios.forEach(function(f){
-        if(String(f.id)===String(funcId)){
-          window._funcNomeResolvido = (f.nome||'').toLowerCase().trim();
-        }
-      });
-    });
-  }
-  clRenderFuncScreen(funcId, clId);
-}
-
-function funcAtivarPill(restId){
-  var pills = document.getElementById('func-rest-pills');
-  if(!pills) return;
-  pills.querySelectorAll('button').forEach(function(btn){
-    btn.style.background = 'var(--surface2)';
-    btn.style.color = 'var(--muted)';
-    btn.style.borderColor = 'var(--border2)';
-  });
-  var ativo = document.getElementById('func-rest-pill-'+restId);
-  if(ativo){
-    ativo.style.background = 'var(--accent)';
-    ativo.style.color = '#000';
-    ativo.style.borderColor = 'var(--accent)';
-  }
-}
-
-function funcSelecionarRest(restId, funcId, clId){
-  window._funcRestAtivo = restId;
-  funcAtivarPill(restId);
-  _funcAplicarRest(restId, funcId, clId);
-  // Reiniciar listener para o novo restaurante
-  if(window._clLiveUnsubscribe){ try{window._clLiveUnsubscribe();}catch(e){} window._clLiveUnsubscribe=null; }
-  _funcIniciarListener(restId, funcId, clId);
-}
-
-function _funcIniciarListener(restId, funcId, clId){
-  if(window._clLiveUnsubscribe) return;
-  var col = (restId==='bavaro')
-    ? fbDb.collection('configuracoes')
-    : fbDb.collection('restaurantes').doc(restId).collection('configuracoes');
-  window._clLiveUnsubscribe = col.doc('clData').onSnapshot(function(doc){
-    if(doc&&doc.exists&&doc.data()&&doc.data().data){
-      var novosCl = doc.data().data||[];
-      if(window._funcRestData[restId]) window._funcRestData[restId].clData = novosCl;
-      if(window._funcRestAtivo===restId){
-        clData = novosCl;
-        if(!window._clItemChanging) clRenderFuncScreen(funcId, clId);
+  lista.forEach(function(r){
+    var col=(r.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
+    var colF=(r.id==='bavaro')?fbDb.collection('funcionarios'):fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
+    var okCl=false,okF=false;
+    function check(){
+      if(!okCl||!okF) return;
+      done++;
+      if(done<total) return;
+      // Todos carregados — aplica
+      funcionarios=allFunc;
+      clData=allCl;
+      // Esconde seletor (link único, sem necessidade de seletor)
+      var sel=document.getElementById('func-rest-selector');
+      if(sel) sel.style.display='none';
+      clRenderFuncScreen(funcId,clId);
+      // Listener tempo real do Bávaro (principal)
+      if(!window._clLiveUnsubscribe){
+        window._clLiveUnsubscribe=fbDb.collection('configuracoes').doc('clData').onSnapshot(function(doc){
+          if(doc&&doc.exists&&doc.data()&&doc.data().data){
+            // Substitui só os do Bávaro no array combinado
+            var outros=clData.filter(function(c){return c._restId&&c._restId!=='bavaro';});
+            clData=(doc.data().data||[]).concat(outros);
+            if(!window._clItemChanging) clRenderFuncScreen(funcId,clId);
+          }
+        },function(){});
       }
     }
-  },function(){});
+    col.doc('clData').get().then(function(doc){
+      if(doc&&doc.exists&&doc.data()&&doc.data().data){
+        var items=doc.data().data||[];
+        // Marca com restId para poder separar depois
+        items.forEach(function(c){c._restId=r.id;});
+        allCl=allCl.concat(items);
+      }
+      okCl=true; check();
+    }).catch(function(){okCl=true;check();});
+    colF.get().then(function(snap){
+      snap.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
+      okF=true; check();
+    }).catch(function(){okF=true;check();});
+  });
 }
 function clRenderFuncScreen(funcId, clId){
   var func=funcionarios.find(function(f){return String(f.id)===String(funcId);})||null;
@@ -5021,26 +5015,10 @@ function clRenderFuncScreen(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(!content) return;
 
-  // Get checklists for this func
-  var funcNomeUrl = (window._funcNomeResolvido||'').toLowerCase().trim();
-  // Se ainda não resolveu, tenta nos funcionários atuais
-  if(!funcNomeUrl){
-    var fUrl = funcionarios.find(function(f){return String(f.id)===String(funcId);});
-    if(fUrl) funcNomeUrl = (fUrl.nome||'').toLowerCase().trim();
-  }
-
+  // Get checklists for this func — clData já tem todos os restaurantes mesclados
   var listas=clData.filter(function(cl){
-    var pertence=false;
-    var idsParaCheckar = cl.funcIds&&cl.funcIds.length>0 ? cl.funcIds : [cl.funcId];
-    // Match por ID direto
-    pertence = idsParaCheckar.some(function(fid){return String(fid)===String(funcId);});
-    // Fallback: match por nome do funcionário
-    if(!pertence && funcNomeUrl){
-      pertence = idsParaCheckar.some(function(fid){
-        var fMatch = funcionarios.find(function(f){return String(f.id)===String(fid);});
-        return fMatch && (fMatch.nome||'').toLowerCase().trim()===funcNomeUrl;
-      });
-    }
+    var idsParaCheckar = (cl.funcIds&&cl.funcIds.length>0) ? cl.funcIds : [cl.funcId];
+    var pertence = idsParaCheckar.some(function(fid){return String(fid)===String(funcId);});
     if(!pertence) return false;
     if(clId && String(cl.id)!==String(clId)) return false;
     if(!cl.dia || cl.dia==='') return true;

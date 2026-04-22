@@ -4907,19 +4907,6 @@ function clVerificarModoFunc(){
   var funcId=params.get('func');
   var clId=params.get('cl');
   var checklistId=params.get('checklist');
-  var restId=params.get('rest');
-
-  // Se veio com ?rest=, setar restaurante correto antes de carregar dados
-  if(restId && !restauranteAtivo){
-    var lista=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-    var r=lista.find(function(x){return x.id===restId;});
-    if(r) restauranteAtivo=r;
-    else restauranteAtivo={id:restId, nome:'Restaurante', emoji:'🍽️'};
-  }
-  // Sem ?rest=, usa Bávaro (raiz)
-  if(!restauranteAtivo){
-    restauranteAtivo={id:'bavaro', nome:'Bávaro', emoji:'🍺'};
-  }
 
   if(checklistId && !funcId){
     showTab('checklist');
@@ -4942,16 +4929,21 @@ function clVerificarModoFunc(){
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
-  if(!fbDb){
-    var tentativas=0;
-    var iv=setInterval(function(){
-      tentativas++;
-      if(fbDb){ clearInterval(iv); _funcCarregarERendar(funcId,clId); }
-      else if(tentativas>30){ clearInterval(iv); clRenderFuncScreen(funcId,clId); }
-    },500);
-    return;
-  }
-  _funcCarregarERendar(funcId, clId);
+  // Espera Firebase estar pronto (até 20 segundos)
+  var tentativas=0;
+  var iv=setInterval(function(){
+    tentativas++;
+    if(fbDb){
+      clearInterval(iv);
+      _funcCarregarERendar(funcId,clId);
+    } else if(tentativas===1){
+      // Tenta inicializar o Firebase se ainda não foi feito
+      try{ iniciarFirebase(); }catch(e){}
+    } else if(tentativas>40){
+      clearInterval(iv);
+      if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">❌ Erro ao conectar. Recarregue a página.</div>';
+    }
+  },500);
 }
 
 function _funcCarregarERendar(funcId, clId){
@@ -4981,51 +4973,38 @@ function _funcCarregarERendar(funcId, clId){
 
 function _funcCarregarDeLista(lista, funcId, clId){
   var allCl=[], allFunc=[];
-  var total=lista.length, done=0;
+  var total=lista.length*2, done=0;
+
+  function check(){
+    done++;
+    if(done<total) return;
+    // Tudo carregado — renderiza uma única vez
+    funcionarios=allFunc;
+    clData=allCl;
+    var sel=document.getElementById('func-rest-selector');
+    if(sel) sel.style.display='none';
+    clRenderFuncScreen(funcId,clId);
+  }
 
   lista.forEach(function(r){
-    var col=(r.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
-    var colF=(r.id==='bavaro')?fbDb.collection('funcionarios'):fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
-    var okCl=false,okF=false;
-
-    function check(){
-      if(!okCl||!okF) return;
-      done++;
-      if(done<total) return;
-      // Todos carregados
-      funcionarios=allFunc;
-      clData=allCl;
-      var sel=document.getElementById('func-rest-selector');
-      if(sel) sel.style.display='none';
-      clRenderFuncScreen(funcId,clId);
-      // Listeners tempo real — ignora o primeiro disparo (já carregamos via get)
-      lista.forEach(function(r2){
-        var col2=(r2.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r2.id).collection('configuracoes');
-        var primeiro=true;
-        col2.doc('clData').onSnapshot(function(doc){
-          if(primeiro){ primeiro=false; return; } // ignora disparo imediato
-          if(doc&&doc.exists&&doc.data()&&doc.data().data){
-            var novos=(doc.data().data||[]).map(function(c){c._restId=r2.id;return c;});
-            clData=clData.filter(function(c){return c._restId!==r2.id;}).concat(novos);
-            if(!window._clItemChanging) clRenderFuncScreen(funcId,clId);
-          }
-        },function(){});
-      });
-    }
+    var col=(r.id==='bavaro')
+      ?fbDb.collection('configuracoes')
+      :fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
+    var colF=(r.id==='bavaro')
+      ?fbDb.collection('funcionarios')
+      :fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
 
     col.doc('clData').get().then(function(doc){
       if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        var items=doc.data().data||[];
-        items.forEach(function(c){c._restId=r.id;});
-        allCl=allCl.concat(items);
+        (doc.data().data||[]).forEach(function(c){c._restId=r.id; allCl.push(c);});
       }
-      okCl=true; check();
-    }).catch(function(){okCl=true;check();});
+      check();
+    }).catch(function(){check();});
 
-    colF.get().then(function(snap2){
-      snap2.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
-      okF=true; check();
-    }).catch(function(){okF=true;check();});
+    colF.get().then(function(snap){
+      snap.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
+      check();
+    }).catch(function(){check();});
   });
 }
 

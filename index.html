@@ -696,7 +696,6 @@ body.admin-mode .admin-only{display:flex!important;}
   var funcId=params.get('func');
   var hasAccess=false;
   try{ hasAccess=sessionStorage.getItem('bavaro_acesso')==='1'; }catch(e){}
-  // Se tem ?func= esconde PIN diretamente
   if(funcId){
     document.addEventListener('DOMContentLoaded',function(){
       var bs=document.getElementById('block-screen');
@@ -704,22 +703,11 @@ body.admin-mode .admin-only{display:flex!important;}
     });
     return;
   }
-  // Se já tem sessão: esconde PIN e mostra restaurante ou app
+  // Sessão ativa: esconde PIN apenas — restIniciar() cuida do resto
   if(hasAccess){
     document.addEventListener('DOMContentLoaded',function(){
       var bs=document.getElementById('block-screen');
       if(bs) bs.classList.add('hidden');
-      // Verifica se precisa mostrar seletor de restaurante
-      var lista=[];
-      try{ lista=JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]'); }catch(e){}
-      var restSalvo=null;
-      try{ restSalvo=JSON.parse(localStorage.getItem('gestao_rest_ativo')); }catch(e){}
-      if(lista.length>1 && !restSalvo){
-        // Múltiplos restaurantes sem restaurante salvo → mostrar seletor
-        var rs=document.getElementById('rest-screen');
-        if(rs) rs.classList.remove('hidden');
-      }
-      // Se tem restaurante salvo ou só 1 restaurante, o app carrega normalmente
     });
   }
 })();
@@ -5625,26 +5613,46 @@ function restIniciar(){
     localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
     _fbSalvarListaRestaurantes();
   }
-  // Se só tem um restaurante, seta ativo direto
+
+  var hasAccess = false;
+  try{ hasAccess = sessionStorage.getItem('bavaro_acesso')==='1'; }catch(e){}
+
+  // Sem sessão ativa — PIN vai ser pedido, não faz nada aqui
+  if(!hasAccess) return;
+
+  // Com sessão ativa:
   if(lista.length === 1){
+    // Só 1 restaurante — entra direto
     restauranteAtivo = lista[0];
     localStorage.setItem('gestao_rest_ativo', JSON.stringify(lista[0]));
     var el = document.getElementById('header-rest-nome');
-    if(el) el.textContent = '— ' + lista[0].emoji + ' ' + lista[0].nome;
+    if(el) el.textContent = '— '+lista[0].emoji+' '+lista[0].nome;
     document.getElementById('rest-screen').classList.add('hidden');
+    document.getElementById('app').style.display = '';
+    var hs = document.getElementById('home-screen');
+    if(hs){ hs.style.display='flex'; setTimeout(function(){ hs.classList.remove('hidden'); initHomeAnims(); },10); }
     return;
   }
-  // Múltiplos restaurantes: se já tem sessão ativa e restaurante salvo, usa ele
-  // (PIN já foi digitado antes — usuário está trocando de restaurante)
+
+  // Múltiplos restaurantes com sessão ativa
   var restSalvo = null;
   try{ restSalvo = JSON.parse(localStorage.getItem('gestao_rest_ativo')); }catch(e){}
+
   if(restSalvo){
+    // Já tinha restaurante selecionado — entra direto
     restauranteAtivo = restSalvo;
     var el2 = document.getElementById('header-rest-nome');
-    if(el2) el2.textContent = '— ' + restSalvo.emoji + ' ' + restSalvo.nome;
+    if(el2) el2.textContent = '— '+restSalvo.emoji+' '+restSalvo.nome;
     document.getElementById('rest-screen').classList.add('hidden');
+    document.getElementById('app').style.display = '';
+    var hs2 = document.getElementById('home-screen');
+    if(hs2){ hs2.style.display='flex'; setTimeout(function(){ hs2.classList.remove('hidden'); initHomeAnims(); },10); }
+  } else {
+    // Sem restaurante salvo — mostra seletor
+    restRenderTela();
+    document.getElementById('rest-screen').classList.remove('hidden');
+    document.getElementById('app').style.display = 'none';
   }
-  // Se não tem restaurante salvo, a tela de seleção será mostrada pelo PIN
 }
 
 // ═══ FIREBASE SYNC ═══

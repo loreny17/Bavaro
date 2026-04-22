@@ -3809,11 +3809,11 @@ function clCarregarRestFirebase(restId){
 
 function clCarregarFirebase(){
   if(!fbDb) return;
+  // Em modo funcionário, não usar este listener — _funcCarregarDeLista cuida dos dados
+  if(window._funcMode) return;
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
   if(lista.length===0) lista=[{id:'bavaro',nome:'Bávaro',emoji:'🍺'}];
-  // Inicia seletor visual
   clIniciarSeletorRest();
-  // Carrega todos os restaurantes
   lista.forEach(function(r){ clCarregarRestFirebase(r.id); });
 }
 
@@ -4899,8 +4899,13 @@ function clAbrirWhatsApp(funcId, clId, titulo, nomeFunc, telFunc){
   }
 }
 
-// ── MODO FUNCIONÁRIO ──
-window._funcMode = null;
+// ── MODO FUNCIONÁRIO — detecta antes do Firebase ──
+window._funcMode = (function(){
+  try{
+    var p=new URLSearchParams(window.location.search);
+    return p.get('func')||null;
+  }catch(e){return null;}
+})();
 
 function clVerificarModoFunc(){
   var params=new URLSearchParams(window.location.search);
@@ -4960,13 +4965,16 @@ function _funcCarregarERendar(funcId, clId){
   var content=document.getElementById('func-cl-content');
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
-  // Descobre restaurantes pelo Firebase (não localStorage — funciona no celular do funcionário)
-  fbDb.collection('restaurantes').get().then(function(snap){
+  // Busca lista de restaurantes de um documento fixo no Firebase
+  fbDb.collection('configuracoes').doc('restaurantes').get().then(function(doc){
     var lista=[{id:'bavaro'}];
-    snap.forEach(function(d){ if(d.id) lista.push({id:d.id}); });
+    if(doc&&doc.exists&&doc.data()&&doc.data().lista){
+      doc.data().lista.forEach(function(r){
+        if(r.id&&r.id!=='bavaro') lista.push({id:r.id});
+      });
+    }
     _funcCarregarDeLista(lista, funcId, clId);
   }).catch(function(){
-    // Sem acesso à coleção restaurantes — tenta só Bávaro
     _funcCarregarDeLista([{id:'bavaro'}], funcId, clId);
   });
 }
@@ -5520,6 +5528,12 @@ function restCancelarNovo(){
   document.getElementById('rest-novo-emoji').value = '';
 }
 
+function _fbSalvarListaRestaurantes(){
+  if(!fbDb) return;
+  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+  fbDb.collection('configuracoes').doc('restaurantes').set({lista: lista}).catch(function(){});
+}
+
 function restConfirmarNovo(){
   var nome = document.getElementById('rest-novo-nome').value.trim();
   var emoji = document.getElementById('rest-novo-emoji').value.trim() || '🍽️';
@@ -5528,6 +5542,7 @@ function restConfirmarNovo(){
   var id = 'rest_' + Date.now();
   lista.push({id: id, nome: nome, emoji: emoji});
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+  _fbSalvarListaRestaurantes();
   restCancelarNovo();
   restRenderTela();
   showToast('✅ ' + nome + ' criado!', 'var(--success)');
@@ -5538,6 +5553,7 @@ function restDeletar(id){
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
   lista = lista.filter(function(r){ return r.id !== id; });
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+  _fbSalvarListaRestaurantes();
   restRenderTela();
 }
 
@@ -5607,6 +5623,7 @@ function restIniciar(){
   if(lista.length === 0){
     lista = [{id: 'bavaro', nome: 'Bávaro', emoji: '🍺'}];
     localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+    _fbSalvarListaRestaurantes();
   }
   // Se só tem um restaurante, seta ativo direto
   if(lista.length === 1){
@@ -5679,6 +5696,8 @@ function fbSalvarVF(){
 
 function _iniciarListeners(){
   if(!fbDb || !restauranteAtivo) return;
+  // Em modo funcionário, não iniciar listeners globais
+  if(window._funcMode) return;
 
   // Listener funcionarios
   var u1 = fbCol('funcionarios').onSnapshot(function(snap){
@@ -5718,6 +5737,8 @@ function iniciarFirebase(){
     fbDb = firebase.firestore();
     console.log('Firebase conectado!');
     fbExecutarFila();
+    // Em modo funcionário, não iniciar listeners do gestor
+    if(window._funcMode) return;
     showToast('☁️ Sincronizado', 'var(--surface3)');
     restIniciar();
     _iniciarListeners();

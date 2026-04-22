@@ -4849,6 +4849,7 @@ function clVerificarModoFunc(){
 // dados por restaurante na tela do funcionário
 window._funcRestData = {}; // {restId: {clData:[], funcionarios:[]}}
 window._funcRestAtivo = null; // restId selecionado
+window._funcNomeResolvido = null; // nome do funcionário resolvido via URL funcId
 
 function _funcCarregarERendar(funcId, clId){
   if(!fbDb){
@@ -4951,6 +4952,17 @@ function _funcAplicarRest(restId, funcId, clId){
   var d = window._funcRestData[restId]||{clData:[],funcionarios:[]};
   clData = d.clData;
   funcionarios = d.funcionarios;
+  // Garante que o nome do funcionário da URL está resolvido para cross-match
+  // Busca em todos os restaurantes carregados
+  if(!window._funcNomeResolvido){
+    Object.values(window._funcRestData).forEach(function(rd){
+      rd.funcionarios.forEach(function(f){
+        if(String(f.id)===String(funcId)){
+          window._funcNomeResolvido = (f.nome||'').toLowerCase().trim();
+        }
+      });
+    });
+  }
   clRenderFuncScreen(funcId, clId);
 }
 
@@ -5010,22 +5022,29 @@ function clRenderFuncScreen(funcId, clId){
   if(!content) return;
 
   // Get checklists for this func
+  var funcNomeUrl = (window._funcNomeResolvido||'').toLowerCase().trim();
+  // Se ainda não resolveu, tenta nos funcionários atuais
+  if(!funcNomeUrl){
+    var fUrl = funcionarios.find(function(f){return String(f.id)===String(funcId);});
+    if(fUrl) funcNomeUrl = (fUrl.nome||'').toLowerCase().trim();
+  }
+
   var listas=clData.filter(function(cl){
-    // Checklist pertence ao funcionário?
     var pertence=false;
-    if(cl.funcIds&&cl.funcIds.length>0){
-      pertence=cl.funcIds.some(function(fid){return String(fid)===String(funcId);});
-    } else {
-      pertence=String(cl.funcId)===String(funcId);
+    var idsParaCheckar = cl.funcIds&&cl.funcIds.length>0 ? cl.funcIds : [cl.funcId];
+    // Match por ID direto
+    pertence = idsParaCheckar.some(function(fid){return String(fid)===String(funcId);});
+    // Fallback: match por nome do funcionário
+    if(!pertence && funcNomeUrl){
+      pertence = idsParaCheckar.some(function(fid){
+        var fMatch = funcionarios.find(function(f){return String(f.id)===String(fid);});
+        return fMatch && (fMatch.nome||'').toLowerCase().trim()===funcNomeUrl;
+      });
     }
     if(!pertence) return false;
-    // Se veio com ?cl=ID específico, mostrar só esse
     if(clId && String(cl.id)!==String(clId)) return false;
-    // Sem dia definido = aparece sempre
     if(!cl.dia || cl.dia==='') return true;
-    // 'todos' = aparece todos os dias incluindo domingo
     if(cl.dia==='todos') return true;
-    // Dia específico = só no dia certo
     return cl.dia===hojeNome;
   });
   var diaOrdemF={todos:0,segunda:1,terca:2,quarta:3,quinta:4,sexta:5,sabado:6,'':7};

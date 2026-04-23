@@ -4981,11 +4981,9 @@ function _funcCarregarERendar(funcId, clId){
     snap.forEach(function(d){
       if(d.id && !jaTem[d.id]){ lista.push({id:d.id}); jaTem[d.id]=true; }
     });
-    // Garante que o restaurante da URL esteja na lista, mesmo que doc pai não exista
     if(restIdURL && !jaTem[restIdURL]){ lista.push({id:restIdURL}); }
     _funcCarregarDeLista(lista, funcId, clId);
   }).catch(function(){
-    // Sem acesso à coleção restaurantes — usa Bávaro + o da URL se houver
     var lista=[{id:'bavaro'}];
     if(restIdURL && restIdURL!=='bavaro') lista.push({id:restIdURL});
     _funcCarregarDeLista(lista, funcId, clId);
@@ -5056,7 +5054,12 @@ function clRenderFuncScreen(funcId, clId){
   if(!content) return;
 
   // Get checklists for this func — clData já tem todos os restaurantes mesclados
+  // Dedupe por id (caso o banco tenha sido contaminado por versões anteriores do app)
+  var vistos={};
   var listas=clData.filter(function(cl){
+    if(!cl || !cl.id) return false;
+    if(vistos[cl.id]) return false;
+    vistos[cl.id]=true;
     var idsParaCheckar = (cl.funcIds&&cl.funcIds.length>0) ? cl.funcIds : [cl.funcId];
     var pertence = idsParaCheckar.some(function(fid){return String(fid)===String(funcId);});
     if(!pertence) return false;
@@ -5245,9 +5248,25 @@ function funcToggleItem(clId, itemId, feito, funcId, targetClId){
     item.feitoBy='';
     item.feitoEm='';
   }
-  // Save to Firebase directly
+  // Descobre a qual restaurante este checklist pertence (marcador _restId setado ao carregar)
+  var restIdDono = cl._restId || 'bavaro';
+  // Pega APENAS os checklists deste restaurante e remove o marcador _restId antes de gravar
+  var checklistsDoRest = clData
+    .filter(function(c){ return (c._restId||'bavaro') === restIdDono; })
+    .map(function(c){
+      var copia={};
+      for(var k in c){ if(k!=='_restId') copia[k]=c[k]; }
+      return copia;
+    });
+  // Guarda anti-echo: evita o onSnapshot re-renderizar com o mesmo dado e causar flicker/duplicação
+  window._clItemChanging = true;
+  setTimeout(function(){ window._clItemChanging = false; }, 1500);
+  // Grava direto no documento do restaurante correto (não usa fbCol, que depende de restauranteAtivo)
   if(fbDb){
-    fbCol('configuracoes').doc('clData').set({data:clData}).then(function(){
+    var col = (restIdDono==='bavaro')
+      ? fbDb.collection('configuracoes')
+      : fbDb.collection('restaurantes').doc(restIdDono).collection('configuracoes');
+    col.doc('clData').set({data:checklistsDoRest}).then(function(){
       clRenderFuncScreen(funcId, targetClId);
     }).catch(function(){ clRenderFuncScreen(funcId, targetClId); });
   } else {
@@ -5559,15 +5578,22 @@ function restConfirmarNovo(){
   if(!nome){ document.getElementById('rest-novo-nome').focus(); return; }
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
   var id = 'rest_' + Date.now();
-  lista.push({id: id, nome: nome, emoji: emoji});
+  var novo = {id: id, nome: nome, emoji: emoji};
+  lista.push(novo);
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-  // Cria documento pai no Firestore para que o link do funcionário encontre este restaurante
+  // Salva na nuvem (Firestore) — assim sincroniza entre dispositivos
   if(fbDb){
     fbDb.collection('restaurantes').doc(id).set({
+      id: id,
       nome: nome,
       emoji: emoji,
       criadoEm: new Date().toISOString()
-    }).catch(function(e){ console.warn('Falha ao criar doc restaurante no Firebase:', e); });
+    }).then(function(){
+      showToast('☁️ ' + nome + ' sincronizado', 'var(--surface3)');
+    }).catch(function(e){
+      console.warn('Falha ao salvar restaurante na nuvem:', e);
+      showToast('⚠️ Salvo local (nuvem falhou)', 'var(--warn)');
+    });
   }
   restCancelarNovo();
   restRenderTela();
@@ -5575,11 +5601,20 @@ function restConfirmarNovo(){
 }
 
 function restDeletar(id){
-  if(!confirm('Remover este restaurante da lista? (Os dados no Firebase não são apagados)')) return;
-  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
-  lista = lista.filter(function(r){ return r.id !== id; });
-  localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-  restRenderTela();
+  cvtConfirm('Remover este restaurante da lista?\n(Os dados deste restaurante no Firebase não são apagados — só a entrada na lista)', function(){
+    var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
+    var r = lista.find(function(x){ return x.id === id; });
+    lista = lista.filter(function(r){ return r.id !== id; });
+    localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+    // Remove da nuvem (só o documento de metadados — subcoleções com dados permanecem)
+    if(fbDb && id !== 'bavaro'){
+      fbDb.collection('restaurantes').doc(id).delete().catch(function(e){
+        console.warn('Falha ao remover restaurante da nuvem:', e);
+      });
+    }
+    restRenderTela();
+    showToast('🗑️ ' + (r?r.nome:'Restaurante') + ' removido', 'var(--surface3)');
+  });
 }
 
 function restSelecionar(id){
@@ -5762,24 +5797,61 @@ function iniciarFirebase(){
     showToast('☁️ Sincronizado', 'var(--surface3)');
     restIniciar();
     _iniciarListeners();
-    // Reparo automático: garante que todo restaurante do localStorage tenha doc pai no Firestore
-    try{
-      var _lr = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-      _lr.forEach(function(r){
-        if(!r || !r.id || r.id==='bavaro') return;
-        fbDb.collection('restaurantes').doc(r.id).get().then(function(d){
-          if(!d.exists){
-            fbDb.collection('restaurantes').doc(r.id).set({
-              nome: r.nome||'Restaurante',
-              emoji: r.emoji||'🍽️',
-              reparadoEm: new Date().toISOString()
-            }).catch(function(){});
-          }
-        }).catch(function(){});
-      });
-    }catch(e){}
+    _restSyncNuvem();
   }catch(e){
     console.warn('Firebase init erro:', e.message);
+  }
+}
+
+// Sincroniza lista de restaurantes com a nuvem (bidirecional) + listener em tempo real
+function _restSyncNuvem(){
+  if(!fbDb) return;
+  try{
+    var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+    // Sobe pra nuvem qualquer restaurante local que ainda não esteja lá (inclusive criados offline)
+    lista.forEach(function(r){
+      if(!r || !r.id || r.id==='bavaro') return;
+      fbDb.collection('restaurantes').doc(r.id).get().then(function(d){
+        if(!d.exists){
+          fbDb.collection('restaurantes').doc(r.id).set({
+            id: r.id,
+            nome: r.nome||'Restaurante',
+            emoji: r.emoji||'🍽️',
+            criadoEm: new Date().toISOString()
+          }).catch(function(){});
+        }
+      }).catch(function(){});
+    });
+    // Listener em tempo real: espelha nuvem -> localStorage e atualiza a tela se estiver visível
+    if(window._restListenerNuvem){ try{ window._restListenerNuvem(); }catch(e){} }
+    window._restListenerNuvem = fbDb.collection('restaurantes').onSnapshot(function(snap){
+      var nuvemList=[];
+      snap.forEach(function(d){
+        var dados = d.data()||{};
+        nuvemList.push({
+          id: d.id,
+          nome: dados.nome || 'Restaurante',
+          emoji: dados.emoji || '🍽️'
+        });
+      });
+      // Garante Bávaro sempre presente (hardcoded)
+      if(!nuvemList.find(function(x){return x.id==='bavaro';})){
+        nuvemList.unshift({id:'bavaro', nome:'Bávaro', emoji:'🍺'});
+      }
+      var atual = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+      // Detecta se mudou (comparação simples por JSON)
+      var mudou = JSON.stringify(atual) !== JSON.stringify(nuvemList);
+      if(mudou){
+        localStorage.setItem('gestao_restaurantes', JSON.stringify(nuvemList));
+        // Se a tela de seleção de restaurante está visível, re-renderiza
+        var restScreen = document.getElementById('rest-screen');
+        if(restScreen && !restScreen.classList.contains('hidden')){
+          restRenderTela();
+        }
+      }
+    }, function(err){ console.warn('Listener restaurantes erro:', err && err.message); });
+  }catch(e){
+    console.warn('_restSyncNuvem erro:', e.message);
   }
 }
 

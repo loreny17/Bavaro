@@ -4974,13 +4974,21 @@ function _funcCarregarERendar(funcId, clId){
   if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);font-size:0.85rem;">⏳ Carregando...</div>';
 
   // Descobre restaurantes pelo Firebase (não localStorage — funciona no celular do funcionário)
+  var restIdURL = new URLSearchParams(window.location.search).get('rest');
   fbDb.collection('restaurantes').get().then(function(snap){
     var lista=[{id:'bavaro'}];
-    snap.forEach(function(d){ if(d.id) lista.push({id:d.id}); });
+    var jaTem={bavaro:true};
+    snap.forEach(function(d){
+      if(d.id && !jaTem[d.id]){ lista.push({id:d.id}); jaTem[d.id]=true; }
+    });
+    // Garante que o restaurante da URL esteja na lista, mesmo que doc pai não exista
+    if(restIdURL && !jaTem[restIdURL]){ lista.push({id:restIdURL}); }
     _funcCarregarDeLista(lista, funcId, clId);
   }).catch(function(){
-    // Sem acesso à coleção restaurantes — tenta só Bávaro
-    _funcCarregarDeLista([{id:'bavaro'}], funcId, clId);
+    // Sem acesso à coleção restaurantes — usa Bávaro + o da URL se houver
+    var lista=[{id:'bavaro'}];
+    if(restIdURL && restIdURL!=='bavaro') lista.push({id:restIdURL});
+    _funcCarregarDeLista(lista, funcId, clId);
   });
 }
 
@@ -5553,6 +5561,14 @@ function restConfirmarNovo(){
   var id = 'rest_' + Date.now();
   lista.push({id: id, nome: nome, emoji: emoji});
   localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+  // Cria documento pai no Firestore para que o link do funcionário encontre este restaurante
+  if(fbDb){
+    fbDb.collection('restaurantes').doc(id).set({
+      nome: nome,
+      emoji: emoji,
+      criadoEm: new Date().toISOString()
+    }).catch(function(e){ console.warn('Falha ao criar doc restaurante no Firebase:', e); });
+  }
   restCancelarNovo();
   restRenderTela();
   showToast('✅ ' + nome + ' criado!', 'var(--success)');
@@ -5746,6 +5762,22 @@ function iniciarFirebase(){
     showToast('☁️ Sincronizado', 'var(--surface3)');
     restIniciar();
     _iniciarListeners();
+    // Reparo automático: garante que todo restaurante do localStorage tenha doc pai no Firestore
+    try{
+      var _lr = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+      _lr.forEach(function(r){
+        if(!r || !r.id || r.id==='bavaro') return;
+        fbDb.collection('restaurantes').doc(r.id).get().then(function(d){
+          if(!d.exists){
+            fbDb.collection('restaurantes').doc(r.id).set({
+              nome: r.nome||'Restaurante',
+              emoji: r.emoji||'🍽️',
+              reparadoEm: new Date().toISOString()
+            }).catch(function(){});
+          }
+        }).catch(function(){});
+      });
+    }catch(e){}
   }catch(e){
     console.warn('Firebase init erro:', e.message);
   }

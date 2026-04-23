@@ -3713,12 +3713,13 @@ function clPersistir(){
   localStorage.setItem('clData', JSON.stringify(clData));
   if(fbDb){
     var restId = _clRestAtivo || (restauranteAtivo?restauranteAtivo.id:'bavaro');
+    // Atualiza cache local ANTES da escrita no Firebase,
+    // para que o onSnapshot não sobrescreva com dado desatualizado
+    _clRestDados[restId] = clData.slice();
     var col = (restId==='bavaro')
       ? fbDb.collection('configuracoes')
       : fbDb.collection('restaurantes').doc(restId).collection('configuracoes');
     col.doc('clData').set({data:clData}).catch(function(){});
-    // Atualiza cache local
-    _clRestDados[restId] = clData.slice();
   }
 }
 
@@ -3795,12 +3796,16 @@ function clCarregarRestFirebase(restId){
     if(doc&&doc.exists&&doc.data()&&doc.data().data!==undefined){
       dados = Array.isArray(doc.data().data)?doc.data().data:[];
     }
-    _clRestDados[restId] = dados;
-    // Se este é o restaurante ativo no seletor, atualiza a tela
-    if(_clRestAtivo===restId){
-      clData = dados;
-      clRender();
-      if(window._funcMode) clRenderFuncScreen(window._funcMode);
+    // Só atualiza se Firebase trouxe dados >= cache local
+    // (evita onSnapshot imediato apagar item recém-criado antes da escrita confirmar)
+    var cacheAtual = _clRestDados[restId];
+    if(!cacheAtual || dados.length >= cacheAtual.length){
+      _clRestDados[restId] = dados;
+      if(_clRestAtivo===restId){
+        clData = dados;
+        clRender();
+        if(window._funcMode) clRenderFuncScreen(window._funcMode);
+      }
     }
   },function(){});
   _clRestListeners[restId] = u;

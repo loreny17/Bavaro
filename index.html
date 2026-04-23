@@ -5544,6 +5544,12 @@ function fbDoc(colecao, docId){
 var _restListeners = [];
 
 function restRenderTela(){
+  // Se tem Firebase, puxa da nuvem primeiro (assíncrono — renderiza com cache enquanto carrega)
+  if(fbDb && !window._restTelaPuxando){
+    window._restTelaPuxando = true;
+    setTimeout(function(){ window._restTelaPuxando = false; }, 1000);
+    _restPuxarNuvem();
+  }
   var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
   var html = lista.map(function(r){
     return '<div class="rest-card" onclick="restSelecionar(\''+r.id+'\')">'
@@ -5576,6 +5582,10 @@ function restConfirmarNovo(){
   var nome = document.getElementById('rest-novo-nome').value.trim();
   var emoji = document.getElementById('rest-novo-emoji').value.trim() || '🍽️';
   if(!nome){ document.getElementById('rest-novo-nome').focus(); return; }
+  if(!fbDb){
+    showToast('⚠️ Firebase não conectado. Aguarde e tente novamente.', 'var(--warn)');
+    return;
+  }
   var id = 'rest_' + Date.now();
   var payload = {
     id: id,
@@ -5583,24 +5593,45 @@ function restConfirmarNovo(){
     emoji: emoji,
     criadoEm: new Date().toISOString()
   };
-  // NUVEM é a fonte da verdade. localStorage é só cache (atualizado pelo onSnapshot).
-  function gravarNuvem(){
-    fbDb.collection('restaurantes').doc(id).set(payload).then(function(){
-      showToast('☁️ ' + nome + ' salvo na nuvem', 'var(--surface3)');
-    }).catch(function(e){
-      console.error('ERRO gravar restaurante na nuvem:', e);
-      showToast('⚠️ Falha ao salvar: ' + (e.message||'erro'), 'var(--warn)');
+  showToast('⏳ Salvando ' + nome + '...', 'var(--surface3)');
+  console.log('[REST] Tentando gravar:', id, payload);
+  fbDb.collection('restaurantes').doc(id).set(payload).then(function(){
+    console.log('[REST] ✓ Gravado com sucesso:', id);
+    showToast('☁️ ' + nome + ' salvo na nuvem!', 'var(--success)');
+    restCancelarNovo();
+    // Força atualização imediata da lista (não espera o listener)
+    _restPuxarNuvem();
+  }).catch(function(e){
+    console.error('[REST] ✗ ERRO ao gravar:', e.code, e.message, e);
+    showToast('❌ ' + (e.code||'erro') + ': ' + (e.message||'desconhecido'), 'var(--warn)');
+  });
+}
+
+// Lê a lista de restaurantes da nuvem e atualiza cache + UI
+function _restPuxarNuvem(){
+  if(!fbDb) return;
+  fbDb.collection('restaurantes').get().then(function(snap){
+    var lista = [];
+    snap.forEach(function(d){
+      var dados = d.data() || {};
+      lista.push({
+        id: d.id,
+        nome: dados.nome || 'Restaurante',
+        emoji: dados.emoji || '🍽️'
+      });
     });
-  }
-  if(fbDb){
-    gravarNuvem();
-  } else {
-    // Enfileira pra quando Firebase estiver pronto
-    _fbFila.push(gravarNuvem);
-    showToast('⏳ Aguardando conexão...', 'var(--surface3)');
-  }
-  restCancelarNovo();
-  // Nota: restRenderTela() será chamado automaticamente pelo listener quando a nuvem confirmar
+    if(!lista.find(function(x){return x.id==='bavaro';})){
+      lista.unshift({id:'bavaro', nome:'Bávaro', emoji:'🍺'});
+    }
+    console.log('[REST] Puxou da nuvem:', lista.length, 'restaurantes');
+    localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
+    var restScreen = document.getElementById('rest-screen');
+    if(restScreen && !restScreen.classList.contains('hidden')){
+      restRenderTela();
+    }
+  }).catch(function(e){
+    console.error('[REST] Erro ao ler nuvem:', e);
+  });
 }
 
 function restDeletar(id){
@@ -5613,13 +5644,15 @@ function restDeletar(id){
       showToast('⚠️ Sem conexão — tente novamente', 'var(--warn)');
       return;
     }
+    console.log('[REST] Deletando:', id);
     fbDb.collection('restaurantes').doc(id).delete().then(function(){
-      showToast('🗑️ Removido da nuvem', 'var(--surface3)');
+      console.log('[REST] ✓ Deletado:', id);
+      showToast('🗑️ Removido da nuvem', 'var(--success)');
+      _restPuxarNuvem();
     }).catch(function(e){
-      console.error('ERRO deletar restaurante:', e);
-      showToast('⚠️ Falha ao remover: ' + (e.message||'erro'), 'var(--warn)');
+      console.error('[REST] ✗ Erro ao deletar:', e);
+      showToast('❌ ' + (e.code||'erro') + ': ' + (e.message||''), 'var(--warn)');
     });
-    // Re-render acontece via listener
   });
 }
 

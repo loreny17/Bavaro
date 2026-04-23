@@ -5576,44 +5576,50 @@ function restConfirmarNovo(){
   var nome = document.getElementById('rest-novo-nome').value.trim();
   var emoji = document.getElementById('rest-novo-emoji').value.trim() || '🍽️';
   if(!nome){ document.getElementById('rest-novo-nome').focus(); return; }
-  var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
   var id = 'rest_' + Date.now();
-  var novo = {id: id, nome: nome, emoji: emoji};
-  lista.push(novo);
-  localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-  // Salva na nuvem (Firestore) — assim sincroniza entre dispositivos
-  if(fbDb){
-    fbDb.collection('restaurantes').doc(id).set({
-      id: id,
-      nome: nome,
-      emoji: emoji,
-      criadoEm: new Date().toISOString()
-    }).then(function(){
-      showToast('☁️ ' + nome + ' sincronizado', 'var(--surface3)');
+  var payload = {
+    id: id,
+    nome: nome,
+    emoji: emoji,
+    criadoEm: new Date().toISOString()
+  };
+  // NUVEM é a fonte da verdade. localStorage é só cache (atualizado pelo onSnapshot).
+  function gravarNuvem(){
+    fbDb.collection('restaurantes').doc(id).set(payload).then(function(){
+      showToast('☁️ ' + nome + ' salvo na nuvem', 'var(--surface3)');
     }).catch(function(e){
-      console.warn('Falha ao salvar restaurante na nuvem:', e);
-      showToast('⚠️ Salvo local (nuvem falhou)', 'var(--warn)');
+      console.error('ERRO gravar restaurante na nuvem:', e);
+      showToast('⚠️ Falha ao salvar: ' + (e.message||'erro'), 'var(--warn)');
     });
   }
+  if(fbDb){
+    gravarNuvem();
+  } else {
+    // Enfileira pra quando Firebase estiver pronto
+    _fbFila.push(gravarNuvem);
+    showToast('⏳ Aguardando conexão...', 'var(--surface3)');
+  }
   restCancelarNovo();
-  restRenderTela();
-  showToast('✅ ' + nome + ' criado!', 'var(--success)');
+  // Nota: restRenderTela() será chamado automaticamente pelo listener quando a nuvem confirmar
 }
 
 function restDeletar(id){
-  cvtConfirm('Remover este restaurante da lista?\n(Os dados deste restaurante no Firebase não são apagados — só a entrada na lista)', function(){
-    var lista = JSON.parse(localStorage.getItem('gestao_restaurantes') || '[]');
-    var r = lista.find(function(x){ return x.id === id; });
-    lista = lista.filter(function(r){ return r.id !== id; });
-    localStorage.setItem('gestao_restaurantes', JSON.stringify(lista));
-    // Remove da nuvem (só o documento de metadados — subcoleções com dados permanecem)
-    if(fbDb && id !== 'bavaro'){
-      fbDb.collection('restaurantes').doc(id).delete().catch(function(e){
-        console.warn('Falha ao remover restaurante da nuvem:', e);
-      });
+  if(id === 'bavaro'){
+    showToast('⚠️ Bávaro não pode ser removido', 'var(--warn)');
+    return;
+  }
+  cvtConfirm('Remover este restaurante da lista?\n(Os dados na nuvem deste restaurante permanecem)', function(){
+    if(!fbDb){
+      showToast('⚠️ Sem conexão — tente novamente', 'var(--warn)');
+      return;
     }
-    restRenderTela();
-    showToast('🗑️ ' + (r?r.nome:'Restaurante') + ' removido', 'var(--surface3)');
+    fbDb.collection('restaurantes').doc(id).delete().then(function(){
+      showToast('🗑️ Removido da nuvem', 'var(--surface3)');
+    }).catch(function(e){
+      console.error('ERRO deletar restaurante:', e);
+      showToast('⚠️ Falha ao remover: ' + (e.message||'erro'), 'var(--warn)');
+    });
+    // Re-render acontece via listener
   });
 }
 
@@ -5803,55 +5809,68 @@ function iniciarFirebase(){
   }
 }
 
-// Sincroniza lista de restaurantes com a nuvem (bidirecional) + listener em tempo real
+// Sincroniza lista de restaurantes com a nuvem.
+// A NUVEM é a fonte da verdade. localStorage é apenas cache offline.
 function _restSyncNuvem(){
-  if(!fbDb) return;
+  if(!fbDb){ console.warn('_restSyncNuvem: fbDb nao pronto'); return; }
   try{
-    var lista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-    // Sobe pra nuvem qualquer restaurante local que ainda não esteja lá (inclusive criados offline)
-    lista.forEach(function(r){
+    // Migração única: sobe pra nuvem qualquer restaurante que exista só localmente
+    // (isto cobre o caso de restaurantes criados antes desta correção)
+    var localLista = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
+    localLista.forEach(function(r){
       if(!r || !r.id || r.id==='bavaro') return;
       fbDb.collection('restaurantes').doc(r.id).get().then(function(d){
         if(!d.exists){
+          console.log('Migrando para nuvem:', r.id, r.nome);
           fbDb.collection('restaurantes').doc(r.id).set({
             id: r.id,
             nome: r.nome||'Restaurante',
             emoji: r.emoji||'🍽️',
-            criadoEm: new Date().toISOString()
-          }).catch(function(){});
+            criadoEm: new Date().toISOString(),
+            migrado: true
+          }).then(function(){
+            console.log('✓ migrado:', r.nome);
+          }).catch(function(e){
+            console.error('FALHA migrar', r.id, ':', e.message);
+          });
         }
-      }).catch(function(){});
+      }).catch(function(e){
+        console.error('Erro verificando', r.id, ':', e.message);
+      });
     });
-    // Listener em tempo real: espelha nuvem -> localStorage e atualiza a tela se estiver visível
-    if(window._restListenerNuvem){ try{ window._restListenerNuvem(); }catch(e){} }
+
+    // Listener em tempo real: nuvem -> localStorage + UI
+    if(window._restListenerNuvem){
+      try{ window._restListenerNuvem(); }catch(e){}
+    }
     window._restListenerNuvem = fbDb.collection('restaurantes').onSnapshot(function(snap){
-      var nuvemList=[];
+      var nuvemList = [];
       snap.forEach(function(d){
-        var dados = d.data()||{};
+        var dados = d.data() || {};
         nuvemList.push({
           id: d.id,
           nome: dados.nome || 'Restaurante',
           emoji: dados.emoji || '🍽️'
         });
       });
-      // Garante Bávaro sempre presente (hardcoded)
+      // Bávaro sempre presente
       if(!nuvemList.find(function(x){return x.id==='bavaro';})){
         nuvemList.unshift({id:'bavaro', nome:'Bávaro', emoji:'🍺'});
       }
-      var atual = JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]');
-      // Detecta se mudou (comparação simples por JSON)
-      var mudou = JSON.stringify(atual) !== JSON.stringify(nuvemList);
-      if(mudou){
-        localStorage.setItem('gestao_restaurantes', JSON.stringify(nuvemList));
-        // Se a tela de seleção de restaurante está visível, re-renderiza
-        var restScreen = document.getElementById('rest-screen');
-        if(restScreen && !restScreen.classList.contains('hidden')){
-          restRenderTela();
-        }
+      console.log('Restaurantes na nuvem:', nuvemList.length, nuvemList.map(function(r){return r.nome;}).join(', '));
+      // Atualiza cache local
+      localStorage.setItem('gestao_restaurantes', JSON.stringify(nuvemList));
+      // Re-renderiza se a tela de seleção estiver visível
+      var restScreen = document.getElementById('rest-screen');
+      if(restScreen && !restScreen.classList.contains('hidden')){
+        restRenderTela();
       }
-    }, function(err){ console.warn('Listener restaurantes erro:', err && err.message); });
+    }, function(err){
+      console.error('ERRO listener restaurantes:', err && err.message);
+      showToast('⚠️ Sync nuvem falhou: ' + (err.message||''), 'var(--warn)');
+    });
   }catch(e){
-    console.warn('_restSyncNuvem erro:', e.message);
+    console.error('_restSyncNuvem exception:', e.message);
   }
 }
 

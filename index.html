@@ -4992,50 +4992,34 @@ function _funcCarregarERendar(funcId, clId){
 
 function _funcCarregarDeLista(lista, funcId, clId){
   var allCl=[], allFunc=[];
-  var total=lista.length, done=0;
+  var total=lista.length*2, done=0;
+
+  function check(){
+    done++;
+    if(done<total) return;
+    funcionarios=allFunc;
+    clData=allCl;
+    var sel=document.getElementById('func-rest-selector');
+    if(sel) sel.style.display='none';
+    clRenderFuncScreen(funcId,clId);
+    // SEM onSnapshot — evita duplicação/desaparecimento
+  }
 
   lista.forEach(function(r){
     var col=(r.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r.id).collection('configuracoes');
     var colF=(r.id==='bavaro')?fbDb.collection('funcionarios'):fbDb.collection('restaurantes').doc(r.id).collection('funcionarios');
-    var okCl=false,okF=false;
-
-    function check(){
-      if(!okCl||!okF) return;
-      done++;
-      if(done<total) return;
-      // Todos carregados
-      funcionarios=allFunc;
-      clData=allCl;
-      var sel=document.getElementById('func-rest-selector');
-      if(sel) sel.style.display='none';
-      clRenderFuncScreen(funcId,clId);
-      // Listeners tempo real para todos os restaurantes
-      lista.forEach(function(r2){
-        var col2=(r2.id==='bavaro')?fbDb.collection('configuracoes'):fbDb.collection('restaurantes').doc(r2.id).collection('configuracoes');
-        col2.doc('clData').onSnapshot(function(doc){
-          if(doc&&doc.exists&&doc.data()&&doc.data().data){
-            var novos=(doc.data().data||[]).map(function(c){c._restId=r2.id;return c;});
-            // Substitui os deste restaurante no array combinado
-            clData=clData.filter(function(c){return c._restId!==r2.id;}).concat(novos);
-            if(!window._clItemChanging) clRenderFuncScreen(funcId,clId);
-          }
-        },function(){});
-      });
-    }
 
     col.doc('clData').get().then(function(doc){
       if(doc&&doc.exists&&doc.data()&&doc.data().data){
-        var items=doc.data().data||[];
-        items.forEach(function(c){c._restId=r.id;});
-        allCl=allCl.concat(items);
+        (doc.data().data||[]).forEach(function(c){c._restId=r.id; allCl.push(c);});
       }
-      okCl=true; check();
-    }).catch(function(){okCl=true;check();});
+      check();
+    }).catch(function(){check();});
 
     colF.get().then(function(snap2){
       snap2.forEach(function(d){if(d.exists&&d.data()&&d.data().id) allFunc.push(d.data());});
-      okF=true; check();
-    }).catch(function(){okF=true;check();});
+      check();
+    }).catch(function(){check();});
   });
 }
 
@@ -5258,20 +5242,16 @@ function funcToggleItem(clId, itemId, feito, funcId, targetClId){
       for(var k in c){ if(k!=='_restId') copia[k]=c[k]; }
       return copia;
     });
-  // Guarda anti-echo: evita o onSnapshot re-renderizar com o mesmo dado e causar flicker/duplicação
-  window._clItemChanging = true;
-  setTimeout(function(){ window._clItemChanging = false; }, 1500);
-  // Grava direto no documento do restaurante correto (não usa fbCol, que depende de restauranteAtivo)
+  // Renderiza imediatamente da memória (sem esperar Firebase)
+  clRenderFuncScreen(funcId, targetClId);
+  // Grava no Firebase em background — sem callback que re-renderize
   if(fbDb){
     var col = (restIdDono==='bavaro')
       ? fbDb.collection('configuracoes')
       : fbDb.collection('restaurantes').doc(restIdDono).collection('configuracoes');
-    col.doc('clData').set({data:checklistsDoRest}).then(function(){
-      clRenderFuncScreen(funcId, targetClId);
-    }).catch(function(){ clRenderFuncScreen(funcId, targetClId); });
+    col.doc('clData').set({data:checklistsDoRest}).catch(function(){});
   } else {
     localStorage.setItem('clData',JSON.stringify(clData));
-    clRenderFuncScreen(funcId, targetClId);
   }
 }
 

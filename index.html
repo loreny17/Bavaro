@@ -2122,26 +2122,27 @@ function _jspdfTotaisBox(doc, y, boxes){
   // boxes: [{label,valor,cor}]
   var boxW = (186 - (boxes.length-1)*4) / boxes.length;
   var x = 12;
+  var boxH = 12; // altura reduzida (era 16)
   boxes.forEach(function(b){
     doc.setFillColor(_COR.bgCard[0],_COR.bgCard[1],_COR.bgCard[2]);
-    doc.roundedRect(x,y,boxW,16,2,2,'F');
+    doc.roundedRect(x,y,boxW,boxH,2,2,'F');
     // Borda colorida
     doc.setDrawColor(b.cor[0],b.cor[1],b.cor[2]);
     doc.setLineWidth(0.4);
-    doc.roundedRect(x,y,boxW,16,2,2,'S');
+    doc.roundedRect(x,y,boxW,boxH,2,2,'S');
     // Valor
     doc.setTextColor(b.cor[0],b.cor[1],b.cor[2]);
     doc.setFont('helvetica','bold');
-    doc.setFontSize(12);
-    doc.text(b.valor,x+boxW/2,y+7,{align:'center'});
+    doc.setFontSize(11);
+    doc.text(b.valor,x+boxW/2,y+5.5,{align:'center'});
     // Label
     doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
     doc.setFont('helvetica','normal');
-    doc.setFontSize(8);
-    doc.text(b.label,x+boxW/2,y+13,{align:'center'});
+    doc.setFontSize(7);
+    doc.text(b.label,x+boxW/2,y+10,{align:'center'});
     x += boxW + 4;
   });
-  return y + 20;
+  return y + boxH + 3;
 }
 
 function _jspdfSectionTitle(doc, y, titulo, cor){
@@ -2233,7 +2234,7 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
   var doc = _jspdfNovoDoc();
   // Página 1: Vales e Faltas
   _jspdfPintarFundo(doc,_COR.bgEscuro);
-  _jspdfHeader(doc,'GESTÃO BÁVARO','RELATÓRIO CONSOLIDADO — VALES E FALTAS',mesNome,_COR.verde,_COR.bgHeader);
+  _jspdfHeader(doc,'GESTAO BAVARO','RELATORIO CONSOLIDADO - VALES E FALTAS',mesNome,_COR.verde,_COR.bgHeader);
 
   var totalGeralV=0,totalGeralF=0,linhas=[];
   funcionarios.forEach(function(f){
@@ -2258,19 +2259,23 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
     {label:'TOTAL VALES',valor:'R$ '+totalGeralV.toFixed(2).replace('.',','),cor:_COR.verde},
     {label:'TOTAL FALTAS',valor:String(totalGeralF),cor:_COR.vermelho}
   ]);
-  y = _jspdfSectionTitle(doc,y+3,'Detalhamento por Funcionário',_COR.verde);
+  y = _jspdfSectionTitle(doc,y+3,'Detalhamento por Funcionario',_COR.verde);
   y = _jspdfTabela(doc,y,[
-    {header:'FUNCIONÁRIO',width:70,align:'left'},
-    {header:'TOTAL VALES',width:36,align:'right'},
-    {header:'FALTAS',width:80,align:'left'}
-  ],linhas,_COR.verde);
+    {header:'FUNCIONARIO',width:58,align:'left'},
+    {header:'TOTAL VALES',width:34,align:'right'},
+    {header:'',width:6,align:'left'},
+    {header:'FALTAS',width:88,align:'left'}
+  ],linhas.map(function(l){
+    // Adiciona coluna vazia entre Total Vales e Faltas pra dar espaço
+    return [l[0], l[1], {text:'',cor:_COR.textoClaro}, l[2]];
+  }),_COR.verde);
 
-  _jspdfFooter(doc,'Página 1 de 2 • Gerado em '+hoje+' • Gestão Bávaro');
+  _jspdfFooter(doc,'Pagina 1 de 2 - Gerado em '+hoje+' - Gestao Bavaro');
 
   // Página 2: Feriados
   doc.addPage();
   _jspdfPintarFundo(doc,_COR.bgEscuro);
-  _jspdfHeader(doc,'GESTÃO BÁVARO','🏛️ FERIADOS TRABALHADOS',mesNome,_COR.amarelo,_COR.bgHeaderFer);
+  _jspdfHeader(doc,'GESTAO BAVARO','FERIADOS TRABALHADOS',mesNome,_COR.amarelo,_COR.bgHeaderFer);
 
   var totalGeralFer=0,linhasF=[];
   funcionarios.forEach(function(f){
@@ -2294,14 +2299,14 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
   y = _jspdfTotaisBox(doc,y,[
     {label:'TOTAL FERIADOS TRABALHADOS',valor:String(totalGeralFer),cor:_COR.amarelo}
   ]);
-  y = _jspdfSectionTitle(doc,y+3,'Feriados por Funcionário',_COR.amarelo);
+  y = _jspdfSectionTitle(doc,y+3,'Feriados por Funcionario',_COR.amarelo);
   y = _jspdfTabela(doc,y,[
-    {header:'FUNCIONÁRIO',width:60,align:'left'},
+    {header:'FUNCIONARIO',width:60,align:'left'},
     {header:'QTD',width:16,align:'center'},
     {header:'DATAS',width:110,align:'left'}
   ],linhasF,_COR.amarelo);
 
-  _jspdfFooter(doc,'Página 2 de 2 • Gerado em '+hoje+' • Gestão Bávaro');
+  _jspdfFooter(doc,'Pagina 2 de 2 - Gerado em '+hoje+' - Gestao Bavaro');
   return doc;
 }
 
@@ -2315,74 +2320,72 @@ function _jspdfRelatorioIndividual(f, k, mesNome, hoje){
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
   var totF=faltas.length;
 
-  // Página 1: Vales e Faltas detalhados
+  // Página 1: Vales e Faltas — mesma tabela consolidada (formato antigo)
   _jspdfPintarFundo(doc,_COR.bgEscuro);
-  _jspdfHeader(doc,f.nome,(f.cargo||'Sem cargo'),'Vales e Faltas — '+mesNome,_COR.verde,_COR.bgHeader);
+  _jspdfHeader(doc,f.nome,(f.cargo||'Sem cargo'),'Vales e Faltas - '+mesNome,_COR.verde,_COR.bgHeader);
+
+  // String de faltas formatada (igual ao relatório geral antigo)
+  var fStr = totF===0 ? '-' : totF+' - '+faltas.map(function(fa){
+    var p=fa.data.split('-');
+    var dt=new Date(fa.data+'T12:00:00');
+    var sab=dt.getDay()===6?' (Sab)':'';
+    return p[2]+'/'+p[1]+sab;
+  }).join(', ');
+
+  var linhas = [[
+    {text:f.nome,cor:_COR.textoClaro,bold:true},
+    {text:'R$ '+totV.toFixed(2).replace('.',','),cor:_COR.verde,bold:true},
+    {text:fStr,cor:totF>0?_COR.vermelho:_COR.textoMudo}
+  ]];
 
   var y = 46;
-  y = _jspdfTotaisBox(doc,y,[
-    {label:'TOTAL VALES',valor:'R$ '+totV.toFixed(2).replace('.',','),cor:_COR.verde},
-    {label:'FALTAS',valor:String(totF),cor:_COR.vermelho}
-  ]);
-
-  // Tabela Vales
-  y = _jspdfSectionTitle(doc,y+3,'💰 Vales do Período',_COR.verde);
-  var linhasV = vales.length
-    ? vales.map(function(v){
-        var p=v.data.split('-');
-        return [
-          {text:p[2]+'/'+p[1]+'/'+p[0],cor:_COR.textoClaro},
-          {text:'R$ '+parseFloat(v.val||0).toFixed(2).replace('.',','),cor:_COR.verde,bold:true},
-          {text:v.desc||'—',cor:_COR.textoMudo}
-        ];
-      })
-    : [[{text:'Nenhum vale',cor:_COR.textoSuave}]];
+  y = _jspdfSectionTitle(doc,y,'Detalhamento',_COR.verde);
   y = _jspdfTabela(doc,y,[
-    {header:'DATA',width:30,align:'left'},
-    {header:'VALOR',width:30,align:'right'},
-    {header:'DESCRIÇÃO',width:126,align:'left'}
-  ],linhasV,_COR.verde);
+    {header:'FUNCIONARIO',width:60,align:'left'},
+    {header:'TOTAL VALES',width:36,align:'right'},
+    {header:'FALTAS',width:90,align:'left'}
+  ],linhas,_COR.verde);
 
-  // Tabela Faltas
-  y = _jspdfSectionTitle(doc,y+3,'❌ Faltas do Período',_COR.vermelho);
-  var linhasF = faltas.length
-    ? faltas.map(function(fa){
-        var p=fa.data.split('-');
-        var dt=new Date(fa.data+'T12:00:00');
-        var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];
-        return [
-          {text:p[2]+'/'+p[1]+'/'+p[0]+' ('+dia+')',cor:_COR.vermelho},
-          {text:fa.desc||'—',cor:_COR.textoMudo}
-        ];
-      })
-    : [[{text:'Nenhuma falta',cor:_COR.textoSuave}]];
-  y = _jspdfTabela(doc,y,[
-    {header:'DATA',width:50,align:'left'},
-    {header:'MOTIVO',width:136,align:'left'}
-  ],linhasF,_COR.vermelho);
+  // Detalhamento expandido dos vales (se houver mais de um)
+  if(vales.length > 0){
+    y = _jspdfSectionTitle(doc,y+4,'Vales do Periodo',_COR.verde);
+    var linhasV = vales.map(function(v){
+      var p=v.data.split('-');
+      return [
+        {text:p[2]+'/'+p[1]+'/'+p[0],cor:_COR.textoClaro},
+        {text:'R$ '+parseFloat(v.val||0).toFixed(2).replace('.',','),cor:_COR.verde,bold:true},
+        {text:v.desc||'-',cor:_COR.textoMudo}
+      ];
+    });
+    y = _jspdfTabela(doc,y,[
+      {header:'DATA',width:30,align:'left'},
+      {header:'VALOR',width:30,align:'right'},
+      {header:'DESCRICAO',width:126,align:'left'}
+    ],linhasV,_COR.verde);
+  }
 
-  _jspdfFooter(doc,'Página 1 de 2 • Gerado em '+hoje+' • Gestão Bávaro');
+  _jspdfFooter(doc,'Pagina 1 de 2 - Gerado em '+hoje+' - Gestao Bavaro');
 
   // Página 2: Feriados
   doc.addPage();
   _jspdfPintarFundo(doc,_COR.bgEscuro);
-  _jspdfHeader(doc,f.nome,(f.cargo||'Sem cargo'),'🏛️ Feriados Trabalhados — '+mesNome,_COR.amarelo,_COR.bgHeaderFer);
+  _jspdfHeader(doc,f.nome,(f.cargo||'Sem cargo'),'Feriados Trabalhados - '+mesNome,_COR.amarelo,_COR.bgHeaderFer);
 
   y = 46;
   y = _jspdfTotaisBox(doc,y,[
     {label:'TOTAL FERIADOS TRABALHADOS',valor:String(feriados.length),cor:_COR.amarelo}
   ]);
-  y = _jspdfSectionTitle(doc,y+3,'🏛️ Datas Detalhadas',_COR.amarelo);
+  y = _jspdfSectionTitle(doc,y+3,'Datas Detalhadas',_COR.amarelo);
 
   var linhasFer = feriados.length
     ? feriados.map(function(fe){
         var p=fe.data.split('-');
         var dt=new Date(fe.data+'T12:00:00');
-        var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];
+        var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sab'][dt.getDay()];
         return [
           {text:p[2]+'/'+p[1]+'/'+p[0]+' ('+dia+')',cor:_COR.amarelo},
           {text:'1',cor:_COR.amarelo,bold:true},
-          {text:fe.desc||'—',cor:_COR.amareloClaro}
+          {text:fe.desc||'-',cor:_COR.amareloClaro}
         ];
       })
     : [[{text:'Nenhum feriado trabalhado',cor:_COR.textoSuave}]];
@@ -2392,7 +2395,7 @@ function _jspdfRelatorioIndividual(f, k, mesNome, hoje){
     {header:'FERIADO',width:120,align:'left'}
   ],linhasFer,_COR.amarelo);
 
-  _jspdfFooter(doc,'Página 2 de 2 • Gerado em '+hoje+' • Gestão Bávaro');
+  _jspdfFooter(doc,'Pagina 2 de 2 - Gerado em '+hoje+' - Gestao Bavaro');
   return doc;
 }
 

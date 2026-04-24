@@ -13,7 +13,38 @@
 <title>Gestão de Funcionários</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+// Carregamento robusto do jsPDF com fallback de múltiplos CDNs
+(function(){
+  var cdns = [
+    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js',
+    'https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js',
+    'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'
+  ];
+  var idx = 0;
+  function tentar(){
+    if(idx >= cdns.length){
+      console.error('Todos os CDNs do jsPDF falharam');
+      window._jspdfFalhou = true;
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = cdns[idx];
+    s.async = false;
+    s.onload = function(){
+      console.log('jsPDF carregado de:', cdns[idx]);
+      window._jspdfOK = true;
+    };
+    s.onerror = function(){
+      console.warn('Falha CDN:', cdns[idx]);
+      idx++;
+      tentar();
+    };
+    document.head.appendChild(s);
+  }
+  tentar();
+})();
+</script>
 <style>
 :root{
   --bg:#080808;--surface:#101010;--surface2:#161616;--surface3:#1c1c1c;
@@ -2399,7 +2430,11 @@ function _fallbackDownloadPDF(blob,nomeArquivo){
 function gerarPDFeCompartilharWA(funcIdOuNull){
   var JsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if(!JsPDF){
-    showToast('❌ Biblioteca PDF não carregada. Verifique a conexão.','#f75a5a');
+    if(window._jspdfFalhou){
+      showToast('❌ Sem internet para carregar biblioteca PDF. Conecte e recarregue.','#f75a5a');
+    } else {
+      showToast('⏳ Biblioteca ainda carregando, tente em 2 segundos...','#f7a34f');
+    }
     return;
   }
   var meses=nomesMeses();
@@ -6124,8 +6159,33 @@ function compartilharPdfWA(tipo){
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('/sw.js')
-      .then(function(){ console.log('SW registrado'); })
+      .then(function(reg){
+        console.log('SW registrado');
+        // Força checagem de atualização toda vez que o app abre
+        reg.update();
+        // Se há nova versão aguardando, ativa imediatamente
+        if(reg.waiting){ reg.waiting.postMessage({type:'SKIP_WAITING'}); }
+        reg.addEventListener('updatefound', function(){
+          var novo = reg.installing;
+          if(novo){
+            novo.addEventListener('statechange', function(){
+              if(novo.state === 'installed' && navigator.serviceWorker.controller){
+                // Nova versão pronta — recarrega pra usar
+                console.log('Nova versão do app disponível — atualizando...');
+                novo.postMessage({type:'SKIP_WAITING'});
+              }
+            });
+          }
+        });
+      })
       .catch(function(e){ console.warn('SW erro:', e); });
+    // Quando o SW toma controle de uma nova versão, recarrega UMA vez
+    var recarregou = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function(){
+      if(recarregou) return;
+      recarregou = true;
+      window.location.reload();
+    });
   });
 }
 // HOME SCREEN

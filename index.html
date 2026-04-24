@@ -13,6 +13,7 @@
 <title>Gestão de Funcionários</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 :root{
   --bg:#080808;--surface:#101010;--surface2:#161616;--surface3:#1c1c1c;
@@ -79,6 +80,32 @@ header{background:rgba(8,8,8,0.97);backdrop-filter:blur(20px);-webkit-backdrop-f
 /* TYPOGRAPHY */
 .section-title{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:0.06em;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--text);}
 .section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+/* Seções colapsáveis */
+.sec-col{margin-bottom:4px;}
+.sec-col-header{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:0.06em;display:flex;align-items:center;gap:8px;color:var(--text);cursor:pointer;user-select:none;padding:10px 0;margin-bottom:8px;border-bottom:1px solid var(--border);transition:color 0.15s;}
+.sec-col-header:active{color:var(--accent);}
+.sec-col-caret{font-size:0.8rem;color:var(--muted);transition:transform 0.25s;margin-left:auto;}
+.sec-col.open .sec-col-caret{transform:rotate(180deg);}
+.sec-col-body{max-height:0;overflow:hidden;transition:max-height 0.3s ease;}
+.sec-col.open .sec-col-body{max-height:3000px;transition:max-height 0.5s ease;}
+.sec-col-badge{font-family:'Space Grotesk',sans-serif;font-size:0.7rem;font-weight:600;background:var(--surface3);color:var(--muted);padding:2px 8px;border-radius:10px;letter-spacing:0;margin-left:6px;}
+.sec-col-badge.filled{background:var(--accent-dim);color:var(--accent);}
+/* Upload compacto */
+.upload-area-compact{border:1.5px dashed var(--border2);border-radius:12px;padding:10px 12px;cursor:pointer;position:relative;display:flex;align-items:center;gap:10px;transition:border-color 0.2s,background 0.2s;}
+.upload-area-compact:hover,.upload-area-compact.drag-over{border-color:var(--accent);background:var(--accent-dim);}
+.upload-area-compact input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;padding:0;border:none;background:none;}
+.upload-area-compact .upload-icon-sm{font-size:1.2rem;flex-shrink:0;}
+.upload-area-compact .upload-txt{font-size:0.78rem;color:var(--muted);line-height:1.3;}
+.upload-area-compact .upload-txt strong{color:var(--accent);font-size:0.82rem;display:block;}
+/* Idade / tempo de casa hints */
+.field-hint{font-family:'Space Grotesk',sans-serif;font-size:0.72rem;color:var(--accent);margin-top:4px;font-weight:500;display:none;}
+.field-hint.show{display:block;}
+/* Botão WhatsApp no telefone */
+.tel-wrap{display:flex;gap:8px;align-items:stretch;}
+.tel-wrap input{flex:1;}
+.tel-wa-btn{background:rgba(37,211,102,0.12);border:1.5px solid rgba(37,211,102,0.4);color:#25d366;border-radius:var(--radius);width:46px;flex-shrink:0;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s;}
+.tel-wa-btn:active{background:rgba(37,211,102,0.25);}
+.tel-wa-btn:disabled{opacity:0.4;cursor:not-allowed;}
 
 /* FORMS */
 .form-group{margin-bottom:14px;}
@@ -837,60 +864,117 @@ body.admin-mode .admin-only{display:flex!important;}
 
 <!-- TAB CADASTRO -->
 <div class="tab-content" id="tab-cadastro">
-  <div class="section-title">📝 Dados do Funcionário</div>
-  <div class="form-group"><label>Nome completo *</label><input type="text" id="f-nome" placeholder="Ex: João da Silva"></div>
-  <div class="form-group"><label>Cargo / Função</label><input type="text" id="f-cargo" placeholder="Ex: Auxiliar de serviços"></div>
-  <div class="form-row">
-    <div><label>CPF</label><input type="text" id="f-cpf" placeholder="000.000.000-00" maxlength="14"></div>
-    <div><label>Data de Nascimento</label><input type="date" id="f-nascimento"></div>
-  </div>
-  <div class="form-group"><label>Telefone</label><input type="tel" id="f-tel" placeholder="(11) 99999-9999"></div>
-  <div class="form-group"><label>Data de admissão</label><input type="date" id="f-admissao"></div>
 
-  <div class="divider"></div>
-  <div class="section-title">🏦 Dados Bancários</div>
-  <div class="form-row">
-    <div><label>Agência Itaú</label><input type="text" id="f-agencia" placeholder="Ex: 1234" oninput="atualizarBotaoCopiaItau()"></div>
-    <div><label>Conta Itaú</label><input type="text" id="f-conta" placeholder="Ex: 12345-6" oninput="atualizarBotaoCopiaItau()"></div>
-  </div>
-  <div class="form-group" id="f-copy-itau-wrap" style="display:none">
-    <button type="button" onclick="copiarDadosItauForm()" style="width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:var(--radius);color:var(--accent);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.85rem;padding:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-      📋 Copiar dados Itaú (Agência + Conta + CPF)
-    </button>
-  </div>
-  <div class="form-group">
-    <label>Cartão Transporte</label>
-    <div style="display:flex;gap:8px;align-items:center">
-      <input type="text" id="f-cartao-num" placeholder="Número do cartão" style="flex:1">
-      <select id="f-cartao-tipo" style="width:140px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:10px 8px;outline:none;font-size:0.85rem">
-        <option value="">Tipo</option>
-        <option value="Urbs">Urbs</option>
-        <option value="Metrocard">Metrocard</option>
-      </select>
+  <!-- DADOS DO FUNCIONÁRIO -->
+  <div class="sec-col open" id="sec-dados">
+    <div class="sec-col-header" onclick="toggleSec('sec-dados')">
+      <span>📝 Dados do Funcionário</span>
+      <span class="sec-col-badge" id="badge-dados">obrigatório</span>
+      <span class="sec-col-caret">▼</span>
+    </div>
+    <div class="sec-col-body">
+      <div class="form-group"><label>Nome completo *</label><input type="text" id="f-nome" placeholder="Ex: João da Silva"></div>
+      <div class="form-group"><label>Cargo / Função</label><input type="text" id="f-cargo" placeholder="Ex: Auxiliar de serviços"></div>
+      <div class="form-row">
+        <div><label>CPF</label><input type="text" id="f-cpf" placeholder="000.000.000-00" maxlength="14"></div>
+        <div>
+          <label>Data de Nascimento</label>
+          <input type="date" id="f-nascimento" onchange="atualizarIdade()">
+          <div class="field-hint" id="hint-idade"></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Telefone</label>
+        <div class="tel-wrap">
+          <input type="tel" id="f-tel" placeholder="(11) 99999-9999" oninput="atualizarBotaoWA()">
+          <button type="button" class="tel-wa-btn" id="btn-tel-wa" onclick="abrirWhatsAppTel()" disabled title="Abrir no WhatsApp"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg></button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Data de admissão</label>
+        <input type="date" id="f-admissao" onchange="atualizarTempoCasa()">
+        <div class="field-hint" id="hint-tempo-casa"></div>
+      </div>
     </div>
   </div>
 
-  <div class="divider"></div>
-  <div class="section-title">⚠️ Pendências</div>
-  <p style="font-size:0.78rem;color:var(--muted);margin-bottom:10px">Ative as pendências que o funcionário possui:</p>
-  <div class="pendencias-block">
-    <div class="pendencia-item"><div class="pendencia-label">🏦 Conta Itaú</div><label class="toggle"><input type="checkbox" id="p-itau"><span class="toggle-slider"></span></label></div>
-    <div class="pendencia-item"><div class="pendencia-label">🚌 Cartão V.T</div><label class="toggle"><input type="checkbox" id="p-vt"><span class="toggle-slider"></span></label></div>
+  <!-- DADOS BANCÁRIOS -->
+  <div class="sec-col" id="sec-banc">
+    <div class="sec-col-header" onclick="toggleSec('sec-banc')">
+      <span>🏦 Dados Bancários</span>
+      <span class="sec-col-badge" id="badge-banc">opcional</span>
+      <span class="sec-col-caret">▼</span>
+    </div>
+    <div class="sec-col-body">
+      <div class="form-row">
+        <div><label>Agência Itaú</label><input type="text" id="f-agencia" placeholder="Ex: 1234" oninput="atualizarBotaoCopiaItau()"></div>
+        <div><label>Conta Itaú</label><input type="text" id="f-conta" placeholder="Ex: 12345-6" oninput="atualizarBotaoCopiaItau()"></div>
+      </div>
+      <div class="form-group" id="f-copy-itau-wrap" style="display:none">
+        <button type="button" onclick="copiarDadosItauForm()" style="width:100%;background:var(--surface2);border:1.5px solid var(--accent);border-radius:var(--radius);color:var(--accent);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.85rem;padding:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+          📋 Copiar dados Itaú (Agência + Conta + CPF)
+        </button>
+      </div>
+      <div class="form-group">
+        <label>Cartão Transporte</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="f-cartao-num" placeholder="Número do cartão" style="flex:1">
+          <select id="f-cartao-tipo" style="width:140px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:10px 8px;outline:none;font-size:0.85rem">
+            <option value="">Tipo</option>
+            <option value="Urbs">Urbs</option>
+            <option value="Metrocard">Metrocard</option>
+          </select>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="divider"></div>
-  <div class="section-title">📎 Arquivos & Imagens</div>
-  <p style="font-size:0.78rem;color:var(--muted);margin-bottom:10px">Fotos, documentos, comprovantes:</p>
-  <div class="upload-area" id="upload-area">
-    <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onchange="handleFiles(this.files)">
-    <div class="upload-icon">📁</div><p><strong>Toque para selecionar</strong></p><p>Imagens, PDFs, documentos</p>
+  <!-- PENDÊNCIAS -->
+  <div class="sec-col" id="sec-pend">
+    <div class="sec-col-header" onclick="toggleSec('sec-pend')">
+      <span>⚠️ Pendências</span>
+      <span class="sec-col-badge" id="badge-pend">nenhuma</span>
+      <span class="sec-col-caret">▼</span>
+    </div>
+    <div class="sec-col-body">
+      <p style="font-size:0.78rem;color:var(--muted);margin-bottom:10px">Ative as pendências que o funcionário possui:</p>
+      <div class="pendencias-block">
+        <div class="pendencia-item"><div class="pendencia-label">🏦 Conta Itaú</div><label class="toggle"><input type="checkbox" id="p-itau" onchange="atualizarBadgePend()"><span class="toggle-slider"></span></label></div>
+        <div class="pendencia-item"><div class="pendencia-label">🚌 Cartão V.T</div><label class="toggle"><input type="checkbox" id="p-vt" onchange="atualizarBadgePend()"><span class="toggle-slider"></span></label></div>
+      </div>
+    </div>
   </div>
-  <div class="file-preview-grid" id="file-preview"></div>
 
-  <div class="divider"></div>
-  <div class="section-title">💬 Observações</div>
-  <div class="form-group"><textarea id="f-obs" placeholder="Escreva qualquer observação..."></textarea></div>
-  <button class="btn btn-primary" onclick="salvarFuncionario()">💾 Salvar Funcionário</button>
+  <!-- ARQUIVOS -->
+  <div class="sec-col" id="sec-arq">
+    <div class="sec-col-header" onclick="toggleSec('sec-arq')">
+      <span>📎 Arquivos & Imagens</span>
+      <span class="sec-col-badge" id="badge-arq">0</span>
+      <span class="sec-col-caret">▼</span>
+    </div>
+    <div class="sec-col-body">
+      <div class="upload-area-compact" id="upload-area">
+        <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onchange="handleFiles(this.files)">
+        <div class="upload-icon-sm">📁</div>
+        <div class="upload-txt"><strong>Toque para selecionar</strong>Imagens, PDFs, documentos</div>
+      </div>
+      <div class="file-preview-grid" id="file-preview" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <!-- OBSERVAÇÕES -->
+  <div class="sec-col" id="sec-obs">
+    <div class="sec-col-header" onclick="toggleSec('sec-obs')">
+      <span>💬 Observações</span>
+      <span class="sec-col-badge" id="badge-obs">vazio</span>
+      <span class="sec-col-caret">▼</span>
+    </div>
+    <div class="sec-col-body">
+      <div class="form-group"><textarea id="f-obs" placeholder="Escreva qualquer observação..." oninput="atualizarBadgeObs()"></textarea></div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="salvarFuncionario()" style="margin-top:14px;">💾 Salvar Funcionário</button>
 </div>
 
 <!-- TAB LISTA -->
@@ -940,8 +1024,9 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="vf-stat v-faltas"><div class="val" id="stat-faltas">0</div><div class="lbl">Faltas</div></div>
     </div>
   </div>
-  <div style="margin-bottom:10px;">
-    <button class="vf-pdf-btn" id="btn-pdf" onclick="gerarPDF(null)">📄 Gerar PDF Geral — Contabilidade</button>
+  <div style="margin-bottom:10px;display:flex;gap:8px;">
+    <button class="vf-pdf-btn" id="btn-pdf" onclick="gerarPDF(null)" style="flex:1.4;">📄 PDF Geral</button>
+    <button class="vf-pdf-btn" id="btn-pdf-wa" onclick="gerarPDFeCompartilharWA(null)" style="flex:1;background:rgba(37,211,102,0.12);border-color:rgba(37,211,102,0.4);color:#25d366;">📲 Enviar WhatsApp</button>
   </div>
   <div class="vf-search-wrap">
     <span class="vf-search-icon">🔍</span>
@@ -1217,6 +1302,9 @@ function abrirCadastro(){
   document.querySelectorAll('.tab-content').forEach(function(el){el.classList.remove('active');});
   document.getElementById('tab-cadastro').classList.add('active');
   document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
+  // Esconde o FAB na tela de cadastro
+  var fab=document.getElementById('fab-novo-func');
+  if(fab) fab.style.display='none';
   window.scrollTo(0,0);
 }
 
@@ -1237,9 +1325,103 @@ function showTab(tab){
 
 // ═══ ARQUIVOS ═══
 function handleFiles(files){Array.from(files).forEach(function(file){var r=new FileReader();r.onload=function(e){currentFiles.push({name:file.name,type:file.type,dataUrl:e.target.result});renderFilePreviews();};r.readAsDataURL(file);});document.getElementById('file-input').value='';}
-function renderFilePreviews(){document.getElementById('file-preview').innerHTML=currentFiles.map(function(f,i){return'<div class="file-preview-item">'+(f.type.startsWith('image/')?'<img src="'+f.dataUrl+'" alt="">':'<span class="file-icon">'+fileIcon(f.name)+'</span><span class="file-name">'+f.name+'</span>')+'<button class="file-remove" onclick="removeFile('+i+')">✕</button></div>';}).join('');}
+function renderFilePreviews(){document.getElementById('file-preview').innerHTML=currentFiles.map(function(f,i){return'<div class="file-preview-item">'+(f.type.startsWith('image/')?'<img src="'+f.dataUrl+'" alt="">':'<span class="file-icon">'+fileIcon(f.name)+'</span><span class="file-name">'+f.name+'</span>')+'<button class="file-remove" onclick="removeFile('+i+')">✕</button></div>';}).join('');atualizarBadgeArq();}
 function removeFile(i){currentFiles.splice(i,1);renderFilePreviews();}
 function fileIcon(n){if(/\.pdf$/i.test(n))return'📄';if(/\.(doc|docx)$/i.test(n))return'📝';if(/\.(xls|xlsx)$/i.test(n))return'📊';return'📎';}
+
+// ═══ SEÇÕES COLAPSÁVEIS ═══
+function toggleSec(id){
+  var el=document.getElementById(id);
+  if(!el) return;
+  el.classList.toggle('open');
+}
+
+// ═══ IDADE CALCULADA ═══
+function atualizarIdade(){
+  var v=document.getElementById('f-nascimento').value;
+  var el=document.getElementById('hint-idade');
+  if(!v){ el.classList.remove('show'); el.textContent=''; return; }
+  var p=v.split('-');
+  if(p.length!==3){ el.classList.remove('show'); return; }
+  var nasc=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));
+  var hoje=new Date();
+  var anos=hoje.getFullYear()-nasc.getFullYear();
+  var m=hoje.getMonth()-nasc.getMonth();
+  if(m<0 || (m===0 && hoje.getDate()<nasc.getDate())) anos--;
+  if(anos<0 || anos>120){ el.classList.remove('show'); return; }
+  // Aniversário hoje?
+  var aniv=(hoje.getMonth()===nasc.getMonth() && hoje.getDate()===nasc.getDate());
+  el.textContent=(aniv?'🎂 ':'🎂 ')+anos+' ano'+(anos===1?'':'s')+(aniv?' — aniversário hoje!':'');
+  el.classList.add('show');
+}
+
+// ═══ TEMPO DE CASA ═══
+function atualizarTempoCasa(){
+  var v=document.getElementById('f-admissao').value;
+  var el=document.getElementById('hint-tempo-casa');
+  if(!v){ el.classList.remove('show'); el.textContent=''; return; }
+  var p=v.split('-');
+  if(p.length!==3){ el.classList.remove('show'); return; }
+  var adm=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));
+  var hoje=new Date(); hoje.setHours(0,0,0,0); adm.setHours(0,0,0,0);
+  if(adm>hoje){ el.textContent='📅 Admissão futura'; el.classList.add('show'); return; }
+  var anos=hoje.getFullYear()-adm.getFullYear();
+  var meses=hoje.getMonth()-adm.getMonth();
+  var dias=hoje.getDate()-adm.getDate();
+  if(dias<0){ meses--; }
+  if(meses<0){ anos--; meses+=12; }
+  var diffDias=Math.floor((hoje-adm)/(1000*60*60*24));
+  var txt;
+  if(diffDias<=0) txt='Admitido hoje';
+  else if(diffDias<30) txt=diffDias+' dia'+(diffDias===1?'':'s')+' de casa';
+  else if(anos===0) txt=meses+' m'+(meses===1?'ês':'eses')+' de casa';
+  else if(meses===0) txt=anos+' ano'+(anos===1?'':'s')+' de casa';
+  else txt=anos+' ano'+(anos===1?'':'s')+' e '+meses+' m'+(meses===1?'ês':'eses')+' de casa';
+  el.textContent='⏱️ '+txt;
+  el.classList.add('show');
+}
+
+// ═══ WHATSAPP NO TELEFONE ═══
+function atualizarBotaoWA(){
+  var tel=document.getElementById('f-tel').value;
+  var num=(tel||'').replace(/\D/g,'');
+  var btn=document.getElementById('btn-tel-wa');
+  if(!btn) return;
+  btn.disabled=(num.length<10);
+}
+function abrirWhatsAppTel(){
+  var tel=document.getElementById('f-tel').value;
+  var num=(tel||'').replace(/\D/g,'');
+  if(num.length<10){ showToast('⚠️ Telefone inválido','#f7a34f'); return; }
+  // Adiciona 55 se não tiver código do país
+  if(num.length===10 || num.length===11) num='55'+num;
+  window.open('https://wa.me/'+num,'_blank');
+}
+
+// ═══ BADGES DAS SEÇÕES ═══
+function atualizarBadgePend(){
+  var i=document.getElementById('p-itau').checked;
+  var v=document.getElementById('p-vt').checked;
+  var n=(i?1:0)+(v?1:0);
+  var b=document.getElementById('badge-pend');
+  if(!b) return;
+  if(n===0){ b.textContent='nenhuma'; b.classList.remove('filled'); }
+  else { b.textContent=n+' ativa'+(n===1?'':'s'); b.classList.add('filled'); }
+}
+function atualizarBadgeArq(){
+  var b=document.getElementById('badge-arq');
+  if(!b) return;
+  var n=currentFiles.length;
+  b.textContent=n;
+  if(n>0) b.classList.add('filled'); else b.classList.remove('filled');
+}
+function atualizarBadgeObs(){
+  var v=(document.getElementById('f-obs').value||'').trim();
+  var b=document.getElementById('badge-obs');
+  if(!b) return;
+  if(v){ b.textContent=v.length+' car.'; b.classList.add('filled'); }
+  else { b.textContent='vazio'; b.classList.remove('filled'); }
+}
 
 // ═══ SALVAR FUNCIONÁRIO ═══
 function salvarFuncionario(){
@@ -1274,6 +1456,9 @@ function limparForm(){
   document.getElementById('f-cartao-tipo').value='';
   document.getElementById('p-itau').checked=false;document.getElementById('p-vt').checked=false;
   currentFiles=[];renderFilePreviews();editingId=null;
+  // Atualizar hints e badges
+  atualizarIdade();atualizarTempoCasa();atualizarBotaoWA();
+  atualizarBadgePend();atualizarBadgeArq();atualizarBadgeObs();
 }
 
 // ═══ FILTRO PENDÊNCIAS ═══
@@ -1365,6 +1550,9 @@ function editarFuncionario(id){
   document.getElementById('p-vt').checked=f.pendencias.vt;
   document.getElementById('f-obs').value=f.obs||'';
   currentFiles=(f.arquivos||[]).slice();renderFilePreviews();editingId=id;abrirCadastro();
+  // Atualizar hints e badges para os dados carregados
+  atualizarIdade();atualizarTempoCasa();atualizarBotaoWA();
+  atualizarBadgePend();atualizarBadgeArq();atualizarBadgeObs();
 }
 function excluirFuncionario(id){
   id = typeof id === 'string' ? parseInt(id, 10) : id;
@@ -1436,7 +1624,10 @@ function renderVFFuncSelecionado(){
       '<button class="vfc-close" onclick="fecharFuncVF()">✕</button>'+
     '</div>'+
     '<div class="vfc-body">'+
-    '<button onclick="gerarPDF('+f.id+')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;background:rgba(220,38,38,0.12);border:1.5px solid rgba(220,38,38,0.35);border-radius:8px;color:#f87171;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;padding:9px;cursor:pointer;margin-bottom:10px;letter-spacing:0.04em;">📄 Gerar PDF Individual</button>'+
+    '<div style="display:flex;gap:6px;margin-bottom:10px;">'+
+      '<button onclick="gerarPDF('+f.id+')" style="flex:1.2;display:flex;align-items:center;justify-content:center;gap:4px;background:rgba(220,38,38,0.12);border:1.5px solid rgba(220,38,38,0.35);border-radius:8px;color:#f87171;font-family:\'Space Grotesk\',sans-serif;font-size:0.76rem;font-weight:700;padding:9px 4px;cursor:pointer;letter-spacing:0.03em;">📄 PDF</button>'+
+      '<button onclick="gerarPDFeCompartilharWA('+f.id+')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;background:rgba(37,211,102,0.12);border:1.5px solid rgba(37,211,102,0.4);border-radius:8px;color:#25d366;font-family:\'Space Grotesk\',sans-serif;font-size:0.76rem;font-weight:700;padding:9px 4px;cursor:pointer;letter-spacing:0.03em;">📲 WhatsApp</button>'+
+    '</div>'+
     '<div class="vfc-totals">'+
       '<div class="vfc-total money"><div class="tv">'+fmtMoney(totV)+'</div><div class="tl">Total Vales</div></div>'+
       '<div class="vfc-total faltas"><div class="tv">'+totF+'</div><div class="tl">Faltas</div></div>'+
@@ -1726,6 +1917,112 @@ function _abrirPDF(paginas, titulo, corBotao, corTexto){
   var url=URL.createObjectURL(blob);
   window.open(url,'_blank');
   setTimeout(function(){URL.revokeObjectURL(url);},15000);
+}
+
+// ═══ Gera PDF como Blob em memória e abre share sheet nativo (ou WhatsApp direto) ═══
+function _gerarPDFBlob(paginas, nomeArquivo){
+  // Monta HTML sem o botão "Salvar como PDF" (desnecessário num PDF de verdade)
+  var html='<!DOCTYPE html><html lang="pt-BR"><head>'
+    +'<meta charset="UTF-8">'
+    +'<style>'+_pdfCSS+'</style></head><body>'
+    +paginas
+    +'</body></html>';
+  // Container invisível para renderizar
+  var container=document.createElement('div');
+  container.innerHTML=html;
+  container.style.position='absolute';
+  container.style.left='-99999px';
+  container.style.top='0';
+  container.style.width='794px'; // ~A4 em pixels a 96dpi
+  document.body.appendChild(container);
+  var opt={
+    margin:[8,8,8,8],
+    filename:nomeArquivo+'.pdf',
+    image:{type:'jpeg',quality:0.95},
+    html2canvas:{scale:2,useCORS:true,logging:false,letterRendering:true},
+    jsPDF:{unit:'mm',format:'a4',orientation:'portrait',compress:true},
+    pagebreak:{mode:['avoid-all','css','legacy']}
+  };
+  return html2pdf().set(opt).from(container).outputPdf('blob').then(function(blob){
+    document.body.removeChild(container);
+    return blob;
+  }).catch(function(err){
+    try{document.body.removeChild(container);}catch(e){}
+    throw err;
+  });
+}
+
+// Compartilha o PDF direto no WhatsApp via Web Share API
+function _compartilharPDF(blob, nomeArquivo, mensagemPadrao){
+  var file=new File([blob],nomeArquivo+'.pdf',{type:'application/pdf'});
+  // Web Share API Level 2 — aceita arquivos
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    return navigator.share({
+      files:[file],
+      title:nomeArquivo,
+      text:mensagemPadrao||nomeArquivo
+    }).then(function(){
+      showToast('✅ Pronto para enviar!','var(--success)');
+    }).catch(function(err){
+      if(err && err.name==='AbortError') return; // usuário cancelou, tudo bem
+      console.error('Erro share:',err);
+      _fallbackDownloadPDF(blob,nomeArquivo);
+    });
+  } else {
+    // Fallback: navegador não suporta compartilhamento de arquivo
+    return _fallbackDownloadPDF(blob,nomeArquivo);
+  }
+}
+
+function _fallbackDownloadPDF(blob,nomeArquivo){
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;
+  a.download=nomeArquivo+'.pdf';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},500);
+  showToast('⬇️ PDF baixado. Abra o WhatsApp e anexe o arquivo.','var(--warn)');
+}
+
+// Gera PDF e compartilha para WhatsApp (individual ou geral)
+function gerarPDFeCompartilharWA(funcIdOuNull){
+  if(typeof html2pdf==='undefined'){
+    showToast('❌ Biblioteca PDF não carregada. Verifique a conexão.','#f75a5a');
+    return;
+  }
+  var meses=nomesMeses();
+  var mesNome=meses[vfMonth-1].toLowerCase()+' de '+vfYear;
+  var k=vfKey(),hoje=new Date().toLocaleDateString('pt-BR');
+  var paginas, nomeArq, mensagem;
+  try{
+    if(funcIdOuNull){
+      var f=funcionarios.find(function(x){return x.id===funcIdOuNull;});
+      if(!f){showToast('❌ Funcionário não encontrado','#f75a5a');return;}
+      var p1=_buildPaginaValesIndividual(f,k,mesNome,hoje,'Página 1 de 2');
+      var p2=_buildPaginaFeriadosIndividual(f,k,mesNome,hoje,'Página 2 de 2');
+      paginas=p1+p2;
+      nomeArq=sanitize(f.nome)+'_'+mesNome.replace(/\s/g,'_');
+      mensagem='📄 Relatório Vales/Faltas — '+f.nome+' — '+mesNome;
+    } else {
+      var p1g=_buildPaginaValesGeral(k,mesNome,hoje);
+      var p2g=_buildPaginaFeriadosGeral(k,mesNome,hoje);
+      paginas=p1g+p2g;
+      nomeArq='Relatorio_Completo_'+mesNome.replace(/\s/g,'_');
+      mensagem='📄 Relatório Completo Contabilidade — '+mesNome;
+    }
+  }catch(err){
+    console.error(err);
+    showToast('❌ Erro ao preparar PDF','#f75a5a');
+    return;
+  }
+  showToast('⏳ Gerando PDF...','var(--surface3)');
+  _gerarPDFBlob(paginas,nomeArq).then(function(blob){
+    return _compartilharPDF(blob,nomeArq,mensagem);
+  }).catch(function(err){
+    console.error('Erro gerar PDF:',err);
+    showToast('❌ Falha ao gerar PDF: '+(err.message||''),'#f75a5a');
+  });
 }
 
 // ═══ PDF — feriados trabalhados (mantido por compatibilidade, agora gera combinado) ═══

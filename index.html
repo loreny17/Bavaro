@@ -1920,31 +1920,81 @@ function _abrirPDF(paginas, titulo, corBotao, corTexto){
 }
 
 // ═══ Gera PDF como Blob em memória e abre share sheet nativo (ou WhatsApp direto) ═══
+// CSS otimizado para impressão (fundo branco, alto contraste) — muito melhor para contabilidade
+var _pdfCSSLight='*{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+  +'body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1e293b;padding:0;font-size:12px;}'
+  +'.pagina{width:100%;max-width:780px;margin:0 auto;padding:14px 18px;page-break-after:always;background:#fff;}'
+  +'.pagina:last-of-type{page-break-after:auto;}'
+  +'.header{border-radius:8px;padding:16px;text-align:center;margin-bottom:14px;background:#f1f5f9;border:1px solid #cbd5e1;}'
+  +'.header h1{font-size:18px;font-weight:700;letter-spacing:0.06em;margin-bottom:4px;color:#0f172a;}'
+  +'.header .sub{font-size:12px;margin:2px 0 6px;color:#475569;}'
+  +'.header p{font-size:11px;color:#64748b;margin:2px 0;}'
+  +'.totais{display:flex;gap:10px;margin-bottom:14px;}'
+  +'.tot-box{flex:1;border-radius:8px;padding:10px;text-align:center;border:1px solid;background:#fff;}'
+  +'.tot-vales{border-color:#22c55e;background:#f0fdf4;}'
+  +'.tot-faltas{border-color:#dc2626;background:#fef2f2;}'
+  +'.tot-feriados{border-color:#f59e0b;background:#fffbeb;}'
+  +'.tot-val{font-size:16px;font-weight:700;line-height:1.2;}'
+  +'.tot-vales .tot-val{color:#15803d;}'
+  +'.tot-faltas .tot-val{color:#b91c1c;}'
+  +'.tot-feriados .tot-val{color:#b45309;}'
+  +'.tot-lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;font-weight:600;}'
+  +'.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid;color:#0f172a;border-color:#cbd5e1;}'
+  +'.sec-title.red{color:#b91c1c;border-color:#fca5a5;}'
+  +'.sec-title.yellow{color:#b45309;border-color:#fcd34d;}'
+  +'.sec-title.green{color:#15803d;border-color:#86efac;}'
+  +'table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px;background:#fff;}'
+  +'th{background:#f1f5f9;color:#0f172a;padding:7px 6px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #cbd5e1;}'
+  +'td{padding:7px 6px;border-bottom:1px solid #e2e8f0;color:#1e293b;}'
+  +'tr:nth-child(even) td{background:#f8fafc;}'
+  +'.empty{text-align:center;padding:20px;color:#94a3b8;font-style:italic;font-size:12px;background:#f8fafc;border-radius:6px;border:1px dashed #cbd5e1;}'
+  +'.func-nome{font-weight:700;color:#0f172a;}'
+  +'.val-money{color:#15803d;font-weight:700;}'
+  +'.val-falta{color:#b91c1c;font-weight:700;}'
+  +'.val-feriado{color:#b45309;font-weight:700;}'
+  +'.footer{text-align:center;padding:10px;color:#94a3b8;font-size:10px;margin-top:10px;border-top:1px solid #e2e8f0;}'
+  +'.page-num{position:absolute;top:10px;right:16px;font-size:9px;color:#94a3b8;}'
+  +'.func-header{background:#f1f5f9;padding:10px 14px;border-radius:6px;margin-bottom:10px;border-left:3px solid #dc2626;}'
+  +'.func-header .nome{font-size:14px;font-weight:700;color:#0f172a;}'
+  +'.func-header .cargo{font-size:11px;color:#64748b;margin-top:2px;}';
+
 function _gerarPDFBlob(paginas, nomeArquivo){
-  // Monta HTML sem o botão "Salvar como PDF" (desnecessário num PDF de verdade)
+  // Usa versão LIGHT do CSS — fica legível impresso e para contabilidade
   var html='<!DOCTYPE html><html lang="pt-BR"><head>'
     +'<meta charset="UTF-8">'
-    +'<style>'+_pdfCSS+'</style></head><body>'
+    +'<style>'+_pdfCSSLight+'</style></head><body>'
     +paginas
     +'</body></html>';
-  // Container invisível para renderizar
+  // Container VISÍVEL mas escondido (visibility:hidden em vez de posicionamento off-screen)
+  // Isto garante que o html2canvas capture corretamente cores e layout
   var container=document.createElement('div');
   container.innerHTML=html;
-  container.style.position='absolute';
-  container.style.left='-99999px';
+  container.style.position='fixed';
   container.style.top='0';
-  container.style.width='794px'; // ~A4 em pixels a 96dpi
+  container.style.left='0';
+  container.style.width='780px';
+  container.style.zIndex='-9999';
+  container.style.visibility='hidden';
+  container.style.pointerEvents='none';
+  container.style.background='#fff';
   document.body.appendChild(container);
   var opt={
-    margin:[8,8,8,8],
+    margin:[10,10,10,10],
     filename:nomeArquivo+'.pdf',
-    image:{type:'jpeg',quality:0.95},
-    html2canvas:{scale:2,useCORS:true,logging:false,letterRendering:true},
+    image:{type:'jpeg',quality:0.98},
+    html2canvas:{
+      scale:2,
+      useCORS:true,
+      logging:false,
+      letterRendering:true,
+      backgroundColor:'#ffffff',
+      windowWidth:780
+    },
     jsPDF:{unit:'mm',format:'a4',orientation:'portrait',compress:true},
-    pagebreak:{mode:['avoid-all','css','legacy']}
+    pagebreak:{mode:['css','legacy'],before:'.pagina',after:'.pagina'}
   };
   return html2pdf().set(opt).from(container).outputPdf('blob').then(function(blob){
-    document.body.removeChild(container);
+    try{document.body.removeChild(container);}catch(e){}
     return blob;
   }).catch(function(err){
     try{document.body.removeChild(container);}catch(e){}

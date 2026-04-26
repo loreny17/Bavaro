@@ -289,6 +289,7 @@ textarea{resize:vertical;min-height:80px;}
 .hist-tabela td.mes{font-weight:700;color:var(--text);}
 .hist-tabela td.vale{color:#4ade80;text-align:right;font-weight:700;}
 .hist-tabela td.falta{color:#f87171;text-align:center;font-weight:700;}
+.hist-tabela td.atestado{color:#4a9ef7;text-align:center;font-weight:700;}
 .hist-tabela td.fer{color:#f59e0b;text-align:center;font-weight:700;}
 .hist-tabela td.zero{color:var(--muted);font-weight:400;}
 .hist-titulo-secao{font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin:14px 0 8px;}
@@ -583,6 +584,7 @@ body.admin-mode .admin-only{display:flex!important;}
 .vfc-mini{font-family:'Space Grotesk',sans-serif;font-size:0.78rem;font-weight:700;padding:6px 10px;border-radius:8px;display:inline-flex;align-items:center;gap:5px;}
 .vfc-mini.money{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-glow);}
 .vfc-mini.falta{background:var(--danger-dim);color:var(--danger);border:1px solid rgba(255,68,68,0.25);}
+.vfc-mini.atestado{background:rgba(74,158,247,0.12);color:#4a9ef7;border:1px solid rgba(74,158,247,0.3);}
 .vfc-mini.fer{background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);}
 
 /* Chips de adicionar */
@@ -602,6 +604,8 @@ body.admin-mode .admin-only{display:flex!important;}
 .vfc-chip{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:0.78rem;font-family:'Space Grotesk',sans-serif;}
 .vfc-chip-vale{background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);}
 .vfc-chip-falta{background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.2);}
+.vfc-chip-falta.atestado{background:rgba(74,158,247,0.06);border:1px solid rgba(74,158,247,0.25);}
+.vfc-chip-falta.atestado .vfc-chip-val{color:#4a9ef7;}
 .vfc-chip-fer{background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);}
 .vfc-chip-val{font-weight:700;flex-shrink:0;min-width:40px;}
 .vfc-chip-vale .vfc-chip-val{color:#4ade80;}
@@ -626,6 +630,9 @@ body.admin-mode .admin-only{display:flex!important;}
 .add-block-title.money{color:var(--accent);}
 .add-block-title.falta{color:var(--danger);}
 .add-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
+.atestado-toggle{display:flex;align-items:center;gap:8px;background:rgba(74,158,247,0.06);border:1px solid rgba(74,158,247,0.25);border-radius:8px;padding:9px 11px;margin-bottom:8px;cursor:pointer;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;color:#4a9ef7;-webkit-user-select:none;user-select:none;}
+.atestado-toggle input[type=checkbox]{accent-color:#4a9ef7;width:16px;height:16px;cursor:pointer;flex-shrink:0;}
+.atestado-toggle .atestado-info{font-size:0.65rem;color:var(--muted);font-weight:400;margin-left:auto;}
 .add-full{margin-bottom:8px;}
 .add-submit{width:100%;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;padding:11px;cursor:pointer;font-family:'Space Grotesk',sans-serif;}
 .money-btn{background:var(--success);color:#0a2214;}
@@ -2130,22 +2137,26 @@ function _histColetar(fid, periodoMeses){
   // Coletar info de cada mês
   var nomesMes = nomesMeses();
   var meses = [];
-  var totV = 0, totF = 0, totFer = 0;
+  var totV = 0, totF = 0, totAt = 0, totFer = 0;
   var maiorVale = null, mesMaisFaltas = null, mesMaisFeriados = null;
   mesesKeys.forEach(function(k){
     var d = vfData[k] && vfData[k][fid];
     var vales = d ? (d.vales||[]) : [];
-    var faltas = d ? (d.faltas||[]) : [];
+    var todasFaltas = d ? (d.faltas||[]) : [];
+    var faltasPuras = todasFaltas.filter(function(fa){return !fa.atestado;});
+    var atestados = todasFaltas.filter(function(fa){return fa.atestado;});
     var feriados = d ? (d.feriados||[]) : [];
     var tv = vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-    var tf = faltas.length;
+    var tf = todasFaltas.length;       // TOTAL de faltas (inclui atestados) — exibido no histórico
+    var tat = atestados.length;        // só atestados (subset)
     var tfer = feriados.length;
-    if(tv===0 && tf===0 && tfer===0 && periodoMeses===0) return; // tudo: pula meses zerados
+    if(tv===0 && tf===0 && tfer===0 && periodoMeses===0) return;
     var p = k.split('-');
     var mesLabel = nomesMes[parseInt(p[1])-1].substring(0,3) + '/' + p[0].substring(2);
-    meses.push({key:k, label:mesLabel, ano:parseInt(p[0]), mes:parseInt(p[1]), tv:tv, tf:tf, tfer:tfer, vales:vales, faltas:faltas, feriados:feriados});
+    meses.push({key:k, label:mesLabel, ano:parseInt(p[0]), mes:parseInt(p[1]), tv:tv, tf:tf, tat:tat, tfer:tfer, vales:vales, faltas:todasFaltas, atestados:atestados, feriados:feriados});
     totV += tv;
     totF += tf;
+    totAt += tat;
     totFer += tfer;
     // Recordes
     vales.forEach(function(v){
@@ -2161,7 +2172,7 @@ function _histColetar(fid, periodoMeses){
   var qtdMesesComDados = meses.length || 1;
   var mediaV = totV / qtdMesesComDados;
   return {
-    f:f, meses:meses, totV:totV, totF:totF, totFer:totFer,
+    f:f, meses:meses, totV:totV, totF:totF, totAt:totAt, totFer:totFer,
     maiorVale:maiorVale, mesMaisFaltas:mesMaisFaltas, mesMaisFeriados:mesMaisFeriados,
     qtdMesesComDados:qtdMesesComDados, mediaV:mediaV
   };
@@ -2179,8 +2190,9 @@ function histRender(){
   var html = '<div class="hist-resumo">';
   html += '<div class="hist-resumo-item"><div class="hist-resumo-label">Total Vales</div><div class="hist-resumo-valor verde">'+fmtMoney(dados.totV)+'</div></div>';
   html += '<div class="hist-resumo-item"><div class="hist-resumo-label">Faltas</div><div class="hist-resumo-valor vermelho">'+dados.totF+'</div></div>';
+  html += '<div class="hist-resumo-item"><div class="hist-resumo-label">Atestados</div><div class="hist-resumo-valor azul">'+dados.totAt+'</div></div>';
   html += '<div class="hist-resumo-item"><div class="hist-resumo-label">Feriados</div><div class="hist-resumo-valor laranja">'+dados.totFer+'</div></div>';
-  html += '<div class="hist-resumo-item"><div class="hist-resumo-label">Média/mês</div><div class="hist-resumo-valor azul">'+fmtMoney(dados.mediaV)+'</div></div>';
+  html += '<div class="hist-resumo-item full"><div class="hist-resumo-label">Média Vales/mês</div><div class="hist-resumo-valor azul">'+fmtMoney(dados.mediaV)+'</div></div>';
   html += '</div>';
   // Tabela mês a mês
   html += '<div class="hist-titulo-secao">Mês a mês</div>';
@@ -2188,13 +2200,15 @@ function histRender(){
     +'<th>MÊS</th>'
     +'<th class="ar">VALES</th>'
     +'<th class="ac">FALTAS</th>'
-    +'<th class="ac">FERIADOS</th>'
+    +'<th class="ac">📋</th>'
+    +'<th class="ac">FER</th>'
     +'</tr></thead><tbody>';
   dados.meses.forEach(function(m){
     html += '<tr>'
       +'<td class="mes">'+m.label+'</td>'
       +'<td class="vale'+(m.tv===0?' zero':'')+'">'+(m.tv===0?'-':fmtMoney(m.tv))+'</td>'
       +'<td class="falta'+(m.tf===0?' zero':'')+'">'+(m.tf===0?'-':m.tf)+'</td>'
+      +'<td class="atestado'+(m.tat===0?' zero':'')+'">'+(m.tat===0?'-':m.tat)+'</td>'
       +'<td class="fer'+(m.tfer===0?' zero':'')+'">'+(m.tfer===0?'-':m.tfer)+'</td>'
     +'</tr>';
   });
@@ -2243,68 +2257,129 @@ function _histJspdf(dados){
   var doc = _jspdfNovoDoc();
   var hoje = new Date().toLocaleDateString('pt-BR');
   _jspdfPintarFundo(doc, _COR.bgEscuro);
-  var periodoTxt = _histPeriodo===0 ? 'Histórico Completo' : 'Últimos '+_histPeriodo+' meses';
-  _jspdfHeader(doc, dados.f.nome.toUpperCase(), (dados.f.cargo||'Sem cargo'), periodoTxt, _COR.verde, _COR.bgHeader);
-  var y = 46;
-  // Resumo (4 chips)
+  var periodoTxt = _histPeriodo===0 ? 'Historico Completo' : 'Ultimos '+_histPeriodo+' meses';
+  var casa = tempoCasaCurto(dados.f.admissao);
+
+  // ─── HEADER COMPACTO COM CARTÃO DO FUNCIONÁRIO ───
+  // Bloco unificado: nome grande + cargo + tempo + período em UMA caixa
+  doc.setFillColor(_COR.bgHeader[0],_COR.bgHeader[1],_COR.bgHeader[2]);
+  doc.roundedRect(12,12,186,24,3,3,'F');
+  // Nome
+  doc.setTextColor(_COR.verde[0],_COR.verde[1],_COR.verde[2]);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(15);
+  doc.text(dados.f.nome.toUpperCase(),105,21,{align:'center'});
+  // Cargo + tempo de casa em uma linha (menor, mas legível)
+  doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9);
+  var subtitulo = (dados.f.cargo||'Sem cargo') + (casa ? '  -  ' + casa + ' de casa' : '');
+  doc.text(subtitulo,105,28,{align:'center'});
+  // Período (cinza, menor)
+  doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
+  doc.setFontSize(8);
+  doc.text(periodoTxt,105,33.5,{align:'center'});
+
+  var y = 42;
+
+  // ─── 3 CAIXAS DE RESUMO PRINCIPAIS (uma linha só, equilibradas) ───
   y = _jspdfMiniTotais(doc, y, [
     {label:'TOTAL VALES', valor:'R$ '+dados.totV.toFixed(2).replace('.',','), cor:_COR.verde},
     {label:'FALTAS', valor:String(dados.totF), cor:_COR.vermelho},
     {label:'FERIADOS', valor:String(dados.totFer), cor:_COR.amarelo}
   ]);
-  y = _jspdfMiniTotais(doc, y, [
-    {label:'MEDIA VALES/MES', valor:'R$ '+dados.mediaV.toFixed(2).replace('.',','), cor:[74,158,247]},
-    {label:'MESES COM DADOS', valor:String(dados.qtdMesesComDados), cor:_COR.textoClaro}
-  ]);
-  // Tabela mês a mês
-  y = _jspdfSectionTitle(doc, y+2, 'Mes a Mes', _COR.verde);
+
+  // ─── INFO SECUNDÁRIA INLINE (sem caixa, só texto pequeno centralizado) ───
+  doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(7.5);
+  var infoLine = 'Media Vales/mes: R$ '+dados.mediaV.toFixed(2).replace('.',',');
+  if(dados.totAt>0) infoLine += '    -    '+dados.totAt+' atestado'+(dados.totAt>1?'s':'')+' (nao saem na contabilidade)';
+  infoLine += '    -    '+dados.qtdMesesComDados+' '+(dados.qtdMesesComDados===1?'mes':'meses')+' com dados';
+  doc.text(infoLine,105,y+1,{align:'center'});
+  y += 6;
+
+  // ─── TABELA MÊS A MÊS (com coluna de atestado se houver) ───
+  y = _jspdfSectionTitle(doc, y+1, 'Mes a Mes', _COR.verde);
+  var temAtestado = dados.totAt > 0;
   var linhas = dados.meses.map(function(m){
-    return [
+    var linha = [
       {text:m.label, cor:_COR.textoClaro, bold:true},
       {text: m.tv===0 ? '-' : 'R$ '+m.tv.toFixed(2).replace('.',','), cor: m.tv===0?_COR.textoSuave:_COR.verde, bold: m.tv>0},
-      {text: m.tf===0 ? '-' : String(m.tf), cor: m.tf===0?_COR.textoSuave:_COR.vermelho, bold: m.tf>0},
-      {text: m.tfer===0 ? '-' : String(m.tfer), cor: m.tfer===0?_COR.textoSuave:_COR.amarelo, bold: m.tfer>0}
+      {text: m.tf===0 ? '-' : String(m.tf), cor: m.tf===0?_COR.textoSuave:_COR.vermelho, bold: m.tf>0}
     ];
+    if(temAtestado){
+      linha.push({text: m.tat===0 ? '-' : String(m.tat), cor: m.tat===0?_COR.textoSuave:[74,158,247], bold: m.tat>0});
+    }
+    linha.push({text: m.tfer===0 ? '-' : String(m.tfer), cor: m.tfer===0?_COR.textoSuave:_COR.amarelo, bold: m.tfer>0});
+    return linha;
   });
-  y = _jspdfTabela(doc, y, [
-    {header:'MES', width:50, align:'left'},
-    {header:'VALES', width:60, align:'right'},
-    {header:'FALTAS', width:36, align:'center'},
-    {header:'FERIADOS', width:40, align:'center'}
-  ], linhas, _COR.verde);
-  // Recordes
-  if(dados.maiorVale || (dados.mesMaisFaltas && dados.mesMaisFaltas.qtd>0) || (dados.mesMaisFeriados && dados.mesMaisFeriados.qtd>0)){
-    y = _jspdfSectionTitle(doc, y+4, 'Recordes', _COR.verde);
-    var linhasRec = [];
-    if(dados.maiorVale){
-      linhasRec.push([
-        {text:'Maior vale', cor:_COR.textoMudo},
-        {text:'R$ '+dados.maiorVale.val.toFixed(2).replace('.',','), cor:_COR.verde, bold:true},
-        {text:dados.maiorVale.mes, cor:_COR.textoClaro}
-      ]);
-    }
-    if(dados.mesMaisFaltas && dados.mesMaisFaltas.qtd>0){
-      linhasRec.push([
-        {text:'Mais faltas', cor:_COR.textoMudo},
-        {text:String(dados.mesMaisFaltas.qtd), cor:_COR.vermelho, bold:true},
-        {text:dados.mesMaisFaltas.label, cor:_COR.textoClaro}
-      ]);
-    }
-    if(dados.mesMaisFeriados && dados.mesMaisFeriados.qtd>0){
-      linhasRec.push([
-        {text:'Mais feriados', cor:_COR.textoMudo},
-        {text:String(dados.mesMaisFeriados.qtd), cor:_COR.amarelo, bold:true},
-        {text:dados.mesMaisFeriados.label, cor:_COR.textoClaro}
-      ]);
-    }
-    y = _jspdfTabela(doc, y, [
-      {header:'RECORDE', width:80, align:'left'},
-      {header:'VALOR', width:46, align:'right'},
-      {header:'QUANDO', width:60, align:'left'}
-    ], linhasRec, _COR.verde);
+  var colunas = [
+    {header:'MES', width:42, align:'left'},
+    {header:'VALES', width:54, align:'right'},
+    {header:'FALTAS', width:30, align:'center'}
+  ];
+  if(temAtestado){
+    colunas.push({header:'ATESTADO', width:30, align:'center'});
+    colunas.push({header:'FERIADOS', width:30, align:'center'});
+  } else {
+    colunas[2].width = 45;
+    colunas.push({header:'FERIADOS', width:45, align:'center'});
   }
+  y = _jspdfTabela(doc, y, colunas, linhas, _COR.verde);
+
+  // ─── RECORDES EM 3 CARDS LADO A LADO (em vez de tabela) ───
+  var temRecordes = dados.maiorVale || (dados.mesMaisFaltas && dados.mesMaisFaltas.qtd>0) || (dados.mesMaisFeriados && dados.mesMaisFeriados.qtd>0);
+  if(temRecordes){
+    y = _jspdfSectionTitle(doc, y+4, 'Recordes', _COR.verde);
+    // 3 cards lado a lado
+    _histDesenharRecordeCard(doc, 12, y, 60,
+      'MAIOR VALE',
+      dados.maiorVale ? 'R$ '+dados.maiorVale.val.toFixed(2).replace('.',',') : '-',
+      dados.maiorVale ? dados.maiorVale.mes : '',
+      _COR.verde);
+    _histDesenharRecordeCard(doc, 75, y, 60,
+      'MAIS FALTAS',
+      (dados.mesMaisFaltas && dados.mesMaisFaltas.qtd>0) ? String(dados.mesMaisFaltas.qtd) : '-',
+      (dados.mesMaisFaltas && dados.mesMaisFaltas.qtd>0) ? dados.mesMaisFaltas.label : '',
+      _COR.vermelho);
+    _histDesenharRecordeCard(doc, 138, y, 60,
+      'MAIS FERIADOS',
+      (dados.mesMaisFeriados && dados.mesMaisFeriados.qtd>0) ? String(dados.mesMaisFeriados.qtd) : '-',
+      (dados.mesMaisFeriados && dados.mesMaisFeriados.qtd>0) ? dados.mesMaisFeriados.label : '',
+      _COR.amarelo);
+    y += 22;
+  }
+
   _jspdfFooter(doc, 'Gerado em '+hoje+' - Gestao Bavaro');
   return doc;
+}
+
+// Desenha um card de recorde compacto: titulo em cima, valor grande no meio, mês embaixo
+function _histDesenharRecordeCard(doc, x, y, w, titulo, valor, quando, cor){
+  var h = 18;
+  doc.setFillColor(_COR.bgCard[0],_COR.bgCard[1],_COR.bgCard[2]);
+  doc.roundedRect(x,y,w,h,1.5,1.5,'F');
+  doc.setDrawColor(cor[0],cor[1],cor[2]);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(x,y,w,h,1.5,1.5,'S');
+  // Título
+  doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(6.5);
+  doc.text(titulo,x+w/2,y+4.5,{align:'center'});
+  // Valor (grande, colorido)
+  doc.setTextColor(cor[0],cor[1],cor[2]);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.text(valor,x+w/2,y+11,{align:'center'});
+  // Mês (pequeno, claro)
+  if(quando){
+    doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7);
+    doc.text('em '+quando,x+w/2,y+15.5,{align:'center'});
+  }
 }
 
 // ═══ DESLIGAMENTO ═══
@@ -2393,7 +2468,8 @@ function _jspdfDesligamento(f, dataSaida){
   // Dados de vales/faltas/feriados do mês
   var d=vfData[k]&&vfData[k][f.id];
   var vales=d?(d.vales||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
-  var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
+  // Atestados NÃO saem no relatório de contabilidade
+  var faltas=d?(d.faltas||[]).filter(function(fa){return !fa.atestado;}).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var feriados=d?(d.feriados||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
 
@@ -2625,7 +2701,7 @@ function renderVF(){
   var meses=nomesMeses();
   document.getElementById('vf-month-label').textContent=meses[vfMonth-1]+' / '+vfYear;
   var k=vfKey(),tv=0,tf=0,cm=0;
-  if(vfData[k])Object.keys(vfData[k]).forEach(function(fid){var d=vfData[k][fid];var v=(d.vales||[]).reduce(function(s,x){return s+parseFloat(x.val||0);},0);var f=(d.faltas||[]).length;if(v>0||f>0)cm++;tv+=v;tf+=f;});
+  if(vfData[k])Object.keys(vfData[k]).forEach(function(fid){var d=vfData[k][fid];var v=(d.vales||[]).reduce(function(s,x){return s+parseFloat(x.val||0);},0);var f=(d.faltas||[]).filter(function(fa){return !fa.atestado;}).length;if(v>0||f>0)cm++;tv+=v;tf+=f;});
   document.getElementById('stat-func').textContent=cm;
   document.getElementById('stat-vales').textContent='R$\u00a0'+tv.toFixed(2).replace('.',',');
   document.getElementById('stat-faltas').textContent=tf;
@@ -2657,7 +2733,9 @@ function renderVFFuncSelecionado(){
   var d=getVF(f.id);
   var ini=f.nome.split(' ').slice(0,2).map(function(p){return p[0];}).join('').toUpperCase();
   var totV=(d.vales||[]).reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-  var totF=(d.faltas||[]).length;
+  var todasFaltas = d.faltas||[];
+  var totF = todasFaltas.filter(function(fa){return !fa.atestado;}).length;
+  var totAtestados = todasFaltas.filter(function(fa){return fa.atestado;}).length;
   // Lançamentos como chips compactos com dia da semana
   var diasSem = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   function chipDataDia(iso){
@@ -2673,9 +2751,13 @@ function renderVFFuncSelecionado(){
     +'</div>';
   }).join('');
   var fChips = (d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fa){
-    return '<div class="vfc-chip vfc-chip-falta">'
-      +'<span class="vfc-chip-val">❌</span>'
-      +'<span class="vfc-chip-meta">'+chipDataDia(fa.data)+(fa.desc?' · '+fa.desc:'')+'</span>'
+    var ehAtestado = fa.atestado;
+    var icone = ehAtestado ? '📋' : '❌';
+    var classeExtra = ehAtestado ? ' atestado' : '';
+    var infoExtra = ehAtestado ? ' (atestado)' : '';
+    return '<div class="vfc-chip vfc-chip-falta'+classeExtra+'">'
+      +'<span class="vfc-chip-val">'+icone+'</span>'
+      +'<span class="vfc-chip-meta">'+chipDataDia(fa.data)+(fa.desc?' · '+fa.desc:'')+infoExtra+'</span>'
       +'<button class="vfc-chip-rm" onclick="removerFalta('+f.id+',\''+fa.id+'\')">×</button>'
     +'</div>';
   }).join('');
@@ -2705,6 +2787,7 @@ function renderVFFuncSelecionado(){
     '<div class="vfc-mini-stats">'+
       '<span class="vfc-mini money">💰 '+fmtMoney(totV)+'</span>'+
       '<span class="vfc-mini falta">❌ '+totF+'</span>'+
+      (totAtestados>0?'<span class="vfc-mini atestado">📋 '+totAtestados+'</span>':'')+
       '<span class="vfc-mini fer">🏛️ '+totFer+'</span>'+
     '</div>'+
     // Botões de adicionar (chips menores)
@@ -2722,6 +2805,7 @@ function renderVFFuncSelecionado(){
     '<div id="falta-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
       '<div class="add-grid"><div><label style="font-size:0.62rem">Data da falta</label><input type="date" id="falta-data-'+f.id+'"></div>'+
       '<div><label style="font-size:0.62rem">Motivo</label><input type="text" id="falta-desc-'+f.id+'" placeholder="opcional"></div></div>'+
+      '<label class="atestado-toggle"><input type="checkbox" id="falta-atestado-'+f.id+'"><span>📋 Falta com atestado</span><span class="atestado-info">(não sai no PDF da contabilidade)</span></label>'+
       '<button class="add-submit falta-btn" onclick="adicionarFalta('+f.id+')">+ Registrar Falta</button>'+
     '</div>'+
     '<div id="fer-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
@@ -2753,7 +2837,7 @@ function renderVFMovimentacao(){
     var d=vfData[k]&&vfData[k][f.id];
     if(!d)return;
     var tv=(d.vales||[]).reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-    var tf=(d.faltas||[]).length;
+    var tf=(d.faltas||[]).filter(function(fa){return !fa.atestado;}).length;
     var tfer=(d.feriados||[]).length;
     if(tv>0||tf>0||tfer>0) comMov.push({f:f,tv:tv,tf:tf,tfer:tfer});
   });
@@ -2793,11 +2877,17 @@ function adicionarVale(funcId){
 }
 function adicionarFalta(funcId){
   var dI=document.getElementById('falta-data-'+funcId),dsI=document.getElementById('falta-desc-'+funcId);
+  var atI=document.getElementById('falta-atestado-'+funcId);
   if(!dI.value){showToast('⚠️ Informe a data!','#f7a34f');return;}
   var d=getVF(funcId);
   if(d.faltas.some(function(fa){return fa.data===dI.value;})){showToast('⚠️ Já existe falta nessa data!','#f7a34f');return;}
-  d.faltas.push({id:'f'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():''});
-  saveVF().then(function(){dI.value='';if(dsI)dsI.value='';renderVF();showToast('❌ Falta registrada!','#f75a5a');});
+  var atestado = atI ? atI.checked : false;
+  d.faltas.push({id:'f'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():'',atestado:atestado});
+  saveVF().then(function(){
+    dI.value='';if(dsI)dsI.value='';if(atI)atI.checked=false;
+    renderVF();
+    showToast(atestado?'📋 Atestado registrado!':'❌ Falta registrada!',atestado?'#4a9ef7':'#f75a5a');
+  });
 }
 function adicionarFeriado(funcId){
   var dI=document.getElementById('fer-data-'+funcId),dsI=document.getElementById('fer-desc-'+funcId);
@@ -3386,26 +3476,26 @@ function _jspdfMiniTotais(doc, y, chips){
   var gap = 3;
   var w = (totalW - gap*(chips.length-1)) / chips.length;
   var x = 12;
-  var h = 9;
+  var h = 6.5; // altura reduzida (era 9)
   chips.forEach(function(c){
     doc.setFillColor(_COR.bgCard[0],_COR.bgCard[1],_COR.bgCard[2]);
-    doc.roundedRect(x,y,w,h,1.5,1.5,'F');
+    doc.roundedRect(x,y,w,h,1.2,1.2,'F');
     doc.setDrawColor(c.cor[0],c.cor[1],c.cor[2]);
     doc.setLineWidth(0.3);
-    doc.roundedRect(x,y,w,h,1.5,1.5,'S');
-    // Label à esquerda
+    doc.roundedRect(x,y,w,h,1.2,1.2,'S');
+    // Label à esquerda (mesmo eixo Y do valor)
     doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
     doc.setFont('helvetica','normal');
     doc.setFontSize(6.5);
-    doc.text(c.label,x+3,y+3.7);
-    // Valor centralizado/direita
+    doc.text(c.label,x+3,y+4.3);
+    // Valor à direita (mesma linha do label)
     doc.setTextColor(c.cor[0],c.cor[1],c.cor[2]);
     doc.setFont('helvetica','bold');
-    doc.setFontSize(9);
-    doc.text(c.valor,x+w-3,y+6.7,{align:'right'});
+    doc.setFontSize(8.5);
+    doc.text(c.valor,x+w-3,y+4.5,{align:'right'});
     x += w + gap;
   });
-  return y + h + 4;
+  return y + h + 3;
 }
 
 function _jspdfRelatorioGeral(k, mesNome, hoje){
@@ -3421,7 +3511,8 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
     if(!d) return;
     var tv=(d.vales||[]).reduce(function(s,v){return s+parseFloat(v.val||0);},0);
     var qtdV=(d.vales||[]).length;
-    var faltas=d.faltas||[];
+    // Filtra atestados — eles NÃO saem no relatório de contabilidade
+    var faltas=(d.faltas||[]).filter(function(fa){return !fa.atestado;});
     var feriados=d.feriados||[];
     if(tv>0){ listaVales.push({f:f,total:tv,qtd:qtdV}); totalVales+=tv; }
     if(faltas.length){ listaFaltas.push({f:f,faltas:faltas}); totalFaltas+=faltas.length; }
@@ -3508,7 +3599,8 @@ function _jspdfRelatorioIndividual(f, k, mesNome, hoje){
   var doc = _jspdfNovoDoc();
   var d=vfData[k]&&vfData[k][f.id];
   var vales=d?(d.vales||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
-  var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
+  // Filtra atestados — eles NÃO saem no relatório de contabilidade
+  var faltas=d?(d.faltas||[]).filter(function(fa){return !fa.atestado;}).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var feriados=d?(d.feriados||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
 

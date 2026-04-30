@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<!-- DEBUG TEMPORÁRIO: console na tela (Eruda) - REMOVER DEPOIS -->
+<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+<script>eruda.init();</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#080808">
@@ -9216,7 +9219,30 @@ function authBootstrapTenant(){
   return new Promise(function(resolve, reject){
     if(!fbDb || !_usuarioAtual){ reject(new Error('Firebase ou usuário ausente')); return; }
     var uid = _usuarioAtual.uid;
+    console.log('[Tenant] Bootstrap iniciado para uid=', uid);
+
+    // Mostra tela de loading enquanto verifica tenant
+    var overlay = document.getElementById('auth-overlay');
+    var loadingEl = document.getElementById('auth-tela-loading');
+    var loginEl = document.getElementById('auth-tela-login');
+    var resetEl = document.getElementById('auth-tela-reset');
+    if(overlay) overlay.classList.remove('hidden');
+    if(loadingEl) loadingEl.style.display = 'block';
+    if(loginEl) loginEl.style.display = 'none';
+    if(resetEl) resetEl.style.display = 'none';
+
+    // Timeout de 12s — se não responder, é erro de regras
+    var resolved = false;
+    var timeout = setTimeout(function(){
+      if(resolved) return;
+      console.warn('[Tenant] Timeout — verifique regras Firestore');
+      var msg = 'Tempo esgotado. Verifique:\n\n1. Regras do Firestore permitem leitura em users/{uid}\n2. Sua internet está OK';
+      alert('⚠️ '+msg);
+      reject(new Error('Timeout ao buscar tenant'));
+    }, 12000);
+
     fbDb.collection('users').doc(uid).get().then(function(doc){
+      console.log('[Tenant] users/'+uid+' exists?', doc.exists);
       if(doc.exists && doc.data() && doc.data().tenantId){
         // Usuário já tem tenant
         _userDoc = doc.data();
@@ -9227,19 +9253,35 @@ function authBootstrapTenant(){
           if(tDoc.exists){
             _userDoc.tenantInfo = tDoc.data();
           }
+          clearTimeout(timeout);
+          resolved = true;
+          // Esconde tela de auth completamente
+          if(overlay) overlay.classList.add('hidden');
+          if(loadingEl) loadingEl.style.display = 'none';
           resolve(true);
         });
       } else {
         // Primeiro acesso — mostra tela de boas-vindas pra criar tenant
         console.log('[Tenant] Primeiro acesso, mostrando boas-vindas');
+        clearTimeout(timeout);
+        resolved = true;
+        // Esconde tela de loading e auth-overlay
+        if(loadingEl) loadingEl.style.display = 'none';
+        if(overlay) overlay.classList.add('hidden');
+        // Mostra a tela de boas-vindas
         return _mostrarBoasVindas().then(function(nomeNegocio){
           return _criarTenantParaUsuario(nomeNegocio).then(function(){
             resolve(true);
           });
-        });
+        }).catch(function(e){ reject(e); });
       }
     }).catch(function(err){
-      console.error('Bootstrap tenant erro:', err);
+      clearTimeout(timeout);
+      resolved = true;
+      console.error('[Tenant] Erro ao buscar users/'+uid+':', err);
+      // Mostra erro pra usuário
+      var msgEl = document.getElementById('auth-status');
+      if(msgEl) msgEl.textContent = '❌ '+(err.message||err.code||'Erro de conexão');
       reject(err);
     });
   });

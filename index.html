@@ -1670,7 +1670,7 @@ body.admin-mode .admin-only{display:flex!important;}
 </div>
 
 <!-- Tela de Boas-Vindas (primeiro acesso) -->
-<div id="boas-vindas-overlay" class="auth-overlay">
+<div id="boas-vindas-overlay" class="auth-overlay hidden">
   <div class="auth-box">
     <div class="auth-logo">
       <div style="font-size:2.5rem;margin-bottom:6px;">👋</div>
@@ -9264,7 +9264,8 @@ function _criarTenantParaUsuario(nomeNegocio){
     criadoEm: Date.now(),
     plano: 'trial'
   };
-  // Cria os dois docs
+  console.log('[Tenant] Criando tenant', tenantId, 'para', _usuarioAtual.email);
+  // Cria os docs
   var batch = fbDb.batch();
   batch.set(fbDb.collection('users').doc(uid), dadosUser);
   batch.set(fbDb.collection('tenants').doc(tenantId).collection('info').doc('main'), dadosTenant);
@@ -9274,8 +9275,21 @@ function _criarTenantParaUsuario(nomeNegocio){
     _userDoc.tenantInfo = dadosTenant;
     _tenantId = tenantId;
     console.log('[Tenant] ✓ Criado tenantId=', tenantId);
+    _esconderBoasVindas();
     showToast('✅ Conta criada: '+nomeNegocio,'#4ade80');
     return true;
+  }).catch(function(err){
+    console.error('[Tenant] ✗ Erro ao criar:', err);
+    // Mostra erro na tela de boas-vindas
+    var erroEl = document.getElementById('bv-erro');
+    if(erroEl){
+      erroEl.textContent = '❌ Erro: '+(err.message||err.code||'falha desconhecida');
+      erroEl.classList.add('show');
+    }
+    // Reseta o botão pra permitir nova tentativa
+    var btn = document.getElementById('bv-btn-criar');
+    if(btn){ btn.disabled = false; btn.textContent = 'Tentar novamente'; }
+    throw err;
   });
 }
 
@@ -9284,7 +9298,7 @@ function _mostrarBoasVindas(){
   return new Promise(function(resolve, reject){
     var overlay = document.getElementById('boas-vindas-overlay');
     if(!overlay){
-      // Não tem o HTML ainda — fallback simples
+      // Fallback caso HTML não tenha sido carregado
       var nome = prompt('Bem-vindo! Qual o nome do seu negócio?');
       if(!nome || !nome.trim()){
         reject(new Error('Nome obrigatório'));
@@ -9293,22 +9307,37 @@ function _mostrarBoasVindas(){
       resolve(nome.trim());
       return;
     }
-    overlay.classList.add('show');
+    overlay.classList.remove('hidden');
     var emailEl = document.getElementById('bv-email');
     if(emailEl) emailEl.textContent = _usuarioAtual.email;
     var inp = document.getElementById('bv-nome-negocio');
-    if(inp){ inp.value = ''; inp.focus(); }
-    document.getElementById('bv-btn-criar').onclick = function(){
+    if(inp){ inp.value = ''; setTimeout(function(){ inp.focus(); }, 100); }
+    var btn = document.getElementById('bv-btn-criar');
+    btn.onclick = function(){
       var nome = (inp.value||'').trim();
+      var erro = document.getElementById('bv-erro');
       if(!nome){
-        var erro = document.getElementById('bv-erro');
         if(erro){ erro.textContent='Digite o nome do seu negócio'; erro.classList.add('show'); }
         return;
       }
-      overlay.classList.remove('show');
+      // Limpa erro
+      if(erro){ erro.textContent=''; erro.classList.remove('show'); }
+      // Mostra estado de carregamento
+      btn.disabled = true;
+      btn.textContent = 'Criando conta...';
+      // Resolve a promise — a função criadora vai esconder o overlay no fim
       resolve(nome);
     };
   });
+}
+
+// Esconde a tela de boas-vindas (chamada após criação bem-sucedida)
+function _esconderBoasVindas(){
+  var overlay = document.getElementById('boas-vindas-overlay');
+  if(overlay) overlay.classList.add('hidden');
+  // Restaura o botão pra próximas vezes
+  var btn = document.getElementById('bv-btn-criar');
+  if(btn){ btn.disabled = false; btn.textContent = 'Criar minha conta'; }
 }
 
 

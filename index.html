@@ -3240,6 +3240,8 @@ function arquivosAbrir(){
     showToast('⚠️ Selecione um restaurante primeiro', '#f7a34f');
     return;
   }
+  // Atualiza o dropdown de filtro com as categorias customizadas
+  _atualizarFiltroCategorias();
   document.getElementById('arq-filtro').value = _arqFiltroAtivo;
   document.getElementById('arq-overlay').classList.add('show');
   _carregarArquivosLocais();
@@ -3276,30 +3278,74 @@ function arquivosUpload(files){
   if(!files || files.length === 0) return;
   if(!db){ showToast('⚠️ Banco local não está pronto','#f87171'); return; }
   if(!restauranteAtivo){ showToast('⚠️ Selecione um restaurante','#f7a34f'); return; }
-  // Pergunta a categoria primeiro
-  _arquivosPedirCategoria(function(categoria){
-    if(!categoria){ document.getElementById('arq-input').value = ''; return; }
-    _uploadArquivosSequencial(Array.from(files), categoria, 0);
-  });
-  // Reset do input pra permitir reupload do mesmo arquivo
+  // CRÍTICO: capturar os arquivos NUMA VARIÁVEL antes de qualquer operação assíncrona,
+  // pois o FileList do input pode ser invalidado no Chrome mobile quando o value é zerado.
+  var arquivosCapturados = Array.from(files);
+  // Reset do input AGORA pra permitir reupload do mesmo arquivo depois
+  // (é seguro porque já capturamos os arquivos acima)
   document.getElementById('arq-input').value = '';
+  // Pergunta a categoria primeiro, depois faz o upload usando a variável capturada
+  _arquivosPedirCategoria(function(categoria){
+    if(!categoria) return; // usuário cancelou
+    _uploadArquivosSequencial(arquivosCapturados, categoria, 0);
+  });
+}
+
+// ── CATEGORIAS CUSTOMIZADAS ──
+// Categorias padrão (não removíveis)
+var _arqCatsPadrao = {
+  fechamento: {nome:'Fechamento', icone:'📊'},
+  contrato:   {nome:'Contrato',   icone:'📝'},
+  planilha:   {nome:'Planilha',   icone:'📈'},
+  documento:  {nome:'Documento',  icone:'📄'},
+  outro:      {nome:'Outro',      icone:'📎'}
+};
+function _arqChaveCatsCustom(){
+  return 'arq_cats_custom_' + (restauranteAtivo ? restauranteAtivo.id : 'default');
+}
+function _arqCarregarCatsCustom(){
+  if(!restauranteAtivo) return [];
+  try{
+    var raw = localStorage.getItem(_arqChaveCatsCustom());
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function _arqSalvarCatsCustom(lista){
+  if(!restauranteAtivo) return;
+  try{ localStorage.setItem(_arqChaveCatsCustom(), JSON.stringify(lista)); }catch(e){}
+}
+// Retorna mapa unificado: {chave: {nome, icone, custom?}}
+function _arqTodasCategorias(){
+  var todas = {};
+  Object.keys(_arqCatsPadrao).forEach(function(k){
+    todas[k] = {nome:_arqCatsPadrao[k].nome, icone:_arqCatsPadrao[k].icone, custom:false};
+  });
+  _arqCarregarCatsCustom().forEach(function(c){
+    todas[c.id] = {nome:c.nome, icone:c.icone || '📂', custom:true};
+  });
+  return todas;
 }
 
 function _arquivosPedirCategoria(callback){
   var existing = document.getElementById('arq-cat-modal');
   if(existing) existing.remove();
+  var todas = _arqTodasCategorias();
   var modal = document.createElement('div');
   modal.id = 'arq-cat-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9500;display:flex;align-items:center;justify-content:center;padding:20px;';
-  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
+  // Monta lista de botões dinamicamente
+  var botoesHtml = Object.keys(todas).map(function(id){
+    var c = todas[id];
+    return '<button class="arq-cat-opt" data-cat="'+id+'">'+c.icone+' '+_escapeHtml(c.nome)+'</button>';
+  }).join('');
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;max-height:80vh;display:flex;flex-direction:column;">'
     +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">CATEGORIA DO ARQUIVO</div>'
     +'<div style="font-size:0.78rem;color:var(--muted);margin-bottom:16px;">Escolha pra organizar melhor depois</div>'
-    +'<div style="display:flex;flex-direction:column;gap:8px;">'
-      +'<button class="arq-cat-opt" data-cat="fechamento">📊 Fechamento</button>'
-      +'<button class="arq-cat-opt" data-cat="contrato">📝 Contrato</button>'
-      +'<button class="arq-cat-opt" data-cat="planilha">📈 Planilha</button>'
-      +'<button class="arq-cat-opt" data-cat="documento">📄 Documento</button>'
-      +'<button class="arq-cat-opt" data-cat="outro">📎 Outro</button>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;">'
+      +botoesHtml
+      +'<button class="arq-cat-opt" id="arq-cat-nova" style="background:rgba(212,168,67,0.08);border:1.5px dashed rgba(212,168,67,0.4);color:var(--accent);">'
+        +'➕ Nova categoria'
+      +'</button>'
     +'</div>'
     +'<button id="arq-cat-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Cancelar</button>'
     +'</div>';
@@ -3307,17 +3353,115 @@ function _arquivosPedirCategoria(callback){
   var style = document.createElement('style');
   style.textContent = '.arq-cat-opt{background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:12px 14px;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:500;text-align:left;cursor:pointer;transition:all 0.15s;}.arq-cat-opt:hover,.arq-cat-opt:active{background:rgba(212,168,67,0.12);border-color:var(--accent);}';
   modal.appendChild(style);
+  // Listener pros botões de categoria existente
   modal.querySelectorAll('.arq-cat-opt').forEach(function(btn){
+    if(btn.id === 'arq-cat-nova') return; // tratado abaixo
     btn.onclick = function(){
       var cat = btn.dataset.cat;
       modal.remove();
       callback(cat);
     };
   });
+  // Botão "Nova categoria"
+  modal.querySelector('#arq-cat-nova').onclick = function(){
+    modal.remove();
+    _arquivosCriarCategoria(function(novoId){
+      if(novoId){
+        // Já escolhe a categoria recém-criada
+        callback(novoId);
+      } else {
+        // Cancelou, volta pro picker
+        _arquivosPedirCategoria(callback);
+      }
+    });
+  };
   modal.querySelector('#arq-cat-cancel').onclick = function(){
     modal.remove();
     callback(null);
   };
+}
+
+// Modal de criação de nova categoria (nome + emoji)
+function _arquivosCriarCategoria(callback){
+  var existing = document.getElementById('arq-novacat-modal');
+  if(existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'arq-novacat-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var emojisSugeridos = ['📁','📂','💼','📦','🧾','💳','🏦','📋','🎯','⭐','🍽️','🍷','🚚','🧹'];
+  var emojisHtml = emojisSugeridos.map(function(e){
+    return '<button class="emoji-pick" data-emoji="'+e+'" style="background:var(--surface2);border:1.5px solid var(--border2);border-radius:8px;width:40px;height:40px;font-size:1.2rem;cursor:pointer;transition:all 0.15s;">'+e+'</button>';
+  }).join('');
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:14px;">NOVA CATEGORIA</div>'
+    +'<label style="display:block;font-size:0.74rem;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Nome</label>'
+    +'<input id="arq-novacat-nome" type="text" maxlength="30" placeholder="Ex: Notas fiscais" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.92rem;margin-bottom:14px;">'
+    +'<label style="display:block;font-size:0.74rem;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Ícone</label>'
+    +'<div id="arq-emoji-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;">'+emojisHtml+'</div>'
+    +'<div style="font-size:0.7rem;color:var(--muted);margin-bottom:14px;">Selecionado: <span id="arq-novacat-emoji-preview" style="font-size:1.2rem;">📁</span></div>'
+    +'<div style="display:flex;gap:8px;">'
+      +'<button id="arq-novacat-cancel" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:10px;padding:11px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:500;">Cancelar</button>'
+      +'<button id="arq-novacat-criar" style="flex:1;background:var(--accent);border:none;color:#000;border-radius:10px;padding:11px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:700;">Criar</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(modal);
+  var emojiSelecionado = '📁';
+  var preview = modal.querySelector('#arq-novacat-emoji-preview');
+  modal.querySelectorAll('.emoji-pick').forEach(function(btn){
+    btn.onclick = function(){
+      emojiSelecionado = btn.dataset.emoji;
+      preview.textContent = emojiSelecionado;
+      modal.querySelectorAll('.emoji-pick').forEach(function(b){
+        b.style.borderColor = 'var(--border2)';
+        b.style.background = 'var(--surface2)';
+      });
+      btn.style.borderColor = 'var(--accent)';
+      btn.style.background = 'rgba(212,168,67,0.18)';
+    };
+  });
+  // Pré-seleciona o primeiro emoji
+  var primeiro = modal.querySelector('.emoji-pick');
+  if(primeiro){ primeiro.style.borderColor = 'var(--accent)'; primeiro.style.background = 'rgba(212,168,67,0.18)'; }
+  // Foco no input
+  setTimeout(function(){ try{ modal.querySelector('#arq-novacat-nome').focus(); }catch(e){} }, 100);
+  modal.querySelector('#arq-novacat-cancel').onclick = function(){
+    modal.remove();
+    callback(null);
+  };
+  modal.querySelector('#arq-novacat-criar').onclick = function(){
+    var nome = modal.querySelector('#arq-novacat-nome').value.trim();
+    if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
+    // Cria ID único e seguro
+    var idCustom = 'cat_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+    var lista = _arqCarregarCatsCustom();
+    lista.push({id:idCustom, nome:nome, icone:emojiSelecionado, criadoEm:Date.now()});
+    _arqSalvarCatsCustom(lista);
+    _atualizarFiltroCategorias();
+    modal.remove();
+    showToast('✓ Categoria "'+nome+'" criada','#4ade80');
+    callback(idCustom);
+  };
+  // Enter no nome cria
+  modal.querySelector('#arq-novacat-nome').addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); modal.querySelector('#arq-novacat-criar').click(); }
+  });
+}
+
+// Atualiza o dropdown do filtro de categorias com as customizadas
+function _atualizarFiltroCategorias(){
+  var sel = document.getElementById('arq-filtro');
+  if(!sel) return;
+  var valorAtual = sel.value;
+  var todas = _arqTodasCategorias();
+  var html = '<option value="todos">Todas as categorias</option>';
+  Object.keys(todas).forEach(function(id){
+    var c = todas[id];
+    html += '<option value="'+id+'">'+c.icone+' '+_escapeHtml(c.nome)+'</option>';
+  });
+  sel.innerHTML = html;
+  // Restaura seleção (se a categoria ainda existir)
+  if(todas[valorAtual] || valorAtual === 'todos') sel.value = valorAtual;
+  else sel.value = 'todos';
 }
 
 function _uploadArquivosSequencial(arquivos, categoria, index){
@@ -3442,23 +3586,18 @@ function _renderArquivos(){
       +'</div>';
     return;
   }
-  var icones = {
-    fechamento:'📊', contrato:'📝', planilha:'📈', documento:'📄', outro:'📎'
-  };
-  var nomes = {
-    fechamento:'Fechamento', contrato:'Contrato', planilha:'Planilha', documento:'Documento', outro:'Outro'
-  };
+  // Pega todas as categorias (padrão + customizadas)
+  var todasCats = _arqTodasCategorias();
   body.innerHTML = aviso + lista.map(function(a){
     var dt = new Date(a.dataUpload);
     var dataStr = dt.toLocaleDateString('pt-BR') + ' · ' + dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
     var tamStr = _formatarTamanho(a.tamanho);
-    var icone = icones[a.categoria] || '📎';
-    var catNome = nomes[a.categoria] || 'Arquivo';
+    var catInfo = todasCats[a.categoria] || {nome:'Arquivo', icone:'📎'};
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;">'
-      +'<div style="font-size:1.6rem;flex-shrink:0;width:36px;text-align:center;">'+icone+'</div>'
+      +'<div style="font-size:1.6rem;flex-shrink:0;width:36px;text-align:center;">'+catInfo.icone+'</div>'
       +'<div style="flex:1;min-width:0;">'
         +'<div style="font-size:0.84rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escapeHtml(a.nome)+'</div>'
-        +'<div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">'+catNome+' · '+tamStr+' · '+dataStr+'</div>'
+        +'<div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">'+_escapeHtml(catInfo.nome)+' · '+tamStr+' · '+dataStr+'</div>'
       +'</div>'
       +'<button onclick="arquivosBaixar(\''+a.id+'\')" title="Baixar" style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:#4ade80;border-radius:8px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
         +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'

@@ -1961,6 +1961,9 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="arq-title">ARQUIVOS</div>
       <div class="arq-sub" id="arq-sub">Carregando...</div>
     </div>
+    <button class="arq-icon-btn" id="arq-btn-ordenar" onclick="_arqAbrirOrdenacao()" title="Ordenar">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+    </button>
     <button class="arq-icon-btn" id="arq-btn-buscar" onclick="_arqToggleBusca()" title="Buscar">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     </button>
@@ -3308,9 +3311,51 @@ var _arqCatAtual = null;       // ID da categoria atual (quando navegando)
 var _arqCaminhoAtual = [];     // Array de pastaIds: caminho desde a raiz da categoria. Vazio = raiz.
 var _arqBuscaTermo = '';
 var _ARQ_MAX_PROFUNDIDADE = 8; // Limite de aninhamento (protege contra bagunça)
+// Ordenação atual: 'data_desc' (padrão) | 'data_asc' | 'nome_asc' | 'nome_desc'
+var _arqOrdem = 'data_desc';
 // Pasta "atual" = última do caminho (ou null se está na raiz da categoria)
 function _arqPastaAtualId(){
   return _arqCaminhoAtual.length ? _arqCaminhoAtual[_arqCaminhoAtual.length - 1] : null;
+}
+
+// Persistência da ordem escolhida (por restaurante)
+function _arqChaveOrdem(){
+  return 'arq_ordem_' + (restauranteAtivo ? restauranteAtivo.id : 'default');
+}
+function _arqCarregarOrdem(){
+  if(!restauranteAtivo) return 'data_desc';
+  try{ return localStorage.getItem(_arqChaveOrdem()) || 'data_desc'; }catch(e){ return 'data_desc'; }
+}
+function _arqSalvarOrdem(ord){
+  if(!restauranteAtivo) return;
+  try{ localStorage.setItem(_arqChaveOrdem(), ord); }catch(e){}
+}
+
+// Comparador natural — entende números no nome
+// Ex: "10.pdf" > "2.pdf" (correto), em vez de "10.pdf" < "2.pdf" (alfabético burro)
+function _arqCompararNatural(a, b){
+  return String(a).localeCompare(String(b), 'pt-BR', {numeric:true, sensitivity:'base'});
+}
+
+// Aplica a ordem escolhida a uma lista de arquivos
+function _arqOrdenarArquivos(lista){
+  var copia = lista.slice();
+  switch(_arqOrdem){
+    case 'data_asc':
+      copia.sort(function(a,b){ return (a.dataUpload||0) - (b.dataUpload||0); });
+      break;
+    case 'nome_asc':
+      copia.sort(function(a,b){ return _arqCompararNatural(a.nome||'', b.nome||''); });
+      break;
+    case 'nome_desc':
+      copia.sort(function(a,b){ return _arqCompararNatural(b.nome||'', a.nome||''); });
+      break;
+    case 'data_desc':
+    default:
+      copia.sort(function(a,b){ return (b.dataUpload||0) - (a.dataUpload||0); });
+      break;
+  }
+  return copia;
 }
 
 // ── Categorias ──
@@ -3364,6 +3409,8 @@ function arquivosAbrir(){
   _arqCatAtual = null;
   _arqCaminhoAtual = [];
   _arqBuscaTermo = '';
+  // Carrega preferência de ordenação salva pra esse restaurante
+  _arqOrdem = _arqCarregarOrdem();
   document.getElementById('arq-busca-input').value = '';
   document.getElementById('arq-busca-bar').style.display = 'none';
   document.getElementById('arq-btn-buscar').classList.remove('active');
@@ -3445,6 +3492,56 @@ function _arqToggleBusca(){
   }
 }
 
+// Modal de escolha de ordenação
+function _arqAbrirOrdenacao(){
+  var existing = document.getElementById('arq-ord-modal');
+  if(existing) existing.remove();
+  var opcoes = [
+    {id:'data_desc', icone:'🆕', nome:'Mais recentes primeiro', sub:'Por data de envio'},
+    {id:'data_asc',  icone:'📅', nome:'Mais antigos primeiro', sub:'Por data de envio'},
+    {id:'nome_asc',  icone:'🔢', nome:'Nome A → Z (1, 2, 10)', sub:'Numérico — ideal pra fechamentos'},
+    {id:'nome_desc', icone:'🔠', nome:'Nome Z → A (10, 2, 1)', sub:'Inverso'}
+  ];
+  var modal = document.createElement('div');
+  modal.id = 'arq-ord-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var optsHtml = opcoes.map(function(o){
+    var ativo = (o.id === _arqOrdem);
+    var bgAtivo = ativo ? 'rgba(212,168,67,0.18)' : 'var(--surface2)';
+    var borderAtivo = ativo ? 'var(--accent)' : 'var(--border2)';
+    var checkSvg = ativo
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4a843" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="20 6 9 17 4 12"/></svg>'
+      : '<div style="width:16px;flex-shrink:0;"></div>';
+    return '<button class="arq-ord-opt" data-ord="'+o.id+'" style="background:'+bgAtivo+';border:1.5px solid '+borderAtivo+';color:var(--text);border-radius:10px;padding:12px 14px;font-family:\'Space Grotesk\',sans-serif;text-align:left;cursor:pointer;display:flex;align-items:center;gap:10px;width:100%;">'
+      +'<span style="font-size:1.2rem;flex-shrink:0;">'+o.icone+'</span>'
+      +'<div style="flex:1;min-width:0;">'
+        +'<div style="font-size:0.86rem;font-weight:600;">'+o.nome+'</div>'
+        +'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+o.sub+'</div>'
+      +'</div>'
+      +checkSvg
+    +'</button>';
+  }).join('');
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:380px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">ORDENAR POR</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:16px;">Aplica a esta e às outras pastas</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'+optsHtml+'</div>'
+    +'<button id="arq-ord-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Fechar</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.querySelectorAll('.arq-ord-opt').forEach(function(btn){
+    btn.onclick = function(){
+      _arqOrdem = btn.dataset.ord;
+      _arqSalvarOrdem(_arqOrdem);
+      modal.remove();
+      _renderArquivos();
+      // Toast só pra confirmar visualmente
+      var nomes = {data_desc:'Mais recentes', data_asc:'Mais antigos', nome_asc:'Nome A→Z', nome_desc:'Nome Z→A'};
+      showToast('🔀 Ordenado por: '+nomes[_arqOrdem],'#d4a843');
+    };
+  });
+  modal.querySelector('#arq-ord-cancel').onclick = function(){ modal.remove(); };
+}
+
 // ═══ Carregar arquivos ═══
 function _carregarArquivosLocais(){
   if(!db || !restauranteAtivo){ _arquivos = []; _renderArquivos(); return; }
@@ -3485,12 +3582,63 @@ function arquivosUpload(files){
   }
 }
 
-// Pergunta os nomes de cada arquivo, depois faz o upload
+// Pergunta os nomes de cada arquivo (opcional), depois faz o upload
 function _arquivosFluxoUploadComContexto(arquivos, categoria, pastaId){
-  _arqRenomearLote(arquivos, 0, [], function(nomesEditados){
-    if(!nomesEditados) return; // cancelou
-    _uploadArquivosSequencial(arquivos, nomesEditados, categoria, pastaId, 0);
+  // Se for só 1 arquivo, vai direto pro fluxo de renomear (rápido)
+  if(arquivos.length === 1){
+    _arqRenomearLote(arquivos, 0, [], function(nomesEditados){
+      if(!nomesEditados) return;
+      _uploadArquivosSequencial(arquivos, nomesEditados, categoria, pastaId, 0);
+    });
+    return;
+  }
+  // Múltiplos: pergunta se quer renomear ou enviar direto
+  _arqEscolherModoUpload(arquivos.length, function(modo){
+    if(modo === 'cancelar') return;
+    if(modo === 'direto'){
+      // Usa os nomes originais — sem renomear
+      var nomesOriginais = arquivos.map(function(f){ return f.name; });
+      _uploadArquivosSequencial(arquivos, nomesOriginais, categoria, pastaId, 0);
+      return;
+    }
+    // modo === 'renomear'
+    _arqRenomearLote(arquivos, 0, [], function(nomesEditados){
+      if(!nomesEditados) return;
+      _uploadArquivosSequencial(arquivos, nomesEditados, categoria, pastaId, 0);
+    });
   });
+}
+
+// Modal: enviar direto OU renomear cada arquivo
+function _arqEscolherModoUpload(qtd, callback){
+  var existing = document.getElementById('arq-modo-modal');
+  if(existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'arq-modo-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">ENVIAR '+qtd+' ARQUIVOS</div>'
+    +'<div style="font-size:0.78rem;color:var(--muted);margin-bottom:16px;">Como deseja proceder?</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'
+      +'<button id="arq-modo-direto" style="background:var(--accent);border:none;color:#000;border-radius:10px;padding:14px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;font-weight:700;text-align:left;">'
+        +'<div style="display:flex;align-items:center;gap:10px;">'
+          +'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>'
+          +'<div><div>Enviar direto</div><div style="font-size:0.7rem;font-weight:500;opacity:0.75;margin-top:2px;">Mantém os nomes originais</div></div>'
+        +'</div>'
+      +'</button>'
+      +'<button id="arq-modo-renomear" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:14px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;font-weight:600;text-align:left;">'
+        +'<div style="display:flex;align-items:center;gap:10px;">'
+          +'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'
+          +'<div><div>Renomear cada um</div><div style="font-size:0.7rem;font-weight:500;color:var(--muted);margin-top:2px;">Pergunta o nome de cada arquivo</div></div>'
+        +'</div>'
+      +'</button>'
+    +'</div>'
+    +'<button id="arq-modo-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Cancelar</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.querySelector('#arq-modo-direto').onclick = function(){ modal.remove(); callback('direto'); };
+  modal.querySelector('#arq-modo-renomear').onclick = function(){ modal.remove(); callback('renomear'); };
+  modal.querySelector('#arq-modo-cancel').onclick = function(){ modal.remove(); callback('cancelar'); };
 }
 
 // Modal pra renomear cada arquivo antes do upload
@@ -3531,6 +3679,9 @@ function _arqRenomearLote(arquivos, idx, nomesAcumulados, callbackFinal){
       +'<button id="arq-rename-cancel" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:10px;padding:11px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:500;">Cancelar tudo</button>'
       +'<button id="arq-rename-ok" style="flex:1;background:var(--accent);border:none;color:#000;border-radius:10px;padding:11px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:700;">'+(arquivos.length > 1 ? 'Próximo' : 'Enviar')+'</button>'
     +'</div>'
+    +(arquivos.length > 1 && idx < arquivos.length - 1
+      ? '<button id="arq-rename-skip-all" style="width:100%;margin-top:8px;background:none;border:none;color:var(--muted);padding:8px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.78rem;text-decoration:underline;">Pular renomear dos restantes ('+(arquivos.length - idx)+')</button>'
+      : '')
     +'</div>';
   document.body.appendChild(modal);
   var inp = modal.querySelector('#arq-rename-input');
@@ -3548,6 +3699,22 @@ function _arqRenomearLote(arquivos, idx, nomesAcumulados, callbackFinal){
     modal.remove();
     callbackFinal(null);
   };
+  // Pular o restante: usa o nome digitado pra esse + nomes originais pros próximos
+  var btnSkip = modal.querySelector('#arq-rename-skip-all');
+  if(btnSkip){
+    btnSkip.onclick = function(){
+      // Primeiro aplica o nome digitado pro arquivo atual
+      var novoBase = inp.value.trim();
+      if(!novoBase) novoBase = nomeBase;
+      nomesAcumulados.push(novoBase + ext);
+      // Depois preenche com nomes originais pros próximos
+      for(var k = idx + 1; k < arquivos.length; k++){
+        nomesAcumulados.push(arquivos[k].name);
+      }
+      modal.remove();
+      callbackFinal(nomesAcumulados);
+    };
+  }
   inp.addEventListener('keydown', function(e){
     if(e.key === 'Enter'){ e.preventDefault(); aplicar(); }
   });
@@ -3994,6 +4161,7 @@ function _renderArquivos(){
     var resultados = _arquivos.filter(function(a){
       return (a.nome && a.nome.toLowerCase().indexOf(_arqBuscaTermo) >= 0);
     });
+    resultados = _arqOrdenarArquivos(resultados);
     if(sub) sub.textContent = resultados.length + ' resultado(s) · '+restauranteAtivo.nome;
     if(resultados.length === 0){
       body.innerHTML = '<div class="arq-empty"><div class="arq-empty-icone">🔍</div><div class="arq-empty-titulo">Nada encontrado</div><div class="arq-empty-sub">Tente outro termo</div></div>';
@@ -4073,10 +4241,24 @@ function _renderArquivos(){
     var subpastas = todasPastas.filter(function(p){
       return p.categoria === _arqCatAtual && (p.pastaPaiId || null) === pastaPaiAtual;
     });
-    subpastas.sort(function(a,b){ return b.criadoEm - a.criadoEm; });
+    // Pastas: ordenar conforme escolha do usuário (com sentido)
+    if(_arqOrdem === 'nome_asc' || _arqOrdem === 'nome_desc'){
+      subpastas.sort(function(a,b){
+        var cmp = _arqCompararNatural(a.nome||'', b.nome||'');
+        return _arqOrdem === 'nome_desc' ? -cmp : cmp;
+      });
+    } else {
+      // Ordem por data: mais recentes ou mais antigas
+      subpastas.sort(function(a,b){
+        return _arqOrdem === 'data_asc'
+          ? (a.criadoEm||0) - (b.criadoEm||0)
+          : (b.criadoEm||0) - (a.criadoEm||0);
+      });
+    }
     var arqsDoNivel = _arquivos.filter(function(a){
       return a.categoria === _arqCatAtual && (a.pastaId || null) === pastaPaiAtual;
     });
+    arqsDoNivel = _arqOrdenarArquivos(arqsDoNivel);
     if(sub){
       var qtdTxt = [];
       if(subpastas.length > 0) qtdTxt.push(subpastas.length+' pasta'+(subpastas.length>1?'s':''));

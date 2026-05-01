@@ -1977,17 +1977,9 @@ body.admin-mode .admin-only{display:flex!important;}
   <!-- Breadcrumb / navegação -->
   <div id="arq-breadcrumb" class="arq-breadcrumb"></div>
 
-  <!-- Barra de ações -->
-  <div class="arq-actions">
+  <!-- Barra de ações (montada dinamicamente conforme a vista) -->
+  <div class="arq-actions" id="arq-actions">
     <input type="file" id="arq-input" multiple style="display:none;" onchange="arquivosUpload(this.files)">
-    <button class="arq-action-btn primary" onclick="document.getElementById('arq-input').click()">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      <span>Enviar</span>
-    </button>
-    <button class="arq-action-btn" id="arq-btn-nova-pasta" onclick="_arqCriarPasta()">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-      <span>Pasta</span>
-    </button>
   </div>
 
   <!-- Progresso de upload -->
@@ -3377,7 +3369,10 @@ function _arqSalvarCatsCustom(lista){
 }
 function _arqTodasCategorias(){
   var todas = {};
+  // Padrão: pula as ocultas pelo usuário
+  var ocultas = _arqCarregarPadroesOcultas();
   Object.keys(_arqCatsPadrao).forEach(function(k){
+    if(ocultas.indexOf(k) >= 0) return; // oculta — não mostra
     todas[k] = {nome:_arqCatsPadrao[k].nome, icone:_arqCatsPadrao[k].icone, custom:false};
   });
   _arqCarregarCatsCustom().forEach(function(c){
@@ -3892,16 +3887,24 @@ function _arqCriarPastaContextual(catId, pastaPaiId){
   });
 }
 
-// ═══ Excluir categoria (apenas customizadas) ═══
+// ═══ Excluir categoria ═══
+// Categorias padrão são ocultadas (não removidas), pra você poder restaurar depois.
+// Customizadas são removidas pra valer.
+function _arqChavePadroesOcultas(){ return 'arq_pad_ocultas_' + (restauranteAtivo ? restauranteAtivo.id : 'default'); }
+function _arqCarregarPadroesOcultas(){
+  if(!restauranteAtivo) return [];
+  try{ var raw = localStorage.getItem(_arqChavePadroesOcultas()); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+}
+function _arqSalvarPadroesOcultas(lista){
+  if(!restauranteAtivo) return;
+  try{ localStorage.setItem(_arqChavePadroesOcultas(), JSON.stringify(lista)); }catch(e){}
+}
+
 function _arqExcluirCategoria(catId){
-  // Bloqueia exclusão das padrão
-  if(_arqCatsPadrao[catId]){
-    showToast('🔒 Categorias padrão não podem ser excluídas','#f7a34f');
-    return;
-  }
   var todas = _arqTodasCategorias();
   var cat = todas[catId];
   if(!cat) return;
+  var ehPadrao = !!_arqCatsPadrao[catId];
   // Conta arquivos e pastas afetados
   var qtdArq = _arquivos.filter(function(a){ return a.categoria === catId; }).length;
   var pastasDaCat = _arqCarregarPastas().filter(function(p){ return p.categoria === catId; });
@@ -3913,6 +3916,9 @@ function _arqExcluirCategoria(catId){
   if(partes.length > 0){
     msg += '\n\n⚠️ Tudo que está dentro será PERMANENTEMENTE apagado: '+partes.join(' e ')+'.';
   }
+  if(ehPadrao){
+    msg += '\n\n💡 Esta é uma categoria padrão. Você pode restaurá-la depois pelas configurações.';
+  }
   cvtConfirm(msg, function(){
     // Apaga arquivos da categoria do IndexedDB
     var promessas = _arquivos
@@ -3922,10 +3928,16 @@ function _arqExcluirCategoria(catId){
       // Remove pastas da categoria
       var todasPastas = _arqCarregarPastas();
       _arqSalvarPastas(todasPastas.filter(function(p){ return p.categoria !== catId; }));
-      // Remove a categoria
-      var custom = _arqCarregarCatsCustom();
-      _arqSalvarCatsCustom(custom.filter(function(c){ return c.id !== catId; }));
-      // Recarrega tudo
+      if(ehPadrao){
+        // Adiciona à lista de ocultas (não remove de _arqCatsPadrao pra poder reaparecer)
+        var ocultas = _arqCarregarPadroesOcultas();
+        if(ocultas.indexOf(catId) < 0) ocultas.push(catId);
+        _arqSalvarPadroesOcultas(ocultas);
+      } else {
+        // Customizada: remove da lista
+        var custom = _arqCarregarCatsCustom();
+        _arqSalvarCatsCustom(custom.filter(function(c){ return c.id !== catId; }));
+      }
       _carregarArquivosLocais();
       showToast('🗑️ Categoria excluída','#f87171');
     }).catch(function(e){
@@ -3933,6 +3945,47 @@ function _arqExcluirCategoria(catId){
       showToast('Erro ao excluir categoria','#f87171');
     });
   });
+}
+
+// Mostra um modal pra restaurar categorias padrão que foram ocultadas
+function _arqRestaurarPadroes(){
+  var ocultas = _arqCarregarPadroesOcultas();
+  if(ocultas.length === 0){
+    showToast('💡 Nenhuma categoria padrão oculta','#d4a843');
+    return;
+  }
+  var existing = document.getElementById('arq-restaurar-modal');
+  if(existing) existing.remove();
+  var optsHtml = ocultas.map(function(catId){
+    var c = _arqCatsPadrao[catId];
+    if(!c) return '';
+    return '<button class="arq-restaurar-opt" data-cat="'+catId+'" style="background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px 14px;font-family:\'Space Grotesk\',sans-serif;text-align:left;cursor:pointer;display:flex;align-items:center;gap:10px;width:100%;">'
+      +'<span style="font-size:1.4rem;flex-shrink:0;">'+c.icone+'</span>'
+      +'<span style="flex:1;font-size:0.88rem;font-weight:600;">'+c.nome+'</span>'
+      +'<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">Restaurar</span>'
+    +'</button>';
+  }).join('');
+  var modal = document.createElement('div');
+  modal.id = 'arq-restaurar-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:380px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">CATEGORIAS PADRÃO OCULTAS</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:16px;">Toque para restaurar</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'+optsHtml+'</div>'
+    +'<button id="arq-restaurar-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Fechar</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.querySelectorAll('.arq-restaurar-opt').forEach(function(btn){
+    btn.onclick = function(){
+      var catId = btn.dataset.cat;
+      var nova = _arqCarregarPadroesOcultas().filter(function(id){ return id !== catId; });
+      _arqSalvarPadroesOcultas(nova);
+      modal.remove();
+      showToast('✓ Categoria restaurada','#4ade80');
+      _renderArquivos();
+    };
+  });
+  modal.querySelector('#arq-restaurar-cancel').onclick = function(){ modal.remove(); };
 }
 
 function _arqRenomearPasta(pastaId){
@@ -4117,6 +4170,191 @@ function _uploadArquivosSequencial(arquivos, nomesEditados, categoria, pastaId, 
   });
 }
 
+// ═══ Download como ZIP (preserva estrutura de pastas) ═══
+// Carrega JSZip de forma lazy (só quando o usuário clica em ZIP)
+var _jszipCarregando = false;
+function _carregarJSZip(){
+  return new Promise(function(resolve, reject){
+    if(typeof JSZip !== 'undefined'){ resolve(); return; }
+    if(_jszipCarregando){
+      // Polling pra esperar carregar (caso já tenha sido iniciado)
+      var t0 = Date.now();
+      var int = setInterval(function(){
+        if(typeof JSZip !== 'undefined'){ clearInterval(int); resolve(); }
+        else if(Date.now() - t0 > 15000){ clearInterval(int); reject(new Error('Timeout')); }
+      }, 100);
+      return;
+    }
+    _jszipCarregando = true;
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    script.onload = function(){ resolve(); };
+    script.onerror = function(){ _jszipCarregando = false; reject(new Error('Falha ao carregar JSZip')); };
+    document.head.appendChild(script);
+  });
+}
+
+// Sanitiza nome pra ser válido em sistema de arquivos
+function _arqNomeSeguro(nome){
+  if(!nome) return 'sem_nome';
+  // Remove caracteres proibidos: \ / : * ? " < > |
+  return String(nome).replace(/[\\\/:*?"<>|]/g, '_').trim() || 'sem_nome';
+}
+
+// Coleta todos os descendentes (pastas + arquivos) de um nível
+// Retorna: {pastas: [{id, nome, caminhoRelativo}], arquivos: [{...meta, caminhoRelativo}]}
+function _arqColetarArvore(catId, pastaPaiId){
+  var todasPastas = _arqCarregarPastas();
+  var pastasDaCat = todasPastas.filter(function(p){ return p.categoria === catId; });
+  // BFS pra montar o caminho relativo de cada pasta
+  var pastas = []; // {id, caminhoRelativo}
+  var fila = [{pastaId:pastaPaiId, prefixo:''}];
+  var safety = 1000;
+  while(fila.length > 0 && safety-- > 0){
+    var atual = fila.shift();
+    var subs = pastasDaCat.filter(function(p){ return (p.pastaPaiId || null) === atual.pastaId; });
+    subs.forEach(function(p){
+      var nomeSeguro = _arqNomeSeguro(p.nome);
+      var caminhoP = atual.prefixo ? atual.prefixo + '/' + nomeSeguro : nomeSeguro;
+      pastas.push({id:p.id, caminhoRelativo:caminhoP});
+      fila.push({pastaId:p.id, prefixo:caminhoP});
+    });
+  }
+  // Mapa de pastaId -> caminhoRelativo (vazio = está direto no nível atual)
+  var caminhoPorPasta = {};
+  pastas.forEach(function(p){ caminhoPorPasta[p.id] = p.caminhoRelativo; });
+  // Coleta arquivos: do nível atual + de todas as subpastas
+  var idsValidos = [pastaPaiId].concat(pastas.map(function(p){ return p.id; }));
+  var arquivos = _arquivos
+    .filter(function(a){ return a.categoria === catId && idsValidos.indexOf(a.pastaId || null) >= 0; })
+    .map(function(a){
+      var caminho = a.pastaId ? (caminhoPorPasta[a.pastaId] || '') : '';
+      // Cópia manual (compatibilidade com navegadores antigos)
+      return {
+        id:a.id, restId:a.restId, nome:a.nome, nomeOriginal:a.nomeOriginal,
+        tamanho:a.tamanho, tipo:a.tipo, categoria:a.categoria, pastaId:a.pastaId,
+        dataUpload:a.dataUpload, uploadPor:a.uploadPor,
+        caminhoRelativo:caminho
+      };
+    });
+  return {pastas:pastas, arquivos:arquivos};
+}
+
+// Cria toast persistente com progresso (não some até remover)
+function _arqProgressToastShow(texto){
+  var el = document.getElementById('arq-progress-toast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'arq-progress-toast';
+    el.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:var(--surface2);color:var(--text);border:1px solid var(--accent);border-radius:10px;padding:12px 18px;font-size:0.84rem;font-weight:600;font-family:\'Space Grotesk\',sans-serif;z-index:9800;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:90%;text-align:center;';
+    document.body.appendChild(el);
+  }
+  el.textContent = texto;
+}
+function _arqProgressToastHide(){
+  var el = document.getElementById('arq-progress-toast');
+  if(el) el.remove();
+}
+
+// Baixa o conteúdo do nível atual como ZIP
+function _arqBaixarZipDoNivelAtual(){
+  if(_arqVista !== 'navegando' || !_arqCatAtual){
+    showToast('💡 Entre numa categoria para baixar','#f7a34f');
+    return;
+  }
+  var pastaPaiAtual = _arqPastaAtualId();
+  var arvore = _arqColetarArvore(_arqCatAtual, pastaPaiAtual);
+  if(arvore.arquivos.length === 0){
+    showToast('💡 Nada para baixar aqui','#f7a34f');
+    return;
+  }
+  // Define o nome do ZIP
+  var todasCats = _arqTodasCategorias();
+  var todasPastas = _arqCarregarPastas();
+  var nomeZip;
+  if(pastaPaiAtual){
+    var p = todasPastas.find(function(pp){ return pp.id === pastaPaiAtual; });
+    nomeZip = _arqNomeSeguro((p && p.nome) || 'pasta');
+  } else {
+    nomeZip = _arqNomeSeguro((todasCats[_arqCatAtual] && todasCats[_arqCatAtual].nome) || 'categoria');
+  }
+  // Adiciona timestamp pra não confundir downloads
+  var dt = new Date();
+  var ts = dt.getFullYear() + ('0'+(dt.getMonth()+1)).slice(-2) + ('0'+dt.getDate()).slice(-2);
+  nomeZip += '_' + ts + '.zip';
+  _arqProgressToastShow('📦 Carregando biblioteca de ZIP...');
+  _carregarJSZip().then(function(){
+    return _arqMontarZip(arvore);
+  }).then(function(zipBlob){
+    _arqProgressToastHide();
+    // Força download
+    var url = URL.createObjectURL(zipBlob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = nomeZip;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ a.remove(); URL.revokeObjectURL(url); }, 500);
+    showToast('✓ ZIP gerado: '+arvore.arquivos.length+' arquivo(s)','#4ade80');
+  }).catch(function(e){
+    console.error('Erro ZIP:', e);
+    _arqProgressToastHide();
+    showToast('❌ '+(e && e.message ? e.message : 'Erro ao gerar ZIP'),'#f87171', 5000);
+  });
+}
+
+// Monta o ZIP em memória — lê os blobs do IndexedDB sequencialmente
+function _arqMontarZip(arvore){
+  var zip = new JSZip();
+  var arquivos = arvore.arquivos;
+  // Detecta nomes duplicados no mesmo caminho e renomeia (foto.jpg, foto (2).jpg, ...)
+  var ocupados = {}; // chave: caminhoCompleto
+  function chaveUnica(caminho, nome){
+    var nomeSeguro = _arqNomeSeguro(nome);
+    var chave = (caminho ? caminho + '/' : '') + nomeSeguro;
+    if(!ocupados[chave]){ ocupados[chave] = 1; return {caminho:chave, nome:nomeSeguro}; }
+    // Achei conflito: adiciona contador
+    var ult = nomeSeguro.lastIndexOf('.');
+    var base = ult > 0 ? nomeSeguro.substring(0, ult) : nomeSeguro;
+    var ext = ult > 0 ? nomeSeguro.substring(ult) : '';
+    var n = 2;
+    while(ocupados[(caminho ? caminho + '/' : '') + base + ' ('+n+')' + ext]){ n++; }
+    var nomeNovo = base + ' ('+n+')' + ext;
+    var chaveNova = (caminho ? caminho + '/' : '') + nomeNovo;
+    ocupados[chaveNova] = 1;
+    return {caminho:chaveNova, nome:nomeNovo};
+  }
+  // Processa em sequência (carrega blob, adiciona ao zip)
+  return new Promise(function(resolve, reject){
+    var i = 0;
+    function next(){
+      if(i >= arquivos.length){
+        // Tudo adicionado — gera o ZIP final
+        _arqProgressToastShow('📦 Compactando '+arquivos.length+' arquivo(s)...');
+        zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:5}},
+          function(meta){
+            var pct = Math.round(meta.percent);
+            _arqProgressToastShow('📦 Compactando... '+pct+'%');
+          }
+        ).then(resolve).catch(reject);
+        return;
+      }
+      var arq = arquivos[i++];
+      _arqProgressToastShow('📦 Lendo '+i+'/'+arquivos.length+': '+arq.nome);
+      dbGet('arquivos', arq.id).then(function(reg){
+        if(!reg || !reg.blob){ next(); return; }
+        var info = chaveUnica(arq.caminhoRelativo, arq.nome);
+        zip.file(info.caminho, reg.blob);
+        next();
+      }).catch(function(e){
+        console.warn('Falha ao ler arquivo', arq.id, e);
+        next(); // pula esse e continua
+      });
+    }
+    next();
+  });
+}
+
 function arquivosBaixar(arquivoId){
   if(!db) return;
   dbGet('arquivos', arquivoId).then(function(registro){
@@ -4144,7 +4382,57 @@ function arquivosExcluir(arquivoId){
 }
 
 // ═══ Render ═══
+// Monta a barra de ações dinâmica conforme contexto
+function _arqRenderAcoes(){
+  var bar = document.getElementById('arq-actions');
+  if(!bar) return;
+  // Botão Enviar (sempre presente)
+  var html = '<button class="arq-action-btn primary" onclick="document.getElementById(\'arq-input\').click()">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+    +'<span>Enviar</span>'
+  +'</button>';
+  // Tela de categorias: mostra botão "Categoria"
+  if(_arqVista === 'categorias'){
+    html += '<button class="arq-action-btn" onclick="_arqCriarCategoriaDireto()">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
+      +'<span>Categoria</span>'
+    +'</button>';
+    // Botão pra restaurar padrões ocultas (se houver)
+    var ocultas = _arqCarregarPadroesOcultas();
+    if(ocultas.length > 0){
+      html += '<button class="arq-action-btn" onclick="_arqRestaurarPadroes()" title="Restaurar categorias padrão">'
+        +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>'
+      +'</button>';
+    }
+  } else {
+    // Dentro de categoria/pasta: botão "Pasta" + "Baixar ZIP"
+    html += '<button class="arq-action-btn" onclick="_arqCriarPasta()">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>'
+      +'<span>Pasta</span>'
+    +'</button>';
+    html += '<button class="arq-action-btn" onclick="_arqBaixarZipDoNivelAtual()" title="Baixar como ZIP">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+      +'<span>ZIP</span>'
+    +'</button>';
+  }
+  // Mantém o input (já existe), apenas atualiza os botões
+  var input = bar.querySelector('input[type="file"]');
+  bar.innerHTML = html;
+  if(input) bar.appendChild(input);
+}
+
+// Atalho: criar categoria diretamente (sem passar por escolher categoria do upload)
+function _arqCriarCategoriaDireto(){
+  _arquivosCriarCategoria(function(novoId){
+    // Não faz nada extra — a função _arquivosCriarCategoria já mostrou o toast.
+    // Re-render pra mostrar a nova categoria na lista.
+    if(novoId) _renderArquivos();
+  });
+}
+
 function _renderArquivos(){
+  // Atualiza barra de ações conforme contexto
+  _arqRenderAcoes();
   var body = document.getElementById('arq-body');
   if(!body) return;
   var bc = document.getElementById('arq-breadcrumb');
@@ -4191,10 +4479,8 @@ function _renderArquivos(){
       if(qtdP > 0) meta.push(qtdP+' pasta'+(qtdP>1?'s':''));
       if(qtdA > 0) meta.push(qtdA+' arquivo'+(qtdA>1?'s':''));
       var metaTxt = meta.length ? meta.join(' · ') : 'vazio';
-      // Botão de excluir só pra categorias customizadas (padrão são imutáveis)
-      var btnExcluir = c.custom
-        ? '<button class="arq-mini-btn danger" style="margin-right:4px;" onclick="event.stopPropagation();_arqExcluirCategoria(\''+catId+'\')" title="Excluir categoria"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>'
-        : '';
+      // Botão de excluir em todas as categorias (padrão fica oculta, custom é removida)
+      var btnExcluir = '<button class="arq-mini-btn danger" style="margin-right:4px;" onclick="event.stopPropagation();_arqExcluirCategoria(\''+catId+'\')" title="Excluir categoria"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>';
       html += '<div class="arq-card-cat" onclick="_arqEntrarCategoria(\''+catId+'\')">'
         +'<div class="arq-card-cat-icone">'+c.icone+'</div>'
         +'<div class="arq-card-cat-info">'

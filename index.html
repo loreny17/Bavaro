@@ -3628,17 +3628,29 @@ function _arquivosCriarCategoria(callback){
 
 // ═══ Pastas ═══
 function _arqCriarPasta(){
-  if(!_arqCatAtual){
-    showToast('💡 Entre em uma categoria primeiro','#f7a34f');
+  // Se está dentro de uma categoria, cria diretamente lá
+  if(_arqCatAtual){
+    _arqCriarPastaNaCategoria(_arqCatAtual);
     return;
   }
+  // Se está na raiz (lista de categorias), pergunta primeiro a categoria
+  _arquivosPedirCategoria(function(catId){
+    if(!catId) return;
+    _arqCriarPastaNaCategoria(catId);
+  });
+}
+
+function _arqCriarPastaNaCategoria(catId){
   var existing = document.getElementById('arq-novapasta-modal');
   if(existing) existing.remove();
+  var todasCats = _arqTodasCategorias();
+  var catNome = (todasCats[catId] && todasCats[catId].nome) || 'Categoria';
   var modal = document.createElement('div');
   modal.id = 'arq-novapasta-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
   modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
-    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:14px;">NOVA PASTA</div>'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">NOVA PASTA</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:14px;">Em: '+_escapeHtml(catNome)+'</div>'
     +'<label style="display:block;font-size:0.74rem;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Nome da pasta</label>'
     +'<input id="arq-novapasta-nome" type="text" maxlength="50" placeholder="Ex: Janeiro 2026" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.92rem;margin-bottom:16px;">'
     +'<div style="display:flex;gap:8px;">'
@@ -3653,7 +3665,7 @@ function _arqCriarPasta(){
     if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
     var pastaId = 'pasta_' + Date.now() + '_' + Math.floor(Math.random()*1000);
     var lista = _arqCarregarPastas();
-    lista.push({id:pastaId, categoria:_arqCatAtual, nome:nome, criadoEm:Date.now()});
+    lista.push({id:pastaId, categoria:catId, nome:nome, criadoEm:Date.now()});
     _arqSalvarPastas(lista);
     modal.remove();
     showToast('✓ Pasta "'+nome+'" criada','#4ade80');
@@ -3663,6 +3675,49 @@ function _arqCriarPasta(){
   modal.querySelector('#arq-novapasta-cancel').onclick = function(){ modal.remove(); };
   modal.querySelector('#arq-novapasta-nome').addEventListener('keydown', function(e){
     if(e.key === 'Enter'){ e.preventDefault(); criar(); }
+  });
+}
+
+// ═══ Excluir categoria (apenas customizadas) ═══
+function _arqExcluirCategoria(catId){
+  // Bloqueia exclusão das padrão
+  if(_arqCatsPadrao[catId]){
+    showToast('🔒 Categorias padrão não podem ser excluídas','#f7a34f');
+    return;
+  }
+  var todas = _arqTodasCategorias();
+  var cat = todas[catId];
+  if(!cat) return;
+  // Conta arquivos e pastas afetados
+  var qtdArq = _arquivos.filter(function(a){ return a.categoria === catId; }).length;
+  var pastasDaCat = _arqCarregarPastas().filter(function(p){ return p.categoria === catId; });
+  var qtdPasta = pastasDaCat.length;
+  var partes = [];
+  if(qtdPasta > 0) partes.push(qtdPasta+' pasta'+(qtdPasta>1?'s':''));
+  if(qtdArq > 0) partes.push(qtdArq+' arquivo'+(qtdArq>1?'s':''));
+  var msg = 'Excluir a categoria "'+cat.nome+'"?';
+  if(partes.length > 0){
+    msg += '\n\n⚠️ Tudo que está dentro será PERMANENTEMENTE apagado: '+partes.join(' e ')+'.';
+  }
+  cvtConfirm(msg, function(){
+    // Apaga arquivos da categoria do IndexedDB
+    var promessas = _arquivos
+      .filter(function(a){ return a.categoria === catId; })
+      .map(function(a){ return dbDelete('arquivos', a.id); });
+    Promise.all(promessas).then(function(){
+      // Remove pastas da categoria
+      var todasPastas = _arqCarregarPastas();
+      _arqSalvarPastas(todasPastas.filter(function(p){ return p.categoria !== catId; }));
+      // Remove a categoria
+      var custom = _arqCarregarCatsCustom();
+      _arqSalvarCatsCustom(custom.filter(function(c){ return c.id !== catId; }));
+      // Recarrega tudo
+      _carregarArquivosLocais();
+      showToast('🗑️ Categoria excluída','#f87171');
+    }).catch(function(e){
+      console.error(e);
+      showToast('Erro ao excluir categoria','#f87171');
+    });
   });
 }
 
@@ -3898,12 +3953,17 @@ function _renderArquivos(){
       if(qtdP > 0) meta.push(qtdP+' pasta'+(qtdP>1?'s':''));
       if(qtdA > 0) meta.push(qtdA+' arquivo'+(qtdA>1?'s':''));
       var metaTxt = meta.length ? meta.join(' · ') : 'vazio';
+      // Botão de excluir só pra categorias customizadas (padrão são imutáveis)
+      var btnExcluir = c.custom
+        ? '<button class="arq-mini-btn danger" style="margin-right:4px;" onclick="event.stopPropagation();_arqExcluirCategoria(\''+catId+'\')" title="Excluir categoria"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>'
+        : '';
       html += '<div class="arq-card-cat" onclick="_arqEntrarCategoria(\''+catId+'\')">'
         +'<div class="arq-card-cat-icone">'+c.icone+'</div>'
         +'<div class="arq-card-cat-info">'
           +'<div class="arq-card-cat-nome">'+_escapeHtml(c.nome)+'</div>'
           +'<div class="arq-card-cat-meta">'+metaTxt+'</div>'
         +'</div>'
+        +btnExcluir
         +'<svg class="arq-card-cat-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>'
       +'</div>';
     });

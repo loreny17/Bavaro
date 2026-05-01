@@ -3299,10 +3299,19 @@ function lixeiraEsvaziar(){
 //   chave: arq_pastas_{restId}  =>  [{id, categoria, nome, criadoEm}]
 
 var _arquivos = [];      // metadados em memória (sem o blob)
-var _arqVista = 'categorias'; // 'categorias' | 'pastas' | 'arquivos' | 'busca'
-var _arqCatAtual = null; // categoria selecionada (quando dentro de uma)
-var _arqPastaAtual = null; // pasta selecionada (quando dentro de uma)
+// Estado de navegação:
+//   'categorias' = lista todas categorias (raiz)
+//   'navegando' = dentro de uma categoria, exibe pastas + arquivos do nível atual
+//   'busca' = exibindo resultados de busca global
+var _arqVista = 'categorias';
+var _arqCatAtual = null;       // ID da categoria atual (quando navegando)
+var _arqCaminhoAtual = [];     // Array de pastaIds: caminho desde a raiz da categoria. Vazio = raiz.
 var _arqBuscaTermo = '';
+var _ARQ_MAX_PROFUNDIDADE = 8; // Limite de aninhamento (protege contra bagunça)
+// Pasta "atual" = última do caminho (ou null se está na raiz da categoria)
+function _arqPastaAtualId(){
+  return _arqCaminhoAtual.length ? _arqCaminhoAtual[_arqCaminhoAtual.length - 1] : null;
+}
 
 // ── Categorias ──
 var _arqCatsPadrao = {
@@ -3353,7 +3362,7 @@ function arquivosAbrir(){
   // Reset estado de navegação
   _arqVista = 'categorias';
   _arqCatAtual = null;
-  _arqPastaAtual = null;
+  _arqCaminhoAtual = [];
   _arqBuscaTermo = '';
   document.getElementById('arq-busca-input').value = '';
   document.getElementById('arq-busca-bar').style.display = 'none';
@@ -3375,22 +3384,43 @@ function arquivosFechar(){
 // Navegação
 function _arqEntrarCategoria(catId){
   _arqCatAtual = catId;
-  _arqPastaAtual = null;
-  _arqVista = 'pastas';
+  _arqCaminhoAtual = [];
+  _arqVista = 'navegando';
   _renderArquivos();
-  history.pushState({arq:'pastas', catId:catId}, '');
+  history.pushState({arq:'navegando', catId:catId, caminho:[]}, '');
 }
+// Entra em uma pasta (filha do nível atual)
 function _arqEntrarPasta(pastaId){
-  _arqPastaAtual = pastaId;
-  _arqVista = 'arquivos';
+  if(_arqCaminhoAtual.length >= _ARQ_MAX_PROFUNDIDADE){
+    showToast('⚠️ Limite de '+_ARQ_MAX_PROFUNDIDADE+' níveis de pastas','#f7a34f');
+    return;
+  }
+  _arqCaminhoAtual.push(pastaId);
+  _arqVista = 'navegando';
   _renderArquivos();
-  history.pushState({arq:'arquivos', catId:_arqCatAtual, pastaId:pastaId}, '');
+  history.pushState({arq:'navegando', catId:_arqCatAtual, caminho:_arqCaminhoAtual.slice()}, '');
 }
-function _arqVoltarPara(nivel){
-  if(nivel === 'categorias'){
-    _arqCatAtual = null; _arqPastaAtual = null; _arqVista = 'categorias';
-  } else if(nivel === 'pastas'){
-    _arqPastaAtual = null; _arqVista = 'pastas';
+// Volta um nível (pop do caminho). Se já está na raiz da categoria, volta pras categorias.
+function _arqVoltarUmNivel(){
+  if(_arqCaminhoAtual.length > 0){
+    _arqCaminhoAtual.pop();
+  } else {
+    // Estava na raiz da categoria — volta pras categorias
+    _arqCatAtual = null;
+    _arqVista = 'categorias';
+  }
+  _renderArquivos();
+}
+// Vai direto pra um nível específico do caminho (clique no breadcrumb).
+// indice = -1 (categorias raiz), 0 (raiz da categoria), 1 (primeira pasta), ...
+function _arqIrParaNivel(indice){
+  if(indice < 0){
+    _arqCatAtual = null;
+    _arqCaminhoAtual = [];
+    _arqVista = 'categorias';
+  } else {
+    _arqCaminhoAtual = _arqCaminhoAtual.slice(0, indice);
+    _arqVista = 'navegando';
   }
   _renderArquivos();
 }
@@ -3443,14 +3473,11 @@ function arquivosUpload(files){
   if(!restauranteAtivo){ showToast('⚠️ Selecione um restaurante','#f7a34f'); return; }
   var arquivosCapturados = Array.from(files);
   document.getElementById('arq-input').value = '';
-  // Se já estamos dentro de uma categoria/pasta, usa o contexto atual
-  if(_arqVista === 'arquivos' && _arqCatAtual){
-    _arquivosFluxoUploadComContexto(arquivosCapturados, _arqCatAtual, _arqPastaAtual);
-  } else if(_arqVista === 'pastas' && _arqCatAtual){
-    // Dentro de uma categoria mas na lista de pastas — usa categoria, sem pasta
-    _arquivosFluxoUploadComContexto(arquivosCapturados, _arqCatAtual, null);
+  // Se está navegando, usa categoria + pasta atual do caminho
+  if(_arqVista === 'navegando' && _arqCatAtual){
+    _arquivosFluxoUploadComContexto(arquivosCapturados, _arqCatAtual, _arqPastaAtualId());
   } else {
-    // Tela inicial — pergunta categoria primeiro
+    // Tela de categorias — pergunta categoria primeiro (vai pra raiz dela)
     _arquivosPedirCategoria(function(categoria){
       if(!categoria) return;
       _arquivosFluxoUploadComContexto(arquivosCapturados, categoria, null);
@@ -3628,29 +3655,49 @@ function _arquivosCriarCategoria(callback){
 
 // ═══ Pastas ═══
 function _arqCriarPasta(){
-  // Se está dentro de uma categoria, cria diretamente lá
+  // Está dentro de uma categoria (raiz dela ou subpasta)
   if(_arqCatAtual){
-    _arqCriarPastaNaCategoria(_arqCatAtual);
+    if(_arqCaminhoAtual.length >= _ARQ_MAX_PROFUNDIDADE){
+      showToast('⚠️ Limite de '+_ARQ_MAX_PROFUNDIDADE+' níveis de pastas atingido','#f7a34f');
+      return;
+    }
+    _arqCriarPastaContextual(_arqCatAtual, _arqPastaAtualId());
     return;
   }
-  // Se está na raiz (lista de categorias), pergunta primeiro a categoria
+  // Está na tela de categorias — pergunta primeiro a categoria
   _arquivosPedirCategoria(function(catId){
     if(!catId) return;
-    _arqCriarPastaNaCategoria(catId);
+    _arqCriarPastaContextual(catId, null);
   });
 }
 
-function _arqCriarPastaNaCategoria(catId){
+function _arqCriarPastaContextual(catId, pastaPaiId){
   var existing = document.getElementById('arq-novapasta-modal');
   if(existing) existing.remove();
   var todasCats = _arqTodasCategorias();
+  var todasPastas = _arqCarregarPastas();
   var catNome = (todasCats[catId] && todasCats[catId].nome) || 'Categoria';
+  // Monta o caminho legível pra mostrar onde a pasta vai ser criada
+  var caminhoTxt = catNome;
+  if(pastaPaiId){
+    // Reconstrói caminho subindo a hierarquia
+    var partes = [];
+    var atual = pastaPaiId;
+    var safety = 20;
+    while(atual && safety-- > 0){
+      var p = todasPastas.find(function(x){ return x.id === atual; });
+      if(!p) break;
+      partes.unshift(p.nome);
+      atual = p.pastaPaiId || null;
+    }
+    if(partes.length > 0) caminhoTxt += ' › ' + partes.join(' › ');
+  }
   var modal = document.createElement('div');
   modal.id = 'arq-novapasta-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
   modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
     +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">NOVA PASTA</div>'
-    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:14px;">Em: '+_escapeHtml(catNome)+'</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:14px;overflow:hidden;text-overflow:ellipsis;">📍 '+_escapeHtml(caminhoTxt)+'</div>'
     +'<label style="display:block;font-size:0.74rem;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Nome da pasta</label>'
     +'<input id="arq-novapasta-nome" type="text" maxlength="50" placeholder="Ex: Janeiro 2026" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.92rem;margin-bottom:16px;">'
     +'<div style="display:flex;gap:8px;">'
@@ -3665,7 +3712,7 @@ function _arqCriarPastaNaCategoria(catId){
     if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
     var pastaId = 'pasta_' + Date.now() + '_' + Math.floor(Math.random()*1000);
     var lista = _arqCarregarPastas();
-    lista.push({id:pastaId, categoria:catId, nome:nome, criadoEm:Date.now()});
+    lista.push({id:pastaId, categoria:catId, pastaPaiId:pastaPaiId || null, nome:nome, criadoEm:Date.now()});
     _arqSalvarPastas(lista);
     modal.remove();
     showToast('✓ Pasta "'+nome+'" criada','#4ade80');
@@ -3756,35 +3803,58 @@ function _arqRenomearPasta(pastaId){
   });
 }
 
+// Coleta recursivamente todos os IDs de subpastas (incluindo a própria)
+function _arqColetarSubpastasIds(pastaId, todasPastas){
+  var ids = [pastaId];
+  var fila = [pastaId];
+  var safety = 1000;
+  while(fila.length > 0 && safety-- > 0){
+    var atual = fila.shift();
+    todasPastas.forEach(function(p){
+      if(p.pastaPaiId === atual){
+        ids.push(p.id);
+        fila.push(p.id);
+      }
+    });
+  }
+  return ids;
+}
+
 function _arqExcluirPasta(pastaId){
   var lista = _arqCarregarPastas();
   var pasta = lista.find(function(p){ return p.id === pastaId; });
   if(!pasta) return;
-  var qtdArqs = _arquivos.filter(function(a){ return a.pastaId === pastaId; }).length;
+  // Coleta TODAS as subpastas afetadas (recursivamente)
+  var idsAfetados = _arqColetarSubpastasIds(pastaId, lista);
+  var qtdSubpastas = idsAfetados.length - 1; // -1 pra não contar a própria
+  // Conta todos os arquivos dentro de qualquer subpasta da árvore
+  var arqsAfetados = _arquivos.filter(function(a){ return idsAfetados.indexOf(a.pastaId) >= 0; });
+  var qtdArqs = arqsAfetados.length;
   var msg = 'Excluir a pasta "'+pasta.nome+'"?';
-  if(qtdArqs > 0) msg += '\n\n'+qtdArqs+' arquivo(s) dentro vão voltar para a raiz da categoria (não serão apagados).';
+  var partes = [];
+  if(qtdSubpastas > 0) partes.push(qtdSubpastas+' subpasta'+(qtdSubpastas>1?'s':''));
+  if(qtdArqs > 0) partes.push(qtdArqs+' arquivo'+(qtdArqs>1?'s':''));
+  if(partes.length > 0){
+    msg += '\n\n⚠️ Tudo que está dentro será PERMANENTEMENTE apagado: '+partes.join(' e ')+'.';
+  }
   cvtConfirm(msg, function(){
-    // Move arquivos pra raiz (pastaId = null)
-    if(qtdArqs > 0){
-      var promessas = _arquivos
-        .filter(function(a){ return a.pastaId === pastaId; })
-        .map(function(a){
-          return dbGet('arquivos', a.id).then(function(reg){
-            if(reg){ reg.pastaId = null; return dbPut('arquivos', reg); }
-          });
-        });
-      Promise.all(promessas).then(function(){
-        var novaLista = lista.filter(function(p){ return p.id !== pastaId; });
-        _arqSalvarPastas(novaLista);
-        _carregarArquivosLocais();
-        showToast('🗑️ Pasta excluída','#f87171');
-      });
-    } else {
-      var novaLista = lista.filter(function(p){ return p.id !== pastaId; });
+    // Apaga TODOS os arquivos das pastas afetadas
+    var promessas = arqsAfetados.map(function(a){ return dbDelete('arquivos', a.id); });
+    Promise.all(promessas).then(function(){
+      // Remove todas as pastas afetadas da lista
+      var novaLista = lista.filter(function(p){ return idsAfetados.indexOf(p.id) < 0; });
       _arqSalvarPastas(novaLista);
-      _renderArquivos();
+      // Se a pasta atual está sendo excluída ou estamos dentro dela, sobe um nível
+      if(_arqCaminhoAtual.some(function(id){ return idsAfetados.indexOf(id) >= 0; })){
+        // Remove do caminho atual qualquer pasta afetada
+        _arqCaminhoAtual = _arqCaminhoAtual.filter(function(id){ return idsAfetados.indexOf(id) < 0; });
+      }
+      _carregarArquivosLocais();
       showToast('🗑️ Pasta excluída','#f87171');
-    }
+    }).catch(function(e){
+      console.error(e);
+      showToast('Erro ao excluir pasta','#f87171');
+    });
   });
 }
 
@@ -3970,30 +4040,69 @@ function _renderArquivos(){
     body.innerHTML = html;
     return;
   }
-  // Modo PASTAS (dentro de uma categoria)
-  if(_arqVista === 'pastas'){
+  // Modo NAVEGANDO (dentro de categoria, qualquer profundidade)
+  if(_arqVista === 'navegando'){
     var cat = todasCats[_arqCatAtual] || {nome:'?', icone:'📎'};
-    bc.innerHTML = '<button class="arq-bc-link" onclick="_arqVoltarPara(\'categorias\')">📁 Início</button>'
-      +'<span class="arq-bc-sep">›</span>'
-      +'<span class="arq-bc-atual">'+cat.icone+' '+_escapeHtml(cat.nome)+'</span>';
-    var pastasDaCat = todasPastas.filter(function(p){ return p.categoria === _arqCatAtual; });
-    pastasDaCat.sort(function(a,b){ return b.criadoEm - a.criadoEm; });
-    var arqsRaiz = _arquivos.filter(function(a){ return a.categoria === _arqCatAtual && !a.pastaId; });
-    if(sub) sub.textContent = pastasDaCat.length+' pasta(s) · '+arqsRaiz.length+' arquivo(s) na raiz';
-    if(pastasDaCat.length === 0 && arqsRaiz.length === 0){
-      body.innerHTML = '<div class="arq-empty"><div class="arq-empty-icone">📂</div><div class="arq-empty-titulo">Categoria vazia</div><div class="arq-empty-sub">Crie uma pasta ou envie arquivos diretamente</div></div>';
+    var pastaPaiAtual = _arqPastaAtualId(); // null se na raiz
+    // Monta breadcrumb com TODOS os níveis do caminho clicáveis
+    var bcParts = ['<button class="arq-bc-link" onclick="_arqIrParaNivel(-1)">📁 Início</button>'];
+    bcParts.push('<span class="arq-bc-sep">›</span>');
+    if(_arqCaminhoAtual.length === 0){
+      // Raiz da categoria
+      bcParts.push('<span class="arq-bc-atual">'+cat.icone+' '+_escapeHtml(cat.nome)+'</span>');
+    } else {
+      // Categoria como link
+      bcParts.push('<button class="arq-bc-link" onclick="_arqIrParaNivel(0)">'+cat.icone+' '+_escapeHtml(cat.nome)+'</button>');
+      // Cada pasta intermediária do caminho
+      for(var i = 0; i < _arqCaminhoAtual.length; i++){
+        var pid = _arqCaminhoAtual[i];
+        var p = todasPastas.find(function(pp){ return pp.id === pid; });
+        var nomeP = p ? p.nome : '?';
+        bcParts.push('<span class="arq-bc-sep">›</span>');
+        if(i === _arqCaminhoAtual.length - 1){
+          // Último: não clicável
+          bcParts.push('<span class="arq-bc-atual">📂 '+_escapeHtml(nomeP)+'</span>');
+        } else {
+          var idxClique = i + 1; // _arqIrParaNivel(N) deixa N pastas no caminho
+          bcParts.push('<button class="arq-bc-link" onclick="_arqIrParaNivel('+idxClique+')">📂 '+_escapeHtml(nomeP)+'</button>');
+        }
+      }
+    }
+    bc.innerHTML = bcParts.join('');
+    // Subpastas e arquivos do nível atual (filtra por pastaPaiId === pastaPaiAtual e categoria correta)
+    var subpastas = todasPastas.filter(function(p){
+      return p.categoria === _arqCatAtual && (p.pastaPaiId || null) === pastaPaiAtual;
+    });
+    subpastas.sort(function(a,b){ return b.criadoEm - a.criadoEm; });
+    var arqsDoNivel = _arquivos.filter(function(a){
+      return a.categoria === _arqCatAtual && (a.pastaId || null) === pastaPaiAtual;
+    });
+    if(sub){
+      var qtdTxt = [];
+      if(subpastas.length > 0) qtdTxt.push(subpastas.length+' pasta'+(subpastas.length>1?'s':''));
+      if(arqsDoNivel.length > 0) qtdTxt.push(arqsDoNivel.length+' arquivo'+(arqsDoNivel.length>1?'s':''));
+      sub.textContent = qtdTxt.length ? qtdTxt.join(' · ') : 'vazio';
+    }
+    if(subpastas.length === 0 && arqsDoNivel.length === 0){
+      body.innerHTML = '<div class="arq-empty"><div class="arq-empty-icone">📂</div><div class="arq-empty-titulo">'+(pastaPaiAtual ? 'Pasta vazia' : 'Categoria vazia')+'</div><div class="arq-empty-sub">Crie uma pasta ou envie arquivos</div></div>';
       return;
     }
     var html = '';
-    if(pastasDaCat.length > 0){
+    if(subpastas.length > 0){
       html += '<div class="arq-secao-titulo">Pastas</div>';
-      pastasDaCat.forEach(function(p){
-        var qtd = _arquivos.filter(function(a){ return a.pastaId === p.id; }).length;
+      subpastas.forEach(function(p){
+        // Conta arquivos diretos + arquivos em subpastas (recursivo) — só pra mostrar o número total
+        var idsDessaArvore = _arqColetarSubpastasIds(p.id, todasPastas);
+        var qtd = _arquivos.filter(function(a){ return idsDessaArvore.indexOf(a.pastaId) >= 0; }).length;
+        var qtdSub = idsDessaArvore.length - 1; // subpastas dela
+        var meta = [];
+        if(qtdSub > 0) meta.push(qtdSub+' subpasta'+(qtdSub>1?'s':''));
+        meta.push(qtd+' arquivo'+(qtd!==1?'s':''));
         html += '<div class="arq-card-pasta" onclick="_arqEntrarPasta(\''+p.id+'\')">'
           +'<div class="arq-card-pasta-icone">📂</div>'
           +'<div class="arq-card-pasta-info">'
             +'<div class="arq-card-pasta-nome">'+_escapeHtml(p.nome)+'</div>'
-            +'<div class="arq-card-pasta-meta">'+qtd+' arquivo'+(qtd!==1?'s':'')+'</div>'
+            +'<div class="arq-card-pasta-meta">'+meta.join(' · ')+'</div>'
           +'</div>'
           +'<div class="arq-card-pasta-actions" onclick="event.stopPropagation();">'
             +'<button class="arq-mini-btn" onclick="_arqRenomearPasta(\''+p.id+'\')" title="Renomear"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>'
@@ -4002,29 +4111,11 @@ function _renderArquivos(){
         +'</div>';
       });
     }
-    if(arqsRaiz.length > 0){
-      html += '<div class="arq-secao-titulo">Arquivos sem pasta</div>';
-      html += arqsRaiz.map(function(a){ return _arqRenderArquivoCard(a, todasCats, todasPastas, false); }).join('');
+    if(arqsDoNivel.length > 0){
+      html += '<div class="arq-secao-titulo">Arquivos</div>';
+      html += arqsDoNivel.map(function(a){ return _arqRenderArquivoCard(a, todasCats, todasPastas, false); }).join('');
     }
     body.innerHTML = html;
-    return;
-  }
-  // Modo ARQUIVOS (dentro de uma pasta)
-  if(_arqVista === 'arquivos'){
-    var cat = todasCats[_arqCatAtual] || {nome:'?', icone:'📎'};
-    var pasta = todasPastas.find(function(p){ return p.id === _arqPastaAtual; }) || {nome:'?'};
-    bc.innerHTML = '<button class="arq-bc-link" onclick="_arqVoltarPara(\'categorias\')">📁 Início</button>'
-      +'<span class="arq-bc-sep">›</span>'
-      +'<button class="arq-bc-link" onclick="_arqVoltarPara(\'pastas\')">'+cat.icone+' '+_escapeHtml(cat.nome)+'</button>'
-      +'<span class="arq-bc-sep">›</span>'
-      +'<span class="arq-bc-atual">📂 '+_escapeHtml(pasta.nome)+'</span>';
-    var arqs = _arquivos.filter(function(a){ return a.pastaId === _arqPastaAtual; });
-    if(sub) sub.textContent = arqs.length+' arquivo(s) · '+_formatarTamanho(arqs.reduce(function(s,a){return s+(a.tamanho||0);},0));
-    if(arqs.length === 0){
-      body.innerHTML = '<div class="arq-empty"><div class="arq-empty-icone">📂</div><div class="arq-empty-titulo">Pasta vazia</div><div class="arq-empty-sub">Toque em "Enviar" pra adicionar arquivos</div></div>';
-      return;
-    }
-    body.innerHTML = arqs.map(function(a){ return _arqRenderArquivoCard(a, todasCats, todasPastas, false); }).join('');
     return;
   }
 }
@@ -4041,9 +4132,18 @@ function _arqRenderArquivoCard(a, todasCats, todasPastas, mostrarLocal){
   var localTxt = '';
   if(mostrarLocal){
     var partes = [catInfo.nome];
+    // Se está numa pasta, sobe a hierarquia até a raiz
     if(a.pastaId){
-      var p = todasPastas.find(function(pp){ return pp.id === a.pastaId; });
-      if(p) partes.push(p.nome);
+      var idsCaminho = [];
+      var atual = a.pastaId;
+      var safety = 20;
+      while(atual && safety-- > 0){
+        var pp = todasPastas.find(function(x){ return x.id === atual; });
+        if(!pp) break;
+        idsCaminho.unshift(pp.nome);
+        atual = pp.pastaPaiId || null;
+      }
+      partes = partes.concat(idsCaminho);
     }
     localTxt = '<div class="arq-card-arq-meta" style="color:var(--accent);">📍 '+_escapeHtml(partes.join(' › '))+'</div>';
   }
@@ -9477,16 +9577,12 @@ window.addEventListener('popstate', function(e){
     if(buscaBar && buscaBar.style.display !== 'none' && _arqBuscaTermo){
       _arqToggleBusca();
       // Re-empilha o state pra próximo back voltar de novo
-      history.pushState({arq:_arqVista, catId:_arqCatAtual, pastaId:_arqPastaAtual}, '');
+      history.pushState({arq:_arqVista, catId:_arqCatAtual, caminho:_arqCaminhoAtual.slice()}, '');
       return;
     }
-    // Navega pra trás conforme nível
-    if(_arqVista === 'arquivos'){
-      _arqVoltarPara('pastas');
-      return;
-    }
-    if(_arqVista === 'pastas'){
-      _arqVoltarPara('categorias');
+    // Está navegando dentro de uma categoria
+    if(_arqVista === 'navegando'){
+      _arqVoltarUmNivel();
       return;
     }
     // Estava na raiz (categorias) — fecha a tela

@@ -1034,6 +1034,121 @@ body.admin-mode .admin-only{display:flex!important;}
 .menu-lat-divider{height:1px;background:var(--border);margin:8px 4px;}
 .menu-lat-secao-titulo{font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;padding:10px 14px 6px;}
 
+/* ═══ ADAPTAÇÃO DESKTOP ═══ */
+/* Em telas grandes, centraliza o app num "frame de celular" pra não ficar esticado */
+@media (min-width: 768px){
+  /* Background neutro nas laterais */
+  html{
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(212,168,67,0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 80%, rgba(212,168,67,0.04) 0%, transparent 50%),
+      #050505;
+    min-height:100vh;
+  }
+  /* Body como "frame" de celular: max-width fixo, centralizado, com sombra */
+  body{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    box-shadow:0 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,168,67,0.08);
+    position:relative;
+    overflow-x:hidden;
+  }
+  /* Header sticky precisa respeitar o frame */
+  header{
+    max-width:480px;
+    margin:0 auto;
+    left:auto;
+    right:auto;
+  }
+  /* Tabs (bottom nav) — fixed bottom precisa ser constrangido ao frame */
+  .tabs{
+    left:50%;
+    right:auto;
+    transform:translateX(-50%);
+    width:100%;
+    max-width:480px;
+  }
+  /* Telas que cobrem 100% (home, restaurante, login) — também constrangem ao frame */
+  #home-screen,
+  #rest-screen,
+  #block-screen,
+  .loading-screen,
+  .func-screen{
+    left:50%;
+    transform:translateX(-50%);
+    width:100%;
+    max-width:480px;
+  }
+  /* Quando #home-screen tem .hidden (transform já é setado), preserva centralização */
+  #home-screen.hidden{
+    transform:translateX(-50%) scale(0.97);
+  }
+  /* Auth overlay e tela de boas-vindas — cobrem a tela toda mas o conteúdo já tem max-width */
+  /* (não precisa ajuste, .auth-box já é max-width:400px e centralizado) */
+
+  /* Menu lateral (drawer) — dentro do frame */
+  .menu-lateral-overlay{
+    left:50%;
+    transform:translateX(-50%);
+    width:100%;
+    max-width:480px;
+  }
+
+  /* Botões flutuantes (FAB, admin badge) — alinhados ao frame */
+  .fab-btn,
+  .admin-badge,
+  .admin-login-btn{
+    /* Fórmula: distância da direita = (50vw - 240px) + 16px do padding original */
+    right:calc(50vw - 240px + 16px);
+  }
+
+  /* Toast — centralizado na tela, mas dentro do frame visual */
+  .toast{
+    /* Já é translateX(-50%), só mudamos a referência: deixa em 50vw */
+    left:50vw;
+  }
+
+  /* Modais de bottom sheet (action-sheet, modal-overlay, ped-overlay etc) */
+  /* Precisam ser constrangidos pra não quebrar a ilusão do frame */
+  .action-sheet-backdrop,
+  .modal-overlay,
+  .ped-overlay,
+  .cvt-confirm-overlay,
+  .img-viewer,
+  .est-grupo-modal,
+  .est-ctx-menu,
+  .admin-lock-overlay,
+  .cl-edit-modal{
+    left:50%;
+    transform:translateX(-50%);
+    width:100%;
+    max-width:480px;
+  }
+  /* Bottom sheet em si (action-sheet) já tem max-width próprio, ajustar centralização */
+  .action-sheet{
+    left:8px;
+    right:8px;
+  }
+}
+
+/* Em telas muito grandes (1280+), aumenta um pouco o frame pra usar melhor o espaço */
+@media (min-width: 1280px){
+  body{ max-width:520px; }
+  header,
+  .tabs,
+  #home-screen, #rest-screen, #block-screen, .loading-screen, .func-screen,
+  .menu-lateral-overlay,
+  .action-sheet-backdrop, .modal-overlay, .ped-overlay,
+  .cvt-confirm-overlay, .img-viewer, .est-grupo-modal,
+  .est-ctx-menu, .admin-lock-overlay, .cl-edit-modal{
+    max-width:520px;
+  }
+  .fab-btn, .admin-badge, .admin-login-btn{
+    right:calc(50vw - 260px + 16px);
+  }
+}
+
 </style>
 <!-- Verificação antecipada de acesso (Firebase Auth cuida do login) -->
 <script>
@@ -1670,7 +1785,7 @@ body.admin-mode .admin-only{display:flex!important;}
       <div class="auth-instrucao">Digite seu email cadastrado. Enviaremos um link para redefinir sua senha.</div>
       <div class="auth-campo">
         <label>Email</label>
-        <input type="email" id="auth-reset-email" placeholder="seu@email.com">
+        <input type="email" id="auth-reset-email" placeholder="seu@email.com" autocomplete="email" inputmode="email" onkeydown="if(event.key==='Enter'){event.preventDefault();authEnviarReset();}">
       </div>
       <button class="auth-btn primary" onclick="authEnviarReset()">Enviar link</button>
       <button class="auth-link" onclick="authMostrarTela('login')">← Voltar para o login</button>
@@ -9526,6 +9641,17 @@ function authMostrarTela(tela){
       });
     });
   }
+  // Ao abrir a tela de reset: pré-preenche com o email do login (se digitado)
+  // e dá foco no input pro usuário poder digitar/corrigir direto
+  if(tela === 'reset'){
+    var emailLogin = (document.getElementById('auth-login-email').value || '').trim();
+    var inpReset = document.getElementById('auth-reset-email');
+    if(inpReset){
+      if(emailLogin && !inpReset.value) inpReset.value = emailLogin;
+      // Pequeno delay pra animação de entrada terminar antes do foco
+      setTimeout(function(){ try{ inpReset.focus(); }catch(e){} }, 200);
+    }
+  }
 }
 
 function authEsconderTela(){
@@ -9883,19 +10009,61 @@ function authEnviarReset(){
     _authMostrarErro('auth-reset-erro', 'Digite seu email.');
     return;
   }
+  // Validação básica de formato
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    _authMostrarErro('auth-reset-erro', 'Email inválido. Verifique se digitou corretamente.');
+    return;
+  }
   if(!fbAuth){
     _authMostrarErro('auth-reset-erro', 'Aguarde a conexão...');
     return;
   }
+  // Loading visual: desabilita botão e mostra texto de envio
+  var btn = document.querySelector('#auth-tela-reset .auth-btn.primary');
+  var textoOriginal = '';
+  if(btn){
+    textoOriginal = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+  }
+  _authMostrarErro('auth-reset-erro', '📨 Enviando link para '+email+'...', true);
   fbAuth.sendPasswordResetEmail(email)
     .then(function(){
-      _authMostrarErro('auth-reset-erro', '✓ Enviamos um link para '+email+'. Verifique sua caixa de entrada (e spam).', true);
+      _authMostrarErro('auth-reset-erro',
+        '✅ Pronto! Enviamos um link para '+email+'.\n\nVerifique sua caixa de entrada (e a pasta de spam).',
+        true);
       // Pré-preenche o email no form de login
       document.getElementById('auth-login-email').value = email;
+      // Volta pra tela de login automaticamente após 4s
+      setTimeout(function(){
+        authMostrarTela('login');
+        showToast('💡 Confira seu email e volte para entrar', '#4ade80');
+      }, 4000);
     })
     .catch(function(err){
       console.warn('Reset senha erro:', err.code, err.message);
-      _authMostrarErro('auth-reset-erro', _authMensagemErroFirebase(err.code));
+      // Por segurança, se o email não está cadastrado, mostra a mesma mensagem
+      // de sucesso. Isso evita que alguém descubra quais emails estão cadastrados
+      // testando vários no formulário de reset.
+      if(err.code === 'auth/user-not-found'){
+        _authMostrarErro('auth-reset-erro',
+          '✅ Pronto! Enviamos um link para '+email+'.\n\nVerifique sua caixa de entrada (e a pasta de spam).',
+          true);
+        document.getElementById('auth-login-email').value = email;
+        setTimeout(function(){
+          authMostrarTela('login');
+          showToast('💡 Confira seu email e volte para entrar', '#4ade80');
+        }, 4000);
+      } else {
+        _authMostrarErro('auth-reset-erro', _authMensagemErroFirebase(err.code));
+      }
+    })
+    .then(function(){
+      // Sempre restaura o botão (sucesso ou erro)
+      if(btn){
+        btn.disabled = false;
+        btn.textContent = textoOriginal || 'Enviar link';
+      }
     });
 }
 

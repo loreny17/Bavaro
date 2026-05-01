@@ -1891,6 +1891,45 @@ body.admin-mode .admin-only{display:flex!important;}
 
 <!-- Modal de Lixeira fim -->
 
+<!-- Modal de Arquivos do Restaurante -->
+<div class="ped-overlay" id="arq-overlay" onclick="if(event.target===this)arquivosFechar()">
+  <div class="ped-modal">
+    <div class="ped-header">
+      <div class="ped-header-icon" style="background:rgba(212,168,67,0.15);">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d4a843" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="ped-header-info">
+        <div class="ped-title">ARQUIVOS</div>
+        <div class="ped-sub" id="arq-sub">Fechamentos, contratos e documentos</div>
+      </div>
+      <button class="ped-close" onclick="arquivosFechar()">×</button>
+    </div>
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="file" id="arq-input" multiple style="display:none;" onchange="arquivosUpload(this.files)">
+      <button class="ped-btn" style="flex:1;background:var(--accent);color:#000;border:none;font-weight:700;" onclick="document.getElementById('arq-input').click()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Enviar arquivo
+      </button>
+      <select id="arq-filtro" onchange="_renderArquivos()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:8px 10px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;">
+        <option value="todos">Todas as categorias</option>
+        <option value="fechamento">📊 Fechamentos</option>
+        <option value="contrato">📝 Contratos</option>
+        <option value="planilha">📈 Planilhas</option>
+        <option value="documento">📄 Documentos</option>
+        <option value="outro">📎 Outros</option>
+      </select>
+    </div>
+    <div id="arq-progresso" style="display:none;padding:10px 14px;background:rgba(212,168,67,0.08);border-bottom:1px solid var(--border);">
+      <div id="arq-prog-texto" style="font-size:0.75rem;color:var(--accent);margin-bottom:6px;font-weight:600;"></div>
+      <div style="height:4px;background:var(--surface2);border-radius:3px;overflow:hidden;">
+        <div id="arq-prog-fill" style="height:100%;background:var(--accent);width:0%;transition:width 0.3s;"></div>
+      </div>
+    </div>
+    <div class="ped-body" id="arq-body" style="padding:8px;"></div>
+  </div>
+</div>
+<!-- Modal de Arquivos fim -->
+
 <!-- Modal de Revisão de Pedido -->
 <div class="ped-overlay" id="ped-overlay" onclick="if(event.target===this)pedFechar()">
   <div class="ped-modal">
@@ -1913,7 +1952,7 @@ body.admin-mode .admin-only{display:flex!important;}
 
 <script>
 // ═══ IndexedDB ═══
-var DB_NAME='GestaoFuncionariosDB',DB_VER=1,db;
+var DB_NAME='GestaoFuncionariosDB',DB_VER=2,db;
 function abrirDB(){
   return new Promise(function(res,rej){
     var r=indexedDB.open(DB_NAME,DB_VER);
@@ -1922,6 +1961,7 @@ function abrirDB(){
       if(!d.objectStoreNames.contains('funcionarios'))d.createObjectStore('funcionarios',{keyPath:'id'});
       if(!d.objectStoreNames.contains('vfData'))d.createObjectStore('vfData',{keyPath:'chave'});
       if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'k'});
+      if(!d.objectStoreNames.contains('arquivos'))d.createObjectStore('arquivos',{keyPath:'id'});
     };
     r.onsuccess=function(e){db=e.target.result;res(db);};
     r.onerror=rej;
@@ -3181,6 +3221,269 @@ function lixeiraEsvaziar(){
   });
 }
 
+// ═══ ARQUIVOS DO RESTAURANTE (LOCAL — IndexedDB) ═══
+// Os arquivos ficam armazenados como Blob no IndexedDB DESTE dispositivo.
+// Chave: arq_{restId}_{timestamp}_{rand}
+// Estrutura no store 'arquivos':
+//   {id, restId, nome, nomeOriginal, tamanho, tipo, categoria, dataUpload, blob, uploadPor}
+// IMPORTANTE: arquivos NÃO sincronizam entre dispositivos. Se limpar dados
+// do navegador ou desinstalar a PWA, perdem-se. Usar pra arquivos locais do dia a dia.
+var _arquivos = []; // metadados em memória (sem o blob)
+var _arqFiltroAtivo = 'todos';
+
+function arquivosAbrir(){
+  if(!db){
+    showToast('⚠️ Banco local não está pronto, aguarde','#f7a34f');
+    return;
+  }
+  if(!restauranteAtivo){
+    showToast('⚠️ Selecione um restaurante primeiro', '#f7a34f');
+    return;
+  }
+  document.getElementById('arq-filtro').value = _arqFiltroAtivo;
+  document.getElementById('arq-overlay').classList.add('show');
+  _carregarArquivosLocais();
+}
+
+function arquivosFechar(){
+  document.getElementById('arq-overlay').classList.remove('show');
+}
+
+// Carrega só os metadados (sem blob pra economizar memória)
+function _carregarArquivosLocais(){
+  if(!db || !restauranteAtivo){ _arquivos = []; _renderArquivos(); return; }
+  dbGetAll('arquivos').then(function(todos){
+    _arquivos = (todos || [])
+      .filter(function(a){ return a.restId === restauranteAtivo.id; })
+      .map(function(a){
+        // Não copia o blob pra lista — só metadados
+        return {
+          id: a.id, restId: a.restId, nome: a.nome, nomeOriginal: a.nomeOriginal,
+          tamanho: a.tamanho, tipo: a.tipo, categoria: a.categoria,
+          dataUpload: a.dataUpload, uploadPor: a.uploadPor
+        };
+      })
+      .sort(function(a,b){ return b.dataUpload - a.dataUpload; });
+    _renderArquivos();
+  }).catch(function(e){
+    console.error('Erro ao carregar arquivos locais:', e);
+    showToast('⚠️ Erro ao carregar arquivos','#f87171');
+  });
+}
+
+// Faz upload (salva no IndexedDB local)
+function arquivosUpload(files){
+  if(!files || files.length === 0) return;
+  if(!db){ showToast('⚠️ Banco local não está pronto','#f87171'); return; }
+  if(!restauranteAtivo){ showToast('⚠️ Selecione um restaurante','#f7a34f'); return; }
+  // Pergunta a categoria primeiro
+  _arquivosPedirCategoria(function(categoria){
+    if(!categoria){ document.getElementById('arq-input').value = ''; return; }
+    _uploadArquivosSequencial(Array.from(files), categoria, 0);
+  });
+  // Reset do input pra permitir reupload do mesmo arquivo
+  document.getElementById('arq-input').value = '';
+}
+
+function _arquivosPedirCategoria(callback){
+  var existing = document.getElementById('arq-cat-modal');
+  if(existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'arq-cat-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9500;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">CATEGORIA DO ARQUIVO</div>'
+    +'<div style="font-size:0.78rem;color:var(--muted);margin-bottom:16px;">Escolha pra organizar melhor depois</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'
+      +'<button class="arq-cat-opt" data-cat="fechamento">📊 Fechamento</button>'
+      +'<button class="arq-cat-opt" data-cat="contrato">📝 Contrato</button>'
+      +'<button class="arq-cat-opt" data-cat="planilha">📈 Planilha</button>'
+      +'<button class="arq-cat-opt" data-cat="documento">📄 Documento</button>'
+      +'<button class="arq-cat-opt" data-cat="outro">📎 Outro</button>'
+    +'</div>'
+    +'<button id="arq-cat-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Cancelar</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  var style = document.createElement('style');
+  style.textContent = '.arq-cat-opt{background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:12px 14px;font-family:\'Space Grotesk\',sans-serif;font-size:0.86rem;font-weight:500;text-align:left;cursor:pointer;transition:all 0.15s;}.arq-cat-opt:hover,.arq-cat-opt:active{background:rgba(212,168,67,0.12);border-color:var(--accent);}';
+  modal.appendChild(style);
+  modal.querySelectorAll('.arq-cat-opt').forEach(function(btn){
+    btn.onclick = function(){
+      var cat = btn.dataset.cat;
+      modal.remove();
+      callback(cat);
+    };
+  });
+  modal.querySelector('#arq-cat-cancel').onclick = function(){
+    modal.remove();
+    callback(null);
+  };
+}
+
+function _uploadArquivosSequencial(arquivos, categoria, index){
+  var prog = document.getElementById('arq-progresso');
+  var progTxt = document.getElementById('arq-prog-texto');
+  var progFill = document.getElementById('arq-prog-fill');
+  if(index >= arquivos.length){
+    prog.style.display = 'none';
+    showToast('✓ '+arquivos.length+' arquivo(s) salvos no aparelho','#4ade80');
+    _carregarArquivosLocais();
+    return;
+  }
+  var file = arquivos[index];
+  // Limite de 100MB por arquivo (proteção — IndexedDB suporta mais, mas 100MB já é bem grande)
+  if(file.size > 100*1024*1024){
+    showToast('⚠️ "'+file.name+'" é muito grande (máx 100MB)','#f87171',4000);
+    _uploadArquivosSequencial(arquivos, categoria, index+1);
+    return;
+  }
+  var arquivoId = 'arq_' + restauranteAtivo.id + '_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+  prog.style.display = 'block';
+  progTxt.textContent = 'Salvando '+(index+1)+'/'+arquivos.length+': '+file.name;
+  progFill.style.width = '20%';
+  // Lê como Blob (na verdade, File já é Blob — guardamos direto)
+  var registro = {
+    id: arquivoId,
+    restId: restauranteAtivo.id,
+    nome: file.name,
+    nomeOriginal: file.name,
+    tamanho: file.size,
+    tipo: file.type || 'application/octet-stream',
+    categoria: categoria,
+    dataUpload: Date.now(),
+    blob: file,
+    uploadPor: (_usuarioAtual && _usuarioAtual.email) || 'desconhecido'
+  };
+  progFill.style.width = '60%';
+  dbPut('arquivos', registro).then(function(){
+    progFill.style.width = '100%';
+    setTimeout(function(){
+      _uploadArquivosSequencial(arquivos, categoria, index+1);
+    }, 150);
+  }).catch(function(err){
+    console.error('Erro ao salvar arquivo no IndexedDB:', err);
+    var msg = '❌ Erro ao salvar';
+    if(err && err.name === 'QuotaExceededError'){
+      msg = '⚠️ Memória do aparelho cheia';
+    }
+    showToast(msg, '#f87171', 5000);
+    prog.style.display = 'none';
+  });
+}
+
+// Baixa o arquivo (lê o blob do IndexedDB e cria um download)
+function arquivosBaixar(arquivoId){
+  if(!db) return;
+  dbGet('arquivos', arquivoId).then(function(registro){
+    if(!registro || !registro.blob){
+      showToast('Arquivo não encontrado','#f87171');
+      return;
+    }
+    var url = URL.createObjectURL(registro.blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = registro.nomeOriginal || 'arquivo';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 200);
+  }).catch(function(e){
+    console.error(e);
+    showToast('Erro ao abrir arquivo','#f87171');
+  });
+}
+
+function arquivosExcluir(arquivoId){
+  var arq = _arquivos.find(function(a){ return a.id === arquivoId; });
+  if(!arq) return;
+  cvtConfirm('Excluir "'+arq.nome+'"?\n\nO arquivo será removido permanentemente do aparelho.', function(){
+    dbDelete('arquivos', arquivoId).then(function(){
+      _arquivos = _arquivos.filter(function(a){ return a.id !== arquivoId; });
+      _renderArquivos();
+      showToast('🗑️ Arquivo excluído','#f87171');
+    }).catch(function(e){
+      console.error(e);
+      showToast('Erro ao excluir','#f87171');
+    });
+  });
+}
+
+function _renderArquivos(){
+  var body = document.getElementById('arq-body');
+  if(!body) return;
+  _arqFiltroAtivo = document.getElementById('arq-filtro').value;
+  var lista = _arquivos;
+  if(_arqFiltroAtivo !== 'todos'){
+    lista = lista.filter(function(a){ return a.categoria === _arqFiltroAtivo; });
+  }
+  // Calcula tamanho total
+  var totalBytes = _arquivos.reduce(function(sum, a){ return sum + (a.tamanho || 0); }, 0);
+  // Atualiza subtitle
+  var sub = document.getElementById('arq-sub');
+  if(sub){
+    if(_arquivos.length === 0) sub.textContent = 'Nenhum arquivo neste aparelho';
+    else sub.textContent = _arquivos.length + ' arquivo(s) · '+_formatarTamanho(totalBytes)+' · '+restauranteAtivo.nome;
+  }
+  // Aviso fixo sobre armazenamento local
+  var aviso = '<div style="background:rgba(247,163,79,0.1);border:1px solid rgba(247,163,79,0.3);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:0.7rem;color:#f7a34f;line-height:1.4;">'
+    +'<strong>📱 Salvo neste aparelho.</strong> Arquivos não sincronizam entre dispositivos. Se limpar dados do app ou desinstalar, serão perdidos.'
+    +'</div>';
+  if(lista.length === 0){
+    body.innerHTML = aviso + '<div style="text-align:center;padding:30px 20px;color:var(--muted);">'
+      +'<div style="font-size:2.4rem;margin-bottom:10px;">📁</div>'
+      +'<div style="font-size:0.86rem;font-weight:600;margin-bottom:4px;">'
+      +(_arquivos.length === 0 ? 'Nenhum arquivo ainda' : 'Nenhum arquivo nesta categoria')
+      +'</div>'
+      +'<div style="font-size:0.74rem;">'
+      +(_arquivos.length === 0 ? 'Toque em "Enviar arquivo" pra começar' : 'Mude o filtro pra ver outros')
+      +'</div>'
+      +'</div>';
+    return;
+  }
+  var icones = {
+    fechamento:'📊', contrato:'📝', planilha:'📈', documento:'📄', outro:'📎'
+  };
+  var nomes = {
+    fechamento:'Fechamento', contrato:'Contrato', planilha:'Planilha', documento:'Documento', outro:'Outro'
+  };
+  body.innerHTML = aviso + lista.map(function(a){
+    var dt = new Date(a.dataUpload);
+    var dataStr = dt.toLocaleDateString('pt-BR') + ' · ' + dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    var tamStr = _formatarTamanho(a.tamanho);
+    var icone = icones[a.categoria] || '📎';
+    var catNome = nomes[a.categoria] || 'Arquivo';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;">'
+      +'<div style="font-size:1.6rem;flex-shrink:0;width:36px;text-align:center;">'+icone+'</div>'
+      +'<div style="flex:1;min-width:0;">'
+        +'<div style="font-size:0.84rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escapeHtml(a.nome)+'</div>'
+        +'<div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">'+catNome+' · '+tamStr+' · '+dataStr+'</div>'
+      +'</div>'
+      +'<button onclick="arquivosBaixar(\''+a.id+'\')" title="Baixar" style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:#4ade80;border-radius:8px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+        +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+      +'</button>'
+      +'<button onclick="arquivosExcluir(\''+a.id+'\')" title="Excluir" style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+        +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>'
+      +'</button>'
+    +'</div>';
+  }).join('');
+}
+
+function _formatarTamanho(bytes){
+  if(bytes < 1024) return bytes + ' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  if(bytes < 1024*1024*1024) return (bytes/(1024*1024)).toFixed(1) + ' MB';
+  return (bytes/(1024*1024*1024)).toFixed(2) + ' GB';
+}
+
+function _escapeHtml(s){
+  if(!s) return '';
+  return String(s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
 // ═══ UI da Lixeira ═══
 var _lixFiltroAtivo = 'todos';
 
@@ -3289,6 +3592,16 @@ function menuLateralAbrir(){
     var html = '';
     // Lixeira (sempre visível)
     var qtdLix = lixeira.length;
+    // Alternar restaurante (volta pra tela de seleção)
+    html += '<button class="menu-lat-item" onclick="menuLateralFechar();setTimeout(voltarParaRestaurantes,250);">'
+      +'<span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg></span>'
+      +'<span class="lbl">Alternar restaurante</span>'
+    +'</button>';
+    // Arquivos do restaurante (Firebase Storage)
+    html += '<button class="menu-lat-item" onclick="menuLateralFechar();setTimeout(arquivosAbrir,250);">'
+      +'<span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>'
+      +'<span class="lbl">Arquivos do restaurante</span>'
+    +'</button>';
     html += '<button class="menu-lat-item" onclick="menuLateralFechar();setTimeout(lixeiraAbrir,250);">'
       +'<span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span>'
       +'<span class="lbl">Lixeira</span>'
@@ -8566,6 +8879,12 @@ function voltarHome(){
 
 // Handle back button
 window.addEventListener('popstate', function(e){
+  // Se modal de arquivos aberto, só fecha ele
+  var arqOv = document.getElementById('arq-overlay');
+  if(arqOv && arqOv.classList.contains('show')){
+    arquivosFechar();
+    return;
+  }
   var home=document.getElementById('home-screen');
   if(!home) return;
   var isHidden = home.classList.contains('hidden') || home.style.display==='none';

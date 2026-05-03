@@ -1184,7 +1184,8 @@ body.admin-mode .admin-only{display:flex!important;}
 .arq-card-pasta-meta{font-size:0.68rem;color:var(--muted);margin-top:2px;}
 .arq-card-pasta-actions{display:flex;gap:4px;flex-shrink:0;}
 .arq-card-arquivo{display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;}
-.arq-card-arq-icone{font-size:1.6rem;flex-shrink:0;width:36px;text-align:center;}
+.arq-card-arq-icone{font-size:1.6rem;flex-shrink:0;width:36px;height:36px;text-align:center;display:flex;align-items:center;justify-content:center;border-radius:7px;overflow:hidden;background:transparent;}
+.arq-card-arq-icone img{width:100%;height:100%;object-fit:cover;display:block;}
 .arq-card-arq-info{flex:1;min-width:0;}
 .arq-card-arq-nome{font-size:0.84rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .arq-card-arq-meta{font-size:0.68rem;color:var(--muted);margin-top:2px;}
@@ -3417,6 +3418,8 @@ function arquivosAbrir(){
 
 function arquivosFechar(){
   document.getElementById('arq-screen').style.display = 'none';
+  // Libera as URLs das miniaturas pra economizar memória
+  _arqLimparThumbsAntigas();
   // Se viemos de pushState, dá um back pra limpar
   if(history.state && history.state.arq){
     history.back();
@@ -4375,6 +4378,11 @@ function arquivosExcluir(arquivoId){
   cvtConfirm('Excluir "'+arq.nome+'"?\n\nO arquivo será removido permanentemente do aparelho.', function(){
     dbDelete('arquivos', arquivoId).then(function(){
       _arquivos = _arquivos.filter(function(a){ return a.id !== arquivoId; });
+      // Libera a miniatura, se houver
+      if(_arqThumbUrls[arquivoId]){
+        try{ URL.revokeObjectURL(_arqThumbUrls[arquivoId]); }catch(e){}
+        delete _arqThumbUrls[arquivoId];
+      }
       _renderArquivos();
       showToast('🗑️ Arquivo excluído','#f87171');
     }).catch(function(e){ console.error(e); showToast('Erro ao excluir','#f87171'); });
@@ -4456,6 +4464,7 @@ function _renderArquivos(){
       return;
     }
     body.innerHTML = resultados.map(function(a){ return _arqRenderArquivoCard(a, todasCats, todasPastas, true); }).join('');
+    _arqCarregarMiniaturas();
     return;
   }
   // Modo CATEGORIAS (raiz)
@@ -4584,6 +4593,7 @@ function _renderArquivos(){
       html += arqsDoNivel.map(function(a){ return _arqRenderArquivoCard(a, todasCats, todasPastas, false); }).join('');
     }
     body.innerHTML = html;
+    _arqCarregarMiniaturas();
     return;
   }
 }
@@ -4594,9 +4604,17 @@ function _arqRenderArquivoCard(a, todasCats, todasPastas, mostrarLocal){
   var tamStr = _formatarTamanho(a.tamanho);
   var catInfo = todasCats[a.categoria] || {nome:'?', icone:'📎'};
   var icone = catInfo.icone;
-  // Se tipo é imagem, mostra ícone diferente
-  if(a.tipo && a.tipo.indexOf('image/') === 0) icone = '🖼️';
-  else if(a.tipo === 'application/pdf') icone = '📕';
+  var ehImagem = a.tipo && a.tipo.indexOf('image/') === 0;
+  // Conteúdo do "ícone": se for imagem, marca pra carregar miniatura depois.
+  // Senão mostra emoji adequado ao tipo.
+  var iconeHtml;
+  if(ehImagem){
+    // Placeholder enquanto a miniatura carrega
+    iconeHtml = '<div class="arq-card-arq-icone" data-thumb-id="'+a.id+'">🖼️</div>';
+  } else {
+    if(a.tipo === 'application/pdf') icone = '📕';
+    iconeHtml = '<div class="arq-card-arq-icone">'+icone+'</div>';
+  }
   var localTxt = '';
   if(mostrarLocal){
     var partes = [catInfo.nome];
@@ -4616,7 +4634,7 @@ function _arqRenderArquivoCard(a, todasCats, todasPastas, mostrarLocal){
     localTxt = '<div class="arq-card-arq-meta" style="color:var(--accent);">📍 '+_escapeHtml(partes.join(' › '))+'</div>';
   }
   return '<div class="arq-card-arquivo">'
-    +'<div class="arq-card-arq-icone">'+icone+'</div>'
+    +iconeHtml
     +'<div class="arq-card-arq-info">'
       +'<div class="arq-card-arq-nome">'+_escapeHtml(a.nome)+'</div>'
       +'<div class="arq-card-arq-meta">'+tamStr+' · '+dataStr+'</div>'
@@ -4627,6 +4645,67 @@ function _arqRenderArquivoCard(a, todasCats, todasPastas, mostrarLocal){
     +'<button class="arq-mini-btn danger" onclick="arquivosExcluir(\''+a.id+'\')" title="Excluir"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>'
   +'</div>';
 }
+
+// Cache de Object URLs criadas pra miniaturas (chave: id do arquivo)
+var _arqThumbUrls = {};
+// Revoga URLs antigas pra liberar memória
+function _arqLimparThumbsAntigas(){
+  Object.keys(_arqThumbUrls).forEach(function(id){
+    try{ URL.revokeObjectURL(_arqThumbUrls[id]); }catch(e){}
+  });
+  _arqThumbUrls = {};
+}
+// Depois do render, busca cada placeholder de imagem e carrega o blob
+function _arqCarregarMiniaturas(){
+  if(!db) return;
+  var placeholders = document.querySelectorAll('#arq-body [data-thumb-id]');
+  if(placeholders.length === 0) return;
+  // IntersectionObserver pra lazy load (só carrega quando estiver visível)
+  if('IntersectionObserver' in window){
+    var observer = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          var el = entry.target;
+          observer.unobserve(el);
+          _arqCarregarUmaThumb(el);
+        }
+      });
+    }, {rootMargin:'200px'}); // pré-carrega 200px antes de aparecer
+    placeholders.forEach(function(el){ observer.observe(el); });
+  } else {
+    // Fallback pra navegadores antigos: carrega tudo de uma vez
+    placeholders.forEach(_arqCarregarUmaThumb);
+  }
+}
+
+function _arqCarregarUmaThumb(el){
+  var id = el.getAttribute('data-thumb-id');
+  if(!id) return;
+  // Já carregada? não recarrega
+  if(_arqThumbUrls[id]){
+    el.innerHTML = '<img src="'+_arqThumbUrls[id]+'" alt="" loading="lazy">';
+    return;
+  }
+  dbGet('arquivos', id).then(function(reg){
+    if(!reg || !reg.blob) return;
+    try{
+      var url = URL.createObjectURL(reg.blob);
+      _arqThumbUrls[id] = url;
+      // Garante que o elemento ainda existe (usuário pode ter navegado)
+      if(el.isConnected){
+        el.innerHTML = '<img src="'+url+'" alt="" loading="lazy">';
+        // Remove o atributo pra não recarregar se _renderArquivos for chamado
+        el.removeAttribute('data-thumb-id');
+      }
+    }catch(e){
+      console.warn('Erro ao gerar thumb:', e);
+    }
+  }).catch(function(e){
+    console.warn('Erro ao ler blob pra thumb:', e);
+  });
+}
+
+
 
 function _formatarTamanho(bytes){
   if(bytes < 1024) return bytes + ' B';

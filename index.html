@@ -4358,6 +4358,411 @@ function _arqMontarZip(arvore){
   });
 }
 
+// Coleta TODOS os arquivos do restaurante atual, organizados por categoria
+// Retorna {arquivos: [{...meta, caminhoRelativo}], totalBytes, totalArquivos}
+function _arqColetarTudo(){
+  var todasCats = _arqTodasCategorias();
+  var todasPastas = _arqCarregarPastas();
+  // Mapa pastaId -> caminho dentro da categoria (ex: "Bávaro/Janeiro 2026")
+  // Calcula via BFS partindo da raiz de cada categoria
+  var caminhoPorPasta = {};
+  Object.keys(todasCats).forEach(function(catId){
+    var pastasDaCat = todasPastas.filter(function(p){ return p.categoria === catId; });
+    var fila = [{pastaId:null, prefixo:''}];
+    var safety = 1000;
+    while(fila.length > 0 && safety-- > 0){
+      var atual = fila.shift();
+      var subs = pastasDaCat.filter(function(p){ return (p.pastaPaiId || null) === atual.pastaId; });
+      subs.forEach(function(p){
+        var nomeSeguro = _arqNomeSeguro(p.nome);
+        var caminhoP = atual.prefixo ? atual.prefixo + '/' + nomeSeguro : nomeSeguro;
+        caminhoPorPasta[p.id] = caminhoP;
+        fila.push({pastaId:p.id, prefixo:caminhoP});
+      });
+    }
+  });
+  // Monta lista de arquivos com caminho completo (Categoria/[Pasta/...])
+  var arquivos = [];
+  var totalBytes = 0;
+  // Conta arquivos órfãos (categoria que foi excluída)
+  var orfaos = [];
+  _arquivos.forEach(function(a){
+    var catInfo = todasCats[a.categoria];
+    if(!catInfo){
+      orfaos.push(a);
+      return;
+    }
+    var nomeCat = _arqNomeSeguro(catInfo.nome);
+    var caminhoNaCat = a.pastaId ? (caminhoPorPasta[a.pastaId] || '') : '';
+    var caminho = caminhoNaCat ? (nomeCat + '/' + caminhoNaCat) : nomeCat;
+    arquivos.push({
+      id:a.id, restId:a.restId, nome:a.nome, nomeOriginal:a.nomeOriginal,
+      tamanho:a.tamanho, tipo:a.tipo, categoria:a.categoria, pastaId:a.pastaId,
+      dataUpload:a.dataUpload, uploadPor:a.uploadPor,
+      caminhoRelativo:caminho
+    });
+    totalBytes += (a.tamanho || 0);
+  });
+  // Arquivos órfãos vão pra pasta "_outros"
+  orfaos.forEach(function(a){
+    arquivos.push({
+      id:a.id, restId:a.restId, nome:a.nome, nomeOriginal:a.nomeOriginal,
+      tamanho:a.tamanho, tipo:a.tipo, categoria:a.categoria, pastaId:a.pastaId,
+      dataUpload:a.dataUpload, uploadPor:a.uploadPor,
+      caminhoRelativo:'_outros'
+    });
+    totalBytes += (a.tamanho || 0);
+  });
+  return {arquivos:arquivos, totalBytes:totalBytes, totalArquivos:arquivos.length};
+}
+
+// Baixa TUDO do restaurante atual em um único ZIP, organizado por categoria
+function _arqBaixarZipTudo(){
+  if(!restauranteAtivo){ showToast('⚠️ Selecione um restaurante','#f7a34f'); return; }
+  if(_arquivos.length === 0){ showToast('💡 Nenhum arquivo para baixar','#f7a34f'); return; }
+  var info = _arqColetarTudo();
+  // Confirmação se o ZIP for muito grande
+  var tamMB = info.totalBytes / (1024 * 1024);
+  var ehGrande = info.totalArquivos > 500 || tamMB > 200;
+  var msgConfirm;
+  if(ehGrande){
+    msgConfirm = '⚠️ Atenção: '+info.totalArquivos+' arquivos · '+_formatarTamanho(info.totalBytes)+'\n\n'
+      +'O ZIP pode demorar pra gerar e usar bastante memória do dispositivo.\n\n'
+      +'Continuar?';
+  } else {
+    msgConfirm = 'Baixar tudo em ZIP?\n\n'
+      +info.totalArquivos+' arquivos · '+_formatarTamanho(info.totalBytes)+'\n\n'
+      +'O ZIP terá esta estrutura:\nCategoria / Pasta / arquivo';
+  }
+  cvtConfirm(msgConfirm, function(){
+    var dt = new Date();
+    var ts = dt.getFullYear() + ('0'+(dt.getMonth()+1)).slice(-2) + ('0'+dt.getDate()).slice(-2);
+    var nomeZip = _arqNomeSeguro(restauranteAtivo.nome) + '_backup_' + ts + '.zip';
+    _arqProgressToastShow('📦 Carregando biblioteca de ZIP...');
+    _carregarJSZip().then(function(){
+      return _arqMontarZip({arquivos:info.arquivos});
+    }).then(function(zipBlob){
+      _arqProgressToastHide();
+      var url = URL.createObjectURL(zipBlob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = nomeZip;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){ a.remove(); URL.revokeObjectURL(url); }, 500);
+      showToast('✓ Backup completo gerado: '+info.totalArquivos+' arquivo(s)','#4ade80', 4000);
+    }).catch(function(e){
+      console.error('Erro ZIP completo:', e);
+      _arqProgressToastHide();
+      var msg = e && e.message ? e.message : 'Erro ao gerar ZIP';
+      // Erro comum: out of memory em ZIPs muito grandes
+      if(msg.indexOf('memory') >= 0 || msg.indexOf('allocation') >= 0){
+        msg = 'Memória insuficiente. Tente baixar por categoria.';
+      }
+      showToast('❌ '+msg,'#f87171', 6000);
+    });
+  });
+}
+
+// ═══ IMPORTAR ZIP (restaurar backup de outro aparelho) ═══
+// Lê um ZIP gerado pelo botão "Baixar tudo" e recria categorias/pastas/arquivos.
+// Modo "adicionar": preserva tudo que já existe, adiciona novos itens.
+// Modo "substituir": apaga TUDO antes e recria do ZIP (drástico).
+
+// Mapa pra detectar categorias padrão pelo nome (case insensitive, sem acento)
+function _arqNomeParaIdPadrao(nomePasta){
+  var normalizado = String(nomePasta).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  var mapa = {
+    'fechamento':'fechamento', 'fechamentos':'fechamento',
+    'contrato':'contrato', 'contratos':'contrato',
+    'planilha':'planilha', 'planilhas':'planilha',
+    'documento':'documento', 'documentos':'documento',
+    'outro':'outro', 'outros':'outro'
+  };
+  return mapa[normalizado] || null;
+}
+
+// Cria input invisível pra escolher arquivo ZIP
+function _arqIniciarImportZip(){
+  if(!restauranteAtivo){ showToast('⚠️ Selecione um restaurante','#f7a34f'); return; }
+  if(!db){ showToast('⚠️ Banco local não está pronto','#f7a34f'); return; }
+  // Cria input file dinamicamente
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.zip,application/zip,application/x-zip-compressed';
+  input.style.display = 'none';
+  input.onchange = function(){
+    var file = input.files && input.files[0];
+    if(file){ _arqEscolherModoImport(file); }
+    input.remove();
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+
+// Pergunta como importar (adicionar ou substituir)
+function _arqEscolherModoImport(zipFile){
+  var existing = document.getElementById('arq-import-modal');
+  if(existing) existing.remove();
+  var temConteudo = _arquivos.length > 0;
+  var modal = document.createElement('div');
+  modal.id = 'arq-import-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9550;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var alertaSubst = temConteudo
+    ? '<div style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:8px;padding:8px 10px;margin-top:6px;font-size:0.7rem;color:#f87171;line-height:1.4;">⚠️ Apagará '+_arquivos.length+' arquivo(s) atuais</div>'
+    : '';
+  modal.innerHTML = '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:20px;max-width:340px;width:100%;">'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px;">IMPORTAR ZIP</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:6px;">📦 '+_escapeHtml(zipFile.name)+'</div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-bottom:14px;">'+_formatarTamanho(zipFile.size)+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'
+      +'<button id="arq-imp-add" style="background:var(--accent);border:none;color:#000;border-radius:10px;padding:14px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;font-weight:700;text-align:left;">'
+        +'<div style="display:flex;align-items:flex-start;gap:10px;">'
+          +'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+          +'<div><div>Adicionar aos existentes</div><div style="font-size:0.7rem;font-weight:500;opacity:0.75;margin-top:2px;">Mantém o que já tem, adiciona o novo</div></div>'
+        +'</div>'
+      +'</button>'
+      +'<button id="arq-imp-sub" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:14px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;font-weight:600;text-align:left;">'
+        +'<div style="display:flex;align-items:flex-start;gap:10px;">'
+          +'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>'
+          +'<div><div>Substituir tudo</div><div style="font-size:0.7rem;font-weight:500;color:var(--muted);margin-top:2px;">Apaga tudo e recria do ZIP</div>'+alertaSubst+'</div>'
+        +'</div>'
+      +'</button>'
+    +'</div>'
+    +'<button id="arq-imp-cancel" style="width:100%;margin-top:14px;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;">Cancelar</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.querySelector('#arq-imp-add').onclick = function(){
+    modal.remove();
+    _arqExecutarImport(zipFile, false);
+  };
+  modal.querySelector('#arq-imp-sub').onclick = function(){
+    modal.remove();
+    if(temConteudo){
+      cvtConfirm('⚠️ APAGAR TUDO antes de importar?\n\nIsso vai excluir permanentemente:\n• '+_arquivos.length+' arquivo(s)\n• Todas as pastas\n• Todas as categorias customizadas\n\nEsta ação NÃO pode ser desfeita.', function(){
+        _arqExecutarImport(zipFile, true);
+      });
+    } else {
+      _arqExecutarImport(zipFile, true);
+    }
+  };
+  modal.querySelector('#arq-imp-cancel').onclick = function(){ modal.remove(); };
+}
+
+// Executa o import: lê ZIP e cria categorias/pastas/arquivos
+function _arqExecutarImport(zipFile, substituir){
+  _arqProgressToastShow('📦 Carregando biblioteca de ZIP...');
+  _carregarJSZip().then(function(){
+    _arqProgressToastShow('📦 Lendo arquivo ZIP...');
+    return JSZip.loadAsync(zipFile);
+  }).then(function(zip){
+    // Filtra entradas: só arquivos (não diretórios vazios)
+    var entradas = [];
+    zip.forEach(function(path, entry){
+      if(!entry.dir) entradas.push({path:path, entry:entry});
+    });
+    if(entradas.length === 0){
+      throw new Error('ZIP vazio ou sem arquivos');
+    }
+    // Se for "substituir", limpa tudo primeiro
+    var prepPromise;
+    if(substituir){
+      prepPromise = _arqLimparTudoLocal();
+    } else {
+      prepPromise = Promise.resolve();
+    }
+    return prepPromise.then(function(){
+      return _arqProcessarEntradasZip(entradas);
+    });
+  }).then(function(stats){
+    _arqProgressToastHide();
+    var msg = '✓ Import concluído: '+stats.arquivos+' arquivo(s)';
+    if(stats.pastas > 0) msg += ' · '+stats.pastas+' pasta(s)';
+    if(stats.categorias > 0) msg += ' · '+stats.categorias+' categoria(s) nova(s)';
+    showToast(msg,'#4ade80', 5000);
+    // Recarrega tudo
+    _carregarArquivosLocais();
+  }).catch(function(e){
+    console.error('Erro import:', e);
+    _arqProgressToastHide();
+    showToast('❌ '+(e && e.message ? e.message : 'Erro ao importar ZIP'),'#f87171', 6000);
+  });
+}
+
+// Apaga TUDO local (usado no modo "substituir")
+function _arqLimparTudoLocal(){
+  return new Promise(function(resolve, reject){
+    _arqProgressToastShow('🗑️ Limpando dados atuais...');
+    // Apaga todos os arquivos do restaurante atual
+    var ids = _arquivos.map(function(a){ return a.id; });
+    var promessas = ids.map(function(id){ return dbDelete('arquivos', id); });
+    Promise.all(promessas).then(function(){
+      // Remove pastas customizadas e categorias custom
+      try{ localStorage.removeItem(_arqChavePastas()); }catch(e){}
+      try{ localStorage.removeItem(_arqChaveCatsCustom()); }catch(e){}
+      try{ localStorage.removeItem(_arqChavePadroesOcultas()); }catch(e){}
+      _arquivos = [];
+      resolve();
+    }).catch(reject);
+  });
+}
+
+// Processa as entradas do ZIP: cria categorias, pastas e arquivos
+function _arqProcessarEntradasZip(entradas){
+  // 1. Pré-analisa todas as paths pra descobrir as categorias e pastas necessárias
+  // Cada entrada tem path tipo "Fechamento/Bávaro/Janeiro 2026/01.pdf"
+  var categoriasNoZip = {}; // nomeCat -> {id, custom}
+  var pastasNecessarias = []; // [{categoria, caminho:[partes], nome}]
+  var arquivosTarefas = []; // [{entry, categoriaId, pastaIdAlvo:null/setado depois, nome}]
+  var todasPastasExistentes = _arqCarregarPastas();
+  var custom = _arqCarregarCatsCustom();
+  var ocultas = _arqCarregarPadroesOcultas();
+  // Cache: chave "catId|caminho" -> pastaId (criada ou existente)
+  var pastaIdCache = {};
+  // Função: pega ou cria categoria
+  function obterOuCriarCategoria(nomePasta){
+    if(categoriasNoZip[nomePasta]) return categoriasNoZip[nomePasta];
+    // Tenta mapear pra padrão
+    var idPadrao = _arqNomeParaIdPadrao(nomePasta);
+    if(idPadrao && _arqCatsPadrao[idPadrao]){
+      // Se está oculta, restaura
+      if(ocultas.indexOf(idPadrao) >= 0){
+        ocultas = ocultas.filter(function(x){ return x !== idPadrao; });
+        _arqSalvarPadroesOcultas(ocultas);
+      }
+      categoriasNoZip[nomePasta] = {id:idPadrao, custom:false};
+      return categoriasNoZip[nomePasta];
+    }
+    // Verifica se já existe uma categoria custom com esse nome
+    var existente = custom.find(function(c){
+      return c.nome.toLowerCase() === nomePasta.toLowerCase();
+    });
+    if(existente){
+      categoriasNoZip[nomePasta] = {id:existente.id, custom:true};
+      return categoriasNoZip[nomePasta];
+    }
+    // Cria nova categoria custom
+    var novoId = 'cat_imp_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    custom.push({id:novoId, nome:nomePasta, icone:'📂', criadoEm:Date.now()});
+    categoriasNoZip[nomePasta] = {id:novoId, custom:true, criada:true};
+    return categoriasNoZip[nomePasta];
+  }
+  // Função: pega ou cria pasta (recursiva pelo caminho)
+  function obterOuCriarPasta(catId, caminhoPartes){
+    if(caminhoPartes.length === 0) return null; // raiz da categoria
+    var pastaPaiId = null;
+    for(var i = 0; i < caminhoPartes.length; i++){
+      var nomePasta = caminhoPartes[i];
+      var chaveCache = catId + '|' + caminhoPartes.slice(0, i+1).join('/');
+      if(pastaIdCache[chaveCache]){
+        pastaPaiId = pastaIdCache[chaveCache];
+        continue;
+      }
+      // Procura pasta existente com mesmo nome e mesmo pai
+      var existente = todasPastasExistentes.find(function(p){
+        return p.categoria === catId
+          && (p.pastaPaiId || null) === (pastaPaiId || null)
+          && p.nome.toLowerCase() === nomePasta.toLowerCase();
+      });
+      if(existente){
+        pastaPaiId = existente.id;
+        pastaIdCache[chaveCache] = existente.id;
+        continue;
+      }
+      // Cria nova
+      var novoId = 'pasta_imp_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+      todasPastasExistentes.push({
+        id:novoId, categoria:catId, pastaPaiId:pastaPaiId || null,
+        nome:nomePasta, criadoEm:Date.now()
+      });
+      pastaIdCache[chaveCache] = novoId;
+      pastaPaiId = novoId;
+    }
+    return pastaPaiId;
+  }
+  // Processa cada entrada do ZIP, decidindo seu destino
+  entradas.forEach(function(item){
+    var partes = item.path.split('/').filter(function(s){ return s.length > 0; });
+    if(partes.length === 0) return;
+    var nomeArquivo = partes[partes.length - 1];
+    var nomeCategoria = partes[0];
+    // Pula a pasta "_outros" se existir (foi gerada por arquivos órfãos no backup)
+    if(nomeCategoria === '_outros') nomeCategoria = 'Outro';
+    var caminhoPasta = partes.slice(1, partes.length - 1); // tudo entre categoria e arquivo
+    var cat = obterOuCriarCategoria(nomeCategoria);
+    var pastaIdAlvo = obterOuCriarPasta(cat.id, caminhoPasta);
+    arquivosTarefas.push({
+      entry: item.entry,
+      categoriaId: cat.id,
+      pastaIdAlvo: pastaIdAlvo,
+      nome: nomeArquivo
+    });
+  });
+  // Salva categorias e pastas atualizadas ANTES de salvar arquivos (pra ficar consistente)
+  _arqSalvarCatsCustom(custom);
+  _arqSalvarPastas(todasPastasExistentes);
+  // Conta categorias novas pro relatório
+  var qtdCatsNovas = Object.values(categoriasNoZip).filter(function(c){ return c.criada; }).length;
+  // Agora extrai os blobs e salva no IndexedDB (sequencialmente pra não estourar memória)
+  var stats = {arquivos:0, pastas:Object.keys(pastaIdCache).length, categorias:qtdCatsNovas, falhas:0};
+  return new Promise(function(resolve, reject){
+    var i = 0;
+    function processarProximo(){
+      if(i >= arquivosTarefas.length){
+        resolve(stats);
+        return;
+      }
+      var t = arquivosTarefas[i++];
+      _arqProgressToastShow('📥 Importando '+i+'/'+arquivosTarefas.length+': '+t.nome);
+      // Lê o blob do ZIP
+      t.entry.async('blob').then(function(blob){
+        var arquivoId = 'arq_' + restauranteAtivo.id + '_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+        var registro = {
+          id: arquivoId,
+          restId: restauranteAtivo.id,
+          nome: t.nome,
+          nomeOriginal: t.nome,
+          tamanho: blob.size,
+          tipo: blob.type || _arqDetectarTipoPorExtensao(t.nome),
+          categoria: t.categoriaId,
+          pastaId: t.pastaIdAlvo,
+          dataUpload: Date.now(),
+          blob: blob,
+          uploadPor: (_usuarioAtual && _usuarioAtual.email) || 'importado'
+        };
+        return dbPut('arquivos', registro).then(function(){
+          stats.arquivos++;
+          processarProximo();
+        });
+      }).catch(function(e){
+        console.warn('Falha ao importar', t.nome, e);
+        stats.falhas++;
+        processarProximo();
+      });
+    }
+    processarProximo();
+  });
+}
+
+// Detecta tipo MIME por extensão (fallback quando blob.type vem vazio)
+function _arqDetectarTipoPorExtensao(nome){
+  var ext = (nome.split('.').pop() || '').toLowerCase();
+  var mapa = {
+    pdf:'application/pdf',
+    jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp',
+    doc:'application/msword',
+    docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:'application/vnd.ms-excel',
+    xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    txt:'text/plain', csv:'text/csv',
+    mp4:'video/mp4', mov:'video/quicktime',
+    mp3:'audio/mpeg', m4a:'audio/mp4'
+  };
+  return mapa[ext] || 'application/octet-stream';
+}
+
 function arquivosBaixar(arquivoId){
   if(!db) return;
   dbGet('arquivos', arquivoId).then(function(registro){
@@ -4404,6 +4809,18 @@ function _arqRenderAcoes(){
     html += '<button class="arq-action-btn" onclick="_arqCriarCategoriaDireto()">'
       +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
       +'<span>Categoria</span>'
+    +'</button>';
+    // Botão "Baixar tudo" (só aparece se houver arquivos)
+    if(_arquivos.length > 0){
+      html += '<button class="arq-action-btn" onclick="_arqBaixarZipTudo()" title="Baixar tudo em ZIP organizado por categoria">'
+        +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+        +'<span>ZIP</span>'
+      +'</button>';
+    }
+    // Botão "Importar ZIP" (sempre visível na raiz pra restaurar de backup)
+    html += '<button class="arq-action-btn" onclick="_arqIniciarImportZip()" title="Importar arquivos de um ZIP de backup">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+      +'<span>Importar</span>'
     +'</button>';
     // Botão pra restaurar padrões ocultas (se houver)
     var ocultas = _arqCarregarPadroesOcultas();

@@ -352,6 +352,18 @@ header{
 .pi-btn.edit{background:rgba(212,168,67,0.1);color:var(--accent);border:1px solid rgba(212,168,67,0.25);}
 .pi-btn.del{background:rgba(248,113,113,0.1);color:var(--danger);border:1px solid rgba(248,113,113,0.25);}
 
+.mesa-header-menu-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:all 0.15s;}
+.mesa-header-menu-btn:active{background:rgba(212,168,67,0.12);border-color:var(--accent);color:var(--accent);}
+.menu-lateral-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:450;opacity:0;pointer-events:none;transition:opacity 0.2s;}
+.menu-lateral-overlay.show{opacity:1;pointer-events:all;}
+.menu-lateral{position:fixed;top:0;left:0;bottom:0;width:85%;max-width:340px;background:var(--surface);border-right:1px solid var(--border2);z-index:460;transform:translateX(-105%);transition:transform 0.25s ease-out;display:flex;flex-direction:column;}
+.menu-lateral.show{transform:translateX(0);}
+.menu-lateral-header{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--border);}
+.menu-lateral-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;}
+.menu-lateral-body{flex:1;overflow-y:auto;padding:10px;}
+.menu-lateral-item{display:flex;align-items:center;width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:8px;color:var(--text);font-family:inherit;cursor:pointer;gap:12px;transition:all 0.15s;}
+.menu-lateral-item:active{background:var(--surface3);border-color:var(--accent);}
+
 /* Desktop */
 @media(min-width:768px){
   html{background:radial-gradient(ellipse at 30% 20%,rgba(212,168,67,0.06) 0%,transparent 50%),#050505;}
@@ -396,6 +408,9 @@ header{
 <!-- Tela de Mesas -->
 <div id="mesa-screen" class="hidden">
   <div class="mesa-header">
+    <button class="mesa-header-menu-btn" onclick="abrirMenuLateral()" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
     <div class="mesa-header-info">
       <div class="mesa-header-titulo">ESCOLHA A MESA</div>
       <div class="mesa-header-sub" id="mesa-header-sub">Selecione para iniciar o atendimento</div>
@@ -406,6 +421,35 @@ header{
     <input type="text" id="mesa-search-input" placeholder="Buscar mesa..." inputmode="numeric" oninput="renderMesas()">
   </div>
   <div class="mesas-grid" id="mesas-grid"></div>
+
+  <!-- Menu Lateral -->
+  <div class="menu-lateral-overlay" id="menu-lateral-overlay" onclick="fecharMenuLateral()"></div>
+  <div class="menu-lateral" id="menu-lateral">
+    <div class="menu-lateral-header">
+      <div class="menu-lateral-avatar">👤</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:0.95rem;" id="menu-lateral-nome">—</div>
+        <div style="font-size:0.72rem;color:var(--muted);">Garçom</div>
+      </div>
+      <button class="modal-fechar" onclick="fecharMenuLateral()">×</button>
+    </div>
+    <div class="menu-lateral-body">
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirHistorico()">
+        <span style="font-size:1.4rem;">📜</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Histórico de Contas</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Contas fechadas e restaurar mesas</div>
+        </div>
+      </button>
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();sair()">
+        <span style="font-size:1.4rem;">🚪</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Sair</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Trocar de garçom</div>
+        </div>
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- App (Cardápio + Pedidos) -->
@@ -567,7 +611,8 @@ var _itemAberto = null;    // item sendo visualizado no modal
 var _qtdTemp = 1;
 var _meusPedidos = [];     // pedidos do garçom nessa mesa
 var _tabAtual = 'cardapio';
-var _unsubItens = null, _unsubCats = null, _unsubPedidos = null;
+var _unsubItens = null, _unsubCats = null, _unsubPedidos = null, _unsubGrupos = null;
+var _grupos = [];
 
 // ════════════════════════════════════════
 //  INIT
@@ -629,17 +674,56 @@ function carregarNomesSalvos(){
 function efetuarLogin(){
   var nome = document.getElementById('input-nome').value.trim();
   if(!nome){ showToast('Digite seu nome para entrar'); return; }
-  _nomeGarcom = nome;
-  localStorage.setItem('garcom_nome', nome);
-  // Salva histórico de nomes
-  var raw = localStorage.getItem('garcom_nomes_salvos') || '[]';
-  var nomes = [];
-  try{ nomes = JSON.parse(raw); }catch(e){}
-  if(!nomes.includes(nome)) nomes.unshift(nome);
-  nomes = nomes.slice(0,10);
-  localStorage.setItem('garcom_nomes_salvos', JSON.stringify(nomes));
-  document.getElementById('login-screen').classList.add('hidden');
-  mostrarMesas();
+  var btn = document.querySelector('.login-btn');
+  btn.disabled = true; btn.textContent = 'Verificando...';
+  // Busca lista de garçons publicada pelo PDV
+  fbDb.collection('restaurantes_publicos').limit(10).get().then(function(snap){
+    var garconsAutorizados = [];
+    var primeiroDoc = null;
+    snap.forEach(function(d){
+      if(!primeiroDoc) primeiroDoc = d;
+      var data = d.data();
+      if(data.garcons && data.garcons.length){
+        garconsAutorizados = garconsAutorizados.concat(data.garcons);
+      }
+    });
+    // Se há lista publicada, valida (case insensitive)
+    if(garconsAutorizados.length > 0){
+      var nomeLower = nome.toLowerCase();
+      var match = garconsAutorizados.find(function(g){
+        return (g.nome||'').toLowerCase() === nomeLower
+          || (g.apelido||'').toLowerCase() === nomeLower;
+      });
+      if(!match){
+        btn.disabled = false; btn.textContent = 'Entrar →';
+        var disponiveis = garconsAutorizados.map(function(g){ return g.apelido || g.nome.split(' ')[0]; }).join(', ');
+        showToast('❌ Nome não cadastrado. Disponíveis: ' + disponiveis, '#f87171');
+        return;
+      }
+      // Usa nome canônico
+      nome = match.apelido || match.nome.split(' ')[0];
+    }
+    // OK — entra
+    _nomeGarcom = nome;
+    localStorage.setItem('garcom_nome', nome);
+    var raw = localStorage.getItem('garcom_nomes_salvos') || '[]';
+    var nomes = [];
+    try{ nomes = JSON.parse(raw); }catch(e){}
+    if(!nomes.includes(nome)) nomes.unshift(nome);
+    nomes = nomes.slice(0,10);
+    localStorage.setItem('garcom_nomes_salvos', JSON.stringify(nomes));
+    btn.disabled = false; btn.textContent = 'Entrar →';
+    document.getElementById('login-screen').classList.add('hidden');
+    mostrarMesas();
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = 'Entrar →';
+    // Se não conseguir validar, deixa entrar mesmo assim (modo offline)
+    console.warn('Erro validação:', e);
+    _nomeGarcom = nome;
+    localStorage.setItem('garcom_nome', nome);
+    document.getElementById('login-screen').classList.add('hidden');
+    mostrarMesas();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function(){
@@ -660,7 +744,21 @@ function mostrarMesas(){
   document.getElementById('app').style.display = 'none';
   document.getElementById('garcom-badge').textContent = '👤 ' + _nomeGarcom;
   document.getElementById('mesa-header-sub').textContent = 'Olá, ' + _nomeGarcom + '! Escolha uma mesa.';
+  var nomeEl = document.getElementById('menu-lateral-nome');
+  if(nomeEl) nomeEl.textContent = _nomeGarcom || '—';
   carregarTenantParaMesas();
+}
+
+// ════════════════════════════════════════
+//  MENU LATERAL
+// ════════════════════════════════════════
+function abrirMenuLateral(){
+  document.getElementById('menu-lateral').classList.add('show');
+  document.getElementById('menu-lateral-overlay').classList.add('show');
+}
+function fecharMenuLateral(){
+  document.getElementById('menu-lateral').classList.remove('show');
+  document.getElementById('menu-lateral-overlay').classList.remove('show');
 }
 
 function carregarTenantParaMesas(){
@@ -806,6 +904,7 @@ function fbColCardapio(sub){
 function iniciarListeners(){
   if(_unsubCats) _unsubCats();
   if(_unsubItens) _unsubItens();
+  if(_unsubGrupos) _unsubGrupos();
 
   var caminho = _tenantId
     ? 'tenants/'+_tenantId.slice(0,8)+'.../restaurantes/'+_restauranteId
@@ -836,12 +935,25 @@ function iniciarListeners(){
       _itens.push({
         id:d.id, nome:v.nome||'', preco:v.preco||0, foto:v.foto||'',
         desc:v.descricao||'', categoriaId:v.categoriaId||v.categoria||'', disponivel:v.disponivel!==false,
-        ordem:v.ordem||0, criadoEm:v.criadoEm||0, codigo:v.codigo||''
+        ordem:v.ordem||0, criadoEm:v.criadoEm||0, codigo:v.codigo||'',
+        gruposIds: v.gruposIds || []
       });
     });
     _itens.sort(function(a,b){ return (a.criadoEm||0)-(b.criadoEm||0); });
     renderItens();
   }, function(e){ console.error('Erro itens:', e); });
+
+  _unsubGrupos = fbColCardapio('grupos_opcoes').onSnapshot(function(snap){
+    _grupos = [];
+    snap.forEach(function(d){
+      var v = d.data();
+      _grupos.push({
+        id: d.id, nome: v.nome||'', tipo: v.tipo||'opcao',
+        obrigatorio: v.obrigatorio !== false,
+        opcoes: v.opcoes || []
+      });
+    });
+  }, function(){});
 
   escutarMeusPedidos();
 }
@@ -993,12 +1105,22 @@ function renderPedidos(){
             '<button class="pi-btn del" onclick="removerItemGarcom(\''+p.id+'\','+idx+')">🗑</button>'+
           '</div>'
         : '';
+      var selecoesEl = '';
+      if(it.selecoes && it.selecoes.length){
+        selecoesEl = '<div style="font-size:0.68rem;color:var(--muted);padding-left:30px;margin-top:2px;line-height:1.4;">';
+        it.selecoes.forEach(function(s){
+          var ext = (s.precoExtra||0) > 0 ? ' (+R$ '+fmtPreco(s.precoExtra)+')' : '';
+          selecoesEl += '• '+esc(s.opcao||'')+esc(ext)+'<br>';
+        });
+        selecoesEl += '</div>';
+      }
       return '<div class="pedido-item-row">'+
         '<div class="pedido-item-top">'+
           '<span class="pedido-item-qtd">'+esc(String(it.qtd||1))+'x</span>'+
           '<span class="pedido-item-nome">'+esc(it.nome||'')+'</span>'+
           '<span class="pedido-item-preco">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
         '</div>'+
+        selecoesEl+
         (it.obs ? '<div class="pedido-item-obs">📝 '+esc(it.obs)+'</div>' : '')+
         acoes+
       '</div>';
@@ -1115,6 +1237,12 @@ function atualizarNavPedidos(){
 // ════════════════════════════════════════
 //  MODAL ITEM
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+//  MODAL ITEM (com grupos de opções/adicionais)
+// ════════════════════════════════════════
+var _gruposItemAtual = []; // grupos do item aberto
+var _selecoesGrupos = {}; // {grupoId: [opcaoIdx,...] (adicional) ou opcaoIdx (opcao)}
+
 function abrirModalItem(it){
   // Se em modo adicionar a pedido existente, adiciona direto
   if(window._modoAdicionarGarcom && _gAdicionarPedId) {
@@ -1133,6 +1261,19 @@ function abrirModalItem(it){
   }
   _itemAberto = it;
   _qtdTemp = 1;
+  // Carrega grupos vinculados ao item
+  _gruposItemAtual = (it.gruposIds||[]).map(function(gid){
+    return _grupos.find(function(g){ return g.id === gid; });
+  }).filter(function(g){ return g && (g.opcoes||[]).length; });
+  _selecoesGrupos = {};
+  // Para opções obrigatórias: pré-seleciona a primeira
+  _gruposItemAtual.forEach(function(g){
+    if(g.tipo === 'opcao' && g.obrigatorio){
+      _selecoesGrupos[g.id] = 0;
+    } else if(g.tipo === 'adicional'){
+      _selecoesGrupos[g.id] = []; // array vazio
+    }
+  });
   document.getElementById('det-titulo').textContent = it.nome.toUpperCase();
   document.getElementById('det-nome').textContent = it.nome;
   document.getElementById('det-desc').textContent = it.desc||'';
@@ -1142,12 +1283,87 @@ function abrirModalItem(it){
   document.getElementById('qtd-val').textContent = 1;
   var fotoEl = document.getElementById('det-foto');
   fotoEl.innerHTML = it.foto ? '<img src="'+it.foto+'" alt="'+it.nome+'">' : '🍽️';
+  renderGruposNoModal();
   atualizarBtnAdd();
   document.getElementById('modal-item').classList.add('show');
 }
+
+function renderGruposNoModal(){
+  // Encontra ou cria container de grupos antes do campo de observação
+  var existente = document.getElementById('det-grupos-wrap');
+  if(existente) existente.remove();
+  if(!_gruposItemAtual.length) return;
+  var modalBody = document.querySelector('#modal-item .modal-body');
+  if(!modalBody) return;
+  var obs = document.querySelector('#modal-item .det-obs');
+  var wrap = document.createElement('div');
+  wrap.id = 'det-grupos-wrap';
+  wrap.style.cssText = 'margin-bottom:14px;';
+  _gruposItemAtual.forEach(function(g){
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:10px;';
+    var titulo = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">'+
+      '<span style="font-size:0.84rem;font-weight:700;color:var(--text);">'+(g.tipo==='opcao'?'🔘':'☑️')+' '+esc(g.nome)+'</span>'+
+      (g.obrigatorio ? '<span style="font-size:0.6rem;background:rgba(248,113,113,0.12);color:#f87171;border-radius:4px;padding:1px 6px;font-weight:700;">OBRIGATÓRIO</span>' : '<span style="font-size:0.66rem;color:var(--muted);">opcional</span>')+
+    '</div>';
+    var opcoesHtml = '';
+    (g.opcoes||[]).forEach(function(op, idx){
+      var precoExtra = parseFloat(op.precoExtra)||0;
+      var precoTxt = precoExtra > 0 ? ' <span style="color:var(--accent);font-size:0.78rem;">+R$ '+fmtPreco(precoExtra)+'</span>' : '';
+      var marcado = false;
+      if(g.tipo === 'opcao'){
+        marcado = _selecoesGrupos[g.id] === idx;
+      } else {
+        marcado = (_selecoesGrupos[g.id]||[]).indexOf(idx) !== -1;
+      }
+      opcoesHtml +=
+        '<label style="display:flex;align-items:center;gap:10px;padding:9px;background:'+(marcado?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(marcado?'var(--accent)':'var(--border2)')+';border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;transition:all 0.15s;">'+
+          '<input type="'+(g.tipo==='opcao'?'radio':'checkbox')+'" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' onchange="toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')" style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
+          '<span style="flex:1;">'+esc(op.nome||'')+precoTxt+'</span>'+
+        '</label>';
+    });
+    box.innerHTML = titulo + opcoesHtml;
+    wrap.appendChild(box);
+  });
+  modalBody.insertBefore(wrap, obs);
+}
+
+function toggleGrupoOpcao(grupoId, opcaoIdx, tipo){
+  if(tipo === 'opcao'){
+    _selecoesGrupos[grupoId] = opcaoIdx;
+  } else {
+    var arr = _selecoesGrupos[grupoId] || [];
+    var pos = arr.indexOf(opcaoIdx);
+    if(pos >= 0) arr.splice(pos, 1);
+    else arr.push(opcaoIdx);
+    _selecoesGrupos[grupoId] = arr;
+  }
+  renderGruposNoModal();
+  atualizarBtnAdd();
+}
+
+function calcularPrecoExtras(){
+  var extras = 0;
+  _gruposItemAtual.forEach(function(g){
+    var sel = _selecoesGrupos[g.id];
+    if(g.tipo === 'opcao' && typeof sel === 'number'){
+      extras += parseFloat((g.opcoes[sel]||{}).precoExtra)||0;
+    } else if(g.tipo === 'adicional' && Array.isArray(sel)){
+      sel.forEach(function(idx){
+        extras += parseFloat((g.opcoes[idx]||{}).precoExtra)||0;
+      });
+    }
+  });
+  return extras;
+}
+
 function fecharModalItem(){
   document.getElementById('modal-item').classList.remove('show');
   _itemAberto = null;
+  _gruposItemAtual = [];
+  _selecoesGrupos = {};
+  var existente = document.getElementById('det-grupos-wrap');
+  if(existente) existente.remove();
 }
 function alterarQtd(delta){
   _qtdTemp = Math.max(1, (_qtdTemp||1)+delta);
@@ -1156,24 +1372,56 @@ function alterarQtd(delta){
 }
 function atualizarBtnAdd(){
   if(!_itemAberto) return;
-  var total = (_itemAberto.preco||0) * _qtdTemp;
+  var precoUnit = (_itemAberto.preco||0) + calcularPrecoExtras();
+  var total = precoUnit * _qtdTemp;
   document.getElementById('btn-add-carrinho').textContent = 'Adicionar — R$ ' + fmtPreco(total);
 }
+
 function adicionarAoCarrinho(){
   if(!_itemAberto) return;
+  // Valida grupos obrigatórios
+  for(var i = 0; i < _gruposItemAtual.length; i++){
+    var g = _gruposItemAtual[i];
+    if(g.obrigatorio){
+      var sel = _selecoesGrupos[g.id];
+      var falta = (g.tipo === 'opcao' && typeof sel !== 'number')
+        || (g.tipo === 'adicional' && (!Array.isArray(sel) || sel.length === 0));
+      if(falta){
+        showToast('⚠️ Escolha: ' + g.nome, '#f7a34f');
+        return;
+      }
+    }
+  }
   var obs = document.getElementById('det-obs').value.trim();
+  // Monta seleções legíveis
+  var selecoes = [];
+  _gruposItemAtual.forEach(function(g){
+    var sel = _selecoesGrupos[g.id];
+    if(g.tipo === 'opcao' && typeof sel === 'number'){
+      var op = g.opcoes[sel];
+      if(op) selecoes.push({grupo:g.nome, opcao:op.nome, precoExtra: parseFloat(op.precoExtra)||0});
+    } else if(g.tipo === 'adicional' && Array.isArray(sel)){
+      sel.forEach(function(idx){
+        var op = g.opcoes[idx];
+        if(op) selecoes.push({grupo:g.nome, opcao:op.nome, precoExtra: parseFloat(op.precoExtra)||0});
+      });
+    }
+  });
+  var extras = calcularPrecoExtras();
   _carrinho.push({
     id: _itemAberto.id,
     nome: _itemAberto.nome,
-    preco: _itemAberto.preco,
+    preco: (_itemAberto.preco||0) + extras,
+    precoBase: _itemAberto.preco||0,
+    extras: extras,
     qtd: _qtdTemp,
     obs: obs,
-    foto: _itemAberto.foto||''
+    foto: _itemAberto.foto||'',
+    selecoes: selecoes
   });
   fecharModalItem();
   atualizarCarrinhoBadge();
   renderItens();
-  // Abre carrinho automaticamente
   abrirModalCarrinho();
 }
 function atualizarCarrinhoBadge(){
@@ -1213,9 +1461,19 @@ function renderCarrinho(){
     total += (it.preco||0)*(it.qtd||1);
     var div = document.createElement('div');
     div.className = 'cart-item';
+    var selecoesHtml = '';
+    if(it.selecoes && it.selecoes.length){
+      selecoesHtml = '<div style="font-size:0.72rem;color:var(--muted);margin-top:3px;line-height:1.4;">';
+      it.selecoes.forEach(function(s){
+        var extra = (s.precoExtra||0) > 0 ? ' (+R$ '+fmtPreco(s.precoExtra)+')' : '';
+        selecoesHtml += '• '+esc(s.opcao||'')+esc(extra)+'<br>';
+      });
+      selecoesHtml += '</div>';
+    }
     div.innerHTML =
       '<div class="cart-item-info">'+
         '<div class="cart-item-nome">'+esc(it.nome)+'</div>'+
+        selecoesHtml+
         (it.obs?'<div class="cart-item-obs">📝 '+esc(it.obs)+'</div>':'')+
         '<div class="cart-item-sub">'+
           '<span class="cart-preco">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
@@ -1258,10 +1516,15 @@ function enviarPedido(){
     mesa: parseInt(_mesaAtiva) || _mesaAtiva,
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
-    status: 'aguardando',
+    status: 'preparo',
     criadoEm: Date.now(),
     itens: _carrinho.map(function(it){
-      return { id:it.id, nome:it.nome, preco:it.preco, qtd:it.qtd, obs:it.obs||'' };
+      return {
+        id:it.id, nome:it.nome, preco:it.preco, qtd:it.qtd, obs:it.obs||'',
+        selecoes: it.selecoes || [],
+        precoBase: it.precoBase || it.preco,
+        extras: it.extras || 0
+      };
     }),
     total: _carrinho.reduce(function(acc,it){ return acc+(it.preco||0)*(it.qtd||1); },0)
   };
@@ -1284,11 +1547,8 @@ function enviarPedido(){
 
 function fecharSucesso(){
   document.getElementById('modal-sucesso').classList.remove('show');
-  // Volta para grade de categorias para próximo pedido
-  _catAtiva = null;
-  renderCatBar();
-  renderItens();
-  showTab('pedidos');
+  // Volta para o mapa de mesas (tela inicial)
+  voltarParaMesas();
 }
 
 // ════════════════════════════════════════
@@ -1586,7 +1846,7 @@ function encerrarConta(){
     (p.itens||[]).forEach(function(it){ todosItens.push(Object.assign({}, it, {pedidoOrigem: p.id})); });
   });
   var registro = {
-    mesa: _fecharMesaNum,
+    mesa: parseInt(_fecharMesaNum) || _fecharMesaNum,
     garcom: _fecharPedidos[0].garcom || _nomeGarcom,
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
@@ -1688,18 +1948,29 @@ function restaurarConta(){
   if(!_contaDetalheAtual) return;
   if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA conta será reaberta e os pedidos voltarão.')) return;
   var c = _contaDetalheAtual;
+  var mesaNum = parseInt(c.mesa) || c.mesa;
   // Recria pedido único com todos os itens da conta
+  var itensRestaurados = (c.itens||[]).map(function(it){
+    return {
+      id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
+      selecoes: it.selecoes || [],
+      precoBase: it.precoBase || it.preco,
+      extras: it.extras || 0
+    };
+  });
+  if(!itensRestaurados.length){
+    showToast('❌ Conta sem itens, não é possível restaurar','#f87171');
+    return;
+  }
   var pedido = {
     garcom: c.garcom || _nomeGarcom,
-    mesa: c.mesa,
+    mesa: mesaNum,
     restauranteId: c.restauranteId || _restauranteId,
     tenantId: c.tenantId || _tenantId,
-    status: 'aguardando',
+    status: 'preparo',
     criadoEm: Date.now(),
-    itens: (c.itens||[]).map(function(it){
-      return { id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'' };
-    }),
-    total: c.subtotal || 0,
+    itens: itensRestaurados,
+    total: c.subtotal || itensRestaurados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0),
     restaurado: true,
     contaOrigem: c.id
   };

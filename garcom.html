@@ -225,6 +225,9 @@ header{
   opacity:0;pointer-events:none;transition:opacity 0.2s;}
 .modal.show{opacity:1;pointer-events:all;}
 @media(min-width:768px){.modal{align-items:center;}}
+/* Modal centralizado (não tampado pelo teclado) */
+.modal.modal-centro{align-items:center;padding:20px;}
+.modal.modal-centro .modal-box{border-radius:18px !important;max-height:80vh;}
 .modal-box{
   background:var(--surface);border:1px solid var(--border2);
   border-radius:18px 18px 0 0;width:100%;max-width:500px;max-height:92vh;
@@ -1665,6 +1668,7 @@ function abrirMenuMesa(num, eOcupada){
   var info = _mesasOcupadas[num];
   var btnPedidos = document.getElementById('btn-mesa-pedidos');
   var btnFechar = document.getElementById('btn-mesa-fechar');
+  var btnLiberar = document.getElementById('btn-mesa-liberar');
   var infoLabel = document.getElementById('mesa-pedidos-info');
   var totalLabel = document.getElementById('mesa-total-info');
   if(eOcupada && info){
@@ -1672,6 +1676,7 @@ function abrirMenuMesa(num, eOcupada){
     btnFechar.disabled = false;
     btnPedidos.style.opacity = '1';
     btnFechar.style.opacity = '1';
+    if(btnLiberar) btnLiberar.style.display = 'flex';
     infoLabel.textContent = info.count + ' pedido(s) — Garçom: ' + (info.garcom || '—');
     totalLabel.textContent = 'Calcular conta da mesa';
   } else {
@@ -1679,6 +1684,7 @@ function abrirMenuMesa(num, eOcupada){
     btnFechar.disabled = true;
     btnPedidos.style.opacity = '0.4';
     btnFechar.style.opacity = '0.4';
+    if(btnLiberar) btnLiberar.style.display = 'none';
     infoLabel.textContent = 'Mesa livre';
     totalLabel.textContent = 'Mesa livre';
   }
@@ -1702,7 +1708,35 @@ function acaoMesa(acao){
     setTimeout(function(){ showTab('pedidos'); }, 100);
   } else if(acao === 'fechar'){
     abrirFecharConta(num);
+  } else if(acao === 'liberar'){
+    liberarMesaForcado(num);
   }
+}
+
+function liberarMesaForcado(num){
+  if(!confirm('⚠️ LIBERAR MESA ' + num + '\n\nIsso vai REMOVER TODOS os pedidos da mesa SEM COBRAR e SEM SALVAR no histórico.\n\nUse só para corrigir mesas travadas / pedidos órfãos.\n\nTem certeza?')) return;
+  var mesaNum = parseInt(num) || num;
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .where('mesa','==', mesaNum)
+    .get().then(function(snap){
+      // Tenta também buscar com mesa como string (mesas antigas)
+      return fbDb.collection('pedidos')
+        .where('restauranteId','==', _restauranteId)
+        .where('mesa','==', String(num))
+        .get().then(function(snapStr){
+          var batch = fbDb.batch();
+          var total = 0;
+          snap.forEach(function(d){ batch.delete(d.ref); total++; });
+          snapStr.forEach(function(d){ batch.delete(d.ref); total++; });
+          if(total === 0){ showToast('Mesa já estava limpa','#f7a34f'); return; }
+          return batch.commit().then(function(){
+            showToast('🧹 Mesa ' + num + ' liberada (' + total + ' pedido(s) removidos)','#4ade80');
+          });
+        });
+    }).catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
 }
 
 // ════════════════════════════════════════
@@ -1813,16 +1847,49 @@ function renderFecharConta(){
 
   // Footer
   var podeEncerrar = restante <= 0.01;
-  footer.innerHTML =
-    '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
-    (_fecharModo==='itens'
-      ? '<button class="f-btn" style="flex:1;background:var(--success);color:#000;'+(podeEncerrar?'':'opacity:0.5;pointer-events:none;')+'" onclick="encerrarConta()">'+(podeEncerrar?'Encerrar Mesa':'Faltam R$ '+fmtPreco(restante))+'</button>'
-      : '<button class="f-btn" style="flex:1;" onclick="abrirPagamento()">'+(_fecharModo==='tudo'?'Pagar R$ '+fmtPreco(restante):'Pagar valor')+'</button>'
-    );
-
-  if(podeEncerrar && _fecharModo !== 'itens'){
-    footer.innerHTML += '<button class="f-btn" style="flex:1;background:var(--success);color:#000;margin-left:8px;" onclick="encerrarConta()">✓ Encerrar</button>';
+  if(_fecharModo === 'itens'){
+    footer.innerHTML =
+      '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+      '<button class="f-btn" style="flex:1;background:var(--success);color:#000;'+(podeEncerrar?'':'opacity:0.5;pointer-events:none;')+'" onclick="encerrarConta()">'+(podeEncerrar?'Encerrar Mesa':'Faltam R$ '+fmtPreco(restante))+'</button>';
+  } else if(_fecharModo === 'tudo'){
+    // Pagar tudo: registra direto e libera o "Encerrar Mesa"
+    if(podeEncerrar){
+      footer.innerHTML =
+        '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1;background:var(--success);color:#000;" onclick="encerrarConta()">✓ Encerrar Mesa</button>';
+    } else {
+      footer.innerHTML =
+        '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1;" onclick="pagarTudoDireto()">💵 Pagar R$ '+fmtPreco(restante)+'</button>';
+    }
+  } else { // parcial
+    if(podeEncerrar){
+      footer.innerHTML =
+        '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1;background:var(--success);color:#000;" onclick="encerrarConta()">✓ Encerrar Mesa</button>';
+    } else {
+      footer.innerHTML =
+        '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1;" onclick="abrirPagamento()">Pagar valor</button>';
+    }
   }
+}
+
+function pagarTudoDireto(){
+  var totalPago = _fecharPagamentos.reduce(function(a,p){ return a + p.valor; }, 0);
+  var totalItensPagos = 0;
+  _fecharPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it, idx){
+      var key = p.id + '_' + idx;
+      if(_fecharItensPagos[key]) totalItensPagos += (it.preco||0)*(it.qtd||1);
+    });
+  });
+  var pagoTotal = totalPago + totalItensPagos * 1.10;
+  var restante = Math.max(0, _fecharTotal - pagoTotal);
+  if(restante <= 0.01) return;
+  _fecharPagamentos.push({ valor: restante, forma: 'dinheiro', data: Date.now() });
+  renderFecharConta();
+  showToast('✓ R$ ' + fmtPreco(restante) + ' registrado','#4ade80');
 }
 
 function setFecharModo(m){
@@ -2115,6 +2182,13 @@ try{ history.replaceState({appState: 'init'}, '', ''); }catch(e){}
           <div style="font-size:0.74rem;color:var(--muted);" id="mesa-total-info">—</div>
         </div>
       </button>
+      <button class="mesa-menu-item" id="btn-mesa-liberar" onclick="acaoMesa('liberar')" style="border-color:rgba(248,113,113,0.3);">
+        <span style="font-size:1.4rem;margin-right:12px;">🧹</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;color:#f87171;">Liberar Mesa (forçado)</div>
+          <div style="font-size:0.74rem;color:var(--muted);">Remove todos pedidos sem cobrar — para corrigir mesas travadas</div>
+        </div>
+      </button>
     </div>
   </div>
 </div>
@@ -2132,8 +2206,8 @@ try{ history.replaceState({appState: 'init'}, '', ''); }catch(e){}
 </div>
 
 <!-- Modal: Pagamento -->
-<div class="modal" id="modal-pagamento">
-  <div class="modal-box" style="max-width:380px;">
+<div class="modal modal-centro" id="modal-pagamento">
+  <div class="modal-box" style="max-width:380px;border-radius:18px;">
     <div class="modal-header">
       <div class="modal-titulo">REGISTRAR PAGAMENTO</div>
       <button class="modal-fechar" onclick="document.getElementById('modal-pagamento').classList.remove('show')">×</button>

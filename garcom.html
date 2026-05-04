@@ -180,6 +180,16 @@ header{
 
 /* ─── Grid de itens ─── */
 .itens-grid{padding:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding-bottom:100px;}
+
+/* Modo compacto (lista) */
+.itens-grid.compacto{display:flex;flex-direction:column;gap:6px;padding:10px;}
+.itens-grid.compacto .item-card{flex-direction:row;align-items:center;padding:0;min-height:auto;border-radius:10px;}
+.itens-grid.compacto .item-card .item-foto{display:none;}
+.itens-grid.compacto .item-card .item-info{padding:11px 14px;flex:1;flex-direction:row;align-items:center;gap:10px;justify-content:space-between;}
+.itens-grid.compacto .item-card .item-nome{font-size:0.92rem;-webkit-line-clamp:1;margin-bottom:0;flex:1;}
+.itens-grid.compacto .item-card .item-desc{display:none;}
+.itens-grid.compacto .item-card .item-preco{margin-top:0;font-size:1.05rem;flex-shrink:0;}
+.itens-grid.compacto .item-add-badge{position:static !important;width:24px;height:24px;font-size:0.95rem;margin-right:6px;}
 @media(min-width:480px){.itens-grid{grid-template-columns:repeat(3,1fr);}}
 .item-card{
   background:var(--surface2);border:1px solid var(--border);border-radius:12px;
@@ -441,6 +451,13 @@ header{
           <div style="font-size:0.72rem;color:var(--muted);">Contas fechadas e restaurar mesas</div>
         </div>
       </button>
+      <button class="menu-lateral-item" id="btn-toggle-compacto" onclick="alternarModoCompacto()">
+        <span style="font-size:1.4rem;" id="ico-compacto">🖼️</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;" id="lbl-compacto">Modo com fotos</div>
+          <div style="font-size:0.72rem;color:var(--muted);" id="sub-compacto">Toque para ver em lista compacta</div>
+        </div>
+      </button>
       <button class="menu-lateral-item" onclick="fecharMenuLateral();sair()">
         <span style="font-size:1.4rem;">🚪</span>
         <div style="flex:1;text-align:left;">
@@ -609,6 +626,7 @@ var _catAtiva = null;       // null = mostra categorias; 'todas' ou id = mostra 
 var _carrinho = [];        // [{id, nome, preco, qtd, obs, foto, catNome}]
 var _itemAberto = null;    // item sendo visualizado no modal
 var _qtdTemp = 1;
+var _modoCompacto = (function(){ try{ return localStorage.getItem('garcom_modo_compacto') === '1'; }catch(e){ return false; } })();
 var _meusPedidos = [];     // pedidos do garçom nessa mesa
 var _tabAtual = 'cardapio';
 var _unsubItens = null, _unsubCats = null, _unsubPedidos = null, _unsubGrupos = null;
@@ -755,10 +773,35 @@ function mostrarMesas(){
 function abrirMenuLateral(){
   document.getElementById('menu-lateral').classList.add('show');
   document.getElementById('menu-lateral-overlay').classList.add('show');
+  atualizarBtnCompacto();
 }
 function fecharMenuLateral(){
   document.getElementById('menu-lateral').classList.remove('show');
   document.getElementById('menu-lateral-overlay').classList.remove('show');
+}
+
+function atualizarBtnCompacto(){
+  var ico = document.getElementById('ico-compacto');
+  var lbl = document.getElementById('lbl-compacto');
+  var sub = document.getElementById('sub-compacto');
+  if(!ico) return;
+  if(_modoCompacto){
+    ico.textContent = '📋';
+    lbl.textContent = 'Lista compacta';
+    sub.textContent = 'Toque para voltar a mostrar fotos';
+  } else {
+    ico.textContent = '🖼️';
+    lbl.textContent = 'Modo com fotos';
+    sub.textContent = 'Toque para ver em lista compacta';
+  }
+}
+
+function alternarModoCompacto(){
+  _modoCompacto = !_modoCompacto;
+  try{ localStorage.setItem('garcom_modo_compacto', _modoCompacto ? '1' : '0'); }catch(e){}
+  atualizarBtnCompacto();
+  renderItens();
+  showToast(_modoCompacto ? '📋 Lista compacta' : '🖼️ Com fotos', '#4ade80');
 }
 
 function carregarTenantParaMesas(){
@@ -1023,7 +1066,7 @@ function renderCatBar(){
 function renderItens(){
   var grid = document.getElementById('itens-grid');
   if(!grid) return;
-  grid.className = 'itens-grid';
+  grid.className = 'itens-grid' + (_modoCompacto && _catAtiva !== null ? ' compacto' : '');
   var buscaInput = document.getElementById('busca-input');
   var buscaBar = document.querySelector('.busca-bar');
 

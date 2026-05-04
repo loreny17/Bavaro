@@ -257,8 +257,22 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab active" id="tab-btn-cardapio" onclick="showTab('cardapio')">📋 Cardápio</button>
+    <button class="tab" id="tab-btn-grupos" onclick="showTab('grupos')">🎛️ Grupos</button>
     <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾 Pedidos <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
     <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜 Histórico</button>
+    <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥 Garçons</button>
+  </div>
+
+  <!-- Painel Grupos -->
+  <div id="painel-grupos" style="display:none;padding:14px;padding-bottom:120px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="flex:1;">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.06em;">GRUPOS DE OPÇÕES</div>
+        <div style="font-size:0.74rem;color:var(--muted);">Crie grupos reutilizáveis (ponto da carne, tamanho, adicionais...)</div>
+      </div>
+      <button class="p-btn primary" style="flex:0 0 auto;padding:10px 14px;" onclick="abrirNovoGrupo()">+ Novo</button>
+    </div>
+    <div id="grupos-lista"></div>
   </div>
 
   <!-- Painel Pedidos -->
@@ -276,6 +290,19 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
   <!-- Painel Histórico -->
   <div id="painel-historico" style="display:none;padding:14px;padding-bottom:90px;">
     <div id="historico-pdv-lista"></div>
+  </div>
+
+  <!-- Painel Garçons -->
+  <div id="painel-garcons" style="display:none;padding:14px;padding-bottom:120px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="flex:1;">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.06em;">EQUIPE</div>
+        <div style="font-size:0.74rem;color:var(--muted);">Garçons cadastrados podem fazer login no app</div>
+      </div>
+      <button class="p-btn primary" style="flex:0 0 auto;padding:10px 14px;" onclick="abrirNovoGarcom()">+ Adicionar</button>
+    </div>
+    <div id="garcons-lista"></div>
+  </div>
   </div>
 
   <!-- Categorias -->
@@ -330,6 +357,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       <div class="f-grupo">
         <label class="f-label">Código (opcional)</label>
         <input type="text" class="f-input" id="item-codigo" maxlength="20" placeholder="Ex: 001">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Grupos de Opções/Adicionais</label>
+        <div id="item-grupos-lista" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">Marque os grupos que aparecerão para este item. Crie grupos na aba "🎛️ Grupos".</div>
       </div>
       <div class="f-grupo">
         <div class="f-toggle active" id="item-disponivel-toggle" onclick="this.classList.toggle('active')">
@@ -552,10 +584,12 @@ function fbColCardapio(sub){
     .collection(sub);
 }
 
-var _unsubItens = null, _unsubCats = null;
+var _unsubItens = null, _unsubCats = null, _unsubGrupos = null;
+var _grupos = []; // grupos de opções/adicionais
 function iniciarListeners(){
   if(_unsubItens) _unsubItens();
   if(_unsubCats) _unsubCats();
+  if(_unsubGrupos) _unsubGrupos();
   _unsubCats = fbColCardapio('categorias').onSnapshot(function(snap){
     _categorias = [];
     snap.forEach(function(doc){
@@ -577,12 +611,28 @@ function iniciarListeners(){
       _itens.push({
         id:doc.id, nome:d.nome||'', preco:d.preco||0, descricao:d.descricao||'',
         categoria:d.categoria||'', codigo:d.codigo||'', foto:d.foto||'',
-        disponivel: d.disponivel !== false, criadoEm:d.criadoEm||0
+        disponivel: d.disponivel !== false, criadoEm:d.criadoEm||0,
+        gruposIds: d.gruposIds || []
       });
     });
     _itens.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
     renderItens();
   }, function(e){ console.warn('Itens erro:', e); });
+
+  _unsubGrupos = fbColCardapio('grupos_opcoes').onSnapshot(function(snap){
+    _grupos = [];
+    snap.forEach(function(doc){
+      var d = doc.data();
+      _grupos.push({
+        id: doc.id, nome: d.nome||'', tipo: d.tipo||'opcao',
+        obrigatorio: d.obrigatorio !== false,
+        opcoes: d.opcoes || [],
+        criadoEm: d.criadoEm || 0
+      });
+    });
+    _grupos.sort(function(a,b){ return (a.criadoEm||0) - (b.criadoEm||0); });
+    if(_tabAtual === 'grupos') renderGrupos();
+  }, function(e){ console.warn('Grupos erro:', e); });
 }
 
 // ═══ RENDER CATEGORIAS ═══
@@ -663,6 +713,7 @@ function abrirModalItem(){
   document.getElementById('item-disponivel-toggle').classList.add('active');
   resetFotoUp();
   preencherSelectCategorias(_catAtiva !== 'todas' ? _catAtiva : null);
+  renderItemGruposCheckboxes([]);
   document.getElementById('btn-excluir').style.display = 'none';
   document.getElementById('modal-item').classList.add('show');
 }
@@ -677,6 +728,7 @@ function editarItem(id){
   document.getElementById('item-codigo').value = i.codigo || '';
   document.getElementById('item-disponivel-toggle').classList.toggle('active', i.disponivel !== false);
   preencherSelectCategorias(i.categoria);
+  renderItemGruposCheckboxes(i.gruposIds || []);
   if(i.foto){
     var fotoUp = document.getElementById('foto-up');
     fotoUp.innerHTML = '<img src="'+i.foto+'" alt=""><span class="foto-up-label" style="display:block;">Trocar foto</span>';
@@ -685,6 +737,31 @@ function editarItem(id){
   }
   document.getElementById('btn-excluir').style.display = 'block';
   document.getElementById('modal-item').classList.add('show');
+}
+
+function renderItemGruposCheckboxes(gruposIdsSelecionados){
+  var wrap = document.getElementById('item-grupos-lista');
+  if(!wrap) return;
+  if(!_grupos.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;border:1px dashed var(--border2);">Nenhum grupo cadastrado. Crie na aba "🎛️ Grupos".</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  _grupos.forEach(function(g){
+    var chk = gruposIdsSelecionados.indexOf(g.id) !== -1;
+    var label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid '+(chk?'var(--accent)':'var(--border2)')+';border-radius:9px;cursor:pointer;transition:border-color 0.15s;';
+    label.innerHTML =
+      '<input type="checkbox" data-grupo-id="'+g.id+'" '+(chk?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
+      '<div style="flex:1;">'+
+        '<div style="font-size:0.86rem;font-weight:600;">'+(g.tipo==='opcao'?'🔘':'☑️')+' '+escapeHtml(g.nome)+'</div>'+
+        '<div style="font-size:0.7rem;color:var(--muted);">'+(g.opcoes||[]).length+' opções'+(g.obrigatorio?' • obrigatório':'')+'</div>'+
+      '</div>';
+    label.addEventListener('change', function(e){
+      label.style.borderColor = e.target.checked ? 'var(--accent)' : 'var(--border2)';
+    });
+    wrap.appendChild(label);
+  });
 }
 function fecharModalItem(){
   document.getElementById('modal-item').classList.remove('show');
@@ -747,9 +824,14 @@ function salvarItem(){
   var foto = _fotoSelecionadaBase64;
   if(foto === null && _itemEditando) foto = _itemEditando.foto || '';
   if(foto === null) foto = '';
+  // Coleta gruposIds selecionados
+  var gruposIds = [];
+  var checkboxes = document.querySelectorAll('#item-grupos-lista input[type="checkbox"]:checked');
+  checkboxes.forEach(function(cb){ gruposIds.push(cb.getAttribute('data-grupo-id')); });
   var dados = {
     nome:nome, preco:preco, categoria:categoria, descricao:descricao,
     codigo:codigo, foto:foto, disponivel:disponivel,
+    gruposIds: gruposIds,
     atualizadoEm:Date.now()
   };
   var col = fbColCardapio('itens');
@@ -910,17 +992,23 @@ var _tabAtual = 'cardapio';
 function showTab(tab) {
   _tabAtual = tab;
   var btnC = document.getElementById('tab-btn-cardapio');
+  var btnGr = document.getElementById('tab-btn-grupos');
   var btnP = document.getElementById('tab-btn-pedidos');
   var btnH = document.getElementById('tab-btn-historico');
+  var btnG = document.getElementById('tab-btn-garcons');
   if(btnC) btnC.classList.toggle('active', tab === 'cardapio');
+  if(btnGr) btnGr.classList.toggle('active', tab === 'grupos');
   if(btnP) btnP.classList.toggle('active', tab === 'pedidos');
   if(btnH) btnH.classList.toggle('active', tab === 'historico');
+  if(btnG) btnG.classList.toggle('active', tab === 'garcons');
   var catBar = document.getElementById('cat-bar');
   var buscaBar = document.querySelector('.busca-bar');
   var itensGrid = document.getElementById('itens-grid');
   var fab = document.getElementById('fab');
   var painelP = document.getElementById('painel-pedidos');
   var painelH = document.getElementById('painel-historico');
+  var painelG = document.getElementById('painel-garcons');
+  var painelGr = document.getElementById('painel-grupos');
   // Esconde tudo
   if(catBar) catBar.style.display = 'none';
   if(buscaBar) buscaBar.style.display = 'none';
@@ -928,18 +1016,26 @@ function showTab(tab) {
   if(fab) fab.style.display = 'none';
   if(painelP) painelP.style.display = 'none';
   if(painelH) painelH.style.display = 'none';
+  if(painelG) painelG.style.display = 'none';
+  if(painelGr) painelGr.style.display = 'none';
   // Mostra a aba ativa
   if(tab === 'cardapio') {
     if(catBar) catBar.style.display = '';
     if(buscaBar) buscaBar.style.display = '';
     if(itensGrid) itensGrid.style.display = '';
     if(fab) fab.style.display = 'flex';
+  } else if(tab === 'grupos') {
+    if(painelGr) painelGr.style.display = 'block';
+    renderGrupos();
   } else if(tab === 'pedidos') {
     if(painelP) painelP.style.display = 'block';
     renderPedidosPDV();
   } else if(tab === 'historico') {
     if(painelH) painelH.style.display = 'block';
     carregarHistoricoPDV();
+  } else if(tab === 'garcons') {
+    if(painelG) painelG.style.display = 'block';
+    carregarGarconsPDV();
   }
 }
 
@@ -996,17 +1092,23 @@ function renderPedidosPDV() {
     var card = document.createElement('div');
     card.className = 'pedido-card';
     var itensHtml = (p.itens||[]).map(function(it, idx) {
+      var selecoesEl = '';
+      if(it.selecoes && it.selecoes.length){
+        selecoesEl = '<div style="font-size:0.7rem;color:var(--muted);padding-left:30px;margin-top:2px;line-height:1.4;">';
+        it.selecoes.forEach(function(s){
+          var ext = (s.precoExtra||0) > 0 ? ' (+R$ '+formatarPreco(s.precoExtra)+')' : '';
+          selecoesEl += '• '+escapeHtml(s.opcao||'')+escapeHtml(ext)+'<br>';
+        });
+        selecoesEl += '</div>';
+      }
       return '<div class="pedido-item-row">' +
         '<div class="pedido-item-top">' +
           '<span class="pedido-item-qtd">' + (it.qtd||1) + 'x</span>' +
           '<span class="pedido-item-nome">' + escapeHtml(it.nome||'') + '</span>' +
           '<span class="pedido-item-preco">R$ ' + formatarPreco((it.preco||0)*(it.qtd||1)) + '</span>' +
         '</div>' +
+        selecoesEl +
         (it.obs ? '<div class="pedido-item-obs">📝 ' + escapeHtml(it.obs) + '</div>' : '') +
-        '<div class="pedido-item-actions">' +
-          '<button class="pi-btn edit" onclick="abrirEditarItemPedido(\'' + p.id + '\',' + idx + ')">✏️ Editar</button>' +
-          '<button class="pi-btn del" onclick="removerItemPedido(\'' + p.id + '\',' + idx + ')">🗑 Remover</button>' +
-        '</div>' +
       '</div>';
     }).join('');
     card.innerHTML =
@@ -1017,20 +1119,12 @@ function renderPedidosPDV() {
         '<span class="pedido-hora">' + hora + '</span>' +
       '</div>' +
       '<div style="margin-bottom:8px;">' +
-        '<span class="pedido-status-tag ' + st + '" onclick="ciclarStatus(\'' + p.id + '\',\'' + st + '\')">' + (statusMap[st]||st) + '</span>' +
-        '<span style="font-size:0.65rem;color:var(--muted);margin-left:6px;">toque p/ avançar</span>' +
+        '<span class="pedido-status-tag ' + st + '">' + (statusMap[st]||st) + '</span>' +
       '</div>' +
       '<div class="pedido-itens-lista">' + itensHtml + '</div>' +
       '<div class="pedido-total-row">' +
         '<span class="pedido-total-label">Total</span>' +
         '<span class="pedido-total-val">R$ ' + formatarPreco(total) + '</span>' +
-      '</div>' +
-      '<div class="pedido-actions">' +
-        (proximo
-          ? '<button class="p-btn primary" onclick="avancarStatus(\'' + p.id + '\',\'' + proximo + '\')">→ ' + (statusMap[proximo]||proximo) + '</button>'
-          : '<button class="p-btn secondary" style="opacity:0.4;">✅ Entregue</button>') +
-        '<button class="p-btn secondary" onclick="iniciarAdicionarItemAoPedido(\'' + p.id + '\')">+ Item</button>' +
-        '<button class="p-btn danger" onclick="cancelarPedido(\'' + p.id + '\')">✕ Cancelar</button>' +
       '</div>';
     wrap.appendChild(card);
   });
@@ -1235,8 +1329,367 @@ function verContaPDV(id){
     carregarHistoricoPDV();
   }).catch(function(e){ showToast('❌ ' + e.message,'#f87171'); });
 }
+// ════════════════════════════════════════
+//  GRUPOS DE OPÇÕES (PDV)
+// ════════════════════════════════════════
+var _grupoEditandoId = null;
+var _grupoOpcoesTemp = []; // [{nome, precoExtra}]
+
+function renderGrupos(){
+  var lista = document.getElementById('grupos-lista');
+  if(!lista) return;
+  if(!_grupos.length){
+    lista.innerHTML = '<div class="empty"><div class="empty-icon">🎛️</div><div class="empty-titulo">Nenhum grupo cadastrado</div><div class="empty-sub">Crie grupos como "Ponto da carne", "Tamanho", "Adicionais" e use em vários itens.</div></div>';
+    return;
+  }
+  lista.innerHTML = '';
+  _grupos.forEach(function(g){
+    var card = document.createElement('div');
+    card.className = 'grupo-card';
+    var opcoesPreview = (g.opcoes||[]).slice(0,4).map(function(o){
+      var preco = (o.precoExtra||0) > 0 ? ' +R$'+formatarPreco(o.precoExtra) : '';
+      return escapeHtml(o.nome||'') + preco;
+    }).join(' • ');
+    if((g.opcoes||[]).length > 4) opcoesPreview += ' • +' + ((g.opcoes||[]).length - 4);
+    card.innerHTML =
+      '<div class="grupo-card-head">'+
+        '<span class="grupo-tipo-tag '+g.tipo+'">'+(g.tipo==='opcao'?'🔘 Opção':'☑️ Adicional')+'</span>'+
+        (g.obrigatorio ? '<span class="grupo-obrig-tag">OBRIGATÓRIO</span>' : '')+
+        '<span style="font-size:0.74rem;color:var(--muted);margin-left:auto;">'+(g.opcoes||[]).length+' opções</span>'+
+      '</div>'+
+      '<div style="font-weight:700;font-size:0.95rem;margin-bottom:4px;">'+escapeHtml(g.nome)+'</div>'+
+      '<div style="font-size:0.76rem;color:var(--muted);">'+opcoesPreview+'</div>';
+    card.onclick = (function(grupo){ return function(){ abrirEditarGrupo(grupo); }; })(g);
+    lista.appendChild(card);
+  });
+}
+
+function abrirNovoGrupo(){
+  _grupoEditandoId = null;
+  _grupoOpcoesTemp = [{nome:'', precoExtra:0}];
+  document.getElementById('modal-grupo-titulo').textContent = 'NOVO GRUPO';
+  document.getElementById('grupo-nome').value = '';
+  document.querySelector('input[name="grupo-tipo"][value="opcao"]').checked = true;
+  document.getElementById('grupo-obrigatorio').checked = true;
+  document.getElementById('btn-excluir-grupo').style.display = 'none';
+  renderGrupoOpcoes();
+  document.getElementById('modal-grupo').classList.add('show');
+}
+
+function abrirEditarGrupo(g){
+  _grupoEditandoId = g.id;
+  _grupoOpcoesTemp = (g.opcoes||[]).map(function(o){ return {nome:o.nome||'', precoExtra:o.precoExtra||0}; });
+  if(!_grupoOpcoesTemp.length) _grupoOpcoesTemp.push({nome:'',precoExtra:0});
+  document.getElementById('modal-grupo-titulo').textContent = 'EDITAR GRUPO';
+  document.getElementById('grupo-nome').value = g.nome||'';
+  document.querySelector('input[name="grupo-tipo"][value="'+(g.tipo||'opcao')+'"]').checked = true;
+  document.getElementById('grupo-obrigatorio').checked = g.obrigatorio !== false;
+  document.getElementById('btn-excluir-grupo').style.display = 'inline-flex';
+  renderGrupoOpcoes();
+  document.getElementById('modal-grupo').classList.add('show');
+}
+
+function renderGrupoOpcoes(){
+  var wrap = document.getElementById('grupo-opcoes-lista');
+  wrap.innerHTML = '';
+  _grupoOpcoesTemp.forEach(function(op, idx){
+    var row = document.createElement('div');
+    row.className = 'grupo-opcao-row';
+    row.innerHTML =
+      '<input type="text" placeholder="Nome da opção" value="'+escapeHtml(op.nome||'')+'" oninput="setOpcaoNome('+idx+',this.value)">'+
+      '<span class="grupo-opcao-prefix">+R$</span>'+
+      '<input type="number" step="0.01" min="0" placeholder="0,00" value="'+(op.precoExtra||0)+'" oninput="setOpcaoPreco('+idx+',this.value)">'+
+      '<button class="grupo-opcao-del" onclick="removerOpcaoGrupo('+idx+')">×</button>';
+    wrap.appendChild(row);
+  });
+}
+
+function setOpcaoNome(idx, val){ _grupoOpcoesTemp[idx].nome = val; }
+function setOpcaoPreco(idx, val){ _grupoOpcoesTemp[idx].precoExtra = parseFloat(val)||0; }
+function addOpcaoGrupo(){ _grupoOpcoesTemp.push({nome:'',precoExtra:0}); renderGrupoOpcoes(); }
+function removerOpcaoGrupo(idx){
+  if(_grupoOpcoesTemp.length <= 1){ showToast('Precisa ter pelo menos 1 opção','#f7a34f'); return; }
+  _grupoOpcoesTemp.splice(idx,1);
+  renderGrupoOpcoes();
+}
+
+function salvarGrupo(){
+  var nome = document.getElementById('grupo-nome').value.trim();
+  if(!nome){ showToast('Digite o nome do grupo','#f7a34f'); return; }
+  var opcoesValidas = _grupoOpcoesTemp.filter(function(o){ return (o.nome||'').trim(); });
+  if(!opcoesValidas.length){ showToast('Adicione ao menos 1 opção','#f7a34f'); return; }
+  var tipoEl = document.querySelector('input[name="grupo-tipo"]:checked');
+  var dados = {
+    nome: nome,
+    tipo: tipoEl ? tipoEl.value : 'opcao',
+    obrigatorio: document.getElementById('grupo-obrigatorio').checked,
+    opcoes: opcoesValidas.map(function(o){ return {nome: o.nome.trim(), precoExtra: parseFloat(o.precoExtra)||0}; }),
+    atualizadoEm: Date.now()
+  };
+  var promessa;
+  if(_grupoEditandoId){
+    promessa = fbColCardapio('grupos_opcoes').doc(_grupoEditandoId).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    promessa = fbColCardapio('grupos_opcoes').add(dados);
+  }
+  promessa.then(function(){
+    showToast('✓ Grupo salvo','#4ade80');
+    document.getElementById('modal-grupo').classList.remove('show');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function excluirGrupo(){
+  if(!_grupoEditandoId) return;
+  if(!confirm('Excluir este grupo?\n\nItens que usam esse grupo deixarão de mostrar essas opções.')) return;
+  fbColCardapio('grupos_opcoes').doc(_grupoEditandoId).delete().then(function(){
+    showToast('🗑️ Excluído','#f87171');
+    document.getElementById('modal-grupo').classList.remove('show');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+// ════════════════════════════════════════
+//  GARÇONS (PDV)
+// ════════════════════════════════════════
+var _garcomEditandoId = null;
+var _garconsCache = [];
+
+function fbColGarcons(){
+  if(_tenantId){
+    return fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteAtivo.id)
+      .collection('garcons');
+  }
+  return fbDb.collection('garcons_publicos').doc(_restauranteAtivo.id).collection('itens');
+}
+
+function carregarGarconsPDV(){
+  var lista = document.getElementById('garcons-lista');
+  lista.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
+  fbColGarcons().get().then(function(snap){
+    _garconsCache = [];
+    snap.forEach(function(d){ _garconsCache.push(Object.assign({id:d.id}, d.data())); });
+    _garconsCache.sort(function(a,b){
+      if((a.status||'ativo')!==(b.status||'ativo')){
+        return (a.status||'ativo')==='ativo' ? -1 : 1;
+      }
+      return (a.nome||'').localeCompare(b.nome||'');
+    });
+    renderGarconsPDV();
+    publicarListaGarcons();
+  }).catch(function(e){
+    lista.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
+  });
+}
+
+function renderGarconsPDV(){
+  var lista = document.getElementById('garcons-lista');
+  if(!_garconsCache.length){
+    lista.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><div class="empty-titulo">Nenhum garçom cadastrado</div><div class="empty-sub">Adicione garçons para que possam usar o app de pedidos.</div></div>';
+    return;
+  }
+  lista.innerHTML = '';
+  _garconsCache.forEach(function(g){
+    var status = g.status || 'ativo';
+    var inicial = (g.nome||'?').trim().charAt(0).toUpperCase();
+    var card = document.createElement('div');
+    card.className = 'garcom-card ' + (status==='inativo'?'inativo':'');
+    card.innerHTML =
+      '<div class="garcom-avatar">'+inicial+'</div>'+
+      '<div class="garcom-info">'+
+        '<div class="garcom-nome">'+escapeHtml(g.nome||'—')+'</div>'+
+        '<div class="garcom-meta">'+(g.apelido?'Apelido: '+escapeHtml(g.apelido):'Sem apelido')+'</div>'+
+      '</div>'+
+      '<span class="garcom-status-tag '+status+'">'+(status==='ativo'?'Ativo':'Inativo')+'</span>';
+    card.onclick = (function(garcom){ return function(){ abrirEditarGarcom(garcom); }; })(g);
+    lista.appendChild(card);
+  });
+}
+
+function abrirNovoGarcom(){
+  _garcomEditandoId = null;
+  document.getElementById('modal-garcom-titulo').textContent = 'NOVO GARÇOM';
+  document.getElementById('garcom-pdv-nome').value = '';
+  document.getElementById('garcom-pdv-apelido').value = '';
+  document.querySelector('input[name="garcom-status"][value="ativo"]').checked = true;
+  document.getElementById('btn-excluir-garcom').style.display = 'none';
+  document.getElementById('modal-garcom-pdv').classList.add('show');
+  setTimeout(function(){ document.getElementById('garcom-pdv-nome').focus(); }, 100);
+}
+
+function abrirEditarGarcom(g){
+  _garcomEditandoId = g.id;
+  document.getElementById('modal-garcom-titulo').textContent = 'EDITAR GARÇOM';
+  document.getElementById('garcom-pdv-nome').value = g.nome||'';
+  document.getElementById('garcom-pdv-apelido').value = g.apelido||'';
+  var st = g.status || 'ativo';
+  document.querySelector('input[name="garcom-status"][value="'+st+'"]').checked = true;
+  document.getElementById('btn-excluir-garcom').style.display = 'inline-flex';
+  document.getElementById('modal-garcom-pdv').classList.add('show');
+}
+
+function salvarGarcom(){
+  var nome = document.getElementById('garcom-pdv-nome').value.trim();
+  if(!nome){ showToast('Digite o nome','#f7a34f'); return; }
+  var apelido = document.getElementById('garcom-pdv-apelido').value.trim();
+  var statusEl = document.querySelector('input[name="garcom-status"]:checked');
+  var status = statusEl ? statusEl.value : 'ativo';
+  var dados = {
+    nome: nome, apelido: apelido, status: status,
+    atualizadoEm: Date.now()
+  };
+  var promessa;
+  if(_garcomEditandoId){
+    promessa = fbColGarcons().doc(_garcomEditandoId).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    promessa = fbColGarcons().add(dados);
+  }
+  promessa.then(function(){
+    showToast('✓ Garçom salvo','#4ade80');
+    document.getElementById('modal-garcom-pdv').classList.remove('show');
+    carregarGarconsPDV();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function excluirGarcom(){
+  if(!_garcomEditandoId) return;
+  if(!confirm('Excluir este garçom?\n\nEle não conseguirá mais entrar no app.')) return;
+  fbColGarcons().doc(_garcomEditandoId).delete().then(function(){
+    showToast('🗑️ Garçom excluído','#f87171');
+    document.getElementById('modal-garcom-pdv').classList.remove('show');
+    carregarGarconsPDV();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+// Publica lista de garçons ativos numa coleção pública pra o app garçom validar login
+function publicarListaGarcons(){
+  if(!_restauranteAtivo) return;
+  var ativos = _garconsCache.filter(function(g){ return (g.status||'ativo')==='ativo'; })
+    .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||''}; });
+  fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
+    garcons: ativos,
+    garconsAtualizadoEm: Date.now()
+  }, {merge:true}).catch(function(e){ console.warn('publicarGarcons:', e); });
+}
 
 </script>
+
+<!-- Modal: Adicionar/Editar Garçom -->
+<div class="modal" id="modal-garcom-pdv">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-header">
+      <div class="modal-titulo" id="modal-garcom-titulo">NOVO GARÇOM</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-garcom-pdv').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="f-grupo">
+        <label class="f-label">Nome do Garçom *</label>
+        <input type="text" class="f-input" id="garcom-pdv-nome" maxlength="40" placeholder="Ex: João Silva">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Apelido / Como aparece</label>
+        <input type="text" class="f-input" id="garcom-pdv-apelido" maxlength="20" placeholder="Ex: João">
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Opcional. Se vazio, usa o primeiro nome.</div>
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Status</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="garcom-status" value="ativo" checked> <span style="font-size:0.85rem;">Ativo</span>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="garcom-status" value="inativo"> <span style="font-size:0.85rem;">Inativo</span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="f-btn danger" id="btn-excluir-garcom" style="flex:0 0 auto;padding:11px 14px;display:none;" onclick="excluirGarcom()">🗑 Excluir</button>
+      <button class="f-btn secondary" style="flex:1;" onclick="document.getElementById('modal-garcom-pdv').classList.remove('show')">Cancelar</button>
+      <button class="f-btn" style="flex:1;" onclick="salvarGarcom()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.garcom-card{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.15s;}
+.garcom-card:active{border-color:var(--accent);}
+.garcom-card.inativo{opacity:0.55;}
+.garcom-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#000;font-family:'Bebas Neue',sans-serif;font-size:1.3rem;flex-shrink:0;}
+.garcom-info{flex:1;min-width:0;}
+.garcom-nome{font-weight:700;font-size:0.95rem;}
+.garcom-meta{font-size:0.74rem;color:var(--muted);margin-top:2px;}
+.garcom-status-tag{font-size:0.68rem;font-weight:700;text-transform:uppercase;border-radius:5px;padding:2px 8px;letter-spacing:0.04em;}
+.garcom-status-tag.ativo{background:rgba(74,222,128,0.15);color:#4ade80;}
+.garcom-status-tag.inativo{background:rgba(255,255,255,0.06);color:var(--muted);}
+</style>
+
+<!-- Modal: Adicionar/Editar Grupo de Opções -->
+<div class="modal" id="modal-grupo">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-titulo" id="modal-grupo-titulo">NOVO GRUPO</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-grupo').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="f-grupo">
+        <label class="f-label">Nome do Grupo *</label>
+        <input type="text" class="f-input" id="grupo-nome" maxlength="40" placeholder="Ex: Ponto da carne, Tamanho, Adicionais">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Tipo</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="grupo-tipo" value="opcao" checked style="margin-top:2px;">
+            <div>
+              <div style="font-size:0.84rem;font-weight:600;">🔘 Opção</div>
+              <div style="font-size:0.7rem;color:var(--muted);">Escolhe 1 (radio)</div>
+            </div>
+          </label>
+          <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="grupo-tipo" value="adicional" style="margin-top:2px;">
+            <div>
+              <div style="font-size:0.84rem;font-weight:600;">☑️ Adicional</div>
+              <div style="font-size:0.7rem;color:var(--muted);">Vários (checkbox)</div>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="f-grupo">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="grupo-obrigatorio" checked>
+          <span style="font-size:0.85rem;">Obrigatório (cliente precisa escolher)</span>
+        </label>
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Opções deste grupo</label>
+        <div id="grupo-opcoes-lista"></div>
+        <button class="p-btn secondary" style="margin-top:8px;width:100%;" onclick="addOpcaoGrupo()">+ Adicionar opção</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="f-btn danger" id="btn-excluir-grupo" style="flex:0 0 auto;padding:11px 14px;display:none;" onclick="excluirGrupo()">🗑</button>
+      <button class="f-btn secondary" style="flex:1;" onclick="document.getElementById('modal-grupo').classList.remove('show')">Cancelar</button>
+      <button class="f-btn" style="flex:1;" onclick="salvarGrupo()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.grupo-card{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color 0.15s;}
+.grupo-card:active{border-color:var(--accent);}
+.grupo-card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.grupo-tipo-tag{font-size:0.66rem;font-weight:700;text-transform:uppercase;border-radius:5px;padding:2px 8px;letter-spacing:0.04em;flex-shrink:0;}
+.grupo-tipo-tag.opcao{background:rgba(212,168,67,0.15);color:var(--accent);}
+.grupo-tipo-tag.adicional{background:rgba(129,140,248,0.15);color:#818cf8;}
+.grupo-obrig-tag{font-size:0.62rem;background:rgba(248,113,113,0.12);color:#f87171;border-radius:4px;padding:1px 6px;font-weight:700;}
+.grupo-opcao-row{display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface3);border:1px solid var(--border2);border-radius:9px;margin-bottom:6px;}
+.grupo-opcao-row input[type="text"]{flex:1;background:transparent;border:none;color:var(--text);font-size:0.86rem;outline:none;font-family:inherit;}
+.grupo-opcao-row input[type="number"]{width:75px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:4px 6px;font-size:0.78rem;outline:none;text-align:right;font-family:inherit;}
+.grupo-opcao-del{background:rgba(248,113,113,0.1);color:#f87171;border:none;width:26px;height:26px;border-radius:6px;font-size:0.9rem;cursor:pointer;}
+.grupo-opcao-prefix{font-size:0.7rem;color:var(--muted);}
+</style>
 
 </body>
 </html>

@@ -761,31 +761,55 @@ function iniciarApp(){
 }
 
 function carregarTenantECardapio(){
-  // Tenta pegar tenantId
-  var restSalvo = null;
-  try{ restSalvo = JSON.parse(localStorage.getItem('restauranteAtivo')||'null'); }catch(e){}
-  if(restSalvo){ _restauranteId = restSalvo.id || 'bavaro'; }
-  if(!_restauranteId) _restauranteId = 'bavaro';
+  // Helper de diagnóstico visível
+  function dbg(msg){
+    console.log('[GARCOM]', msg);
+    var grid = document.getElementById('itens-grid');
+    if(grid) grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">⚙️</div><div class="empty-titulo">Diagnóstico</div><div class="empty-sub" style="font-family:monospace;font-size:0.72rem;line-height:1.6;white-space:pre-line;text-align:left;max-width:280px;margin:10px auto 0;">'+msg+'</div></div>';
+  }
+
+  dbg('Iniciando...');
 
   // 1º — tenta cache local
   var tenantSalvo = null;
   try{ tenantSalvo = localStorage.getItem('gestao_tenant_id')||localStorage.getItem('tenantId'); }catch(e){}
+  var restSalvo = null;
+  try{ restSalvo = JSON.parse(localStorage.getItem('restauranteAtivo')||'null'); }catch(e){}
+  if(restSalvo && restSalvo.id) _restauranteId = restSalvo.id;
+
   if(tenantSalvo){
     _tenantId = tenantSalvo;
+    dbg('Cache local OK\ntenantId: '+tenantSalvo.slice(0,8)+'...\nrestauranteId: '+(_restauranteId||'?'));
     iniciarListeners();
     return;
   }
 
-  // 2º — busca da coleção pública (publicada pelo PDV)
-  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
-    if(doc.exists && doc.data().tenantId){
-      _tenantId = doc.data().tenantId;
+  dbg('Buscando restaurantes publicados...');
+
+  // 2º — busca QUALQUER restaurante publicado pelo PDV
+  fbDb.collection('restaurantes_publicos').limit(10).get().then(function(snap){
+    if(snap.empty){
+      dbg('❌ Nenhum restaurante publicado.\n\nABRA O PDV PRIMEIRO\nfaça login → ele publica os dados.\nDepois volte aqui.');
+      return;
+    }
+    // Se já temos um restauranteId tentamos achar exato, senão pega o primeiro
+    var docEscolhido = null;
+    if(_restauranteId){
+      snap.forEach(function(d){ if(d.id === _restauranteId) docEscolhido = d; });
+    }
+    if(!docEscolhido) docEscolhido = snap.docs[0];
+
+    var dados = docEscolhido.data();
+    _tenantId = dados.tenantId;
+    _restauranteId = docEscolhido.id;
+    if(_tenantId){
       try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
     }
+    dbg('✓ Restaurante encontrado: '+(dados.nome||_restauranteId)+'\ntenantId: '+(_tenantId? _tenantId.slice(0,8)+'...':'?')+'\nCarregando cardápio...');
     iniciarListeners();
   }).catch(function(e){
-    console.warn('Erro buscar tenantId publico:', e);
-    iniciarListeners();
+    dbg('❌ Erro de permissão Firestore:\n'+e.code+'\n\nVerifique as regras do Firestore.\nA coleção restaurantes_publicos\nprecisa permitir leitura pública.');
+    console.error('Erro buscar tenantId publico:', e);
   });
 }
 
@@ -803,6 +827,10 @@ function iniciarListeners(){
   if(_unsubCats) _unsubCats();
   if(_unsubItens) _unsubItens();
 
+  var caminho = _tenantId
+    ? 'tenants/'+_tenantId.slice(0,8)+'.../restaurantes/'+_restauranteId
+    : 'cardapio_publico/'+_restauranteId;
+
   _unsubCats = fbColCardapio('categorias').onSnapshot(function(snap){
     _categorias = [];
     snap.forEach(function(d){
@@ -815,7 +843,11 @@ function iniciarListeners(){
     });
     renderCatBar();
     renderItens();
-  }, function(){ renderCatBar(); renderItens(); });
+  }, function(e){
+    var grid = document.getElementById('itens-grid');
+    if(grid) grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">🔒</div><div class="empty-titulo">Sem permissão</div><div class="empty-sub" style="font-family:monospace;font-size:0.7rem;line-height:1.5;white-space:pre-line;">Erro: '+e.code+'\n\nCaminho:\n'+caminho+'\n\nAjuste as regras do Firestore para permitir leitura pública do cardápio.</div></div>';
+    console.error('Erro categorias:', e);
+  });
 
   _unsubItens = fbColCardapio('itens').onSnapshot(function(snap){
     _itens = [];
@@ -823,13 +855,13 @@ function iniciarListeners(){
       var v = d.data();
       _itens.push({
         id:d.id, nome:v.nome||'', preco:v.preco||0, foto:v.foto||'',
-        desc:v.descricao||'', categoriaId:v.categoriaId||'', disponivel:v.disponivel!==false,
+        desc:v.descricao||'', categoriaId:v.categoriaId||v.categoria||'', disponivel:v.disponivel!==false,
         ordem:v.ordem||0, criadoEm:v.criadoEm||0, codigo:v.codigo||''
       });
     });
     _itens.sort(function(a,b){ return (a.criadoEm||0)-(b.criadoEm||0); });
     renderItens();
-  }, function(){ renderItens(); });
+  }, function(e){ console.error('Erro itens:', e); });
 
   escutarMeusPedidos();
 }

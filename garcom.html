@@ -1152,8 +1152,8 @@ function renderPedidos(){
     var itensHtml = (p.itens||[]).map(function(it, idx){
       var acoes = podeEditar
         ? '<div class="pedido-item-actions">'+
-            '<button class="pi-btn edit" onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')">✏️</button>'+
-            '<button class="pi-btn del" onclick="removerItemGarcom(\''+p.id+'\','+idx+')">🗑</button>'+
+            '<button class="pi-btn edit" onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')">✏️ Editar</button>'+
+            '<button class="pi-btn del" onclick="cancelarItemGarcom(\''+p.id+'\','+idx+')">✕ Cancelar</button>'+
           '</div>'
         : '';
       var selecoesEl = '';
@@ -1187,12 +1187,187 @@ function renderPedidos(){
       '<div style="margin-bottom:8px;"><span class="pedido-status '+st+'">'+( statusMap[st]||st )+'</span></div>'+
       '<div class="pedido-itens-lista">'+itensHtml+'</div>'+
       '<div class="pedido-total">R$ '+fmtPreco(total)+'</div>'+
-      (podeEditar
-        ? '<div style="display:flex;gap:8px;margin-top:10px;">'+
-            '<button class="f-btn" style="font-size:0.8rem;padding:9px 12px;" onclick="iniciarAdicionarItemGarcom(\''+p.id+'\')">+ Adicionar item</button>'+
-          '</div>'
-        : '<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">Pedido em '+( statusMap[st]||st )+' — edição bloqueada</div>');
+      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
+        (podeEditar
+          ? '<button class="f-btn" style="font-size:0.8rem;padding:9px 12px;flex:1;min-width:130px;" onclick="iniciarAdicionarItemGarcom(\''+p.id+'\')">+ Adicionar item</button>'
+          : '')+
+        '<button class="f-btn secondary" style="font-size:0.8rem;padding:9px 12px;flex:1;min-width:120px;" onclick="reimprimirPedidoGarcom(\''+p.id+'\')">🖨️ Reimprimir</button>'+
+      '</div>'+
+      (podeEditar?'':'<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">Pedido em '+( statusMap[st]||st )+' — edição bloqueada</div>');
     wrap.appendChild(card);
+  });
+}
+
+// ── Cancelar ITEM com impressão ──
+function cancelarItemGarcom(pedidoId, idx){
+  var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
+  if(!ped || !ped.itens || !ped.itens[idx]) return;
+  var item = ped.itens[idx];
+  // Verifica se há motivos pré-cadastrados
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+    var motivos = [];
+    var pedeSenha = false;
+    if(doc.exists){
+      var c = doc.data();
+      if(c.cancelMotivos){ motivos = c.cancelMotivos.split('\n').map(function(m){ return m.trim(); }).filter(function(m){ return m; }); }
+      pedeSenha = !!c.cancelSenha;
+    }
+    abrirModalCancelarItem(pedidoId, idx, item, motivos, pedeSenha);
+  }).catch(function(){
+    abrirModalCancelarItem(pedidoId, idx, item, [], false);
+  });
+}
+
+function abrirModalCancelarItem(pedidoId, idx, item, motivos, pedeSenha){
+  var ex = document.getElementById('modal-cancelar-item');
+  if(ex) ex.remove();
+  var motivosHtml = '';
+  if(motivos.length){
+    motivosHtml = '<div class="login-campo"><label>Motivo do cancelamento</label>';
+    motivos.forEach(function(m, i){
+      motivosHtml += '<label style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;">'+
+        '<input type="radio" name="cancel-motivo" value="'+esc(m)+'" '+(i===0?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
+        '<span>'+esc(m)+'</span>'+
+      '</label>';
+    });
+    motivosHtml += '<label style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;">'+
+      '<input type="radio" name="cancel-motivo" value="__outro__" style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
+      '<span>Outro motivo (digitar)</span>'+
+    '</label></div>'+
+    '<div class="login-campo" id="cancel-outro-wrap" style="display:none;"><label>Descreva o motivo</label>'+
+      '<textarea id="cancel-outro-texto" placeholder="Descreva..." style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:0.9rem;outline:none;resize:vertical;min-height:60px;"></textarea>'+
+    '</div>';
+  } else {
+    motivosHtml = '<div class="login-campo"><label>Motivo do cancelamento</label>'+
+      '<textarea id="cancel-outro-texto" placeholder="Descreva o motivo..." style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:0.9rem;outline:none;resize:vertical;min-height:60px;"></textarea>'+
+    '</div>';
+  }
+  var senhaHtml = pedeSenha
+    ? '<div class="login-campo"><label>Senha do gerente</label><input type="password" id="cancel-senha" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:1rem;outline:none;" maxlength="20"></div>'
+    : '';
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-cancelar-item';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:420px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo" style="color:#f87171;">CANCELAR ITEM</div>'+
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-cancelar-item\').remove()">×</button>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:10px;padding:12px;margin-bottom:14px;">'+
+          '<div style="font-size:0.78rem;color:#f87171;font-weight:700;">'+(item.qtd||1)+'x '+esc(item.nome||'')+'</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;">Mesa '+(_meusPedidos.find(function(p){return p.id===pedidoId;})||{}).mesa+' • Pedido #'+pedidoId.slice(-4).toUpperCase()+'</div>'+
+        '</div>'+
+        motivosHtml +
+        senhaHtml +
+      '</div>'+
+      '<div class="modal-footer">'+
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-cancelar-item\').remove()">Voltar</button>'+
+        '<button class="f-btn" style="flex:1;background:#f87171;color:#fff;" onclick="confirmarCancelamentoItem(\''+pedidoId+'\','+idx+','+pedeSenha+')">Confirmar Cancelamento</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  // Toggle do "outro motivo"
+  var radios = mod.querySelectorAll('input[name="cancel-motivo"]');
+  radios.forEach(function(r){
+    r.addEventListener('change', function(){
+      var w = document.getElementById('cancel-outro-wrap');
+      if(w) w.style.display = (r.value === '__outro__' && r.checked) ? '' : (w.style.display);
+      // ajusta visibilidade só dos rádios outros
+      var marc = document.querySelector('input[name="cancel-motivo"]:checked');
+      if(w) w.style.display = (marc && marc.value === '__outro__') ? '' : 'none';
+    });
+  });
+}
+
+function confirmarCancelamentoItem(pedidoId, idx, pedeSenha){
+  var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
+  if(!ped) return;
+  // Senha
+  if(pedeSenha){
+    var senhaDigitada = (document.getElementById('cancel-senha')||{}).value || '';
+    fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+      var senhaCorreta = doc.exists ? (doc.data().cancelSenhaValor||'') : '';
+      if(senhaDigitada !== senhaCorreta){
+        showToast('❌ Senha incorreta','#f87171');
+        return;
+      }
+      executarCancelamento(pedidoId, idx);
+    });
+    return;
+  }
+  executarCancelamento(pedidoId, idx);
+}
+
+function executarCancelamento(pedidoId, idx){
+  var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
+  if(!ped) return;
+  // Pega motivo
+  var motivo = '';
+  var radios = document.querySelectorAll('input[name="cancel-motivo"]');
+  if(radios.length){
+    var marc = document.querySelector('input[name="cancel-motivo"]:checked');
+    if(marc){
+      if(marc.value === '__outro__'){
+        motivo = (document.getElementById('cancel-outro-texto')||{}).value || '';
+      } else {
+        motivo = marc.value;
+      }
+    }
+  } else {
+    motivo = (document.getElementById('cancel-outro-texto')||{}).value || '';
+  }
+  if(!motivo.trim()){ showToast('Informe o motivo','#f7a34f'); return; }
+
+  var item = ped.itens[idx];
+  var itensRestantes = ped.itens.filter(function(_,i){ return i !== idx; });
+
+  // Cria comando de impressão de cancelamento (PDV escuta)
+  var comandoCancel = {
+    tipo: 'cancelamento',
+    restauranteId: _restauranteId,
+    pedidoId: pedidoId,
+    pedidoMesa: ped.mesa,
+    pedidoGarcom: ped.garcom,
+    item: { nome: item.nome, qtd: item.qtd, preco: item.preco, obs: item.obs||'', selecoes: item.selecoes||[] },
+    motivo: motivo,
+    canceladoPor: _nomeGarcom,
+    canceladoEm: Date.now()
+  };
+  fbDb.collection('comandos_impressao').add(comandoCancel).then(function(){
+    // Remove item do pedido (ou deleta pedido se foi o último)
+    if(itensRestantes.length === 0){
+      // Pedido todo cancelado → deleta
+      return fbDb.collection('pedidos').doc(pedidoId).delete();
+    } else {
+      return fbDb.collection('pedidos').doc(pedidoId).update({
+        itens: itensRestantes,
+        atualizadoEm: Date.now()
+      });
+    }
+  }).then(function(){
+    showToast('✕ Item cancelado e enviado pra impressão','#f87171');
+    var m = document.getElementById('modal-cancelar-item');
+    if(m) m.remove();
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
+  });
+}
+
+// ── REIMPRIMIR PEDIDO ──
+function reimprimirPedidoGarcom(pedidoId){
+  if(!confirm('Reimprimir este pedido?')) return;
+  fbDb.collection('comandos_impressao').add({
+    tipo: 'reimprimir',
+    restauranteId: _restauranteId,
+    pedidoId: pedidoId,
+    solicitadoPor: _nomeGarcom,
+    solicitadoEm: Date.now()
+  }).then(function(){
+    showToast('🖨️ Solicitação enviada ao PDV','#4ade80');
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
   });
 }
 

@@ -316,11 +316,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
   <!-- Painel Impressão -->
   <div id="painel-impressao" style="display:none;padding:14px;padding-bottom:120px;">
-    <!-- Status QZ Tray -->
+    <!-- Status QZ Tray / Electron -->
     <div id="qz-status-box" style="background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;">
       <span id="qz-status-icon" style="font-size:1.6rem;">⚪</span>
       <div style="flex:1;">
-        <div style="font-weight:700;font-size:0.95rem;" id="qz-status-titulo">Verificando QZ Tray...</div>
+        <div style="font-weight:700;font-size:0.95rem;" id="qz-status-titulo">Verificando serviço de impressão...</div>
         <div style="font-size:0.74rem;color:var(--muted);margin-top:2px;" id="qz-status-sub">Aguarde</div>
       </div>
       <button class="p-btn secondary" style="flex:0 0 auto;padding:8px 12px;font-size:0.75rem;" onclick="qzReconectar()">↻ Reconectar</button>
@@ -2107,19 +2107,51 @@ function fbDocConfigImp(){
 }
 
 // ─── QZ TRAY ───
+// ─── DETECTA MODO: Electron (recomendado) ou QZ Tray (fallback) ───
+var _modoImpressao = null; // 'electron' | 'qz' | null
+
 function qzInicializar(){
-  if(typeof qz === 'undefined'){
-    atualizarStatusQZ('erro', 'QZ Tray não carregado', 'Recarregue a página');
+  // 1º Tenta detectar o modo Electron (app desktop Bávaro)
+  if(window.__BAVARO_DESKTOP__){
+    _modoImpressao = 'electron';
+    verificarServicoElectron();
     return;
   }
-  // Configuração para usar sem certificado (modo dev/uso local)
+  // 2º Fallback: QZ Tray no navegador
+  if(typeof qz === 'undefined'){
+    atualizarStatusQZ('erro', 'Modo navegador sem QZ Tray', 'Use o app desktop Bávaro PDV ou instale o QZ Tray');
+    return;
+  }
+  _modoImpressao = 'qz';
   qz.security.setCertificatePromise(function(resolve){ resolve(); });
   qz.security.setSignatureAlgorithm('SHA512');
   qz.security.setSignaturePromise(function(){ return function(resolve){ resolve(); }; });
   qzReconectar();
 }
 
+function verificarServicoElectron(){
+  atualizarStatusQZ('conectando', 'Verificando serviço de impressão...', 'App Bávaro PDV Desktop');
+  var url = window.__BAVARO_DESKTOP__.printerApiUrl + '/health';
+  fetch(url).then(function(r){ return r.json(); }).then(function(data){
+    if(data.ok){
+      _qzPronto = true;
+      atualizarStatusQZ('online', '✓ App Desktop conectado', 'Impressão automática habilitada (sem popups)');
+      iniciarListenerImpressao();
+      iniciarListenerComandosImpressao();
+    } else {
+      atualizarStatusQZ('erro', 'Serviço de impressão indisponível', 'Reinicie o app Bávaro PDV');
+    }
+  }).catch(function(e){
+    atualizarStatusQZ('erro', 'Serviço de impressão não responde', 'Reinicie o app Bávaro PDV');
+    console.error('Servico Electron:', e);
+  });
+}
+
 function qzReconectar(){
+  if(_modoImpressao === 'electron'){
+    verificarServicoElectron();
+    return;
+  }
   if(typeof qz === 'undefined') return;
   atualizarStatusQZ('conectando', 'Conectando ao QZ Tray...', 'Verificando se o programa está aberto');
   if(qz.websocket.isActive()){
@@ -2134,6 +2166,7 @@ function qzConectar(){
     _qzPronto = true;
     atualizarStatusQZ('online', '✓ QZ Tray conectado', 'Pronto para imprimir');
     iniciarListenerImpressao();
+    iniciarListenerComandosImpressao();
   }).catch(function(e){
     _qzPronto = false;
     atualizarStatusQZ('offline', '⚠️ QZ Tray não conectado', 'Abra o QZ Tray no PC do caixa');
@@ -2249,9 +2282,9 @@ function atualizarCamposImpressora(){
 
 function detectarImpressorasUSB(selecionada){
   var sel = document.getElementById('imp-nome-windows');
-  if(!_qzPronto){ sel.innerHTML = '<option>QZ Tray desconectado — não é possível detectar</option>'; return; }
+  if(!_qzPronto){ sel.innerHTML = '<option>Serviço de impressão desconectado</option>'; return; }
   sel.innerHTML = '<option>Detectando...</option>';
-  qz.printers.find().then(function(printers){
+  _listarImpressorasInstaladas().then(function(printers){
     if(!printers.length){
       sel.innerHTML = '<option>Nenhuma impressora encontrada</option>';
       return;
@@ -2264,7 +2297,7 @@ function detectarImpressorasUSB(selecionada){
       sel.appendChild(opt);
     });
   }).catch(function(e){
-    sel.innerHTML = '<option>Erro: '+e.message+'</option>';
+    sel.innerHTML = '<option>Erro: '+(e.message||e)+'</option>';
   });
 }
 
@@ -2757,10 +2790,37 @@ function filtrarItensPorModelo(itens, modelo){
 // ─── ENVIAR PARA IMPRESSORA ───
 function enviarParaImpressora(imp, conteudo){
   if(!_qzPronto){
-    showToast('⚠️ QZ Tray desconectado — abra o programa','#f7a34f', 5000);
-    return Promise.reject('QZ desconectado');
+    showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
+    return Promise.reject('desconectado');
   }
   if(!conteudo){ return Promise.reject('Sem conteúdo'); }
+
+  // ─── MODO ELECTRON (app desktop) ───
+  if(_modoImpressao === 'electron'){
+    var url = window.__BAVARO_DESKTOP__.printerApiUrl + '/print';
+    var payload = {
+      tipo: imp.tipo || 'usb',
+      conteudo: conteudo,
+      nomeWindows: imp.nomeWindows,
+      ip: imp.ip,
+      porta: imp.porta || 9100
+    };
+    return fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      if(!r.ok){ return r.json().then(function(e){ throw new Error(e.error||'Falha'); }); }
+      return r.json();
+    }).then(function(){
+      showToast('🖨️ Impresso em '+imp.nome,'#4ade80');
+    }).catch(function(e){
+      showToast('❌ Falha ao imprimir em '+imp.nome+': '+e.message,'#f87171', 5000);
+      console.error(e);
+    });
+  }
+
+  // ─── MODO QZ TRAY (fallback navegador) ───
   var config;
   if(imp.tipo === 'usb'){
     if(!imp.nomeWindows){ showToast('Impressora "'+imp.nome+'" sem nome do Windows','#f87171'); return Promise.reject(); }
@@ -2775,6 +2835,20 @@ function enviarParaImpressora(imp, conteudo){
     showToast('❌ Falha ao imprimir em '+imp.nome+': '+e.message,'#f87171', 5000);
     console.error(e);
   });
+}
+
+// ─── DETECTAR IMPRESSORAS USB (suporta Electron e QZ) ───
+function _listarImpressorasInstaladas(){
+  if(_modoImpressao === 'electron'){
+    var url = window.__BAVARO_DESKTOP__.printerApiUrl + '/printers';
+    return fetch(url).then(function(r){ return r.json(); }).then(function(data){
+      return (data.printers||[]).map(function(p){ return p.displayName || p.name; });
+    });
+  }
+  if(typeof qz !== 'undefined' && _qzPronto){
+    return qz.printers.find();
+  }
+  return Promise.reject('Nenhum método disponível');
 }
 
 // ─── IMPRESSÃO AUTOMÁTICA AO RECEBER PEDIDO ───
@@ -2826,6 +2900,88 @@ function reimprimirPedido(pedidoId){
   var p = (_pedidosPDV||[]).find(function(x){ return x.id === pedidoId; });
   if(!p){ showToast('Pedido não encontrado','#f87171'); return; }
   imprimirPedidoAutomatico(p);
+}
+
+// ════════════════════════════════════════
+//  ESCUTA COMANDOS DO APP GARÇOM
+//  (reimprimir / cancelar item)
+// ════════════════════════════════════════
+var _comandosImpProcessados = {};
+var _impCmdListenerAtivo = false;
+function iniciarListenerComandosImpressao(){
+  if(_impCmdListenerAtivo || !_qzPronto || !_restauranteAtivo) return;
+  _impCmdListenerAtivo = true;
+  // Marca comandos antigos pra não processar de novo no início
+  fbDb.collection('comandos_impressao')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .get().then(function(snap){
+      snap.forEach(function(d){ _comandosImpProcessados[d.id] = true; });
+    });
+  fbDb.collection('comandos_impressao')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .onSnapshot(function(snap){
+      snap.docChanges().forEach(function(ch){
+        if(ch.type !== 'added') return;
+        var id = ch.doc.id;
+        if(_comandosImpProcessados[id]) return;
+        _comandosImpProcessados[id] = true;
+        var cmd = ch.doc.data();
+        processarComandoImpressao(id, cmd);
+      });
+    });
+}
+
+function processarComandoImpressao(cmdId, cmd){
+  if(cmd.tipo === 'reimprimir'){
+    fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
+      if(doc.exists){
+        var pedido = Object.assign({id: doc.id}, doc.data());
+        imprimirPedidoAutomatico(pedido);
+        showToast('🖨️ Reimprimindo pedido (solicitado por '+(cmd.solicitadoPor||'?')+')','#d4a843');
+      }
+      // Apaga o comando após processar
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    });
+  } else if(cmd.tipo === 'cancelamento'){
+    // Imprime cupom de cancelamento
+    if(_configImp.cancelImprimir !== false){
+      var pedidoStub = {
+        id: cmd.pedidoId,
+        mesa: cmd.pedidoMesa,
+        garcom: cmd.pedidoGarcom,
+        criadoEm: cmd.canceladoEm,
+        itens: [cmd.item]
+      };
+      var cupom = gerarCupomCancelamento(pedidoStub, cmd.motivo + '\nCancelado por: ' + (cmd.canceladoPor||'?'));
+      // Decide em qual impressora imprimir
+      var imps = _impressoras;
+      if(_configImp.cancelImpressora === 'origem'){
+        // Tenta achar a impressora que imprimiria esse item
+        var impDestino = null;
+        for(var m=0; m<_modelos.length; m++){
+          var modelo = _modelos[m];
+          var match = false;
+          if(modelo.filtro === 'item'){
+            match = (modelo.itens||[]).indexOf(cmd.item.id) >= 0;
+          } else {
+            var itemDef = (_itens||[]).find(function(i){ return i.id === cmd.item.id; });
+            var cat = itemDef ? itemDef.categoria : '';
+            match = (modelo.categorias||[]).indexOf(cat) >= 0;
+          }
+          if(match){
+            impDestino = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+            if(impDestino) break;
+          }
+        }
+        imps = impDestino ? [impDestino] : _impressoras;
+      }
+      imps.forEach(function(imp){
+        enviarParaImpressora(imp, cupom);
+      });
+      showToast('✕ Cancelamento impresso','#f87171');
+    }
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+  }
 }
 
 </script>

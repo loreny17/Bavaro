@@ -765,27 +765,28 @@ function carregarTenantECardapio(){
   var restSalvo = null;
   try{ restSalvo = JSON.parse(localStorage.getItem('restauranteAtivo')||'null'); }catch(e){}
   if(restSalvo){ _restauranteId = restSalvo.id || 'bavaro'; }
+  if(!_restauranteId) _restauranteId = 'bavaro';
 
+  // 1º — tenta cache local
   var tenantSalvo = null;
   try{ tenantSalvo = localStorage.getItem('gestao_tenant_id')||localStorage.getItem('tenantId'); }catch(e){}
-
   if(tenantSalvo){
     _tenantId = tenantSalvo;
     iniciarListeners();
     return;
   }
-  // Busca tenant via users (se tiver UID salvo)
-  var uid = localStorage.getItem('gestao_uid');
-  if(uid){
-    fbDb.collection('users').doc(uid).get().then(function(doc){
-      if(doc.exists && doc.data().tenantId){
-        _tenantId = doc.data().tenantId;
-      }
-      iniciarListeners();
-    }).catch(function(){ iniciarListeners(); });
-  } else {
+
+  // 2º — busca da coleção pública (publicada pelo PDV)
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+    if(doc.exists && doc.data().tenantId){
+      _tenantId = doc.data().tenantId;
+      try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
+    }
     iniciarListeners();
-  }
+  }).catch(function(e){
+    console.warn('Erro buscar tenantId publico:', e);
+    iniciarListeners();
+  });
 }
 
 function fbColCardapio(sub){

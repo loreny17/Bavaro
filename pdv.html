@@ -205,6 +205,9 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .p-btn.secondary{background:var(--surface3);color:var(--text);border:1px solid var(--border2);}
 .p-btn.danger{background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.25);}
 
+.hist-card-pdv{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:10px;cursor:pointer;transition:border-color 0.15s;}
+.hist-card-pdv:active{border-color:var(--accent);}
+
 </style>
 </head>
 <body>
@@ -255,6 +258,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
   <div class="tabs">
     <button class="tab active" id="tab-btn-cardapio" onclick="showTab('cardapio')">📋 Cardápio</button>
     <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾 Pedidos <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
+    <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜 Histórico</button>
   </div>
 
   <!-- Painel Pedidos -->
@@ -267,6 +271,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       <button class="status-filtro" onclick="filtrarPedidos(this,'entregue')">🚀 Entregue</button>
     </div>
     <div id="pedidos-lista" style="padding:14px;"></div>
+  </div>
+
+  <!-- Painel Histórico -->
+  <div id="painel-historico" style="display:none;padding:14px;padding-bottom:90px;">
+    <div id="historico-pdv-lista"></div>
   </div>
 
   <!-- Categorias -->
@@ -900,29 +909,37 @@ var _tabAtual = 'cardapio';
 
 function showTab(tab) {
   _tabAtual = tab;
-  var isCardapio = (tab === 'cardapio');
   var btnC = document.getElementById('tab-btn-cardapio');
   var btnP = document.getElementById('tab-btn-pedidos');
-  if(btnC) btnC.classList.toggle('active', isCardapio);
-  if(btnP) btnP.classList.toggle('active', !isCardapio);
+  var btnH = document.getElementById('tab-btn-historico');
+  if(btnC) btnC.classList.toggle('active', tab === 'cardapio');
+  if(btnP) btnP.classList.toggle('active', tab === 'pedidos');
+  if(btnH) btnH.classList.toggle('active', tab === 'historico');
   var catBar = document.getElementById('cat-bar');
   var buscaBar = document.querySelector('.busca-bar');
   var itensGrid = document.getElementById('itens-grid');
   var fab = document.getElementById('fab');
-  var painel = document.getElementById('painel-pedidos');
-  if(isCardapio) {
+  var painelP = document.getElementById('painel-pedidos');
+  var painelH = document.getElementById('painel-historico');
+  // Esconde tudo
+  if(catBar) catBar.style.display = 'none';
+  if(buscaBar) buscaBar.style.display = 'none';
+  if(itensGrid) itensGrid.style.display = 'none';
+  if(fab) fab.style.display = 'none';
+  if(painelP) painelP.style.display = 'none';
+  if(painelH) painelH.style.display = 'none';
+  // Mostra a aba ativa
+  if(tab === 'cardapio') {
     if(catBar) catBar.style.display = '';
     if(buscaBar) buscaBar.style.display = '';
     if(itensGrid) itensGrid.style.display = '';
     if(fab) fab.style.display = 'flex';
-    if(painel) painel.style.display = 'none';
-  } else {
-    if(catBar) catBar.style.display = 'none';
-    if(buscaBar) buscaBar.style.display = 'none';
-    if(itensGrid) itensGrid.style.display = 'none';
-    if(fab) fab.style.display = 'none';
-    if(painel) painel.style.display = 'block';
+  } else if(tab === 'pedidos') {
+    if(painelP) painelP.style.display = 'block';
     renderPedidosPDV();
+  } else if(tab === 'historico') {
+    if(painelH) painelH.style.display = 'block';
+    carregarHistoricoPDV();
   }
 }
 
@@ -1130,6 +1147,94 @@ document.addEventListener('click', function(e) {
       showTab('pedidos');
     });
 }, true);
+
+// ════════════════════════════════════════
+//  HISTÓRICO PDV
+// ════════════════════════════════════════
+function carregarHistoricoPDV(){
+  var lista = document.getElementById('historico-pdv-lista');
+  if(!lista) return;
+  lista.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
+  var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', restId)
+    .get().then(function(snap){
+      var contas = [];
+      snap.forEach(function(d){ contas.push(Object.assign({id: d.id}, d.data())); });
+      contas.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });
+      if(!contas.length){
+        lista.innerHTML = '<div class="empty"><div class="empty-icon">📜</div><div class="empty-titulo">Nenhuma conta fechada ainda</div><div class="empty-sub">Contas fechadas aparecerão aqui.</div></div>';
+        return;
+      }
+      // Resumo do dia
+      var hoje = new Date(); hoje.setHours(0,0,0,0);
+      var hojeMs = hoje.getTime();
+      var contasHoje = contas.filter(function(c){ return (c.fechadoEm||0) >= hojeMs; });
+      var totalHoje = contasHoje.reduce(function(a,c){ return a + (c.total||0); }, 0);
+      var resumoHtml = '<div style="background:linear-gradient(135deg,rgba(212,168,67,0.12),rgba(212,168,67,0.04));border:1px solid rgba(212,168,67,0.25);border-radius:14px;padding:14px;margin-bottom:14px;">'+
+        '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Hoje</div>'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">'+
+          '<div><div style="font-family:Bebas Neue,sans-serif;font-size:2rem;color:var(--accent);line-height:1;">R$ '+totalHoje.toFixed(2).replace('.',',')+'</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">'+contasHoje.length+' conta(s) fechada(s)</div></div>'+
+        '</div>'+
+      '</div>';
+      var html = resumoHtml;
+      contas.slice(0, 100).forEach(function(c){
+        var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+        html += '<div class="hist-card-pdv" onclick="verContaPDV(\''+c.id+'\')">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+            '<span style="background:rgba(212,168,67,0.12);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.78rem;font-weight:600;">Mesa '+c.mesa+'</span>'+
+            '<span style="font-size:0.74rem;color:var(--muted);">👤 '+escapeHtml(c.garcom||'—')+'</span>'+
+            '<span style="font-size:0.72rem;color:var(--muted);margin-left:auto;">'+data+'</span>'+
+          '</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+            '<span style="font-size:0.78rem;color:var(--muted);">'+((c.itens||[]).length)+' itens</span>'+
+            '<span style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+(c.total||0).toFixed(2).replace('.',',')+'</span>'+
+          '</div>'+
+        '</div>';
+      });
+      lista.innerHTML = html;
+      window._contasPDV = contas;
+    }).catch(function(e){
+      lista.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
+    });
+}
+
+function verContaPDV(id){
+  var c = (window._contasPDV||[]).find(function(x){ return x.id === id; });
+  if(!c) return;
+  var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR') : '';
+  var msg = 'MESA ' + c.mesa + '\nGarçom: ' + (c.garcom||'—') + '\nFechada: ' + data + '\n\n';
+  msg += 'ITENS:\n';
+  (c.itens||[]).forEach(function(it){
+    msg += '• ' + (it.qtd||1) + 'x ' + it.nome + ' — R$ ' + ((it.preco||0)*(it.qtd||1)).toFixed(2).replace('.',',') + '\n';
+  });
+  msg += '\nSubtotal: R$ ' + (c.subtotal||0).toFixed(2).replace('.',',') + '\n';
+  msg += '+ 10% Garçom: R$ ' + (c.taxa10||0).toFixed(2).replace('.',',') + '\n';
+  msg += 'TOTAL: R$ ' + (c.total||0).toFixed(2).replace('.',',') + '\n\n';
+  msg += 'Restaurar mesa? (volta os pedidos para a mesa)';
+  if(!confirm(msg)) return;
+  // Restaurar
+  var pedido = {
+    garcom: c.garcom || 'Restaurado',
+    mesa: c.mesa,
+    restauranteId: c.restauranteId,
+    tenantId: c.tenantId || null,
+    status: 'aguardando',
+    criadoEm: Date.now(),
+    itens: (c.itens||[]).map(function(it){
+      return {id:it.id,nome:it.nome,preco:it.preco,qtd:it.qtd,obs:it.obs||''};
+    }),
+    total: c.subtotal || 0,
+    restaurado: true
+  };
+  fbDb.collection('pedidos').add(pedido).then(function(){
+    return fbDb.collection('contas_fechadas').doc(c.id).delete();
+  }).then(function(){
+    showToast('✅ Mesa ' + c.mesa + ' restaurada','#4ade80');
+    carregarHistoricoPDV();
+  }).catch(function(e){ showToast('❌ ' + e.message,'#f87171'); });
+}
 
 </script>
 

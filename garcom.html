@@ -447,6 +447,9 @@ header{
     <button class="nav-btn" id="nav-pedidos" onclick="showTab('pedidos')">
       <span class="nav-icon">🧾</span><span id="nav-pedidos-label">Pedidos</span>
     </button>
+    <button class="nav-btn" id="nav-historico" onclick="abrirHistorico()">
+      <span class="nav-icon">📜</span>Histórico
+    </button>
     <button class="nav-btn" id="nav-sair" onclick="sair()">
       <span class="nav-icon">🚪</span>Sair
     </button>
@@ -506,8 +509,8 @@ header{
       </div>
     </div>
     <div class="modal-footer">
-      <button class="f-btn secondary" onclick="fecharModalCarrinho()" style="flex:0 0 auto;padding:13px 18px;">Fechar</button>
-      <button class="f-btn" id="btn-enviar-pedido" onclick="enviarPedido()">Enviar Pedido 🚀</button>
+      <button class="f-btn secondary" onclick="adicionarMaisItens()" style="flex:1;">+ Adicionar itens</button>
+      <button class="f-btn" id="btn-enviar-pedido" onclick="enviarPedido()" style="flex:1;">Enviar 🚀</button>
     </div>
   </div>
 </div>
@@ -729,16 +732,15 @@ function renderMesas(){
     var num = String(i);
     if(busca && !num.includes(busca)) continue;
     var info = _mesasOcupadas[num];
-    var eMinha = info && info.garcom === _nomeGarcom;
-    var eOcupada = info && !eMinha;
-    var cls = 'mesa-card ' + (eMinha ? 'minha' : eOcupada ? 'ocupada' : 'livre');
-    var status = eMinha ? 'Minha mesa' : eOcupada ? 'Ocupada' : 'Livre';
-    var dot = (eMinha||eOcupada) ? '<div class="mesa-dot"></div>' : '';
+    var eOcupada = !!info;
+    var cls = 'mesa-card ' + (eOcupada ? 'ocupada' : 'livre');
+    var status = eOcupada ? 'Ocupada' : 'Livre';
+    var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;
     el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
       '<div class="mesa-status">' + status + '</div>';
-    el.onclick = (function(n){ return function(){ selecionarMesa(n); }; })(num);
+    el.onclick = (function(n, ocupada){ return function(){ abrirMenuMesa(n, ocupada); }; })(num, eOcupada);
     grid.appendChild(el);
   }
 }
@@ -916,19 +918,6 @@ function renderItens(){
       return;
     }
     grid.innerHTML = '';
-    // Card "Todas"
-    var totalDisp = _itens.filter(function(i){ return i.disponivel; }).length;
-    var allCard = document.createElement('div');
-    allCard.className = 'item-card';
-    allCard.style.cssText = 'background:linear-gradient(135deg,rgba(212,168,67,0.18),rgba(212,168,67,0.05));border-color:rgba(212,168,67,0.4);';
-    allCard.innerHTML =
-      '<div class="item-foto" style="font-size:3rem;background:transparent;">🍽️</div>'+
-      '<div class="item-info" style="text-align:center;">'+
-        '<div class="item-nome" style="color:var(--accent);">Ver Todas</div>'+
-        '<div class="item-desc" style="text-align:center;">'+totalDisp+' itens</div>'+
-      '</div>';
-    allCard.onclick = function(){ _catAtiva='todas'; renderCatBar(); renderItens(); };
-    grid.appendChild(allCard);
     // Cards de categorias
     _categorias.forEach(function(cat){
       var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
@@ -941,7 +930,7 @@ function renderItens(){
           '<div class="item-nome">'+esc(cat.nome)+'</div>'+
           '<div class="item-desc" style="text-align:center;">'+count+' '+(count===1?'item':'itens')+'</div>'+
         '</div>';
-      card.onclick = (function(id){ return function(){ _catAtiva=id; renderCatBar(); renderItens(); }; })(cat.id);
+      card.onclick = (function(id){ return function(){ _catAtiva=id; pushHistory('cardapio:'+id); renderCatBar(); renderItens(); }; })(cat.id);
       grid.appendChild(card);
     });
     return;
@@ -1184,7 +1173,8 @@ function adicionarAoCarrinho(){
   fecharModalItem();
   atualizarCarrinhoBadge();
   renderItens();
-  showToast('✅ '+_qtdTemp+'x '+_itemAberto.nome+' adicionado');
+  // Abre carrinho automaticamente
+  abrirModalCarrinho();
 }
 function atualizarCarrinhoBadge(){
   var total = _carrinho.reduce(function(acc,c){ return acc+c.qtd; },0);
@@ -1352,6 +1342,543 @@ function showToast(msg, cor){
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(function(){ el.classList.remove('show'); },2800);
 }
+
+// ════════════════════════════════════════
+//  MENU DA MESA (Fazer Pedido / Ver Pedidos / Fechar)
+// ════════════════════════════════════════
+var _mesaMenuAtual = null;
+
+function abrirMenuMesa(num, eOcupada){
+  _mesaMenuAtual = num;
+  document.getElementById('mesa-menu-titulo').textContent = 'MESA ' + num;
+  // Calcula info da mesa
+  var pedidosMesa = [];
+  // _pedidosMesa será populado por uma escuta separada; usar _mesasOcupadas para info básica
+  var info = _mesasOcupadas[num];
+  var btnPedidos = document.getElementById('btn-mesa-pedidos');
+  var btnFechar = document.getElementById('btn-mesa-fechar');
+  var infoLabel = document.getElementById('mesa-pedidos-info');
+  var totalLabel = document.getElementById('mesa-total-info');
+  if(eOcupada && info){
+    btnPedidos.disabled = false;
+    btnFechar.disabled = false;
+    btnPedidos.style.opacity = '1';
+    btnFechar.style.opacity = '1';
+    infoLabel.textContent = info.count + ' pedido(s) — Garçom: ' + (info.garcom || '—');
+    totalLabel.textContent = 'Calcular conta da mesa';
+  } else {
+    btnPedidos.disabled = true;
+    btnFechar.disabled = true;
+    btnPedidos.style.opacity = '0.4';
+    btnFechar.style.opacity = '0.4';
+    infoLabel.textContent = 'Mesa livre';
+    totalLabel.textContent = 'Mesa livre';
+  }
+  document.getElementById('modal-mesa-menu').classList.add('show');
+  pushHistory('menu-mesa:' + num);
+}
+
+function fecharMenuMesa(){
+  document.getElementById('modal-mesa-menu').classList.remove('show');
+  _mesaMenuAtual = null;
+}
+
+function acaoMesa(acao){
+  var num = _mesaMenuAtual;
+  fecharMenuMesa();
+  if(acao === 'pedido'){
+    selecionarMesa(num);
+    pushHistory('cardapio:null');
+  } else if(acao === 'ver-pedidos'){
+    selecionarMesa(num);
+    setTimeout(function(){ showTab('pedidos'); }, 100);
+  } else if(acao === 'fechar'){
+    abrirFecharConta(num);
+  }
+}
+
+// ════════════════════════════════════════
+//  FECHAR CONTA
+// ════════════════════════════════════════
+var _fecharMesaNum = null;
+var _fecharPedidos = [];
+var _fecharSubtotal = 0;
+var _fecharTaxa = 0;
+var _fecharTotal = 0;
+var _fecharPagamentos = [];
+var _fecharItensPagos = {}; // {pedidoId_idxItem: true}
+var _fecharModo = 'tudo'; // 'tudo' | 'parcial' | 'itens'
+
+function abrirFecharConta(num){
+  _fecharMesaNum = num;
+  _fecharPagamentos = [];
+  _fecharItensPagos = {};
+  _fecharModo = 'tudo';
+  // Busca todos pedidos ativos da mesa
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .where('mesa','==', parseInt(num) || num)
+    .get().then(function(snap){
+      _fecharPedidos = [];
+      snap.forEach(function(d){
+        var v = d.data();
+        if(v.status !== 'entregue' && v.status !== 'cancelado' && v.status !== 'fechado'){
+          _fecharPedidos.push(Object.assign({id: d.id}, v));
+        }
+        // Aceita também 'pronto', 'preparo', 'aguardando' — tudo que não fechou
+      });
+      if(!_fecharPedidos.length){
+        showToast('⚠️ Mesa sem pedidos ativos','#f7a34f');
+        return;
+      }
+      _fecharSubtotal = _fecharPedidos.reduce(function(acc, p){
+        return acc + (p.itens||[]).reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+      }, 0);
+      _fecharTaxa = _fecharSubtotal * 0.10;
+      _fecharTotal = _fecharSubtotal + _fecharTaxa;
+      renderFecharConta();
+      document.getElementById('modal-fechar-conta').classList.add('show');
+      pushHistory('fechar-conta:' + num);
+    }).catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+}
+
+function renderFecharConta(){
+  var body = document.getElementById('fechar-conta-body');
+  var footer = document.getElementById('fechar-conta-footer');
+  var totalPago = _fecharPagamentos.reduce(function(a,p){ return a + p.valor; }, 0);
+  var totalItensPagos = 0;
+  _fecharPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it, idx){
+      var key = p.id + '_' + idx;
+      if(_fecharItensPagos[key]) totalItensPagos += (it.preco||0)*(it.qtd||1);
+    });
+  });
+  var pagoTotal = totalPago + totalItensPagos * 1.10; // itens pagos somam com 10%
+  var restante = Math.max(0, _fecharTotal - pagoTotal);
+
+  var html = '<div class="fechar-bloco">'+
+    '<div class="fechar-linha"><span>Subtotal</span><span class="v">R$ ' + fmtPreco(_fecharSubtotal) + '</span></div>'+
+    '<div class="fechar-linha"><span>+ 10% Garçom</span><span class="v">R$ ' + fmtPreco(_fecharTaxa) + '</span></div>'+
+    '<div class="fechar-linha total"><span>TOTAL</span><span class="v">R$ ' + fmtPreco(_fecharTotal) + '</span></div>'+
+  '</div>';
+
+  if(_fecharPagamentos.length || Object.keys(_fecharItensPagos).length){
+    html += '<div class="fechar-bloco" style="background:rgba(74,222,128,0.06);border-color:rgba(74,222,128,0.25);">';
+    if(_fecharPagamentos.length){
+      _fecharPagamentos.forEach(function(p, idx){
+        html += '<div class="fechar-pago"><span>💵 Pagamento ' + (idx+1) + '</span><span class="v">R$ ' + fmtPreco(p.valor) + ' <button onclick="removerPagamento('+idx+')" style="background:none;border:none;color:var(--danger);margin-left:6px;cursor:pointer;">✕</button></span></div>';
+      });
+    }
+    if(totalItensPagos > 0){
+      html += '<div class="fechar-pago"><span>📋 Itens pagos individualmente</span><span class="v">R$ ' + fmtPreco(totalItensPagos*1.10) + '</span></div>';
+    }
+    html += '<div class="fechar-linha total" style="margin-top:6px;"><span>RESTANTE</span><span class="v" style="color:'+(restante>0?'var(--accent)':'var(--success)')+';">R$ ' + fmtPreco(restante) + '</span></div>';
+    html += '</div>';
+  }
+
+  html += '<div class="fechar-modo-tab">'+
+    '<button class="fechar-modo-btn '+(_fecharModo==='tudo'?'active':'')+'" onclick="setFecharModo(\'tudo\')">Pagar tudo</button>'+
+    '<button class="fechar-modo-btn '+(_fecharModo==='parcial'?'active':'')+'" onclick="setFecharModo(\'parcial\')">Parcial</button>'+
+    '<button class="fechar-modo-btn '+(_fecharModo==='itens'?'active':'')+'" onclick="setFecharModo(\'itens\')">Por itens</button>'+
+  '</div>';
+
+  if(_fecharModo === 'itens'){
+    html += '<div class="fechar-bloco"><div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">Marque os itens pagos:</div>';
+    _fecharPedidos.forEach(function(p){
+      (p.itens||[]).forEach(function(it, idx){
+        var key = p.id + '_' + idx;
+        var pago = !!_fecharItensPagos[key];
+        var valor = (it.preco||0)*(it.qtd||1);
+        html += '<div class="item-pgto '+(pago?'pago':'')+'" onclick="toggleItemPago(\''+key+'\')">'+
+          '<div class="item-pgto-check '+(pago?'checked':'')+'">'+(pago?'✓':'')+'</div>'+
+          '<div style="flex:1;font-size:0.84rem;">'+esc((it.qtd||1)+'x '+it.nome)+'</div>'+
+          '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);">R$ '+fmtPreco(valor)+'</div>'+
+        '</div>';
+      });
+    });
+    html += '<div style="font-size:0.7rem;color:var(--muted);margin-top:10px;">* 10% do garçom será cobrado proporcionalmente.</div></div>';
+  }
+
+  body.innerHTML = html;
+
+  // Footer
+  var podeEncerrar = restante <= 0.01;
+  footer.innerHTML =
+    '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Cancelar</button>' +
+    (_fecharModo==='itens'
+      ? '<button class="f-btn" style="flex:1;background:var(--success);color:#000;'+(podeEncerrar?'':'opacity:0.5;pointer-events:none;')+'" onclick="encerrarConta()">'+(podeEncerrar?'Encerrar Mesa':'Faltam R$ '+fmtPreco(restante))+'</button>'
+      : '<button class="f-btn" style="flex:1;" onclick="abrirPagamento()">'+(_fecharModo==='tudo'?'Pagar R$ '+fmtPreco(restante):'Pagar valor')+'</button>'
+    );
+
+  if(podeEncerrar && _fecharModo !== 'itens'){
+    footer.innerHTML += '<button class="f-btn" style="flex:1;background:var(--success);color:#000;margin-left:8px;" onclick="encerrarConta()">✓ Encerrar</button>';
+  }
+}
+
+function setFecharModo(m){
+  _fecharModo = m;
+  renderFecharConta();
+}
+
+function toggleItemPago(key){
+  if(_fecharItensPagos[key]) delete _fecharItensPagos[key];
+  else _fecharItensPagos[key] = true;
+  renderFecharConta();
+}
+
+function removerPagamento(idx){
+  _fecharPagamentos.splice(idx, 1);
+  renderFecharConta();
+}
+
+function fecharModalFechar(){
+  document.getElementById('modal-fechar-conta').classList.remove('show');
+  _fecharMesaNum = null;
+}
+
+function abrirPagamento(){
+  var totalPago = _fecharPagamentos.reduce(function(a,p){ return a + p.valor; }, 0);
+  var restante = Math.max(0, _fecharTotal - totalPago);
+  var sugerido = _fecharModo === 'tudo' ? restante : (restante / 2);
+  document.getElementById('pagamento-body').innerHTML =
+    '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-bottom:14px;">'+
+      '<div style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Restante</div>'+
+      '<div style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);">R$ '+fmtPreco(restante)+'</div>'+
+    '</div>'+
+    '<label style="display:block;font-size:0.74rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Valor recebido (R$)</label>'+
+    '<input type="number" id="pgto-valor" step="0.01" min="0" max="'+restante.toFixed(2)+'" value="'+sugerido.toFixed(2)+'" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px 14px;font-size:1.1rem;font-family:inherit;outline:none;">'+
+    '<div style="font-size:0.7rem;color:var(--muted);margin-top:8px;">💵 Forma: Dinheiro</div>';
+  document.getElementById('modal-pagamento').classList.add('show');
+  setTimeout(function(){ document.getElementById('pgto-valor').focus(); document.getElementById('pgto-valor').select(); }, 100);
+}
+
+function confirmarPagamento(){
+  var valor = parseFloat(document.getElementById('pgto-valor').value)||0;
+  if(valor <= 0){ showToast('Valor inválido','#f7a34f'); return; }
+  _fecharPagamentos.push({ valor: valor, forma: 'dinheiro', data: Date.now() });
+  document.getElementById('modal-pagamento').classList.remove('show');
+  renderFecharConta();
+  showToast('✓ R$ ' + fmtPreco(valor) + ' registrado','#4ade80');
+}
+
+function encerrarConta(){
+  if(!_fecharPedidos.length) return;
+  var totalPago = _fecharPagamentos.reduce(function(a,p){ return a + p.valor; }, 0);
+  var totalItensPagos = 0;
+  _fecharPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it, idx){
+      var key = p.id + '_' + idx;
+      if(_fecharItensPagos[key]) totalItensPagos += (it.preco||0)*(it.qtd||1);
+    });
+  });
+  var pagoTotal = totalPago + totalItensPagos * 1.10;
+  if(pagoTotal < _fecharTotal - 0.01){
+    showToast('⚠️ Falta pagamento','#f7a34f');
+    return;
+  }
+  if(!confirm('Encerrar mesa ' + _fecharMesaNum + '?\nTotal: R$ ' + fmtPreco(_fecharTotal))) return;
+
+  // Cria registro em contas_fechadas
+  var todosItens = [];
+  _fecharPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){ todosItens.push(Object.assign({}, it, {pedidoOrigem: p.id})); });
+  });
+  var registro = {
+    mesa: _fecharMesaNum,
+    garcom: _fecharPedidos[0].garcom || _nomeGarcom,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    itens: todosItens,
+    subtotal: _fecharSubtotal,
+    taxa10: _fecharTaxa,
+    total: _fecharTotal,
+    pagamentos: _fecharPagamentos,
+    pedidosOriginais: _fecharPedidos.map(function(p){ return p.id; }),
+    fechadoEm: Date.now(),
+    fechadoPor: _nomeGarcom
+  };
+  fbDb.collection('contas_fechadas').add(registro).then(function(){
+    // Marca pedidos como fechados (deletando)
+    var batch = fbDb.batch();
+    _fecharPedidos.forEach(function(p){
+      batch.delete(fbDb.collection('pedidos').doc(p.id));
+    });
+    return batch.commit();
+  }).then(function(){
+    showToast('✅ Mesa ' + _fecharMesaNum + ' encerrada!','#4ade80');
+    fecharModalFechar();
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
+}
+
+// ════════════════════════════════════════
+//  HISTÓRICO
+// ════════════════════════════════════════
+function abrirHistorico(){
+  var body = document.getElementById('historico-body');
+  body.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
+  document.getElementById('modal-historico').classList.add('show');
+  pushHistory('historico');
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', _restauranteId)
+    .get().then(function(snap){
+      var lista = [];
+      snap.forEach(function(d){ lista.push(Object.assign({id: d.id}, d.data())); });
+      lista.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });
+      if(!lista.length){
+        body.innerHTML = '<div class="empty"><div class="empty-icon">📜</div><div class="empty-titulo">Nenhuma conta fechada</div><div class="empty-sub">Suas contas fechadas aparecerão aqui.</div></div>';
+        return;
+      }
+      body.innerHTML = '';
+      lista.slice(0, 50).forEach(function(c){
+        var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+        var card = document.createElement('div');
+        card.className = 'hist-card';
+        card.innerHTML =
+          '<div class="hist-head">'+
+            '<span class="hist-mesa">Mesa ' + c.mesa + '</span>'+
+            '<span style="font-size:0.74rem;color:var(--muted);">👤 ' + esc(c.garcom||'—') + '</span>'+
+            '<span class="hist-data">' + data + '</span>'+
+          '</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+            '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
+            '<span class="hist-total">R$ ' + fmtPreco(c.total||0) + '</span>'+
+          '</div>';
+        card.onclick = (function(conta){ return function(){ verContaDetalhe(conta); }; })(c);
+        body.appendChild(card);
+      });
+    }).catch(function(e){
+      body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
+    });
+}
+
+var _contaDetalheAtual = null;
+function verContaDetalhe(c){
+  _contaDetalheAtual = c;
+  document.getElementById('conta-detalhe-titulo').textContent = 'MESA ' + c.mesa;
+  var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR') : '';
+  var html = '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">'+
+    'Fechada em ' + data + '<br>👤 ' + esc(c.garcom||'—') + (c.fechadoPor && c.fechadoPor!==c.garcom ? ' (cobrou: '+esc(c.fechadoPor)+')' : '') +
+  '</div>';
+  html += '<div class="fechar-bloco">';
+  (c.itens||[]).forEach(function(it){
+    html += '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:0.84rem;border-bottom:1px solid var(--border);"><span>' + (it.qtd||1) + 'x ' + esc(it.nome) + (it.obs?'<br><span style="color:var(--muted);font-size:0.7rem;">📝 '+esc(it.obs)+'</span>':'') + '</span><span style="font-family:Bebas Neue,sans-serif;color:var(--accent);">R$ ' + fmtPreco((it.preco||0)*(it.qtd||1)) + '</span></div>';
+  });
+  html += '</div>';
+  html += '<div class="fechar-bloco">'+
+    '<div class="fechar-linha"><span>Subtotal</span><span class="v">R$ '+fmtPreco(c.subtotal||0)+'</span></div>'+
+    '<div class="fechar-linha"><span>+ 10% Garçom</span><span class="v">R$ '+fmtPreco(c.taxa10||0)+'</span></div>'+
+    '<div class="fechar-linha total"><span>TOTAL</span><span class="v">R$ '+fmtPreco(c.total||0)+'</span></div>'+
+  '</div>';
+  if((c.pagamentos||[]).length){
+    html += '<div class="fechar-bloco" style="background:rgba(74,222,128,0.06);"><div style="font-size:0.74rem;color:var(--muted);margin-bottom:6px;">Pagamentos</div>';
+    c.pagamentos.forEach(function(p){
+      html += '<div class="fechar-pago"><span>💵 Dinheiro</span><span class="v">R$ '+fmtPreco(p.valor)+'</span></div>';
+    });
+    html += '</div>';
+  }
+  document.getElementById('conta-detalhe-body').innerHTML = html;
+  document.getElementById('modal-conta-detalhe').classList.add('show');
+}
+
+function restaurarConta(){
+  if(!_contaDetalheAtual) return;
+  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA conta será reaberta e os pedidos voltarão.')) return;
+  var c = _contaDetalheAtual;
+  // Recria pedido único com todos os itens da conta
+  var pedido = {
+    garcom: c.garcom || _nomeGarcom,
+    mesa: c.mesa,
+    restauranteId: c.restauranteId || _restauranteId,
+    tenantId: c.tenantId || _tenantId,
+    status: 'aguardando',
+    criadoEm: Date.now(),
+    itens: (c.itens||[]).map(function(it){
+      return { id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'' };
+    }),
+    total: c.subtotal || 0,
+    restaurado: true,
+    contaOrigem: c.id
+  };
+  fbDb.collection('pedidos').add(pedido).then(function(){
+    return fbDb.collection('contas_fechadas').doc(c.id).delete();
+  }).then(function(){
+    showToast('✅ Mesa ' + c.mesa + ' restaurada!','#4ade80');
+    document.getElementById('modal-conta-detalhe').classList.remove('show');
+    document.getElementById('modal-historico').classList.remove('show');
+  }).catch(function(e){
+    showToast('❌ ' + e.message,'#f87171');
+  });
+}
+
+// ════════════════════════════════════════
+//  ADICIONAR MAIS ITENS NO CARRINHO
+// ════════════════════════════════════════
+function adicionarMaisItens(){
+  fecharModalCarrinho();
+  // Volta para grade de categorias
+  _catAtiva = null;
+  renderCatBar();
+  renderItens();
+}
+
+// ════════════════════════════════════════
+//  HISTORY API (botão voltar do celular)
+// ════════════════════════════════════════
+var _historyStack = [];
+function pushHistory(state){
+  _historyStack.push(state);
+  try{ history.pushState({appState: state}, '', ''); }catch(e){}
+}
+window.addEventListener('popstate', function(e){
+  // Tenta voltar no estado interno
+  if(_historyStack.length > 0){
+    _historyStack.pop();
+  }
+  // Lógica de voltar baseada no estado atual visível
+  // 1. Modal aberto? Fecha modal
+  var modaisAbertos = document.querySelectorAll('.modal.show');
+  if(modaisAbertos.length > 0){
+    var ultimo = modaisAbertos[modaisAbertos.length-1];
+    ultimo.classList.remove('show');
+    return;
+  }
+  // 2. Em uma categoria? Volta pra lista de categorias
+  if(_catAtiva !== null && document.getElementById('app').style.display !== 'none'){
+    _catAtiva = null;
+    renderCatBar();
+    renderItens();
+    return;
+  }
+  // 3. Está no app de uma mesa? Volta pra seleção de mesas
+  if(document.getElementById('app').style.display !== 'none' && document.getElementById('app').style.display !== ''){
+    voltarParaMesas();
+    return;
+  }
+  if(document.getElementById('app').style.display === 'flex'){
+    voltarParaMesas();
+    return;
+  }
+});
+
+// Push estado inicial pra que o voltar funcione
+try{ history.replaceState({appState: 'init'}, '', ''); }catch(e){}
 </script>
+<!-- Modal: Menu da Mesa (ao tocar) -->
+<div class="modal" id="modal-mesa-menu">
+  <div class="modal-box" style="max-width:340px;">
+    <div class="modal-header">
+      <div class="modal-titulo" id="mesa-menu-titulo">MESA —</div>
+      <button class="modal-fechar" onclick="fecharMenuMesa()">×</button>
+    </div>
+    <div class="modal-body" style="padding:8px;">
+      <button class="mesa-menu-item" onclick="acaoMesa('pedido')">
+        <span style="font-size:1.4rem;margin-right:12px;">📝</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;">Fazer Pedido</div>
+          <div style="font-size:0.74rem;color:var(--muted);">Adicionar itens à mesa</div>
+        </div>
+      </button>
+      <button class="mesa-menu-item" id="btn-mesa-pedidos" onclick="acaoMesa('ver-pedidos')">
+        <span style="font-size:1.4rem;margin-right:12px;">📜</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;">Ver Pedidos</div>
+          <div style="font-size:0.74rem;color:var(--muted);" id="mesa-pedidos-info">—</div>
+        </div>
+      </button>
+      <button class="mesa-menu-item" id="btn-mesa-fechar" onclick="acaoMesa('fechar')">
+        <span style="font-size:1.4rem;margin-right:12px;">💰</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;">Fechar Conta</div>
+          <div style="font-size:0.74rem;color:var(--muted);" id="mesa-total-info">—</div>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Fechar Conta -->
+<div class="modal" id="modal-fechar-conta">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-titulo">FECHAR CONTA</div>
+      <button class="modal-fechar" onclick="fecharModalFechar()">×</button>
+    </div>
+    <div class="modal-body" id="fechar-conta-body"></div>
+    <div class="modal-footer" id="fechar-conta-footer"></div>
+  </div>
+</div>
+
+<!-- Modal: Pagamento -->
+<div class="modal" id="modal-pagamento">
+  <div class="modal-box" style="max-width:380px;">
+    <div class="modal-header">
+      <div class="modal-titulo">REGISTRAR PAGAMENTO</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-pagamento').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body" id="pagamento-body"></div>
+    <div class="modal-footer">
+      <button class="f-btn secondary" style="flex:0 0 auto;padding:11px 16px;" onclick="document.getElementById('modal-pagamento').classList.remove('show')">Cancelar</button>
+      <button class="f-btn" onclick="confirmarPagamento()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Histórico -->
+<div class="modal" id="modal-historico">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-titulo">HISTÓRICO DE CONTAS</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-historico').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body" id="historico-body"></div>
+  </div>
+</div>
+
+<!-- Modal: Detalhe Conta Fechada -->
+<div class="modal" id="modal-conta-detalhe">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-titulo" id="conta-detalhe-titulo">CONTA</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-conta-detalhe').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body" id="conta-detalhe-body"></div>
+    <div class="modal-footer">
+      <button class="f-btn secondary" style="flex:1;" onclick="document.getElementById('modal-conta-detalhe').classList.remove('show')">Fechar</button>
+      <button class="f-btn" id="btn-restaurar-mesa" onclick="restaurarConta()" style="flex:1;background:var(--warning);">↺ Restaurar Mesa</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.mesa-menu-item{display:flex;align-items:center;width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:8px;color:var(--text);font-family:inherit;cursor:pointer;transition:all 0.15s;}
+.mesa-menu-item:active{background:var(--surface3);border-color:var(--accent);}
+.mesa-menu-item:disabled{opacity:0.5;cursor:not-allowed;}
+.fechar-linha{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:0.88rem;}
+.fechar-linha.total{border-top:1px solid var(--border);padding-top:12px;margin-top:8px;font-weight:700;}
+.fechar-linha .v{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:0.04em;}
+.fechar-linha.total .v{font-size:1.5rem;}
+.fechar-bloco{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px;}
+.fechar-modo-tab{display:flex;gap:6px;margin-bottom:14px;}
+.fechar-modo-btn{flex:1;padding:10px;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;color:var(--muted);font-size:0.78rem;font-weight:600;font-family:inherit;cursor:pointer;}
+.fechar-modo-btn.active{background:var(--accent);color:#000;border-color:var(--accent);}
+.fechar-pago{display:flex;justify-content:space-between;padding:6px 0;font-size:0.82rem;color:var(--muted);}
+.fechar-pago .v{color:var(--success);font-weight:600;}
+.item-pgto{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.item-pgto:last-child{border-bottom:none;}
+.item-pgto.pago{opacity:0.5;text-decoration:line-through;}
+.item-pgto-check{width:22px;height:22px;border:2px solid var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;}
+.item-pgto-check.checked{background:var(--accent);border-color:var(--accent);color:#000;}
+.hist-card{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:10px;cursor:pointer;}
+.hist-card:active{border-color:var(--accent);}
+.hist-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;}
+.hist-mesa{background:rgba(212,168,67,0.12);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.78rem;font-weight:600;}
+.hist-data{font-size:0.72rem;color:var(--muted);margin-left:auto;}
+.hist-total{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--accent);}
+</style>
+
 </body>
 </html>

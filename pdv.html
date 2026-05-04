@@ -282,6 +282,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
     <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾 Pedidos <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
     <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜 Histórico</button>
     <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥 Garçons</button>
+    <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️ Impressão</button>
   </div>
 
   <!-- Painel Grupos -->
@@ -311,6 +312,131 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
   <!-- Painel Histórico -->
   <div id="painel-historico" style="display:none;padding:14px;padding-bottom:90px;">
     <div id="historico-pdv-lista"></div>
+  </div>
+
+  <!-- Painel Impressão -->
+  <div id="painel-impressao" style="display:none;padding:14px;padding-bottom:120px;">
+    <!-- Status QZ Tray -->
+    <div id="qz-status-box" style="background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;">
+      <span id="qz-status-icon" style="font-size:1.6rem;">⚪</span>
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:0.95rem;" id="qz-status-titulo">Verificando QZ Tray...</div>
+        <div style="font-size:0.74rem;color:var(--muted);margin-top:2px;" id="qz-status-sub">Aguarde</div>
+      </div>
+      <button class="p-btn secondary" style="flex:0 0 auto;padding:8px 12px;font-size:0.75rem;" onclick="qzReconectar()">↻ Reconectar</button>
+    </div>
+
+    <!-- Tabs internas -->
+    <div style="display:flex;gap:6px;margin-bottom:14px;background:var(--surface2);border-radius:10px;padding:4px;">
+      <button class="imp-subtab active" id="impsub-impressoras" onclick="showImpSubTab('impressoras')">🖨️ Impressoras</button>
+      <button class="imp-subtab" id="impsub-modelos" onclick="showImpSubTab('modelos')">📋 Modelos</button>
+      <button class="imp-subtab" id="impsub-config" onclick="showImpSubTab('config')">⚙️ Config</button>
+    </div>
+
+    <!-- Sub-painel Impressoras -->
+    <div id="imp-painel-impressoras">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="flex:1;font-size:0.74rem;color:var(--muted);">Cadastre as impressoras do restaurante (ex: Cozinha, Bar)</div>
+        <button class="p-btn primary" style="flex:0 0 auto;padding:8px 12px;" onclick="abrirNovaImpressora()">+ Nova</button>
+      </div>
+      <div id="impressoras-lista"></div>
+    </div>
+
+    <!-- Sub-painel Modelos -->
+    <div id="imp-painel-modelos" style="display:none;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="flex:1;font-size:0.74rem;color:var(--muted);">Modelos definem o que cada impressora imprime (ex: bebidas vão pro bar)</div>
+        <button class="p-btn primary" style="flex:0 0 auto;padding:8px 12px;" onclick="abrirNovoModelo()">+ Novo</button>
+      </div>
+      <div id="modelos-lista"></div>
+    </div>
+
+    <!-- Sub-painel Config -->
+    <div id="imp-painel-config" style="display:none;">
+      <div class="cfg-bloco">
+        <h3 class="cfg-titulo">📄 Cabeçalho do Cupom</h3>
+        <div class="f-grupo">
+          <label class="f-label">Nome do Restaurante</label>
+          <input type="text" class="f-input" id="cfg-restaurante-nome" placeholder="Bávaro Bar e Restaurante" maxlength="40">
+        </div>
+        <div class="f-grupo">
+          <label class="f-label">Endereço (linha 1)</label>
+          <input type="text" class="f-input" id="cfg-endereco1" placeholder="Rua das Flores, 123" maxlength="50">
+        </div>
+        <div class="f-grupo">
+          <label class="f-label">Endereço (linha 2) / Telefone</label>
+          <input type="text" class="f-input" id="cfg-endereco2" placeholder="Tel: (00) 00000-0000" maxlength="50">
+        </div>
+        <div class="f-grupo">
+          <label class="f-label">Rodapé (mensagem de agradecimento)</label>
+          <input type="text" class="f-input" id="cfg-rodape" placeholder="Obrigado! Volte sempre!" maxlength="60">
+        </div>
+      </div>
+
+      <div class="cfg-bloco">
+        <h3 class="cfg-titulo">🚫 Cancelamentos</h3>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-cancel-imprimir" checked>
+          <span>Imprimir cupom de cancelamento</span>
+        </label>
+        <div class="f-grupo">
+          <label class="f-label">Imprimir cancelamento em qual impressora?</label>
+          <select class="f-select" id="cfg-cancel-impressora">
+            <option value="todas">Todas as impressoras</option>
+            <option value="origem">Mesma impressora do pedido original</option>
+          </select>
+        </div>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-cancel-senha">
+          <span>Pedir senha do gerente para cancelar</span>
+        </label>
+        <div class="f-grupo" id="cfg-senha-wrap" style="display:none;">
+          <label class="f-label">Senha do gerente</label>
+          <input type="password" class="f-input" id="cfg-cancel-senha-valor" maxlength="10">
+        </div>
+        <div class="f-grupo">
+          <label class="f-label">Motivos de cancelamento (um por linha)</label>
+          <textarea class="f-textarea" id="cfg-cancel-motivos" placeholder="Cliente desistiu&#10;Erro no pedido&#10;Pedido demorou demais" style="min-height:80px;"></textarea>
+        </div>
+      </div>
+
+      <div class="cfg-bloco">
+        <h3 class="cfg-titulo">🖨️ Opções de Impressão</h3>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-mesa" checked>
+          <span>Mostrar mesa no cupom</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-garcom" checked>
+          <span>Mostrar nome do garçom</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-hora" checked>
+          <span>Mostrar hora do pedido</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-obs" checked>
+          <span>Mostrar observações dos itens</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-precos" checked>
+          <span>Mostrar preços (desmarque para via da cozinha)</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-corte-papel" checked>
+          <span>Cortar papel automaticamente após imprimir</span>
+        </label>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-beep" checked>
+          <span>Soar beep ao imprimir (alerta cozinha)</span>
+        </label>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="p-btn secondary" style="flex:1;" onclick="testarImpressaoTodas()">🧪 Testar Impressão</button>
+        <button class="p-btn primary" style="flex:1;" onclick="salvarConfigImpressao()">💾 Salvar Config</button>
+      </div>
+    </div>
   </div>
 
   <!-- Painel Garçons -->
@@ -460,6 +586,8 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsrsasign@10.9.0/lib/jsrsasign-all-min.js"></script>
 <script>
 // ═══ CONFIG ═══
 var firebaseConfig = {
@@ -1120,11 +1248,13 @@ function showTab(tab) {
   var btnP = document.getElementById('tab-btn-pedidos');
   var btnH = document.getElementById('tab-btn-historico');
   var btnG = document.getElementById('tab-btn-garcons');
+  var btnI = document.getElementById('tab-btn-impressao');
   if(btnC) btnC.classList.toggle('active', tab === 'cardapio');
   if(btnGr) btnGr.classList.toggle('active', tab === 'grupos');
   if(btnP) btnP.classList.toggle('active', tab === 'pedidos');
   if(btnH) btnH.classList.toggle('active', tab === 'historico');
   if(btnG) btnG.classList.toggle('active', tab === 'garcons');
+  if(btnI) btnI.classList.toggle('active', tab === 'impressao');
   var catBar = document.getElementById('cat-bar');
   var buscaBar = document.querySelector('.busca-bar');
   var itensGrid = document.getElementById('itens-grid');
@@ -1133,6 +1263,7 @@ function showTab(tab) {
   var painelH = document.getElementById('painel-historico');
   var painelG = document.getElementById('painel-garcons');
   var painelGr = document.getElementById('painel-grupos');
+  var painelI = document.getElementById('painel-impressao');
   // Esconde tudo
   if(catBar) catBar.style.display = 'none';
   if(buscaBar) buscaBar.style.display = 'none';
@@ -1142,6 +1273,7 @@ function showTab(tab) {
   if(painelH) painelH.style.display = 'none';
   if(painelG) painelG.style.display = 'none';
   if(painelGr) painelGr.style.display = 'none';
+  if(painelI) painelI.style.display = 'none';
   // Mostra a aba ativa
   if(tab === 'cardapio') {
     if(itensGrid) itensGrid.style.display = '';
@@ -1159,6 +1291,9 @@ function showTab(tab) {
   } else if(tab === 'garcons') {
     if(painelG) painelG.style.display = 'block';
     carregarGarconsPDV();
+  } else if(tab === 'impressao') {
+    if(painelI) painelI.style.display = 'block';
+    abrirAbaImpressao();
   }
 }
 
@@ -1248,6 +1383,9 @@ function renderPedidosPDV() {
       '<div class="pedido-total-row">' +
         '<span class="pedido-total-label">Total</span>' +
         '<span class="pedido-total-val">R$ ' + formatarPreco(total) + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button class="p-btn secondary" style="flex:1;" onclick="reimprimirPedido(\'' + p.id + '\')">🖨️ Reimprimir</button>' +
       '</div>';
     wrap.appendChild(card);
   });
@@ -1931,8 +2069,899 @@ function moverItem(idArrastado, idAlvo){
     showToast('✓ Ordem atualizada','#4ade80');
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
+// ════════════════════════════════════════════════════════════
+//  IMPRESSÃO (QZ Tray + Bematech)
+// ════════════════════════════════════════════════════════════
+var _impressoras = [];      // [{id, nome, tipo:'usb'|'rede', nomeWindows, ip, porta, largura}]
+var _modelos = [];          // [{id, nome, impressoraId, filtro:'categoria'|'item', categorias:[], itens:[], mostrarPrecos}]
+var _configImp = {
+  restauranteNome: 'Bávaro Bar e Restaurante',
+  endereco1: '', endereco2: '', rodape: 'Obrigado! Volte sempre!',
+  cancelImprimir: true, cancelImpressora: 'todas',
+  cancelSenha: false, cancelSenhaValor: '',
+  cancelMotivos: 'Cliente desistiu\nErro no pedido\nDemorou demais',
+  imprimirMesa: true, imprimirGarcom: true, imprimirHora: true,
+  imprimirObs: true, imprimirPrecos: true,
+  cortePapel: true, beep: true
+};
+var _qzPronto = false;
+var _impEditandoId = null;
+var _modEditandoId = null;
+var _ultimosPedidosImpressos = {}; // {pedidoId: true} pra evitar duplicar
+
+function fbColImpressao(sub){
+  if(_tenantId){
+    return fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteAtivo.id)
+      .collection('impressao').doc('config').collection(sub);
+  }
+  return fbDb.collection('impressao_publico').doc(_restauranteAtivo.id).collection(sub);
+}
+function fbDocConfigImp(){
+  if(_tenantId){
+    return fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteAtivo.id)
+      .collection('impressao').doc('config_geral');
+  }
+  return fbDb.collection('impressao_publico').doc(_restauranteAtivo.id);
+}
+
+// ─── QZ TRAY ───
+function qzInicializar(){
+  if(typeof qz === 'undefined'){
+    atualizarStatusQZ('erro', 'QZ Tray não carregado', 'Recarregue a página');
+    return;
+  }
+  // Configuração para usar sem certificado (modo dev/uso local)
+  qz.security.setCertificatePromise(function(resolve){ resolve(); });
+  qz.security.setSignatureAlgorithm('SHA512');
+  qz.security.setSignaturePromise(function(){ return function(resolve){ resolve(); }; });
+  qzReconectar();
+}
+
+function qzReconectar(){
+  if(typeof qz === 'undefined') return;
+  atualizarStatusQZ('conectando', 'Conectando ao QZ Tray...', 'Verificando se o programa está aberto');
+  if(qz.websocket.isActive()){
+    qz.websocket.disconnect().then(qzConectar).catch(qzConectar);
+  } else {
+    qzConectar();
+  }
+}
+
+function qzConectar(){
+  qz.websocket.connect().then(function(){
+    _qzPronto = true;
+    atualizarStatusQZ('online', '✓ QZ Tray conectado', 'Pronto para imprimir');
+    iniciarListenerImpressao();
+  }).catch(function(e){
+    _qzPronto = false;
+    atualizarStatusQZ('offline', '⚠️ QZ Tray não conectado', 'Abra o QZ Tray no PC do caixa');
+    console.warn('QZ erro:', e);
+  });
+}
+
+function atualizarStatusQZ(estado, titulo, sub){
+  var ico = document.getElementById('qz-status-icon');
+  var t = document.getElementById('qz-status-titulo');
+  var s = document.getElementById('qz-status-sub');
+  if(!ico) return;
+  if(estado === 'online'){ ico.textContent = '🟢'; }
+  else if(estado === 'conectando'){ ico.textContent = '🟡'; }
+  else if(estado === 'erro'){ ico.textContent = '🔴'; }
+  else { ico.textContent = '⚪'; }
+  if(t) t.textContent = titulo;
+  if(s) s.textContent = sub;
+}
+
+// ─── ABRIR ABA IMPRESSÃO ───
+function abrirAbaImpressao(){
+  qzInicializar();
+  carregarImpressoras();
+  carregarModelos();
+  carregarConfigImp();
+  showImpSubTab('impressoras');
+}
+
+function showImpSubTab(t){
+  ['impressoras','modelos','config'].forEach(function(s){
+    var btn = document.getElementById('impsub-'+s);
+    var pan = document.getElementById('imp-painel-'+s);
+    if(btn) btn.classList.toggle('active', s===t);
+    if(pan) pan.style.display = s===t ? 'block' : 'none';
+  });
+}
+
+// ─── IMPRESSORAS CRUD ───
+function carregarImpressoras(){
+  if(!fbDb || !_restauranteAtivo) return;
+  fbColImpressao('impressoras').get().then(function(snap){
+    _impressoras = [];
+    snap.forEach(function(d){ _impressoras.push(Object.assign({id:d.id}, d.data())); });
+    _impressoras.sort(function(a,b){ return (a.criadoEm||0)-(b.criadoEm||0); });
+    renderImpressoras();
+  }).catch(function(e){ console.warn('Imps:', e); });
+}
+
+function renderImpressoras(){
+  var lista = document.getElementById('impressoras-lista');
+  if(!lista) return;
+  if(!_impressoras.length){
+    lista.innerHTML = '<div class="empty"><div class="empty-icon">🖨️</div><div class="empty-titulo">Nenhuma impressora</div><div class="empty-sub">Toque em "+ Nova" para cadastrar a primeira (Cozinha, Bar, etc.)</div></div>';
+    return;
+  }
+  lista.innerHTML = '';
+  _impressoras.forEach(function(imp){
+    var card = document.createElement('div');
+    card.className = 'imp-card';
+    var endereco = imp.tipo === 'usb' ? (imp.nomeWindows||'(sem nome)') : (imp.ip+':'+imp.porta);
+    card.innerHTML =
+      '<div class="imp-card-head">'+
+        '<span class="imp-tipo-tag '+imp.tipo+'">'+(imp.tipo==='usb'?'🔌 USB':'🌐 IP')+'</span>'+
+        '<span style="font-weight:700;font-size:1rem;flex:1;">'+escapeHtml(imp.nome||'')+'</span>'+
+        '<span class="imp-status-dot '+(_qzPronto?'online':'offline')+'"></span>'+
+      '</div>'+
+      '<div style="font-size:0.78rem;color:var(--muted);font-family:monospace;">'+escapeHtml(endereco)+'</div>'+
+      '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">'+(imp.largura||48)+' colunas</div>';
+    card.onclick = (function(i){ return function(){ abrirEditarImpressora(i); }; })(imp);
+    lista.appendChild(card);
+  });
+}
+
+function abrirNovaImpressora(){
+  _impEditandoId = null;
+  document.getElementById('modal-impressora-titulo').textContent = 'NOVA IMPRESSORA';
+  document.getElementById('imp-nome').value = '';
+  document.querySelector('input[name="imp-tipo"][value="usb"]').checked = true;
+  document.getElementById('imp-nome-windows').innerHTML = '<option>Toque em Detectar para listar</option>';
+  document.getElementById('imp-ip').value = '';
+  document.getElementById('imp-porta').value = '9100';
+  document.getElementById('imp-largura').value = '48';
+  document.getElementById('btn-excluir-imp').style.display = 'none';
+  atualizarCamposImpressora();
+  document.getElementById('modal-impressora').classList.add('show');
+  if(_qzPronto) detectarImpressorasUSB();
+}
+
+function abrirEditarImpressora(imp){
+  _impEditandoId = imp.id;
+  document.getElementById('modal-impressora-titulo').textContent = 'EDITAR IMPRESSORA';
+  document.getElementById('imp-nome').value = imp.nome || '';
+  document.querySelector('input[name="imp-tipo"][value="'+(imp.tipo||'usb')+'"]').checked = true;
+  document.getElementById('imp-ip').value = imp.ip || '';
+  document.getElementById('imp-porta').value = imp.porta || '9100';
+  document.getElementById('imp-largura').value = imp.largura || '48';
+  document.getElementById('btn-excluir-imp').style.display = 'inline-flex';
+  atualizarCamposImpressora();
+  if(imp.tipo === 'usb' && imp.nomeWindows){
+    var sel = document.getElementById('imp-nome-windows');
+    sel.innerHTML = '<option value="'+escapeHtml(imp.nomeWindows)+'" selected>'+escapeHtml(imp.nomeWindows)+'</option>';
+    if(_qzPronto) detectarImpressorasUSB(imp.nomeWindows);
+  }
+  document.getElementById('modal-impressora').classList.add('show');
+}
+
+function atualizarCamposImpressora(){
+  var tipo = (document.querySelector('input[name="imp-tipo"]:checked')||{}).value || 'usb';
+  document.getElementById('imp-campo-usb').style.display = tipo==='usb'?'':'none';
+  document.getElementById('imp-campo-rede').style.display = tipo==='rede'?'':'none';
+}
+
+function detectarImpressorasUSB(selecionada){
+  var sel = document.getElementById('imp-nome-windows');
+  if(!_qzPronto){ sel.innerHTML = '<option>QZ Tray desconectado — não é possível detectar</option>'; return; }
+  sel.innerHTML = '<option>Detectando...</option>';
+  qz.printers.find().then(function(printers){
+    if(!printers.length){
+      sel.innerHTML = '<option>Nenhuma impressora encontrada</option>';
+      return;
+    }
+    sel.innerHTML = '';
+    printers.forEach(function(p){
+      var opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      if(selecionada && p === selecionada) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }).catch(function(e){
+    sel.innerHTML = '<option>Erro: '+e.message+'</option>';
+  });
+}
+
+function salvarImpressora(){
+  var nome = document.getElementById('imp-nome').value.trim();
+  if(!nome){ showToast('Digite o nome','#f7a34f'); return; }
+  var tipo = (document.querySelector('input[name="imp-tipo"]:checked')||{}).value || 'usb';
+  var dados = {
+    nome: nome, tipo: tipo,
+    largura: parseInt(document.getElementById('imp-largura').value) || 48,
+    atualizadoEm: Date.now()
+  };
+  if(tipo === 'usb'){
+    dados.nomeWindows = document.getElementById('imp-nome-windows').value;
+    if(!dados.nomeWindows || dados.nomeWindows.indexOf('Toque') >= 0 || dados.nomeWindows.indexOf('Detect') >= 0){
+      showToast('Selecione a impressora do Windows','#f7a34f'); return;
+    }
+  } else {
+    dados.ip = document.getElementById('imp-ip').value.trim();
+    dados.porta = parseInt(document.getElementById('imp-porta').value) || 9100;
+    if(!dados.ip){ showToast('Digite o IP','#f7a34f'); return; }
+  }
+  var p;
+  if(_impEditandoId){
+    p = fbColImpressao('impressoras').doc(_impEditandoId).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    p = fbColImpressao('impressoras').add(dados);
+  }
+  p.then(function(){
+    showToast('✓ Impressora salva','#4ade80');
+    document.getElementById('modal-impressora').classList.remove('show');
+    carregarImpressoras();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function excluirImpressora(){
+  if(!_impEditandoId) return;
+  if(!confirm('Excluir esta impressora?\nModelos que usam ela vão ficar sem destino.')) return;
+  fbColImpressao('impressoras').doc(_impEditandoId).delete().then(function(){
+    showToast('🗑️ Excluída','#f87171');
+    document.getElementById('modal-impressora').classList.remove('show');
+    carregarImpressoras();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function testarImpressora(){
+  var nome = document.getElementById('imp-nome').value.trim() || 'Teste';
+  var tipo = (document.querySelector('input[name="imp-tipo"]:checked')||{}).value || 'usb';
+  var imp = {
+    nome: nome, tipo: tipo,
+    largura: parseInt(document.getElementById('imp-largura').value) || 48,
+    nomeWindows: document.getElementById('imp-nome-windows').value,
+    ip: document.getElementById('imp-ip').value.trim(),
+    porta: parseInt(document.getElementById('imp-porta').value) || 9100
+  };
+  enviarParaImpressora(imp, gerarCupomTeste(imp));
+}
+
+function testarImpressaoTodas(){
+  if(!_impressoras.length){ showToast('Cadastre uma impressora primeiro','#f7a34f'); return; }
+  _impressoras.forEach(function(imp){
+    enviarParaImpressora(imp, gerarCupomTeste(imp));
+  });
+}
+
+// ─── MODELOS CRUD ───
+function carregarModelos(){
+  if(!fbDb || !_restauranteAtivo) return;
+  fbColImpressao('modelos').get().then(function(snap){
+    _modelos = [];
+    snap.forEach(function(d){ _modelos.push(Object.assign({id:d.id}, d.data())); });
+    renderModelos();
+  }).catch(function(e){ console.warn('Modelos:', e); });
+}
+
+function renderModelos(){
+  var lista = document.getElementById('modelos-lista');
+  if(!lista) return;
+  if(!_modelos.length){
+    lista.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-titulo">Nenhum modelo</div><div class="empty-sub">Crie modelos para definir o que cada impressora imprime.<br><br>Ex: "Bebidas" → bar, "Cozinha" → cozinha</div></div>';
+    return;
+  }
+  lista.innerHTML = '';
+  _modelos.forEach(function(m){
+    var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
+    var nomeImp = imp ? imp.nome : '(impressora removida)';
+    var qtd = m.filtro === 'item' ? (m.itens||[]).length : (m.categorias||[]).length;
+    var tipoTxt = m.filtro === 'item' ? qtd+' itens' : qtd+' categorias';
+    var card = document.createElement('div');
+    card.className = 'imp-card';
+    card.innerHTML =
+      '<div class="imp-card-head">'+
+        '<span style="font-size:1.2rem;">📋</span>'+
+        '<span style="font-weight:700;font-size:1rem;flex:1;">'+escapeHtml(m.nome||'')+'</span>'+
+      '</div>'+
+      '<div style="font-size:0.82rem;color:var(--text);">→ <strong>'+escapeHtml(nomeImp)+'</strong></div>'+
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:4px;">'+tipoTxt+(m.mostrarPrecos===false?' • sem preços':'')+'</div>';
+    card.onclick = (function(modelo){ return function(){ abrirEditarModelo(modelo); }; })(m);
+    lista.appendChild(card);
+  });
+}
+
+function abrirNovoModelo(){
+  if(!_impressoras.length){ showToast('Cadastre uma impressora primeiro','#f7a34f'); showImpSubTab('impressoras'); return; }
+  _modEditandoId = null;
+  document.getElementById('modal-modelo-titulo').textContent = 'NOVO MODELO';
+  document.getElementById('mod-nome').value = '';
+  preencherSelectImpressorasModelo();
+  document.querySelector('input[name="mod-filtro"][value="categoria"]').checked = true;
+  document.getElementById('mod-mostrar-precos').checked = true;
+  document.getElementById('btn-excluir-mod').style.display = 'none';
+  atualizarFiltroModelo();
+  renderModeloCategorias([]);
+  renderModeloItens([]);
+  document.getElementById('modal-modelo').classList.add('show');
+}
+
+function abrirEditarModelo(m){
+  _modEditandoId = m.id;
+  document.getElementById('modal-modelo-titulo').textContent = 'EDITAR MODELO';
+  document.getElementById('mod-nome').value = m.nome || '';
+  preencherSelectImpressorasModelo(m.impressoraId);
+  document.querySelector('input[name="mod-filtro"][value="'+(m.filtro||'categoria')+'"]').checked = true;
+  document.getElementById('mod-mostrar-precos').checked = m.mostrarPrecos !== false;
+  document.getElementById('btn-excluir-mod').style.display = 'inline-flex';
+  atualizarFiltroModelo();
+  renderModeloCategorias(m.categorias || []);
+  renderModeloItens(m.itens || []);
+  document.getElementById('modal-modelo').classList.add('show');
+}
+
+function preencherSelectImpressorasModelo(selId){
+  var sel = document.getElementById('mod-impressora');
+  sel.innerHTML = '<option value="">— Selecione —</option>';
+  _impressoras.forEach(function(i){
+    var opt = document.createElement('option');
+    opt.value = i.id; opt.textContent = i.nome;
+    if(selId && i.id === selId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function atualizarFiltroModelo(){
+  var f = (document.querySelector('input[name="mod-filtro"]:checked')||{}).value || 'categoria';
+  document.getElementById('mod-filtro-cat').style.display = f==='categoria'?'':'none';
+  document.getElementById('mod-filtro-itens').style.display = f==='item'?'':'none';
+}
+
+function renderModeloCategorias(selecionadas){
+  var wrap = document.getElementById('mod-cats-lista');
+  if(!_categorias.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Nenhuma categoria criada.</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  _categorias.forEach(function(c){
+    var marc = selecionadas.indexOf(c.id) >= 0;
+    var lbl = document.createElement('label');
+    lbl.className = 'mod-cat-row' + (marc?' selected':'');
+    lbl.innerHTML = '<input type="checkbox" data-cat-id="'+c.id+'" '+(marc?'checked':'')+'>'+
+      '<span>'+escapeHtml(c.emoji||'📂')+' '+escapeHtml(c.nome||'')+'</span>';
+    lbl.querySelector('input').addEventListener('change', function(e){
+      lbl.classList.toggle('selected', e.target.checked);
+    });
+    wrap.appendChild(lbl);
+  });
+}
+
+function renderModeloItens(selecionados){
+  window._modItensSelTemp = (selecionados||[]).slice();
+  filtrarItensModelo();
+}
+
+function filtrarItensModelo(){
+  var wrap = document.getElementById('mod-itens-lista');
+  var termo = (document.getElementById('mod-busca-itens').value||'').toLowerCase().trim();
+  var sel = window._modItensSelTemp || [];
+  if(!_itens.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;">Nenhum item.</div>';
+    return;
+  }
+  var lista = _itens.filter(function(i){ return !termo || (i.nome||'').toLowerCase().indexOf(termo) >= 0; });
+  wrap.innerHTML = '';
+  lista.forEach(function(i){
+    var marc = sel.indexOf(i.id) >= 0;
+    var lbl = document.createElement('label');
+    lbl.className = 'mod-item-row' + (marc?' selected':'');
+    var cat = _categorias.find(function(c){ return c.id === i.categoria; });
+    lbl.innerHTML = '<input type="checkbox" data-item-id="'+i.id+'" '+(marc?'checked':'')+'>'+
+      '<span style="flex:1;">'+escapeHtml(i.nome||'')+(cat?' <span style="font-size:0.7rem;color:var(--muted);">'+escapeHtml(cat.nome)+'</span>':'')+'</span>';
+    lbl.querySelector('input').addEventListener('change', function(e){
+      lbl.classList.toggle('selected', e.target.checked);
+      var id = i.id;
+      if(e.target.checked){
+        if(window._modItensSelTemp.indexOf(id) < 0) window._modItensSelTemp.push(id);
+      } else {
+        window._modItensSelTemp = window._modItensSelTemp.filter(function(x){ return x !== id; });
+      }
+    });
+    wrap.appendChild(lbl);
+  });
+}
+
+function salvarModelo(){
+  var nome = document.getElementById('mod-nome').value.trim();
+  if(!nome){ showToast('Digite o nome','#f7a34f'); return; }
+  var impId = document.getElementById('mod-impressora').value;
+  if(!impId){ showToast('Selecione a impressora','#f7a34f'); return; }
+  var filtro = (document.querySelector('input[name="mod-filtro"]:checked')||{}).value || 'categoria';
+  var dados = {
+    nome: nome, impressoraId: impId, filtro: filtro,
+    mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
+    atualizadoEm: Date.now()
+  };
+  if(filtro === 'categoria'){
+    var cats = [];
+    document.querySelectorAll('#mod-cats-lista input[type="checkbox"]:checked').forEach(function(cb){
+      cats.push(cb.getAttribute('data-cat-id'));
+    });
+    if(!cats.length){ showToast('Selecione ao menos 1 categoria','#f7a34f'); return; }
+    dados.categorias = cats;
+    dados.itens = [];
+  } else {
+    if(!window._modItensSelTemp || !window._modItensSelTemp.length){ showToast('Selecione ao menos 1 item','#f7a34f'); return; }
+    dados.itens = window._modItensSelTemp.slice();
+    dados.categorias = [];
+  }
+  var p;
+  if(_modEditandoId){
+    p = fbColImpressao('modelos').doc(_modEditandoId).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    p = fbColImpressao('modelos').add(dados);
+  }
+  p.then(function(){
+    showToast('✓ Modelo salvo','#4ade80');
+    document.getElementById('modal-modelo').classList.remove('show');
+    carregarModelos();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function excluirModelo(){
+  if(!_modEditandoId) return;
+  if(!confirm('Excluir este modelo?')) return;
+  fbColImpressao('modelos').doc(_modEditandoId).delete().then(function(){
+    showToast('🗑️ Excluído','#f87171');
+    document.getElementById('modal-modelo').classList.remove('show');
+    carregarModelos();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+// ─── CONFIG GERAL ───
+function carregarConfigImp(){
+  if(!fbDb || !_restauranteAtivo) return;
+  fbDocConfigImp().get().then(function(doc){
+    if(doc.exists){ _configImp = Object.assign(_configImp, doc.data()); }
+    aplicarConfigImpNaTela();
+  }).catch(function(){});
+  // Toggle senha
+  var chkSenha = document.getElementById('cfg-cancel-senha');
+  if(chkSenha){
+    chkSenha.onchange = function(){
+      document.getElementById('cfg-senha-wrap').style.display = chkSenha.checked ? '' : 'none';
+    };
+  }
+}
+
+function aplicarConfigImpNaTela(){
+  var c = _configImp;
+  function v(id, val){ var el = document.getElementById(id); if(el){ if(el.type==='checkbox') el.checked=!!val; else el.value=val||''; } }
+  v('cfg-restaurante-nome', c.restauranteNome);
+  v('cfg-endereco1', c.endereco1);
+  v('cfg-endereco2', c.endereco2);
+  v('cfg-rodape', c.rodape);
+  v('cfg-cancel-imprimir', c.cancelImprimir);
+  v('cfg-cancel-senha', c.cancelSenha);
+  v('cfg-cancel-senha-valor', c.cancelSenhaValor);
+  v('cfg-cancel-motivos', c.cancelMotivos);
+  v('cfg-imprimir-mesa', c.imprimirMesa);
+  v('cfg-imprimir-garcom', c.imprimirGarcom);
+  v('cfg-imprimir-hora', c.imprimirHora);
+  v('cfg-imprimir-obs', c.imprimirObs);
+  v('cfg-imprimir-precos', c.imprimirPrecos);
+  v('cfg-corte-papel', c.cortePapel);
+  v('cfg-beep', c.beep);
+  var selImp = document.getElementById('cfg-cancel-impressora');
+  if(selImp && c.cancelImpressora) selImp.value = c.cancelImpressora;
+  document.getElementById('cfg-senha-wrap').style.display = c.cancelSenha ? '' : 'none';
+}
+
+function salvarConfigImpressao(){
+  function v(id){ var el = document.getElementById(id); if(!el) return ''; return el.type==='checkbox'?el.checked:el.value; }
+  var dados = {
+    restauranteNome: v('cfg-restaurante-nome'),
+    endereco1: v('cfg-endereco1'),
+    endereco2: v('cfg-endereco2'),
+    rodape: v('cfg-rodape'),
+    cancelImprimir: v('cfg-cancel-imprimir'),
+    cancelImpressora: v('cfg-cancel-impressora'),
+    cancelSenha: v('cfg-cancel-senha'),
+    cancelSenhaValor: v('cfg-cancel-senha-valor'),
+    cancelMotivos: v('cfg-cancel-motivos'),
+    imprimirMesa: v('cfg-imprimir-mesa'),
+    imprimirGarcom: v('cfg-imprimir-garcom'),
+    imprimirHora: v('cfg-imprimir-hora'),
+    imprimirObs: v('cfg-imprimir-obs'),
+    imprimirPrecos: v('cfg-imprimir-precos'),
+    cortePapel: v('cfg-corte-papel'),
+    beep: v('cfg-beep'),
+    atualizadoEm: Date.now()
+  };
+  fbDocConfigImp().set(dados, {merge:true}).then(function(){
+    _configImp = Object.assign(_configImp, dados);
+    showToast('✓ Configurações salvas','#4ade80');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+// ─── GERAÇÃO DE CUPOM (ESC/POS) ───
+// Usa comandos ESC/POS compatíveis com Bematech MP-4200 e similares
+var ESC = '\x1B', GS = '\x1D';
+
+function escposInit(){ return ESC + '@'; }
+function escposCenter(){ return ESC + 'a' + '\x01'; }
+function escposLeft(){ return ESC + 'a' + '\x00'; }
+function escposBold(on){ return ESC + 'E' + (on?'\x01':'\x00'); }
+function escposLarge(on){ return GS + '!' + (on?'\x11':'\x00'); }
+function escposCut(){ return GS + 'V' + 'A' + '\x10'; }
+function escposBeep(){ return ESC + 'B' + '\x03' + '\x05'; }
+
+function pad(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return s + new Array(n-s.length+1).join(' '); }
+function padR(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return new Array(n-s.length+1).join(' ') + s; }
+function linha(c, n){ return new Array(n+1).join(c||'-'); }
+function quebrarLinha(texto, largura){
+  var palavras = String(texto||'').split(' ');
+  var linhas = []; var atual = '';
+  palavras.forEach(function(p){
+    if((atual + ' ' + p).trim().length > largura){
+      if(atual) linhas.push(atual);
+      atual = p;
+    } else {
+      atual = (atual + ' ' + p).trim();
+    }
+  });
+  if(atual) linhas.push(atual);
+  return linhas;
+}
+
+function gerarCupomPedido(pedido, modelo){
+  var c = _configImp;
+  var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+  var L = imp ? (imp.largura||48) : 48;
+  var s = escposInit();
+  // Cabeçalho
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += (c.restauranteNome||'') + '\n';
+  s += escposLarge(false) + escposBold(false);
+  if(c.endereco1) s += c.endereco1 + '\n';
+  if(c.endereco2) s += c.endereco2 + '\n';
+  s += linha('=', L) + '\n';
+  // Tipo de cupom
+  s += escposBold(true) + escposLarge(true);
+  s += (modelo.nome||'PEDIDO').toUpperCase() + '\n';
+  s += escposLarge(false) + escposBold(false);
+  // Mesa, garçom, hora
+  s += escposLeft();
+  if(c.imprimirMesa && pedido.mesa){
+    s += escposBold(true) + 'MESA: ' + pedido.mesa + escposBold(false) + '\n';
+  }
+  if(c.imprimirGarcom && pedido.garcom){
+    s += 'Garcom: ' + pedido.garcom + '\n';
+  }
+  if(c.imprimirHora){
+    var d = pedido.criadoEm ? new Date(pedido.criadoEm) : new Date();
+    s += 'Hora:   ' + d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  }
+  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  s += linha('-', L) + '\n';
+  // Itens (filtrados pelo modelo)
+  var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
+  if(!itensFiltrados.length){ return null; } // não imprime se nenhum item se aplica
+  itensFiltrados.forEach(function(it){
+    s += escposBold(true) + escposLarge(true);
+    var nomeItem = (it.qtd||1) + 'x ' + (it.nome||'');
+    var linhasNome = quebrarLinha(nomeItem, Math.floor(L/2));
+    linhasNome.forEach(function(ln){ s += ln + '\n'; });
+    s += escposLarge(false) + escposBold(false);
+    // Seleções (opções e adicionais)
+    if(it.selecoes && it.selecoes.length){
+      it.selecoes.forEach(function(sel){
+        var ext = (sel.precoExtra||0) > 0 && modelo.mostrarPrecos!==false ? ' (+R$'+formatarPreco(sel.precoExtra)+')' : '';
+        s += '   * ' + (sel.opcao||'') + ext + '\n';
+      });
+    }
+    // Observação
+    if(c.imprimirObs && it.obs){
+      var obsLin = quebrarLinha('** ' + it.obs, L);
+      obsLin.forEach(function(ln){ s += ln + '\n'; });
+    }
+    // Preço (se modelo permitir)
+    if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
+      var preco = (it.preco||0)*(it.qtd||1);
+      s += padR('R$ ' + formatarPreco(preco), L) + '\n';
+    }
+    s += '\n';
+  });
+  s += linha('-', L) + '\n';
+  // Total (só se modelo mostra preços)
+  if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
+    var total = itensFiltrados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    s += escposBold(true) + escposLarge(true);
+    s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(total), Math.ceil(L/2)) + '\n';
+    s += escposLarge(false) + escposBold(false);
+  }
+  if(c.rodape){
+    s += '\n' + escposCenter() + c.rodape + '\n';
+  }
+  s += escposLeft();
+  s += '\n\n';
+  if(c.beep) s += escposBeep();
+  if(c.cortePapel) s += escposCut();
+  return s;
+}
+
+function gerarCupomCancelamento(pedido, motivo){
+  var c = _configImp;
+  var L = 48;
+  var s = escposInit();
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += '*** CANCELADO ***\n';
+  s += escposLarge(false);
+  s += (c.restauranteNome||'') + '\n';
+  s += escposBold(false);
+  s += linha('=', L) + '\n';
+  s += escposLeft();
+  s += escposBold(true);
+  if(pedido.mesa) s += 'MESA: ' + pedido.mesa + '\n';
+  s += escposBold(false);
+  s += 'Cancelado: ' + new Date().toLocaleString('pt-BR') + '\n';
+  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  s += linha('-', L) + '\n';
+  if(motivo){
+    s += escposBold(true) + 'MOTIVO:\n' + escposBold(false);
+    quebrarLinha(motivo, L).forEach(function(ln){ s += ln + '\n'; });
+    s += linha('-', L) + '\n';
+  }
+  (pedido.itens||[]).forEach(function(it){
+    s += '- ' + (it.qtd||1) + 'x ' + (it.nome||'') + '\n';
+  });
+  s += '\n\n';
+  if(c.cortePapel) s += escposCut();
+  return s;
+}
+
+function gerarCupomTeste(imp){
+  var L = (imp && imp.largura) || 48;
+  var s = escposInit();
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += 'TESTE DE IMPRESSAO\n';
+  s += escposLarge(false) + escposBold(false);
+  s += linha('=', L) + '\n';
+  s += escposLeft();
+  s += 'Impressora: ' + (imp.nome||'-') + '\n';
+  s += 'Tipo: ' + (imp.tipo==='usb'?'USB':'Rede ' + imp.ip) + '\n';
+  s += 'Largura: ' + L + ' colunas\n';
+  s += 'Hora: ' + new Date().toLocaleString('pt-BR') + '\n';
+  s += linha('=', L) + '\n';
+  s += '\nSe voce esta lendo isto,\n';
+  s += 'a impressao esta funcionando!\n\n\n';
+  if(_configImp.cortePapel) s += escposCut();
+  return s;
+}
+
+// ─── FILTRAR ITENS POR MODELO ───
+function filtrarItensPorModelo(itens, modelo){
+  if(modelo.filtro === 'item'){
+    var ids = modelo.itens || [];
+    return itens.filter(function(it){ return ids.indexOf(it.id) >= 0; });
+  } else {
+    var cats = modelo.categorias || [];
+    return itens.filter(function(it){
+      // Procura categoria do item
+      var itemDef = _itens.find(function(i){ return i.id === it.id; });
+      var cat = itemDef ? itemDef.categoria : '';
+      return cats.indexOf(cat) >= 0;
+    });
+  }
+}
+
+// ─── ENVIAR PARA IMPRESSORA ───
+function enviarParaImpressora(imp, conteudo){
+  if(!_qzPronto){
+    showToast('⚠️ QZ Tray desconectado — abra o programa','#f7a34f', 5000);
+    return Promise.reject('QZ desconectado');
+  }
+  if(!conteudo){ return Promise.reject('Sem conteúdo'); }
+  var config;
+  if(imp.tipo === 'usb'){
+    if(!imp.nomeWindows){ showToast('Impressora "'+imp.nome+'" sem nome do Windows','#f87171'); return Promise.reject(); }
+    config = qz.configs.create(imp.nomeWindows);
+  } else {
+    config = qz.configs.create(imp.ip + ':' + (imp.porta||9100));
+  }
+  var data = [{ type:'raw', format:'plain', data: conteudo }];
+  return qz.print(config, data).then(function(){
+    showToast('🖨️ Impresso em '+imp.nome,'#4ade80');
+  }).catch(function(e){
+    showToast('❌ Falha ao imprimir em '+imp.nome+': '+e.message,'#f87171', 5000);
+    console.error(e);
+  });
+}
+
+// ─── IMPRESSÃO AUTOMÁTICA AO RECEBER PEDIDO ───
+var _impListenerAtivo = false;
+function iniciarListenerImpressao(){
+  if(_impListenerAtivo) return;
+  if(!_qzPronto || !_restauranteAtivo) return;
+  _impListenerAtivo = true;
+  // Marca pedidos já existentes para não imprimir o que já estava lá quando QZ conectou
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .get().then(function(snap){
+      snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
+    });
+  // Listener: imprime novos pedidos automaticamente
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .onSnapshot(function(snap){
+      snap.docChanges().forEach(function(ch){
+        if(ch.type === 'added'){
+          var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
+          if(_ultimosPedidosImpressos[pedido.id]) return;
+          if(pedido.impresso) { _ultimosPedidosImpressos[pedido.id] = true; return; }
+          _ultimosPedidosImpressos[pedido.id] = true;
+          imprimirPedidoAutomatico(pedido);
+        }
+      });
+    });
+}
+
+function imprimirPedidoAutomatico(pedido){
+  if(!_modelos.length || !_impressoras.length) return;
+  // Para cada modelo, gera cupom e envia se tiver itens aplicáveis
+  _modelos.forEach(function(modelo){
+    var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+    if(!imp) return;
+    var cupom = gerarCupomPedido(pedido, modelo);
+    if(cupom){
+      enviarParaImpressora(imp, cupom);
+    }
+  });
+  // Marca como impresso no Firestore (evita reimprimir se outro PDV abrir)
+  fbDb.collection('pedidos').doc(pedido.id).update({impresso: true, impressoEm: Date.now()})
+    .catch(function(){});
+}
+
+// Permite reimprimir manualmente (usado em botão futuro)
+function reimprimirPedido(pedidoId){
+  var p = (_pedidosPDV||[]).find(function(x){ return x.id === pedidoId; });
+  if(!p){ showToast('Pedido não encontrado','#f87171'); return; }
+  imprimirPedidoAutomatico(p);
+}
 
 </script>
+
+<!-- Modal: Adicionar/Editar Impressora -->
+<div class="modal" id="modal-impressora">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="modal-header">
+      <div class="modal-titulo" id="modal-impressora-titulo">NOVA IMPRESSORA</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-impressora').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="f-grupo">
+        <label class="f-label">Nome da Impressora *</label>
+        <input type="text" class="f-input" id="imp-nome" maxlength="30" placeholder="Ex: Cozinha, Bar">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Tipo de Conexão</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="imp-tipo" value="usb" checked onchange="atualizarCamposImpressora()">
+            <span style="font-size:0.84rem;font-weight:600;">🔌 USB</span>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="imp-tipo" value="rede" onchange="atualizarCamposImpressora()">
+            <span style="font-size:0.84rem;font-weight:600;">🌐 Rede (IP)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="f-grupo" id="imp-campo-usb">
+        <label class="f-label">Nome da impressora no Windows</label>
+        <select class="f-select" id="imp-nome-windows"><option>Detectando impressoras...</option></select>
+        <button class="p-btn secondary" style="margin-top:6px;width:100%;font-size:0.78rem;" onclick="detectarImpressorasUSB()">🔍 Detectar Impressoras Conectadas</button>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">A impressora deve estar instalada no Windows. Bematech costuma aparecer como "MP-4200 TH" ou similar.</div>
+      </div>
+
+      <div class="f-grupo" id="imp-campo-rede" style="display:none;">
+        <label class="f-label">IP da impressora *</label>
+        <input type="text" class="f-input" id="imp-ip" placeholder="192.168.1.100" maxlength="15">
+        <label class="f-label" style="margin-top:10px;">Porta</label>
+        <input type="number" class="f-input" id="imp-porta" value="9100" min="1" max="65535">
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Padrão Bematech/Epson: porta 9100</div>
+      </div>
+
+      <div class="f-grupo">
+        <label class="f-label">Largura do Papel</label>
+        <select class="f-select" id="imp-largura">
+          <option value="48">80mm (48 colunas) — padrão</option>
+          <option value="32">58mm (32 colunas)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="f-btn danger" id="btn-excluir-imp" style="flex:0 0 auto;padding:11px 14px;display:none;" onclick="excluirImpressora()">🗑</button>
+      <button class="f-btn secondary" style="flex:1;" onclick="testarImpressora()">🧪 Testar</button>
+      <button class="f-btn" style="flex:1;" onclick="salvarImpressora()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Modelo de Impressão -->
+<div class="modal" id="modal-modelo">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-titulo" id="modal-modelo-titulo">NOVO MODELO</div>
+      <button class="modal-fechar" onclick="document.getElementById('modal-modelo').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="f-grupo">
+        <label class="f-label">Nome do Modelo *</label>
+        <input type="text" class="f-input" id="mod-nome" maxlength="30" placeholder="Ex: Bebidas, Cozinha">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Impressora *</label>
+        <select class="f-select" id="mod-impressora"><option value="">— Selecione —</option></select>
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Tipo de Filtro</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-filtro" value="categoria" checked onchange="atualizarFiltroModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">📂 Categorias</span>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-filtro" value="item" onchange="atualizarFiltroModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">🍔 Itens específicos</span>
+          </label>
+        </div>
+      </div>
+      <div class="f-grupo" id="mod-filtro-cat">
+        <label class="f-label">Selecione as categorias que vão para esta impressora</label>
+        <div id="mod-cats-lista" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;"></div>
+      </div>
+      <div class="f-grupo" id="mod-filtro-itens" style="display:none;">
+        <label class="f-label">Selecione os itens específicos</label>
+        <input type="text" class="f-input" id="mod-busca-itens" placeholder="Buscar item..." style="margin-bottom:8px;" oninput="filtrarItensModelo()">
+        <div id="mod-itens-lista" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;"></div>
+      </div>
+      <div class="f-grupo">
+        <label class="cfg-toggle">
+          <input type="checkbox" id="mod-mostrar-precos" checked>
+          <span>Mostrar preços neste cupom</span>
+        </label>
+        <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Desmarque para via da cozinha (sem preço)</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="f-btn danger" id="btn-excluir-mod" style="flex:0 0 auto;padding:11px 14px;display:none;" onclick="excluirModelo()">🗑</button>
+      <button class="f-btn secondary" style="flex:1;" onclick="document.getElementById('modal-modelo').classList.remove('show')">Cancelar</button>
+      <button class="f-btn" style="flex:1;" onclick="salvarModelo()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.imp-subtab{flex:1;padding:9px 6px;background:transparent;border:none;color:var(--muted);font-size:0.78rem;font-weight:600;font-family:inherit;cursor:pointer;border-radius:7px;transition:all 0.15s;}
+.imp-subtab.active{background:var(--accent);color:#000;}
+.imp-card{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color 0.15s;}
+.imp-card:active{border-color:var(--accent);}
+.imp-card-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.imp-tipo-tag{font-size:0.66rem;font-weight:700;text-transform:uppercase;border-radius:5px;padding:2px 8px;letter-spacing:0.04em;flex-shrink:0;}
+.imp-tipo-tag.usb{background:rgba(129,140,248,0.15);color:#818cf8;}
+.imp-tipo-tag.rede{background:rgba(74,222,128,0.15);color:#4ade80;}
+.imp-status-dot{width:8px;height:8px;border-radius:50%;}
+.imp-status-dot.online{background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.5);}
+.imp-status-dot.offline{background:#888;}
+.cfg-bloco{background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:14px;}
+.cfg-titulo{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.06em;color:var(--accent);margin-bottom:12px;}
+.cfg-toggle{display:flex;align-items:center;gap:10px;padding:10px 0;cursor:pointer;font-size:0.86rem;border-bottom:1px solid var(--border);}
+.cfg-toggle:last-child{border-bottom:none;}
+.cfg-toggle input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);}
+.mod-cat-row, .mod-item-row{display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;cursor:pointer;font-size:0.84rem;}
+.mod-cat-row.selected, .mod-item-row.selected{border-color:var(--accent);background:rgba(212,168,67,0.08);}
+.mod-cat-row input, .mod-item-row input{margin:0;width:18px;height:18px;accent-color:var(--accent);}
+</style>
 
 <!-- Modal: Adicionar/Editar Garçom -->
 <div class="modal" id="modal-garcom-pdv">

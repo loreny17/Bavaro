@@ -338,6 +338,20 @@ header{
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
+/* ─── Pedido itens lista (garçom) ─── */
+.pedido-itens-lista{margin:8px 0;padding:8px;background:rgba(0,0,0,0.2);border-radius:10px;}
+.pedido-item-row{padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
+.pedido-item-row:last-child{border-bottom:none;}
+.pedido-item-top{display:flex;align-items:center;gap:8px;font-size:0.82rem;}
+.pedido-item-qtd{background:var(--surface3);color:var(--accent);border-radius:6px;padding:2px 7px;font-family:'Bebas Neue',sans-serif;font-size:0.92rem;flex-shrink:0;}
+.pedido-item-nome{flex:1;color:var(--text);}
+.pedido-item-preco{color:var(--muted);font-size:0.75rem;flex-shrink:0;}
+.pedido-item-obs{font-size:0.7rem;color:var(--muted);margin-top:2px;padding-left:30px;}
+.pedido-item-actions{display:flex;gap:6px;padding-left:30px;margin-top:4px;}
+.pi-btn{padding:3px 10px;border-radius:7px;font-size:0.7rem;font-weight:600;font-family:inherit;cursor:pointer;}
+.pi-btn.edit{background:rgba(212,168,67,0.1);color:var(--accent);border:1px solid rgba(212,168,67,0.25);}
+.pi-btn.del{background:rgba(248,113,113,0.1);color:var(--danger);border:1px solid rgba(248,113,113,0.25);}
+
 /* Desktop */
 @media(min-width:768px){
   html{background:radial-gradient(ellipse at 30% 20%,rgba(212,168,67,0.06) 0%,transparent 50%),#050505;}
@@ -635,7 +649,7 @@ document.addEventListener('DOMContentLoaded', function(){
 // ════════════════════════════════════════
 //  MESAS
 // ════════════════════════════════════════
-var _TOTAL_MESAS = 20;
+var _TOTAL_MESAS = 99;
 var _mesasOcupadas = {}; // {num: {garcom, pedidoId}}
 
 function mostrarMesas(){
@@ -821,35 +835,20 @@ function iniciarListeners(){
 
 function escutarMeusPedidos(){
   if(_unsubPedidos) _unsubPedidos();
+  // Escuta TODOS os pedidos da mesa (qualquer garçom pode ver e editar)
   _unsubPedidos = fbDb.collection('pedidos')
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==',parseInt(_mesaAtiva)||_mesaAtiva)
-    .orderBy('criadoEm','desc')
-    .limit(30)
     .onSnapshot(function(snap){
       _meusPedidos = [];
       snap.forEach(function(d){
         var v = d.data();
         _meusPedidos.push(Object.assign({id:d.id},v));
       });
+      _meusPedidos.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
       renderPedidos();
       atualizarNavPedidos();
-    }, function(e){
-      // fallback sem orderBy se índice não existir
-      fbDb.collection('pedidos')
-        .where('restauranteId','==',_restauranteId)
-        .where('mesa','==',parseInt(_mesaAtiva)||_mesaAtiva)
-        .onSnapshot(function(snap){
-          _meusPedidos = [];
-          snap.forEach(function(d){
-            var v = d.data();
-            _meusPedidos.push(Object.assign({id:d.id},v));
-          });
-          _meusPedidos.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
-          renderPedidos();
-          atualizarNavPedidos();
-        }, function(){});
-    });
+    }, function(){});
 }
 
 // ════════════════════════════════════════
@@ -920,12 +919,30 @@ function renderPedidos(){
     return;
   }
   wrap.innerHTML = '';
+  var statusMap = {aguardando:'⏳ Aguardando',preparo:'👨‍🍳 Preparo',pronto:'✅ Pronto',entregue:'🚀 Entregue'};
   _meusPedidos.forEach(function(p){
     var hora = '';
     if(p.criadoEm){ var d = new Date(p.criadoEm); hora = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
-    var statusTxt = {aguardando:'⏳ Aguardando',preparo:'👨‍🍳 Preparo',pronto:'✅ Pronto',entregue:'🚀 Entregue'}[p.status] || p.status;
-    var itensStr = (p.itens||[]).map(function(i){ return i.qtd+'x '+i.nome; }).join(', ');
     var total = (p.itens||[]).reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
+    var st = p.status || 'aguardando';
+    var podeEditar = (st === 'aguardando' || st === 'preparo');
+    var itensHtml = (p.itens||[]).map(function(it, idx){
+      var acoes = podeEditar
+        ? '<div class="pedido-item-actions">'+
+            '<button class="pi-btn edit" onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')">✏️</button>'+
+            '<button class="pi-btn del" onclick="removerItemGarcom(\''+p.id+'\','+idx+')">🗑</button>'+
+          '</div>'
+        : '';
+      return '<div class="pedido-item-row">'+
+        '<div class="pedido-item-top">'+
+          '<span class="pedido-item-qtd">'+esc(String(it.qtd||1))+'x</span>'+
+          '<span class="pedido-item-nome">'+esc(it.nome||'')+'</span>'+
+          '<span class="pedido-item-preco">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
+        '</div>'+
+        (it.obs ? '<div class="pedido-item-obs">📝 '+esc(it.obs)+'</div>' : '')+
+        acoes+
+      '</div>';
+    }).join('');
     var card = document.createElement('div');
     card.className = 'pedido-card';
     card.innerHTML =
@@ -934,11 +951,99 @@ function renderPedidos(){
         '<span class="pedido-mesa">Mesa '+p.mesa+'</span>'+
         '<span class="pedido-hora">'+hora+'</span>'+
       '</div>'+
-      '<div><span class="pedido-status '+p.status+'">'+statusTxt+'</span></div>'+
-      '<div class="pedido-itens" style="margin-top:8px;">'+esc(itensStr)+'</div>'+
-      '<div class="pedido-total">R$ '+fmtPreco(total)+'</div>';
+      '<div style="margin-bottom:8px;"><span class="pedido-status '+st+'">'+( statusMap[st]||st )+'</span></div>'+
+      '<div class="pedido-itens-lista">'+itensHtml+'</div>'+
+      '<div class="pedido-total">R$ '+fmtPreco(total)+'</div>'+
+      (podeEditar
+        ? '<div style="display:flex;gap:8px;margin-top:10px;">'+
+            '<button class="f-btn" style="font-size:0.8rem;padding:9px 12px;" onclick="iniciarAdicionarItemGarcom(\''+p.id+'\')">+ Adicionar item</button>'+
+          '</div>'
+        : '<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">Pedido em '+( statusMap[st]||st )+' — edição bloqueada</div>');
     wrap.appendChild(card);
   });
+}
+
+// ── Editar item de pedido (garçom) ──
+var _gPedId = null, _gPedIdx = null;
+function abrirEditarItemGarcom(pedidoId, idx) {
+  var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
+  if(!ped) return;
+  var it = ped.itens[idx];
+  _gPedId = pedidoId; _gPedIdx = idx;
+  var ex = document.getElementById('modal-edit-garcom');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal show'; mod.id = 'modal-edit-garcom';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:420px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo">EDITAR ITEM</div>'+
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-edit-garcom\').remove()">×</button>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:8px;padding:10px 12px;font-size:0.82rem;color:var(--accent);margin-bottom:16px;">✏️ '+esc(it.nome||'')+'</div>'+
+        '<div class="login-campo"><label>Quantidade</label><input type="number" class="login-campo input" id="g-edit-qtd" min="1" max="99" value="'+(it.qtd||1)+'" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:1rem;outline:none;"></div>'+
+        '<div class="login-campo" style="margin-top:12px;"><label>Observação</label><textarea id="g-edit-obs" placeholder="Ex: sem cebola..." style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:0.9rem;outline:none;resize:vertical;min-height:60px;">'+esc(it.obs||'')+'</textarea></div>'+
+        '<div class="login-campo" style="margin-top:12px;"><label>Substituir por outro item</label>'+
+          '<div id="g-subst-wrap" style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;margin-top:6px;">'+
+          _itens.filter(function(i){ return i.disponivel && i.id !== (it.id||''); }).map(function(i){
+            return '<button style="padding:5px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:18px;font-size:0.75rem;color:var(--text);cursor:pointer;" onclick="substituirItemGarcom(\''+i.id+'\')">'+esc(i.nome)+'</button>';
+          }).join('')+
+        '</div></div>'+
+      '</div>'+
+      '<div class="modal-footer">'+
+        '<button class="f-btn secondary" style="flex:0 0 auto;padding:11px 16px;" onclick="document.getElementById(\'modal-edit-garcom\').remove()">Cancelar</button>'+
+        '<button class="f-btn" onclick="salvarEditItemGarcom()">Salvar</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+function salvarEditItemGarcom(){
+  var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });
+  if(!ped) return;
+  var novaQtd = parseInt(document.getElementById('g-edit-qtd').value)||1;
+  var novaObs = document.getElementById('g-edit-obs').value.trim();
+  var itens = (ped.itens||[]).map(function(it,i){
+    if(i === _gPedIdx) return Object.assign({},it,{qtd:novaQtd,obs:novaObs});
+    return it;
+  });
+  fbDb.collection('pedidos').doc(_gPedId).update({itens:itens,atualizadoEm:Date.now()})
+    .then(function(){ showToast('✓ Item atualizado'); var m=document.getElementById('modal-edit-garcom'); if(m) m.remove(); })
+    .catch(function(e){ showToast('❌ '+e.message); });
+}
+function substituirItemGarcom(novoItemId){
+  var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });
+  if(!ped) return;
+  var novoItem = _itens.find(function(i){ return i.id === novoItemId; });
+  if(!novoItem) return;
+  var qtd = parseInt(document.getElementById('g-edit-qtd').value)||1;
+  var obs = document.getElementById('g-edit-obs').value.trim();
+  var itens = (ped.itens||[]).map(function(it,i){
+    if(i === _gPedIdx) return {id:novoItem.id,nome:novoItem.nome,preco:novoItem.preco,qtd:qtd,obs:obs};
+    return it;
+  });
+  fbDb.collection('pedidos').doc(_gPedId).update({itens:itens,atualizadoEm:Date.now()})
+    .then(function(){ showToast('✓ Item substituído por '+novoItem.nome); var m=document.getElementById('modal-edit-garcom'); if(m) m.remove(); })
+    .catch(function(e){ showToast('❌ '+e.message); });
+}
+function removerItemGarcom(pedidoId, idx){
+  var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
+  if(!ped || (ped.itens||[]).length <= 1){ showToast('⚠️ Pedido precisa ter ao menos 1 item'); return; }
+  if(!confirm('Remover este item do pedido?')) return;
+  var itens = (ped.itens||[]).filter(function(_,i){ return i !== idx; });
+  fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
+    .then(function(){ showToast('🗑️ Item removido'); })
+    .catch(function(e){ showToast('❌ '+e.message); });
+}
+
+// ── Adicionar item do cardápio a pedido existente ──
+var _gAdicionarPedId = null;
+function iniciarAdicionarItemGarcom(pedidoId){
+  _gAdicionarPedId = pedidoId;
+  showTab('cardapio');
+  showToast('Toque no item para adicioná-lo ao pedido #'+pedidoId.slice(-4).toUpperCase(), '#d4a843');
+  window._modoAdicionarGarcom = true;
+  setTimeout(function(){ if(window._modoAdicionarGarcom){ window._modoAdicionarGarcom=false; _gAdicionarPedId=null; } }, 8000);
 }
 
 function atualizarNavPedidos(){
@@ -951,6 +1056,21 @@ function atualizarNavPedidos(){
 //  MODAL ITEM
 // ════════════════════════════════════════
 function abrirModalItem(it){
+  // Se em modo adicionar a pedido existente, adiciona direto
+  if(window._modoAdicionarGarcom && _gAdicionarPedId) {
+    var ped = _meusPedidos.find(function(p){ return p.id === _gAdicionarPedId; });
+    if(ped) {
+      var itens = (ped.itens||[]).slice();
+      var ex = itens.findIndex(function(i){ return i.id === it.id; });
+      if(ex >= 0) { itens[ex] = Object.assign({},itens[ex],{qtd:(itens[ex].qtd||1)+1}); }
+      else { itens.push({id:it.id,nome:it.nome,preco:it.preco,qtd:1,obs:''}); }
+      window._modoAdicionarGarcom = false;
+      fbDb.collection('pedidos').doc(_gAdicionarPedId).update({itens:itens,atualizadoEm:Date.now()})
+        .then(function(){ showToast('✓ '+it.nome+' adicionado ao pedido'); _gAdicionarPedId=null; showTab('pedidos'); })
+        .catch(function(e){ showToast('❌ '+e.message); });
+      return;
+    }
+  }
   _itemAberto = it;
   _qtdTemp = 1;
   document.getElementById('det-titulo').textContent = it.nome.toUpperCase();

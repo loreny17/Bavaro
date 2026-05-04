@@ -476,42 +476,54 @@ function mostrarErroLogin(msg){
 
 // ═══ TENANT ═══
 function carregarTenantECarrapio(){
-  // Lê o doc do usuário pra pegar tenantId
+  // Tenta restaurante salvo no localStorage primeiro (mais rápido)
+  var restSalvo = null;
+  try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
+  if(restSalvo){ try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){} }
+
+  // Tenta tenantId salvo
+  var tenantSalvo = null;
+  try{ tenantSalvo = localStorage.getItem('gestao_tenant_id') || localStorage.getItem('tenantId'); }catch(e){}
+  if(tenantSalvo){ _tenantId = tenantSalvo; }
+
+  // Se já tem tudo, inicia direto
+  if(_tenantId && _restauranteAtivo){ iniciarApp(); return; }
+
+  // Tenta carregar do Firestore com timeout de segurança
+  var iniciado = false;
+  function iniciarSeFaltar(){
+    if(iniciado) return;
+    iniciado = true;
+    if(!_restauranteAtivo) _restauranteAtivo = {id:'default', nome:'Bávaro', emoji:'🍽️'};
+    iniciarApp();
+  }
+  // Timeout de segurança: se demorar mais de 5s, inicia com fallback
+  var timeout = setTimeout(function(){
+    console.warn('Timeout ao carregar tenant, iniciando com fallback');
+    iniciarSeFaltar();
+  }, 5000);
+
   fbDb.collection('users').doc(_user.uid).get().then(function(doc){
-    if(!doc.exists || !doc.data().tenantId){
-      // Usuário sem tenant: não tem como continuar
-      mostrarErroSemTenant();
-      return;
+    if(doc.exists && doc.data().tenantId){
+      _tenantId = doc.data().tenantId;
+      try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
     }
-    _tenantId = doc.data().tenantId;
-    // Carrega o restaurante ativo (se houver) — usa último salvo no localStorage do app principal
-    var restSalvo = null;
-    try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
-    if(restSalvo){
-      try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){}
-    }
-    if(!_restauranteAtivo){
-      // Pega o primeiro restaurante do tenant
-      fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(1).get().then(function(snap){
-        if(snap.empty){
-          // Nenhum restaurante ainda
-          _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-        } else {
-          var d = snap.docs[0];
-          _restauranteAtivo = {id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'};
-        }
-        iniciarApp();
-      }).catch(function(e){
-        console.warn('Erro restaurantes:', e);
-        _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-        iniciarApp();
-      });
-    } else {
-      iniciarApp();
-    }
+    if(_restauranteAtivo){ clearTimeout(timeout); iniciarSeFaltar(); return; }
+    // Busca restaurante
+    var col = _tenantId
+      ? fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(1)
+      : null;
+    if(!col){ clearTimeout(timeout); iniciarSeFaltar(); return; }
+    col.get().then(function(snap){
+      if(!snap.empty){
+        var d = snap.docs[0];
+        _restauranteAtivo = {id:d.id, nome:d.data().nome||d.id, emoji:d.data().emoji||'🍽️'};
+      }
+      clearTimeout(timeout); iniciarSeFaltar();
+    }).catch(function(){ clearTimeout(timeout); iniciarSeFaltar(); });
   }).catch(function(e){
-    console.error('Erro ao carregar tenant:', e);
-    mostrarErroSemTenant();
+    console.warn('Erro ao carregar usuário:', e.message);
+    clearTimeout(timeout); iniciarSeFaltar();
   });
 }
 
@@ -523,8 +535,12 @@ function mostrarErroSemTenant(){
 
 function iniciarApp(){
   document.getElementById('app').style.display = 'block';
-  document.getElementById('fab').style.display = 'flex';
-  document.getElementById('h-sub').textContent = (_restauranteAtivo.emoji || '🍽️') + ' ' + _restauranteAtivo.nome;
+  document.getElementById('app').style.visibility = 'visible';
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('loading').classList.add('hidden');
+  var fab = document.getElementById('fab');
+  if(fab) fab.style.display = 'flex';
+  document.getElementById('h-sub').textContent = (_restauranteAtivo ? ((_restauranteAtivo.emoji || '🍽️') + ' ' + _restauranteAtivo.nome) : 'Bávaro');
   // Listeners em tempo real
   iniciarListeners();
   iniciarListenerPedidos();

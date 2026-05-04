@@ -558,7 +558,7 @@ var _tenantId = null;
 var _restauranteId = null;
 var _itens = [];
 var _categorias = [];
-var _catAtiva = 'todas';
+var _catAtiva = null;       // null = mostra categorias; 'todas' ou id = mostra itens
 var _carrinho = [];        // [{id, nome, preco, qtd, obs, foto, catNome}]
 var _itemAberto = null;    // item sendo visualizado no modal
 var _qtdTemp = 1;
@@ -661,31 +661,43 @@ function mostrarMesas(){
 }
 
 function carregarTenantParaMesas(){
-  // Tenta pegar tenant do localStorage (set pelo app principal)
-  var restSalvo = null;
-  try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
+  // Tenta cache local
   var tenantSalvo = null;
   try{ tenantSalvo = localStorage.getItem('gestao_tenant_id') || localStorage.getItem('tenantId'); }catch(e){}
+  var restIdSalvo = null;
+  try{ restIdSalvo = localStorage.getItem('garcom_restaurante_id'); }catch(e){}
 
-  if(restSalvo){
-    try{
-      var r = JSON.parse(restSalvo);
-      _restauranteId = r.id;
-    }catch(e){}
-  }
-  if(!_restauranteId) _restauranteId = 'bavaro';
+  if(tenantSalvo) _tenantId = tenantSalvo;
+  if(restIdSalvo) _restauranteId = restIdSalvo;
 
-  // Tenta inferir tenant dos pedidos existentes (escuta a coleção global de pedidos)
-  // Para simplificar, usa um campo tenantId salvo pelo PDV
-  if(tenantSalvo){
-    _tenantId = tenantSalvo;
+  // Se tem ambos, escuta direto
+  if(_tenantId && _restauranteId){
     escutarMesasOcupadas();
-  } else {
-    // Busca pedidos abertos sem tenant (fallback: restaurante por nome)
-    _tenantId = null;
-    escutarMesasOcupadas();
+    renderMesas();
+    return;
   }
-  renderMesas();
+
+  // Senão, busca QUALQUER restaurante publicado pelo PDV
+  fbDb.collection('restaurantes_publicos').limit(10).get().then(function(snap){
+    if(!snap.empty){
+      var docEscolhido = snap.docs[0]; // pega o primeiro publicado
+      var dados = docEscolhido.data();
+      _tenantId = dados.tenantId;
+      _restauranteId = docEscolhido.id;
+      try{
+        if(_tenantId) localStorage.setItem('gestao_tenant_id', _tenantId);
+        localStorage.setItem('garcom_restaurante_id', _restauranteId);
+      }catch(e){}
+    }
+    if(!_restauranteId) _restauranteId = 'bavaro'; // fallback
+    escutarMesasOcupadas();
+    renderMesas();
+  }).catch(function(e){
+    if(!_restauranteId) _restauranteId = 'bavaro';
+    console.warn('Erro ao buscar restaurantes publicos (mesas):', e);
+    escutarMesasOcupadas();
+    renderMesas();
+  });
 }
 
 function escutarMesasOcupadas(){
@@ -734,6 +746,7 @@ function renderMesas(){
 function selecionarMesa(num){
   _mesaAtiva = num;
   _carrinho = [];
+  _catAtiva = null;  // Volta para grade de categorias
   document.getElementById('mesa-screen').classList.add('hidden');
   iniciarApp();
 }
@@ -761,56 +774,21 @@ function iniciarApp(){
 }
 
 function carregarTenantECardapio(){
-  // Helper de diagnóstico visível
-  function dbg(msg){
-    console.log('[GARCOM]', msg);
-    var grid = document.getElementById('itens-grid');
-    if(grid) grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">⚙️</div><div class="empty-titulo">Diagnóstico</div><div class="empty-sub" style="font-family:monospace;font-size:0.72rem;line-height:1.6;white-space:pre-line;text-align:left;max-width:280px;margin:10px auto 0;">'+msg+'</div></div>';
-  }
-
-  dbg('Iniciando...');
-
-  // 1º — tenta cache local
-  var tenantSalvo = null;
-  try{ tenantSalvo = localStorage.getItem('gestao_tenant_id')||localStorage.getItem('tenantId'); }catch(e){}
-  var restSalvo = null;
-  try{ restSalvo = JSON.parse(localStorage.getItem('restauranteAtivo')||'null'); }catch(e){}
-  if(restSalvo && restSalvo.id) _restauranteId = restSalvo.id;
-
-  if(tenantSalvo){
-    _tenantId = tenantSalvo;
-    dbg('Cache local OK\ntenantId: '+tenantSalvo.slice(0,8)+'...\nrestauranteId: '+(_restauranteId||'?'));
+  // _tenantId e _restauranteId já foram resolvidos em carregarTenantParaMesas
+  // Se não, tenta de novo
+  if(_tenantId && _restauranteId){
     iniciarListeners();
     return;
   }
-
-  dbg('Buscando restaurantes publicados...');
-
-  // 2º — busca QUALQUER restaurante publicado pelo PDV
+  // Fallback de segurança
   fbDb.collection('restaurantes_publicos').limit(10).get().then(function(snap){
-    if(snap.empty){
-      dbg('❌ Nenhum restaurante publicado.\n\nABRA O PDV PRIMEIRO\nfaça login → ele publica os dados.\nDepois volte aqui.');
-      return;
+    if(!snap.empty){
+      var d = snap.docs[0];
+      _tenantId = d.data().tenantId;
+      _restauranteId = d.id;
     }
-    // Se já temos um restauranteId tentamos achar exato, senão pega o primeiro
-    var docEscolhido = null;
-    if(_restauranteId){
-      snap.forEach(function(d){ if(d.id === _restauranteId) docEscolhido = d; });
-    }
-    if(!docEscolhido) docEscolhido = snap.docs[0];
-
-    var dados = docEscolhido.data();
-    _tenantId = dados.tenantId;
-    _restauranteId = docEscolhido.id;
-    if(_tenantId){
-      try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
-    }
-    dbg('✓ Restaurante encontrado: '+(dados.nome||_restauranteId)+'\ntenantId: '+(_tenantId? _tenantId.slice(0,8)+'...':'?')+'\nCarregando cardápio...');
     iniciarListeners();
-  }).catch(function(e){
-    dbg('❌ Erro de permissão Firestore:\n'+e.code+'\n\nVerifique as regras do Firestore.\nA coleção restaurantes_publicos\nprecisa permitir leitura pública.');
-    console.error('Erro buscar tenantId publico:', e);
-  });
+  }).catch(function(){ iniciarListeners(); });
 }
 
 function fbColCardapio(sub){
@@ -889,7 +867,21 @@ function escutarMeusPedidos(){
 // ════════════════════════════════════════
 function renderCatBar(){
   var bar = document.getElementById('cat-bar');
+  if(!bar) return;
+  // Se está na tela de categorias (sem categoria selecionada), esconde a barra
+  if(_catAtiva === null){
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = '';
   bar.innerHTML = '';
+  // Botão "voltar para categorias"
+  var voltar = document.createElement('button');
+  voltar.className = 'cat-pill';
+  voltar.style.cssText = 'background:var(--surface3);border:1px solid var(--border2);';
+  voltar.innerHTML = '← Categorias';
+  voltar.onclick = function(){ _catAtiva = null; renderCatBar(); renderItens(); };
+  bar.appendChild(voltar);
   // Pill "Todas"
   var totalDisp = _itens.filter(function(i){ return i.disponivel; }).length;
   var all = document.createElement('button');
@@ -899,7 +891,7 @@ function renderCatBar(){
   bar.appendChild(all);
   // Pills por categoria
   _categorias.forEach(function(cat){
-    var count = _itens.filter(function(i){ return i.categoriaId===cat.id && i.disponivel; }).length;
+    var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
     if(!count) return;
     var pill = document.createElement('button');
     pill.className = 'cat-pill' + (_catAtiva===cat.id?' active':'');
@@ -911,10 +903,56 @@ function renderCatBar(){
 
 function renderItens(){
   var grid = document.getElementById('itens-grid');
-  var busca = (document.getElementById('busca-input').value||'').toLowerCase().trim();
+  if(!grid) return;
+  grid.className = 'itens-grid';
+  var buscaInput = document.getElementById('busca-input');
+  var buscaBar = document.querySelector('.busca-bar');
+
+  // Tela de CATEGORIAS (quando nenhuma selecionada)
+  if(_catAtiva === null){
+    if(buscaBar) buscaBar.style.display = 'none';
+    if(!_categorias.length){
+      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">📂</div><div class="empty-titulo">Sem categorias</div><div class="empty-sub">Cadastre categorias e itens no PDV.</div></div>';
+      return;
+    }
+    grid.innerHTML = '';
+    // Card "Todas"
+    var totalDisp = _itens.filter(function(i){ return i.disponivel; }).length;
+    var allCard = document.createElement('div');
+    allCard.className = 'item-card';
+    allCard.style.cssText = 'background:linear-gradient(135deg,rgba(212,168,67,0.18),rgba(212,168,67,0.05));border-color:rgba(212,168,67,0.4);';
+    allCard.innerHTML =
+      '<div class="item-foto" style="font-size:3rem;background:transparent;">🍽️</div>'+
+      '<div class="item-info" style="text-align:center;">'+
+        '<div class="item-nome" style="color:var(--accent);">Ver Todas</div>'+
+        '<div class="item-desc" style="text-align:center;">'+totalDisp+' itens</div>'+
+      '</div>';
+    allCard.onclick = function(){ _catAtiva='todas'; renderCatBar(); renderItens(); };
+    grid.appendChild(allCard);
+    // Cards de categorias
+    _categorias.forEach(function(cat){
+      var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
+      if(!count) return;
+      var card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML =
+        '<div class="item-foto" style="font-size:3rem;background:linear-gradient(135deg,#2a2a2a,#1a1a1a);">'+(cat.emoji||'📂')+'</div>'+
+        '<div class="item-info" style="text-align:center;">'+
+          '<div class="item-nome">'+esc(cat.nome)+'</div>'+
+          '<div class="item-desc" style="text-align:center;">'+count+' '+(count===1?'item':'itens')+'</div>'+
+        '</div>';
+      card.onclick = (function(id){ return function(){ _catAtiva=id; renderCatBar(); renderItens(); }; })(cat.id);
+      grid.appendChild(card);
+    });
+    return;
+  }
+
+  // Tela de ITENS (categoria selecionada)
+  if(buscaBar) buscaBar.style.display = '';
+  var busca = (buscaInput && buscaInput.value || '').toLowerCase().trim();
   var lista = _itens.filter(function(it){
     if(!it.disponivel) return false;
-    if(_catAtiva!=='todas' && it.categoriaId!==_catAtiva) return false;
+    if(_catAtiva!=='todas' && (it.categoriaId||'')!==_catAtiva) return false;
     if(busca && !it.nome.toLowerCase().includes(busca)) return false;
     return true;
   });
@@ -1256,6 +1294,10 @@ function enviarPedido(){
 
 function fecharSucesso(){
   document.getElementById('modal-sucesso').classList.remove('show');
+  // Volta para grade de categorias para próximo pedido
+  _catAtiva = null;
+  renderCatBar();
+  renderItens();
   showTab('pedidos');
 }
 
@@ -1269,6 +1311,7 @@ function showTab(tab){
   document.getElementById('nav-cardapio').classList.toggle('active', tab==='cardapio');
   document.getElementById('nav-pedidos').classList.toggle('active', tab==='pedidos');
   if(tab==='pedidos') renderPedidos();
+  if(tab==='cardapio') { renderCatBar(); renderItens(); }
 }
 
 // ════════════════════════════════════════

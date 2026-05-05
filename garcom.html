@@ -908,7 +908,7 @@ function escutarMesasOcupadas(){
       var d = doc.data();
       var mesa = String(d.mesa||'');
       if(mesa){
-        var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago'; });
+        var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
         _mesasOcupadas[mesa] = {
           contaId: doc.id,
           garcom: d.garcomPrincipal||'',
@@ -1202,10 +1202,13 @@ function renderPedidos(){
   _meusPedidos.forEach(function(p){
     var hora = '';
     if(p.criadoEm){ var d = new Date(p.criadoEm); hora = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
-    var total = (p.itens||[]).reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
+    var total = (p.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
     var st = p.status || 'aguardando';
     var podeEditar = (st === 'aguardando' || st === 'preparo');
-    var itensHtml = (p.itens||[]).map(function(it, idx){
+    var itensVisiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    if(!itensVisiveis.length){ return; } // Pedido todo cancelado: pula
+    var itensHtml = itensVisiveis.map(function(it){
+      var idx = (p.itens||[]).indexOf(it);
       var acoes = podeEditar
         ? '<div class="pedido-item-actions">'+
             '<button class="pi-btn edit" onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')">✏️ Editar</button>'+
@@ -1377,33 +1380,77 @@ function executarCancelamento(pedidoId, idx){
   if(!motivo.trim()){ showToast('Informe o motivo','#f7a34f'); return; }
 
   var item = ped.itens[idx];
-  var itensRestantes = ped.itens.filter(function(_,i){ return i !== idx; });
-
-  // Cria comando de impressão de cancelamento (PDV escuta)
-  var comandoCancel = {
+  var agora = Date.now();
+  // Marca o item como CANCELADO (não deleta)
+  var itensAtualizados = ped.itens.map(function(it, i){
+    if(i === idx){
+      return Object.assign({}, it, {
+        status: 'cancelado',
+        canceladoEm: agora,
+        canceladoPor: _nomeGarcom,
+        motivoCancelamento: motivo
+      });
+    }
+    return it;
+  });
+  // Registra a reimpressão
+  var reimpressoes = (ped.reimpressoes||[]).concat([{
     tipo: 'cancelamento',
-    restauranteId: _restauranteId,
-    pedidoId: pedidoId,
-    pedidoMesa: ped.mesa,
-    pedidoGarcom: ped.garcom,
-    item: { nome: item.nome, qtd: item.qtd, preco: item.preco, obs: item.obs||'', selecoes: item.selecoes||[] },
-    motivo: motivo,
-    canceladoPor: _nomeGarcom,
-    canceladoEm: Date.now()
-  };
-  fbDb.collection('comandos_impressao').add(comandoCancel).then(function(){
-    // Remove item do pedido (ou deleta pedido se foi o último)
-    if(itensRestantes.length === 0){
-      // Pedido todo cancelado → deleta
-      return fbDb.collection('pedidos').doc(pedidoId).delete();
-    } else {
-      return fbDb.collection('pedidos').doc(pedidoId).update({
-        itens: itensRestantes,
-        atualizadoEm: Date.now()
+    itemKey: item.itemKey || ('idx_' + idx),
+    itemNome: item.nome,
+    data: agora,
+    solicitadoPor: _nomeGarcom,
+    motivo: motivo
+  }]);
+
+  // Atualiza pedido
+  fbDb.collection('pedidos').doc(pedidoId).update({
+    itens: itensAtualizados,
+    reimpressoes: reimpressoes,
+    atualizadoEm: agora
+  }).then(function(){
+    // Se o pedido tem contaId, atualiza também a conta_mesa
+    if(ped.contaId){
+      return fbDb.collection('contas_mesa').doc(ped.contaId).get().then(function(doc){
+        if(!doc.exists) return;
+        var conta = doc.data();
+        // Marca o item correspondente na conta como cancelado também
+        var itensConta = (conta.itens||[]).map(function(it){
+          if(it.pedidoId === pedidoId && it.id === item.id && it.status !== 'cancelado' && it.status !== 'pago'){
+            return Object.assign({}, it, {
+              status: 'cancelado',
+              canceladoEm: agora,
+              canceladoPor: _nomeGarcom,
+              motivoCancelamento: motivo
+            });
+          }
+          return it;
+        });
+        // Recalcula totais ignorando cancelados
+        var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+        return fbDb.collection('contas_mesa').doc(ped.contaId).update({
+          itens: itensConta,
+          subtotal: totais.subtotal,
+          taxa10: totais.taxa10,
+          total: totais.total,
+          pagoTotal: totais.pagoTotal,
+          restante: totais.restante,
+          atualizadoEm: agora
+        });
       });
     }
   }).then(function(){
-    showToast('✕ Item cancelado e enviado pra impressão','#f87171');
+    // Solicita REIMPRESSÃO da comanda completa (com itens riscados)
+    return fbDb.collection('comandos_impressao').add({
+      tipo: 'reimpressao',
+      restauranteId: _restauranteId,
+      pedidoId: pedidoId,
+      motivo: 'Cancelamento de item: ' + item.nome,
+      solicitadoPor: _nomeGarcom,
+      solicitadoEm: agora
+    });
+  }).then(function(){
+    showToast('✕ Item cancelado e reimpressão enviada','#f87171');
     var m = document.getElementById('modal-cancelar-item');
     if(m) m.remove();
   }).catch(function(e){
@@ -1467,13 +1514,51 @@ function salvarEditItemGarcom(){
   if(!ped) return;
   var novaQtd = parseInt(document.getElementById('g-edit-qtd').value)||1;
   var novaObs = document.getElementById('g-edit-obs').value.trim();
+  var itemAntigo = ped.itens[_gPedIdx];
   var itens = (ped.itens||[]).map(function(it,i){
-    if(i === _gPedIdx) return Object.assign({},it,{qtd:novaQtd,obs:novaObs});
+    if(i === _gPedIdx) return Object.assign({},it,{qtd:novaQtd,obs:novaObs, editadoEm:Date.now(), editadoPor:_nomeGarcom});
     return it;
   });
-  fbDb.collection('pedidos').doc(_gPedId).update({itens:itens,atualizadoEm:Date.now()})
-    .then(function(){ showToast('✓ Item atualizado'); var m=document.getElementById('modal-edit-garcom'); if(m) m.remove(); })
-    .catch(function(e){ showToast('❌ '+e.message); });
+  var pedidoId = _gPedId;
+  var contaId = ped.contaId;
+  fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
+    .then(function(){
+      // Sincroniza com contas_mesa
+      if(contaId){
+        return fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+          if(!doc.exists) return;
+          var conta = doc.data();
+          var itensConta = (conta.itens||[]).map(function(it){
+            if(it.pedidoId === pedidoId && it.id === itemAntigo.id && it.status !== 'cancelado' && it.status !== 'pago'){
+              return Object.assign({}, it, {qtd: novaQtd, obs: novaObs});
+            }
+            return it;
+          });
+          var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+          return fbDb.collection('contas_mesa').doc(contaId).update({
+            itens: itensConta,
+            subtotal: totais.subtotal, taxa10: totais.taxa10, total: totais.total,
+            pagoTotal: totais.pagoTotal, restante: totais.restante, atualizadoEm: Date.now()
+          });
+        });
+      }
+    })
+    .then(function(){
+      // Manda reimprimir comanda atualizada
+      return fbDb.collection('comandos_impressao').add({
+        tipo: 'reimpressao',
+        restauranteId: _restauranteId,
+        pedidoId: pedidoId,
+        motivo: 'Edição de item: ' + (itemAntigo.nome||''),
+        solicitadoPor: _nomeGarcom,
+        solicitadoEm: Date.now()
+      });
+    })
+    .then(function(){
+      showToast('✓ Item atualizado e reimpressão enviada','#4ade80');
+      var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+    })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 function substituirItemGarcom(novoItemId){
   var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });
@@ -1482,13 +1567,49 @@ function substituirItemGarcom(novoItemId){
   if(!novoItem) return;
   var qtd = parseInt(document.getElementById('g-edit-qtd').value)||1;
   var obs = document.getElementById('g-edit-obs').value.trim();
+  var itemAntigo = ped.itens[_gPedIdx];
   var itens = (ped.itens||[]).map(function(it,i){
-    if(i === _gPedIdx) return {id:novoItem.id,nome:novoItem.nome,preco:novoItem.preco,qtd:qtd,obs:obs};
+    if(i === _gPedIdx) return {id:novoItem.id,nome:novoItem.nome,preco:novoItem.preco,qtd:qtd,obs:obs, status:'ativo', editadoEm:Date.now(), editadoPor:_nomeGarcom};
     return it;
   });
-  fbDb.collection('pedidos').doc(_gPedId).update({itens:itens,atualizadoEm:Date.now()})
-    .then(function(){ showToast('✓ Item substituído por '+novoItem.nome); var m=document.getElementById('modal-edit-garcom'); if(m) m.remove(); })
-    .catch(function(e){ showToast('❌ '+e.message); });
+  var pedidoId = _gPedId;
+  var contaId = ped.contaId;
+  fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
+    .then(function(){
+      if(contaId){
+        return fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+          if(!doc.exists) return;
+          var conta = doc.data();
+          var itensConta = (conta.itens||[]).map(function(it){
+            if(it.pedidoId === pedidoId && it.id === itemAntigo.id && it.status !== 'cancelado' && it.status !== 'pago'){
+              return Object.assign({}, it, {id: novoItem.id, nome: novoItem.nome, preco: novoItem.preco, qtd: qtd, obs: obs});
+            }
+            return it;
+          });
+          var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+          return fbDb.collection('contas_mesa').doc(contaId).update({
+            itens: itensConta,
+            subtotal: totais.subtotal, taxa10: totais.taxa10, total: totais.total,
+            pagoTotal: totais.pagoTotal, restante: totais.restante, atualizadoEm: Date.now()
+          });
+        });
+      }
+    })
+    .then(function(){
+      return fbDb.collection('comandos_impressao').add({
+        tipo: 'reimpressao',
+        restauranteId: _restauranteId,
+        pedidoId: pedidoId,
+        motivo: 'Substituição: ' + (itemAntigo.nome||'') + ' → ' + novoItem.nome,
+        solicitadoPor: _nomeGarcom,
+        solicitadoEm: Date.now()
+      });
+    })
+    .then(function(){
+      showToast('✓ Substituído por '+novoItem.nome+' (reimpressão enviada)','#4ade80');
+      var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+    })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 function removerItemGarcom(pedidoId, idx){
   var ped = _meusPedidos.find(function(p){ return p.id === pedidoId; });
@@ -1531,13 +1652,66 @@ function abrirModalItem(it){
     var ped = _meusPedidos.find(function(p){ return p.id === _gAdicionarPedId; });
     if(ped) {
       var itens = (ped.itens||[]).slice();
-      var ex = itens.findIndex(function(i){ return i.id === it.id; });
-      if(ex >= 0) { itens[ex] = Object.assign({},itens[ex],{qtd:(itens[ex].qtd||1)+1}); }
-      else { itens.push({id:it.id,nome:it.nome,preco:it.preco,qtd:1,obs:''}); }
+      var jaIdx = -1;
+      for(var k=0;k<itens.length;k++){
+        if(itens[k].id === it.id && itens[k].status !== 'cancelado'){ jaIdx = k; break; }
+      }
+      var pedidoId = _gAdicionarPedId;
+      var contaId = ped.contaId;
+      if(jaIdx >= 0) { itens[jaIdx] = Object.assign({},itens[jaIdx],{qtd:(itens[jaIdx].qtd||1)+1}); }
+      else { itens.push({id:it.id,nome:it.nome,preco:it.preco,qtd:1,obs:'',status:'ativo'}); }
       window._modoAdicionarGarcom = false;
-      fbDb.collection('pedidos').doc(_gAdicionarPedId).update({itens:itens,atualizadoEm:Date.now()})
-        .then(function(){ showToast('✓ '+it.nome+' adicionado ao pedido'); _gAdicionarPedId=null; showTab('pedidos'); })
-        .catch(function(e){ showToast('❌ '+e.message); });
+      fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
+        .then(function(){
+          // Sincroniza com contas_mesa
+          if(contaId){
+            return fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+              if(!doc.exists) return;
+              var conta = doc.data();
+              var itensConta = (conta.itens||[]).slice();
+              if(jaIdx >= 0){
+                // Aumentar qtd no item da conta
+                itensConta = itensConta.map(function(ic){
+                  if(ic.pedidoId === pedidoId && ic.id === it.id && ic.status !== 'cancelado' && ic.status !== 'pago'){
+                    return Object.assign({}, ic, {qtd: (ic.qtd||1) + 1});
+                  }
+                  return ic;
+                });
+              } else {
+                // Adicionar novo item
+                itensConta.push({
+                  itemKey: pedidoId + '_' + Math.random().toString(36).substring(2,8),
+                  pedidoId: pedidoId,
+                  id: it.id, nome: it.nome, preco: it.preco, qtd: 1, obs: '',
+                  selecoes: [], status: 'ativo', pagamentoId: null,
+                  adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom
+                });
+              }
+              var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+              return fbDb.collection('contas_mesa').doc(contaId).update({
+                itens: itensConta,
+                subtotal: totais.subtotal, taxa10: totais.taxa10, total: totais.total,
+                pagoTotal: totais.pagoTotal, restante: totais.restante, atualizadoEm: Date.now()
+              });
+            });
+          }
+        })
+        .then(function(){
+          // Reimprime comanda atualizada
+          return fbDb.collection('comandos_impressao').add({
+            tipo: 'reimpressao',
+            restauranteId: _restauranteId,
+            pedidoId: pedidoId,
+            motivo: 'Item adicionado: ' + it.nome,
+            solicitadoPor: _nomeGarcom,
+            solicitadoEm: Date.now()
+          });
+        })
+        .then(function(){
+          showToast('✓ '+it.nome+' adicionado (reimpressão enviada)','#4ade80');
+          _gAdicionarPedId=null; showTab('pedidos');
+        })
+        .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
       return;
     }
   }
@@ -1832,7 +2006,7 @@ function enviarPedido(){
         pedidoId: pedidoId,
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
         selecoes: it.selecoes || [],
-        status: 'aberto',
+        status: 'ativo',
         pagamentoId: null,
         adicionadoEm: Date.now(),
         adicionadoPor: _nomeGarcom
@@ -1871,9 +2045,10 @@ function enviarPedido(){
 
 // ─── Cálculo de totais da conta ───
 function calcularTotaisConta(c){
-  // Subtotal = soma de TODOS os itens (mesmo pagos), pra mostrar total da mesa
-  var subtotal = (c.itens||[]).reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
-  var subtotalAberto = (c.itens||[]).filter(function(i){ return i.status!=='pago'; })
+  // Ignora itens cancelados em todos os totais
+  var ativos = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; });
+  var subtotal = ativos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+  var subtotalAberto = ativos.filter(function(i){ return i.status!=='pago'; })
     .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
   var taxa10 = subtotal * 0.10;
   var total = subtotal + taxa10;
@@ -2154,7 +2329,7 @@ function renderFecharConta(){
     '<div class="fechar-linha total" style="border-top:none;padding-top:4px;"><span style="color:'+(totais.restante>0?'var(--accent)':'var(--success)')+';">RESTANTE</span><span class="v" style="color:'+(totais.restante>0?'var(--accent)':'var(--success)')+';">R$ ' + fmtPreco(totais.restante) + '</span></div>'+
   '</div>';
 
-  var itensVisiveis = (c.itens||[]).filter(function(i){ return !_fecharOcultarPagos || i.status!=='pago'; });
+  var itensVisiveis = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado' && (!_fecharOcultarPagos || i.status!=='pago'); });
   var qtdPagos = (c.itens||[]).filter(function(i){ return i.status==='pago'; }).length;
   if(itensVisiveis.length){
     html += '<div class="fechar-bloco">'+
@@ -2357,7 +2532,7 @@ function estornarPagamento(pagamentoId){
   if(!confirm('Estornar este pagamento?\n\nOs itens vinculados voltam a ficar em aberto.')) return;
   var pagamentos = (_fecharConta.pagamentos||[]).filter(function(p){ return p.id !== pagamentoId; });
   var itensAtualizados = (_fecharConta.itens||[]).map(function(it){
-    if(it.pagamentoId === pagamentoId) return Object.assign({}, it, {status:'aberto', pagamentoId:null});
+    if(it.pagamentoId === pagamentoId) return Object.assign({}, it, {status:'ativo', pagamentoId:null});
     return it;
   });
   var novaTotais = calcularTotaisConta({itens:itensAtualizados, pagamentos:pagamentos});
@@ -2466,7 +2641,31 @@ function abrirVerContaMesa(num){
 // ════════════════════════════════════════
 //  HISTÓRICO
 // ════════════════════════════════════════
+function executarLimpezaAutomaticaGarcom(){
+  if(!fbDb || !_restauranteId) return;
+  var ultimaLimpeza = parseInt(localStorage.getItem('garcom_ultima_limpeza_'+_restauranteId) || '0');
+  var agora = Date.now();
+  var UM_DIA = 24*60*60*1000;
+  if(ultimaLimpeza && (agora - ultimaLimpeza) < UM_DIA) return;
+  var limite = agora - UM_DIA;
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', _restauranteId)
+    .where('fechadoEm','<', limite)
+    .get().then(function(snap){
+      if(snap.empty){
+        localStorage.setItem('garcom_ultima_limpeza_'+_restauranteId, String(agora));
+        return;
+      }
+      var batch = fbDb.batch();
+      snap.forEach(function(doc){ batch.delete(doc.ref); });
+      return batch.commit().then(function(){
+        localStorage.setItem('garcom_ultima_limpeza_'+_restauranteId, String(agora));
+      });
+    }).catch(function(){});
+}
+
 function abrirHistorico(){
+  executarLimpezaAutomaticaGarcom();
   var body = document.getElementById('historico-body');
   body.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
   document.getElementById('modal-historico').classList.add('show');
@@ -2486,22 +2685,35 @@ function abrirHistorico(){
         var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
         var card = document.createElement('div');
         card.className = 'hist-card';
+        card.style.position = 'relative';
         card.innerHTML =
           '<div class="hist-head">'+
             '<span class="hist-mesa">Mesa ' + c.mesa + '</span>'+
             '<span style="font-size:0.74rem;color:var(--muted);">👤 ' + esc(c.garcom||'—') + '</span>'+
-            '<span class="hist-data">' + data + '</span>'+
+            '<span class="hist-data" style="margin-right:30px;">' + data + '</span>'+
           '</div>'+
           '<div style="display:flex;justify-content:space-between;align-items:center;">'+
             '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
             '<span class="hist-total">R$ ' + fmtPreco(c.total||0) + '</span>'+
-          '</div>';
-        card.onclick = (function(conta){ return function(){ verContaDetalhe(conta); }; })(c);
+          '</div>'+
+          '<button onclick="event.stopPropagation();excluirContaGarcom(\''+c.id+'\',\''+c.mesa+'\')" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:0.85rem;font-family:inherit;">🗑</button>';
+        card.onclick = (function(conta){ return function(e){
+          if(e.target.tagName === 'BUTTON') return;
+          verContaDetalhe(conta);
+        }; })(c);
         body.appendChild(card);
       });
     }).catch(function(e){
       body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
     });
+}
+
+function excluirContaGarcom(id, mesa){
+  if(!confirm('Excluir definitivamente a conta da Mesa ' + mesa + ' do histórico?\n\nEsta ação não pode ser desfeita.')) return;
+  fbDb.collection('contas_fechadas').doc(id).delete().then(function(){
+    showToast('🗑️ Conta removida','#f87171');
+    abrirHistorico();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
 var _contaDetalheAtual = null;

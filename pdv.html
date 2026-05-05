@@ -1350,23 +1350,29 @@ function renderPedidosPDV() {
     var card = document.createElement('div');
     card.className = 'pedido-card';
     var itensHtml = (p.itens||[]).map(function(it, idx) {
+      var cancelado = it.status === 'cancelado';
+      var styleCancel = cancelado ? 'opacity:0.5;text-decoration:line-through;' : '';
       var selecoesEl = '';
       if(it.selecoes && it.selecoes.length){
-        selecoesEl = '<div style="font-size:0.7rem;color:var(--muted);padding-left:30px;margin-top:2px;line-height:1.4;">';
+        selecoesEl = '<div style="font-size:0.7rem;color:var(--muted);padding-left:30px;margin-top:2px;line-height:1.4;'+styleCancel+'">';
         it.selecoes.forEach(function(s){
           var ext = (s.precoExtra||0) > 0 ? ' (+R$ '+formatarPreco(s.precoExtra)+')' : '';
           selecoesEl += '• '+escapeHtml(s.opcao||'')+escapeHtml(ext)+'<br>';
         });
         selecoesEl += '</div>';
       }
+      var tagCancel = cancelado
+        ? '<div style="font-size:0.66rem;background:rgba(248,113,113,0.18);color:#f87171;border-radius:4px;padding:2px 8px;display:inline-block;margin-top:3px;font-weight:700;">✕ CANCELADO'+(it.motivoCancelamento?' — '+escapeHtml(it.motivoCancelamento):'')+(it.canceladoPor?' • '+escapeHtml(it.canceladoPor):'')+'</div>'
+        : '';
       return '<div class="pedido-item-row">' +
-        '<div class="pedido-item-top">' +
+        '<div class="pedido-item-top" style="'+styleCancel+'">' +
           '<span class="pedido-item-qtd">' + (it.qtd||1) + 'x</span>' +
           '<span class="pedido-item-nome">' + escapeHtml(it.nome||'') + '</span>' +
           '<span class="pedido-item-preco">R$ ' + formatarPreco((it.preco||0)*(it.qtd||1)) + '</span>' +
         '</div>' +
         selecoesEl +
-        (it.obs ? '<div class="pedido-item-obs">📝 ' + escapeHtml(it.obs) + '</div>' : '') +
+        (it.obs ? '<div class="pedido-item-obs" style="'+styleCancel+'">📝 ' + escapeHtml(it.obs) + '</div>' : '') +
+        tagCancel +
       '</div>';
     }).join('');
     card.innerHTML =
@@ -1506,7 +1512,37 @@ document.addEventListener('click', function(e) {
 // ════════════════════════════════════════
 //  HISTÓRICO PDV
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+//  AUTO-LIMPEZA DE HISTÓRICO (1x por dia)
+// ════════════════════════════════════════
+function executarLimpezaAutomatica(){
+  if(!fbDb || !_restauranteAtivo) return;
+  // Verifica última execução (localStorage)
+  var ultimaLimpeza = parseInt(localStorage.getItem('pdv_ultima_limpeza_'+_restauranteAtivo.id) || '0');
+  var agora = Date.now();
+  var UM_DIA = 24*60*60*1000;
+  if(ultimaLimpeza && (agora - ultimaLimpeza) < UM_DIA) return; // já rodou nas últimas 24h
+
+  var limite = agora - UM_DIA; // mais que 24h atrás
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .where('fechadoEm','<', limite)
+    .get().then(function(snap){
+      if(snap.empty){
+        localStorage.setItem('pdv_ultima_limpeza_'+_restauranteAtivo.id, String(agora));
+        return;
+      }
+      var batch = fbDb.batch();
+      snap.forEach(function(doc){ batch.delete(doc.ref); });
+      return batch.commit().then(function(){
+        console.log('🧹 Limpeza automática: ' + snap.size + ' contas fechadas removidas (>24h)');
+        localStorage.setItem('pdv_ultima_limpeza_'+_restauranteAtivo.id, String(agora));
+      });
+    }).catch(function(e){ console.warn('Limpeza:', e); });
+}
+
 function carregarHistoricoPDV(){
+  executarLimpezaAutomatica(); // tenta limpar antes de carregar
   var lista = document.getElementById('historico-pdv-lista');
   if(!lista) return;
   lista.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
@@ -1536,16 +1572,19 @@ function carregarHistoricoPDV(){
       var html = resumoHtml;
       contas.slice(0, 100).forEach(function(c){
         var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-        html += '<div class="hist-card-pdv" onclick="verContaPDV(\''+c.id+'\')">'+
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
-            '<span style="background:rgba(212,168,67,0.12);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.78rem;font-weight:600;">Mesa '+c.mesa+'</span>'+
-            '<span style="font-size:0.74rem;color:var(--muted);">👤 '+escapeHtml(c.garcom||'—')+'</span>'+
-            '<span style="font-size:0.72rem;color:var(--muted);margin-left:auto;">'+data+'</span>'+
+        html += '<div class="hist-card-pdv" style="position:relative;">'+
+          '<div onclick="verContaPDV(\''+c.id+'\')" style="cursor:pointer;">'+
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+              '<span style="background:rgba(212,168,67,0.12);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.78rem;font-weight:600;">Mesa '+c.mesa+'</span>'+
+              '<span style="font-size:0.74rem;color:var(--muted);">👤 '+escapeHtml(c.garcom||'—')+'</span>'+
+              '<span style="font-size:0.72rem;color:var(--muted);margin-left:auto;margin-right:30px;">'+data+'</span>'+
+            '</div>'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+              '<span style="font-size:0.78rem;color:var(--muted);">'+((c.itens||[]).length)+' itens</span>'+
+              '<span style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+(c.total||0).toFixed(2).replace('.',',')+'</span>'+
+            '</div>'+
           '</div>'+
-          '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-            '<span style="font-size:0.78rem;color:var(--muted);">'+((c.itens||[]).length)+' itens</span>'+
-            '<span style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+(c.total||0).toFixed(2).replace('.',',')+'</span>'+
-          '</div>'+
+          '<button onclick="excluirContaPDV(\''+c.id+'\',\''+c.mesa+'\')" title="Excluir do histórico" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:0.85rem;">🗑</button>'+
         '</div>';
       });
       lista.innerHTML = html;
@@ -1553,6 +1592,14 @@ function carregarHistoricoPDV(){
     }).catch(function(e){
       lista.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
     });
+}
+
+function excluirContaPDV(id, mesa){
+  if(!confirm('Excluir definitivamente a conta da Mesa ' + mesa + ' do histórico?\n\nEsta ação não pode ser desfeita.')) return;
+  fbDb.collection('contas_fechadas').doc(id).delete().then(function(){
+    showToast('🗑️ Conta removida','#f87171');
+    carregarHistoricoPDV();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
 function verContaPDV(id){
@@ -2981,6 +3028,25 @@ function processarComandoImpressao(cmdId, cmd){
       showToast('✕ Cancelamento impresso','#f87171');
     }
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+  } else if(cmd.tipo === 'reimpressao'){
+    // Busca pedido completo e imprime versão atualizada (com itens cancelados)
+    fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
+      if(!doc.exists){ console.warn('Pedido não encontrado'); return; }
+      var pedido = Object.assign({id: doc.id}, doc.data());
+      // Imprime usando os modelos cadastrados, mas com flag de reimpressão
+      _modelos.forEach(function(modelo){
+        var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+        if(!imp) return;
+        var cupom = gerarCupomReimpressao(pedido, modelo, cmd.motivo);
+        if(cupom){
+          enviarParaImpressora(imp, cupom);
+        }
+      });
+      showToast('🖨️ Reimpressão enviada','#d4a843');
+    }).catch(function(e){ console.warn('reimpressao:', e); })
+      .finally(function(){
+        fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      });
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado
     fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
@@ -3143,6 +3209,89 @@ function gerarCupomContaFinal(conta){
   s += escposLeft();
   s += '\n\n';
   if(cfg.cortePapel) s += escposCut();
+  return s;
+}
+
+// ─── Gera cupom de REIMPRESSÃO (com itens cancelados destacados) ───
+function gerarCupomReimpressao(pedido, modelo, motivo){
+  var c = _configImp;
+  var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+  var L = imp ? (imp.largura||48) : 48;
+  // Filtra itens deste modelo (categorias ou itens)
+  var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
+  if(!itensFiltrados.length) return null; // não imprime se nenhum item desse modelo
+
+  var s = escposInit();
+  // Cabeçalho destacado de REIMPRESSÃO
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += '*** REIMPRESSAO ***\n';
+  s += escposLarge(false);
+  s += (c.restauranteNome||'') + '\n';
+  s += escposBold(false);
+  s += linha('=', L) + '\n';
+  s += escposBold(true) + escposLarge(true);
+  s += (modelo.nome||'PEDIDO').toUpperCase() + '\n';
+  s += escposLarge(false) + escposBold(false);
+  s += escposLeft();
+  if(c.imprimirMesa && pedido.mesa) s += escposBold(true) + 'MESA: ' + pedido.mesa + escposBold(false) + '\n';
+  if(c.imprimirGarcom && pedido.garcom) s += 'Garcom: ' + pedido.garcom + '\n';
+  s += 'Hora: ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  if(motivo){
+    s += escposBold(true) + 'Motivo: ' + escposBold(false) + motivo + '\n';
+  }
+  s += linha('-', L) + '\n';
+  // Itens com indicação CANCELADO
+  itensFiltrados.forEach(function(it){
+    var cancelado = it.status === 'cancelado';
+    if(cancelado){
+      // Item cancelado — destaca
+      s += escposBold(true);
+      s += '*** CANCELADO ***\n';
+      s += '  ' + (it.qtd||1) + 'x ' + (it.nome||'') + '\n';
+      s += escposBold(false);
+      if(it.motivoCancelamento){
+        s += '  Motivo: ' + it.motivoCancelamento + '\n';
+      }
+      if(it.canceladoPor){
+        s += '  Por: ' + it.canceladoPor + '\n';
+      }
+      s += '\n';
+    } else {
+      s += escposBold(true) + escposLarge(true);
+      var nomeItem = (it.qtd||1) + 'x ' + (it.nome||'');
+      var linhasNome = quebrarLinha(nomeItem, Math.floor(L/2));
+      linhasNome.forEach(function(ln){ s += ln + '\n'; });
+      s += escposLarge(false) + escposBold(false);
+      if(it.selecoes && it.selecoes.length){
+        it.selecoes.forEach(function(sel){
+          var ext = (sel.precoExtra||0) > 0 && modelo.mostrarPrecos!==false ? ' (+R$'+formatarPreco(sel.precoExtra)+')' : '';
+          s += '   * ' + (sel.opcao||'') + ext + '\n';
+        });
+      }
+      if(c.imprimirObs && it.obs){
+        var obsLin = quebrarLinha('** ' + it.obs, L);
+        obsLin.forEach(function(ln){ s += ln + '\n'; });
+      }
+      if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
+        var preco = (it.preco||0)*(it.qtd||1);
+        s += padR('R$ ' + formatarPreco(preco), L) + '\n';
+      }
+      s += '\n';
+    }
+  });
+  s += linha('-', L) + '\n';
+  // Total apenas com itens NÃO cancelados
+  if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
+    var ativos = itensFiltrados.filter(function(it){ return it.status !== 'cancelado'; });
+    var total = ativos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    s += escposBold(true);
+    s += pad('TOTAL ATIVO', Math.floor(L/2)) + padR('R$ ' + formatarPreco(total), Math.ceil(L/2)) + '\n';
+    s += escposBold(false);
+  }
+  s += '\n\n';
+  if(c.beep) s += escposBeep();
+  if(c.cortePapel) s += escposCut();
   return s;
 }
 

@@ -7,6 +7,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bávaro Garçom">
+<link rel="manifest" href="/manifest-garcom.json">
+<link rel="apple-touch-icon" href="/icon-garcom-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-garcom-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-garcom-512.png">
 <title>Garçom — Bávaro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -391,6 +396,23 @@ header{
 </head>
 <body>
 
+<!-- Splash Screen -->
+<div id="splash-screen" style="position:fixed;inset:0;background:#0d0d0d;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.5s ease-out;">
+  <img src="/icon-garcom-512.png" alt="Bávaro" style="max-width:75%;max-height:60vh;object-fit:contain;animation:splashFade 0.8s ease-out;">
+  <div style="margin-top:32px;display:flex;align-items:center;gap:8px;">
+    <div class="splash-dot"></div>
+    <div class="splash-dot" style="animation-delay:0.15s;"></div>
+    <div class="splash-dot" style="animation-delay:0.3s;"></div>
+  </div>
+  <div style="margin-top:16px;color:#888;font-size:0.78rem;letter-spacing:0.1em;text-transform:uppercase;font-family:'Bebas Neue',sans-serif;">Carregando</div>
+</div>
+<style>
+@keyframes splashFade{from{opacity:0;transform:scale(0.95);}to{opacity:1;transform:scale(1);}}
+@keyframes splashPulse{0%,80%,100%{opacity:0.3;transform:scale(0.8);}40%{opacity:1;transform:scale(1);}}
+.splash-dot{width:8px;height:8px;border-radius:50%;background:#d4a843;animation:splashPulse 1.2s infinite ease-in-out;}
+#splash-screen.hidden{opacity:0;pointer-events:none;}
+</style>
+
 <!-- Loading -->
 <div id="loading">
   <div class="ld-spin"></div>
@@ -603,6 +625,32 @@ header{
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
 <script>
+// ════════════════════════════════════════
+//  SPLASH SCREEN + PWA
+// ════════════════════════════════════════
+function esconderSplash(){
+  var s = document.getElementById('splash-screen');
+  if(s){
+    s.classList.add('hidden');
+    setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); }, 600);
+  }
+}
+// Esconde o splash após o app carregar (mínimo 1.2s pra não ser brusco)
+window.addEventListener('load', function(){
+  setTimeout(esconderSplash, 1200);
+});
+// Failsafe: esconde após 5s mesmo que algo trave
+setTimeout(esconderSplash, 5000);
+
+// Registra service worker para PWA (instalar como app)
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw-garcom.js').catch(function(e){
+      console.warn('SW erro:', e);
+    });
+  });
+}
+
 // ════════════════════════════════════════
 //  CONFIG FIREBASE (mesma do PDV)
 // ════════════════════════════════════════

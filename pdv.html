@@ -2698,40 +2698,58 @@ function gerarCupomPedido(pedido, modelo){
   var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
   var L = imp ? (imp.largura||48) : 48;
   var s = escposInit();
-  // Cabeçalho
-  s += escposCenter() + escposBold(true) + escposLarge(true);
-  s += (c.restauranteNome||'') + '\n';
-  s += escposLarge(false) + escposBold(false);
-  if(c.endereco1) s += c.endereco1 + '\n';
-  if(c.endereco2) s += c.endereco2 + '\n';
-  s += linha('=', L) + '\n';
-  // Tipo de cupom
-  s += escposBold(true) + escposLarge(true);
-  s += (modelo.nome||'PEDIDO').toUpperCase() + '\n';
-  s += escposLarge(false) + escposBold(false);
-  // Mesa, garçom, hora
-  s += escposLeft();
-  if(c.imprimirMesa && pedido.mesa){
-    s += escposBold(true) + 'MESA: ' + pedido.mesa + escposBold(false) + '\n';
-  }
-  if(c.imprimirGarcom && pedido.garcom){
-    s += 'Garcom: ' + pedido.garcom + '\n';
-  }
-  if(c.imprimirHora){
-    var d = pedido.criadoEm ? new Date(pedido.criadoEm) : new Date();
-    s += 'Hora:   ' + d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
-  }
-  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
-  s += linha('-', L) + '\n';
-  // Itens (filtrados pelo modelo)
+
+  // Filtra itens do modelo primeiro
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
-  if(!itensFiltrados.length){ return null; } // não imprime se nenhum item se aplica
-  itensFiltrados.forEach(function(it){
+  if(!itensFiltrados.length){ return null; }
+
+  // ─── CABEÇALHO ───
+  s += escposCenter();
+  s += linha('=', L) + '\n';
+  var d = pedido.criadoEm ? new Date(pedido.criadoEm) : new Date();
+  var dataHora = d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  s += dataHora + '\n';
+  s += escposBold(true);
+  s += (c.restauranteNome||'') + '\n';
+  s += escposBold(false);
+  s += linha('-', L) + '\n';
+  // Pedido pequeno
+  s += 'Pedido #' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  s += linha('=', L) + '\n';
+  s += '\n';
+
+  // ─── MESA EM DESTAQUE GIGANTE ───
+  if(c.imprimirMesa && pedido.mesa){
     s += escposBold(true) + escposLarge(true);
-    var nomeItem = (it.qtd||1) + 'x ' + (it.nome||'');
-    var linhasNome = quebrarLinha(nomeItem, Math.floor(L/2));
-    linhasNome.forEach(function(ln){ s += ln + '\n'; });
+    s += 'MESA ' + pedido.mesa + '\n';
     s += escposLarge(false) + escposBold(false);
+    s += '\n';
+  }
+
+  // ─── ITENS ───
+  s += escposLeft();
+  s += linha('-', L) + '\n';
+  s += escposBold(true) + 'Itens' + escposBold(false) + '\n';
+  s += linha('-', L) + '\n';
+  s += '\n';
+
+  itensFiltrados.forEach(function(it, idx){
+    var nomeItem = '(' + (it.qtd||1) + ') ' + (it.nome||'').toUpperCase();
+    if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
+      // Nome à esquerda, preço à direita na mesma linha
+      var preco = (it.preco||0)*(it.qtd||1);
+      var precoStr = 'R$ ' + formatarPreco(preco);
+      var espaco = L - nomeItem.length - precoStr.length;
+      if(espaco < 1){
+        // Quebra em duas linhas se não cabe
+        s += nomeItem + '\n';
+        s += padR(precoStr, L) + '\n';
+      } else {
+        s += nomeItem + new Array(espaco+1).join(' ') + precoStr + '\n';
+      }
+    } else {
+      s += nomeItem + '\n';
+    }
     // Seleções (opções e adicionais)
     if(it.selecoes && it.selecoes.length){
       it.selecoes.forEach(function(sel){
@@ -2741,26 +2759,44 @@ function gerarCupomPedido(pedido, modelo){
     }
     // Observação
     if(c.imprimirObs && it.obs){
-      var obsLin = quebrarLinha('** ' + it.obs, L);
+      var obsLin = quebrarLinha('   ** ' + it.obs, L);
       obsLin.forEach(function(ln){ s += ln + '\n'; });
     }
-    // Preço (se modelo permitir)
-    if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
-      var preco = (it.preco||0)*(it.qtd||1);
-      s += padR('R$ ' + formatarPreco(preco), L) + '\n';
+    // Linha tracejada entre itens (não no último)
+    if(idx < itensFiltrados.length - 1){
+      s += '        ' + linha('-', 10) + '\n';
     }
-    s += '\n';
   });
-  s += linha('-', L) + '\n';
-  // Total (só se modelo mostra preços)
+  s += '\n';
+
+  // ─── TOTAIS COM 10% ───
   if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
-    var total = itensFiltrados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    s += linha('=', L) + '\n';
+    var subtotal = itensFiltrados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    var taxa10 = subtotal * 0.10;
+    var total = subtotal + taxa10;
+    s += escposCenter();
+    s += pad('Subtotal:', 16) + padR('R$ ' + formatarPreco(subtotal), 12) + '\n';
+    s += pad('10% Garcom:', 16) + padR('R$ ' + formatarPreco(taxa10), 12) + '\n';
+    s += '          ' + linha('-', 25) + '\n';
     s += escposBold(true) + escposLarge(true);
-    s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(total), Math.ceil(L/2)) + '\n';
+    s += pad('TOTAL:', 8) + 'R$ ' + formatarPreco(total) + '\n';
     s += escposLarge(false) + escposBold(false);
+    s += escposLeft();
+  } else {
+    s += linha('=', L) + '\n';
+  }
+
+  // ─── RODAPÉ ───
+  s += '\n';
+  s += escposCenter();
+  if(c.imprimirGarcom && pedido.garcom){
+    s += 'Garcom: ' + pedido.garcom + '\n';
   }
   if(c.rodape){
-    s += '\n' + escposCenter() + c.rodape + '\n';
+    s += c.rodape + '\n';
+  } else {
+    s += 'Bavaro PDV\n';
   }
   s += escposLeft();
   s += '\n\n';
@@ -3163,48 +3199,87 @@ function gerarCupomContaFinal(conta){
   var cfg = _configImp;
   var L = 48;
   var s = escposInit();
-  s += escposCenter() + escposBold(true) + escposLarge(true);
-  s += (cfg.restauranteNome||'') + '\n';
-  s += escposLarge(false);
-  s += '*** FECHAMENTO ***\n';
-  s += escposBold(false);
-  if(cfg.endereco1) s += cfg.endereco1 + '\n';
-  if(cfg.endereco2) s += cfg.endereco2 + '\n';
+
+  // ─── CABEÇALHO ───
+  s += escposCenter();
   s += linha('=', L) + '\n';
-  s += escposLeft();
+  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += escposBold(true);
+  s += (cfg.restauranteNome||'') + '\n';
+  s += escposBold(false);
+  s += linha('-', L) + '\n';
+  s += '*** FECHAMENTO ***\n';
+  s += linha('=', L) + '\n';
+  s += '\n';
+
+  // ─── MESA EM DESTAQUE GIGANTE ───
   s += escposBold(true) + escposLarge(true);
   s += 'MESA ' + conta.mesa + '\n';
   s += escposLarge(false) + escposBold(false);
-  s += 'Aberta:   ' + (conta.abertaEm ? new Date(conta.abertaEm).toLocaleString('pt-BR') : '—') + '\n';
-  s += 'Fechada:  ' + new Date().toLocaleString('pt-BR') + '\n';
+  s += '\n';
+
+  // ─── DADOS ───
+  s += escposLeft();
+  s += linha('-', L) + '\n';
+  if(conta.abertaEm) s += 'Aberta:   ' + new Date(conta.abertaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += 'Fechada:  ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += 'Garcom:   ' + (conta.garcomPrincipal||'—') + '\n';
   s += linha('-', L) + '\n';
-  (conta.itens||[]).forEach(function(it){
-    var nome = (it.qtd||1) + 'x ' + (it.nome||'');
+  s += escposBold(true) + 'Itens' + escposBold(false) + '\n';
+  s += linha('-', L) + '\n';
+  s += '\n';
+
+  // ─── ITENS ───
+  var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  itensValidos.forEach(function(it, idx){
+    var nome = '(' + (it.qtd||1) + ') ' + (it.nome||'').toUpperCase();
     var preco = (it.preco||0)*(it.qtd||1);
-    s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
-    if(it.obs) s += '  ' + it.obs + '\n';
+    var precoStr = 'R$ ' + formatarPreco(preco);
+    var espaco = L - nome.length - precoStr.length;
+    if(espaco < 1){
+      s += nome + '\n';
+      s += padR(precoStr, L) + '\n';
+    } else {
+      s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
+    }
+    if(it.obs) s += '   ** ' + it.obs + '\n';
+    if(idx < itensValidos.length - 1){
+      s += '        ' + linha('-', 10) + '\n';
+    }
   });
-  s += linha('-', L) + '\n';
+  s += '\n';
+
+  // ─── TOTAIS ───
   var totais = calcularTotaisContaPDV(conta);
-  s += pad('Subtotal', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.subtotal), Math.ceil(L/2)) + '\n';
-  s += pad('+ 10% Garcom', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.taxa10), Math.ceil(L/2)) + '\n';
+  s += linha('=', L) + '\n';
+  s += escposCenter();
+  s += pad('Subtotal:', 16) + padR('R$ ' + formatarPreco(totais.subtotal), 12) + '\n';
+  s += pad('10% Garcom:', 16) + padR('R$ ' + formatarPreco(totais.taxa10), 12) + '\n';
+  s += '          ' + linha('-', 25) + '\n';
   s += escposBold(true) + escposLarge(true);
-  s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.total), Math.ceil(L/2)) + '\n';
+  s += pad('TOTAL:', 8) + 'R$ ' + formatarPreco(totais.total) + '\n';
   s += escposLarge(false) + escposBold(false);
-  s += linha('-', L) + '\n';
-  // Pagamentos
+  s += escposLeft();
+
+  // ─── PAGAMENTOS ───
   if((conta.pagamentos||[]).length){
+    s += linha('-', L) + '\n';
     s += escposBold(true) + 'PAGAMENTOS:' + escposBold(false) + '\n';
     conta.pagamentos.forEach(function(p){
       var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-      var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Crédito');
+      var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Credito');
       s += pad(' ' + hora + ' ' + tipo, L-12) + padR('R$ ' + formatarPreco(p.valor), 12) + '\n';
     });
-    s += linha('-', L) + '\n';
   }
+  s += linha('=', L) + '\n';
+
+  // ─── RODAPÉ ───
+  s += '\n';
+  s += escposCenter();
   if(cfg.rodape){
-    s += '\n' + escposCenter() + cfg.rodape + '\n';
+    s += cfg.rodape + '\n';
+  } else {
+    s += 'Bavaro PDV\n';
   }
   s += escposLeft();
   s += '\n\n';

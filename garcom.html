@@ -2164,6 +2164,13 @@ function abrirMenuMesa(num, eOcupada){
           '<div style="font-size:0.74rem;color:var(--muted);">Receber pagamento ou encerrar mesa</div>'+
         '</div>'+
       '</button>'+
+      '<button class="mesa-menu-item" onclick="acaoMesa(\'transferir\')">'+
+        '<span style="font-size:1.4rem;margin-right:12px;">🔄</span>'+
+        '<div style="flex:1;text-align:left;">'+
+          '<div style="font-weight:700;">Transferir Mesa / Itens</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);">Mover toda a mesa ou itens específicos</div>'+
+        '</div>'+
+      '</button>'+
       '<button class="mesa-menu-item" onclick="acaoMesa(\'liberar\')" style="border-color:rgba(248,113,113,0.3);">'+
         '<span style="font-size:1.4rem;margin-right:12px;">🧹</span>'+
         '<div style="flex:1;text-align:left;">'+
@@ -2207,6 +2214,8 @@ function acaoMesa(acao){
     abrirVerContaMesa(num);
   } else if(acao === 'fechar'){
     abrirFecharConta(num);
+  } else if(acao === 'transferir'){
+    abrirTransferirMesa(num);
   } else if(acao === 'liberar'){
     liberarMesaForcado(num);
   }
@@ -2272,6 +2281,239 @@ function liberarMesaForcado(num){
     }).catch(function(e){
       showToast('❌ ' + e.message, '#f87171');
     });
+}
+
+// ════════════════════════════════════════
+//  TRANSFERIR MESA / ITENS
+// ════════════════════════════════════════
+var _transferirOrigemNum = null;
+var _transferirItensSel = {}; // {itemKey: true}
+var _transferirModo = 'mesa'; // 'mesa' | 'itens'
+
+function abrirTransferirMesa(num){
+  _transferirOrigemNum = num;
+  _transferirItensSel = {};
+  _transferirModo = 'mesa';
+  var conta = _contasMesaCache[String(num)];
+  if(!conta){
+    showToast('⚠️ Mesa sem conta aberta','#f7a34f');
+    return;
+  }
+  var ex = document.getElementById('modal-transferir');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-transferir';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:480px;border-radius:18px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo">TRANSFERIR — MESA '+num+'</div>'+
+        '<button class="modal-fechar" onclick="fecharModalTransferir()">×</button>'+
+      '</div>'+
+      '<div class="modal-body" id="transferir-body"></div>'+
+      '<div class="modal-footer" id="transferir-footer"></div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  pushHistory('transferir:'+num);
+  renderTransferir();
+}
+
+function fecharModalTransferir(){
+  var m = document.getElementById('modal-transferir');
+  if(m) m.remove();
+  _transferirOrigemNum = null;
+  _transferirItensSel = {};
+}
+
+function setTransferirModo(m){ _transferirModo = m; renderTransferir(); }
+function toggleTransferirItem(k){
+  if(_transferirItensSel[k]) delete _transferirItensSel[k];
+  else _transferirItensSel[k] = true;
+  renderTransferir();
+}
+
+function renderTransferir(){
+  var conta = _contasMesaCache[String(_transferirOrigemNum)];
+  if(!conta){ fecharModalTransferir(); return; }
+  var body = document.getElementById('transferir-body');
+  var footer = document.getElementById('transferir-footer');
+  var ativos = (conta.itens||[]).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago'; });
+
+  var html =
+    '<div class="fechar-modo-tab">'+
+      '<button class="fechar-modo-btn '+(_transferirModo==='mesa'?'active':'')+'" onclick="setTransferirModo(\'mesa\')">🪑 Mesa inteira</button>'+
+      '<button class="fechar-modo-btn '+(_transferirModo==='itens'?'active':'')+'" onclick="setTransferirModo(\'itens\')">🍔 Por itens</button>'+
+    '</div>';
+
+  if(_transferirModo === 'mesa'){
+    html += '<div class="fechar-bloco">'+
+      '<div style="font-size:0.86rem;color:var(--text);margin-bottom:8px;">Vai transferir <strong>todos os itens em aberto</strong> da Mesa '+_transferirOrigemNum+' (incluindo pagamentos).</div>'+
+      '<div style="font-size:0.74rem;color:var(--muted);">'+ativos.length+' itens em aberto • R$ '+fmtPreco(conta.total||0)+'</div>'+
+    '</div>';
+  } else {
+    if(!ativos.length){
+      html += '<div class="fechar-bloco" style="text-align:center;color:var(--muted);">Nenhum item em aberto para transferir.</div>';
+    } else {
+      html += '<div class="fechar-bloco">'+
+        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">Selecione os itens que deseja transferir:</div>';
+      ativos.forEach(function(it){
+        var marc = !!_transferirItensSel[it.itemKey];
+        html += '<div class="item-pgto" style="cursor:pointer;" onclick="toggleTransferirItem(\''+it.itemKey+'\')">'+
+          '<div class="item-pgto-check '+(marc?'checked':'')+'" style="margin-right:8px;">'+(marc?'✓':'')+'</div>'+
+          '<div style="flex:1;font-size:0.84rem;">'+esc((it.qtd||1)+'x '+it.nome)+
+            (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
+          '</div>'+
+          '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</div>'+
+        '</div>';
+      });
+      html += '</div>';
+    }
+  }
+
+  body.innerHTML = html;
+
+  var btns = '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalTransferir()">Cancelar</button>';
+  if(_transferirModo === 'mesa'){
+    btns += '<button class="f-btn" style="flex:1.5;" onclick="escolherDestinoTransferencia()">→ Escolher mesa destino</button>';
+  } else {
+    var algumSelec = Object.keys(_transferirItensSel).some(function(k){ return _transferirItensSel[k]; });
+    btns += '<button class="f-btn" style="flex:1.5;'+(algumSelec?'':'opacity:0.4;pointer-events:none;')+'" onclick="escolherDestinoTransferencia()">→ Escolher mesa destino</button>';
+  }
+  footer.innerHTML = btns;
+}
+
+// ─── Mostra mapa de mesas pra selecionar destino ───
+function escolherDestinoTransferencia(){
+  var ex = document.getElementById('modal-destino');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-destino';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:520px;border-radius:18px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo">ESCOLHA A MESA DESTINO</div>'+
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-destino\').remove()">×</button>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">Toque na mesa de destino. Pode ser livre ou ocupada.</div>'+
+        '<div id="destino-mesas-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;"></div>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  // Renderiza mesas
+  var grid = document.getElementById('destino-mesas-grid');
+  for(var i=1; i<=_TOTAL_MESAS; i++){
+    var num = String(i);
+    if(num === String(_transferirOrigemNum)) continue; // não pode ser ela mesma
+    var ocupada = !!_mesasOcupadas[num];
+    var btn = document.createElement('button');
+    btn.className = 'mesa-card-mini ' + (ocupada?'ocupada':'livre');
+    btn.style.cssText = 'background:'+(ocupada?'rgba(247,163,79,0.15)':'var(--surface2)')+';border:1.5px solid '+(ocupada?'rgba(247,163,79,0.4)':'var(--border2)')+';color:var(--text);border-radius:10px;padding:14px 6px;font-family:Bebas Neue,sans-serif;font-size:1.5rem;font-weight:700;cursor:pointer;';
+    btn.innerHTML = num + (ocupada?'<div style="font-size:0.62rem;font-family:DM Sans,sans-serif;color:#f7a34f;margin-top:2px;">OCUPADA</div>':'<div style="font-size:0.62rem;font-family:DM Sans,sans-serif;color:var(--muted);margin-top:2px;">livre</div>');
+    btn.onclick = (function(n){ return function(){ confirmarTransferencia(n); }; })(num);
+    grid.appendChild(btn);
+  }
+}
+
+// ─── Confirma e executa a transferência ───
+function confirmarTransferencia(numDestino){
+  var conta = _contasMesaCache[String(_transferirOrigemNum)];
+  if(!conta){ showToast('Conta não encontrada','#f87171'); return; }
+
+  var itensSelecionados;
+  if(_transferirModo === 'mesa'){
+    itensSelecionados = (conta.itens||[]).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago'; });
+  } else {
+    var keys = Object.keys(_transferirItensSel).filter(function(k){ return _transferirItensSel[k]; });
+    itensSelecionados = (conta.itens||[]).filter(function(i){ return keys.indexOf(i.itemKey) >= 0; });
+  }
+  if(!itensSelecionados.length){ showToast('Nenhum item selecionado','#f7a34f'); return; }
+
+  var totalTransfer = itensSelecionados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+  if(!confirm('Transferir '+itensSelecionados.length+' item(s) (R$ '+fmtPreco(totalTransfer)+') da Mesa '+_transferirOrigemNum+' para a Mesa '+numDestino+'?\n\n⚠️ Esta ação não dispara reimpressão da comanda.')) return;
+
+  var contaDestino = _contasMesaCache[String(numDestino)];
+  var promiseDestino;
+
+  if(contaDestino){
+    // Adiciona itens à conta destino existente
+    var novosItensDestino = (contaDestino.itens||[]).concat(itensSelecionados.map(function(it){
+      return Object.assign({}, it, {
+        transferidoDe: _transferirOrigemNum,
+        transferidoEm: Date.now(),
+        transferidoPor: _nomeGarcom
+      });
+    }));
+    var totaisDestino = calcularTotaisConta({itens: novosItensDestino, pagamentos: contaDestino.pagamentos||[]});
+    promiseDestino = fbDb.collection('contas_mesa').doc(contaDestino.id).update({
+      itens: novosItensDestino,
+      subtotal: totaisDestino.subtotal,
+      taxa10: totaisDestino.taxa10,
+      total: totaisDestino.total,
+      pagoTotal: totaisDestino.pagoTotal,
+      restante: totaisDestino.restante,
+      atualizadoEm: Date.now()
+    });
+  } else {
+    // Cria conta nova na mesa destino
+    var itensNovos = itensSelecionados.map(function(it){
+      return Object.assign({}, it, {
+        transferidoDe: _transferirOrigemNum,
+        transferidoEm: Date.now(),
+        transferidoPor: _nomeGarcom
+      });
+    });
+    var totaisNova = calcularTotaisConta({itens: itensNovos, pagamentos: []});
+    promiseDestino = fbDb.collection('contas_mesa').add({
+      restauranteId: _restauranteId,
+      tenantId: _tenantId || null,
+      mesa: parseInt(numDestino) || numDestino,
+      status: 'aberta',
+      itens: itensNovos,
+      pagamentos: [],
+      subtotal: totaisNova.subtotal,
+      taxa10: totaisNova.taxa10,
+      total: totaisNova.total,
+      pagoTotal: 0,
+      restante: totaisNova.total,
+      garcomPrincipal: _nomeGarcom,
+      abertaEm: Date.now(),
+      abertaPor: _nomeGarcom,
+      criadaPorTransferencia: true
+    });
+  }
+
+  // Remove itens da origem
+  var keysSelec = itensSelecionados.map(function(i){ return i.itemKey; });
+  var itensRestantes = (conta.itens||[]).filter(function(i){ return keysSelec.indexOf(i.itemKey) < 0; });
+
+  promiseDestino.then(function(){
+    if(_transferirModo === 'mesa' || itensRestantes.length === 0 && (conta.pagamentos||[]).length === 0){
+      // Esvazia/encerra origem
+      // Se não sobrou nada, deleta conta de origem
+      var sobrouAlgo = itensRestantes.some(function(i){ return i.status !== 'cancelado'; }) || (conta.pagamentos||[]).length > 0;
+      if(!sobrouAlgo){
+        return fbDb.collection('contas_mesa').doc(conta.id).delete();
+      }
+    }
+    var totaisOrigem = calcularTotaisConta({itens: itensRestantes, pagamentos: conta.pagamentos||[]});
+    return fbDb.collection('contas_mesa').doc(conta.id).update({
+      itens: itensRestantes,
+      subtotal: totaisOrigem.subtotal,
+      taxa10: totaisOrigem.taxa10,
+      total: totaisOrigem.total,
+      pagoTotal: totaisOrigem.pagoTotal,
+      restante: totaisOrigem.restante,
+      atualizadoEm: Date.now()
+    });
+  }).then(function(){
+    showToast('✓ Transferência da Mesa '+_transferirOrigemNum+' → Mesa '+numDestino+' concluída','#4ade80', 4000);
+    var m1 = document.getElementById('modal-destino'); if(m1) m1.remove();
+    fecharModalTransferir();
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171', 5000);
+  });
 }
 
 // ════════════════════════════════════════

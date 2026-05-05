@@ -2432,17 +2432,22 @@ function renderModelos(){
   _modelos.forEach(function(m){
     var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
     var nomeImp = imp ? imp.nome : '(impressora removida)';
+    var tipo = m.tipo || 'pedido';
+    var tipoBadge = tipo === 'fechamento'
+      ? '<span style="background:rgba(74,222,128,0.15);color:#4ade80;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🏁 FECHAMENTO</span>'
+      : '<span style="background:rgba(212,168,67,0.15);color:var(--accent);border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">📝 PEDIDO</span>';
     var qtd = m.filtro === 'item' ? (m.itens||[]).length : (m.categorias||[]).length;
-    var tipoTxt = m.filtro === 'item' ? qtd+' itens' : qtd+' categorias';
+    var tipoTxt = tipo === 'fechamento' ? 'Imprime no fechamento da mesa' : (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias');
     var card = document.createElement('div');
     card.className = 'imp-card';
     card.innerHTML =
       '<div class="imp-card-head">'+
         '<span style="font-size:1.2rem;">📋</span>'+
         '<span style="font-weight:700;font-size:1rem;flex:1;">'+escapeHtml(m.nome||'')+'</span>'+
+        tipoBadge+
       '</div>'+
       '<div style="font-size:0.82rem;color:var(--text);">→ <strong>'+escapeHtml(nomeImp)+'</strong></div>'+
-      '<div style="font-size:0.74rem;color:var(--muted);margin-top:4px;">'+tipoTxt+(m.mostrarPrecos===false?' • sem preços':'')+'</div>';
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:4px;">'+tipoTxt+(m.mostrarPrecos===false?' • sem preços':'')+(m.negrito?' • negrito':'')+'</div>';
     card.onclick = (function(modelo){ return function(){ abrirEditarModelo(modelo); }; })(m);
     lista.appendChild(card);
   });
@@ -2454,13 +2459,17 @@ function abrirNovoModelo(){
   document.getElementById('modal-modelo-titulo').textContent = 'NOVO MODELO';
   document.getElementById('mod-nome').value = '';
   preencherSelectImpressorasModelo();
+  document.querySelector('input[name="mod-tipo"][value="pedido"]').checked = true;
   document.querySelector('input[name="mod-filtro"][value="categoria"]').checked = true;
   document.getElementById('mod-mostrar-precos').checked = true;
+  document.getElementById('mod-negrito').checked = false;
   document.getElementById('btn-excluir-mod').style.display = 'none';
+  atualizarTipoModelo();
   atualizarFiltroModelo();
   renderModeloCategorias([]);
   renderModeloItens([]);
   document.getElementById('modal-modelo').classList.add('show');
+  setTimeout(atualizarPreviewCupom, 100);
 }
 
 function abrirEditarModelo(m){
@@ -2468,13 +2477,103 @@ function abrirEditarModelo(m){
   document.getElementById('modal-modelo-titulo').textContent = 'EDITAR MODELO';
   document.getElementById('mod-nome').value = m.nome || '';
   preencherSelectImpressorasModelo(m.impressoraId);
+  var tipo = m.tipo || 'pedido';
+  var radTipo = document.querySelector('input[name="mod-tipo"][value="'+tipo+'"]');
+  if(radTipo) radTipo.checked = true;
   document.querySelector('input[name="mod-filtro"][value="'+(m.filtro||'categoria')+'"]').checked = true;
   document.getElementById('mod-mostrar-precos').checked = m.mostrarPrecos !== false;
+  document.getElementById('mod-negrito').checked = !!m.negrito;
   document.getElementById('btn-excluir-mod').style.display = 'inline-flex';
+  atualizarTipoModelo();
   atualizarFiltroModelo();
   renderModeloCategorias(m.categorias || []);
   renderModeloItens(m.itens || []);
   document.getElementById('modal-modelo').classList.add('show');
+  setTimeout(atualizarPreviewCupom, 100);
+}
+
+function atualizarTipoModelo(){
+  var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
+  var blocoFiltro = document.getElementById('mod-bloco-filtro');
+  // Modelo de fechamento NÃO precisa de filtro de categoria/item (sempre pega tudo)
+  if(tipo === 'fechamento'){
+    if(blocoFiltro) blocoFiltro.style.display = 'none';
+    document.getElementById('mod-filtro-cat').style.display = 'none';
+    document.getElementById('mod-filtro-itens').style.display = 'none';
+  } else {
+    if(blocoFiltro) blocoFiltro.style.display = '';
+    atualizarFiltroModelo();
+  }
+  atualizarPreviewCupom();
+}
+
+// ─── Pré-visualização do cupom (renderiza dentro do modal) ───
+function atualizarPreviewCupom(){
+  var preview = document.getElementById('mod-preview');
+  if(!preview) return;
+  var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
+  var nome = document.getElementById('mod-nome').value || 'Modelo';
+  var negrito = document.getElementById('mod-negrito').checked;
+  var mostrarPrecos = document.getElementById('mod-mostrar-precos').checked;
+  var L = 48;
+  var sep = new Array(L+1).join('=');
+  var subSep = new Array(L+1).join('-');
+  var lines = [];
+  
+  function linhaValor(lbl, val){
+    var espaco = L - lbl.length - val.length;
+    if(espaco < 1) return lbl + ' ' + val;
+    return lbl + new Array(espaco+1).join(' ') + val;
+  }
+  function linhaItem(qtd, nome, valor){
+    var lbl = qtd + 'x ' + nome.toUpperCase();
+    if(valor === null) return lbl;
+    return linhaValor(lbl, 'R$ ' + valor);
+  }
+  
+  if(tipo === 'fechamento'){
+    lines.push(sep);
+    lines.push('                  MESA 7');
+    lines.push('');
+    lines.push('Garcom: Daniel');
+    lines.push('05/05 16:30');
+    lines.push(subSep);
+    lines.push(linhaItem(1, 'Heineken 300', '19,90'));
+    lines.push(linhaItem(1, 'Heineken 500', '23,90'));
+    lines.push(linhaItem(1, 'Bavaro Burguer', '36,90'));
+    lines.push(sep);
+    lines.push('               Fechamento');
+    lines.push('');
+    lines.push(linhaValor('Total dos itens', 'R$ 80,70'));
+    lines.push(linhaValor('Taxa de servico (10%)', 'R$  8,07'));
+    lines.push(linhaValor('Total', 'R$ 88,77'));
+    lines.push(sep);
+  } else {
+    // Modelo de pedido
+    lines.push(sep);
+    lines.push('                  MESA 7');
+    lines.push('Garcom: Daniel');
+    lines.push('05/05 16:30');
+    lines.push(subSep);
+    if(mostrarPrecos){
+      lines.push(linhaItem(1, 'Heineken 300', '19,90'));
+      lines.push(linhaItem(1, 'Coca-Cola', '8,00'));
+    } else {
+      lines.push(linhaItem(1, 'Heineken 300', null));
+      lines.push(linhaItem(1, 'Coca-Cola', null));
+    }
+    if(mostrarPrecos){
+      lines.push(subSep);
+      lines.push(linhaValor('Subtotal', 'R$ 27,90'));
+      lines.push(linhaValor('10% Garcom', 'R$  2,79'));
+      lines.push(linhaValor('TOTAL', 'R$ 30,69'));
+    }
+    lines.push(sep);
+  }
+  
+  var texto = lines.join('\n');
+  preview.textContent = texto;
+  preview.style.fontWeight = negrito ? 'bold' : 'normal';
 }
 
 function preencherSelectImpressorasModelo(selId){
@@ -2554,10 +2653,14 @@ function salvarModelo(){
   if(!nome){ showToast('Digite o nome','#f7a34f'); return; }
   var impId = document.getElementById('mod-impressora').value;
   if(!impId){ showToast('Selecione a impressora','#f7a34f'); return; }
+  var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
   var filtro = (document.querySelector('input[name="mod-filtro"]:checked')||{}).value || 'categoria';
   var dados = {
-    nome: nome, impressoraId: impId, filtro: filtro,
+    nome: nome, impressoraId: impId,
+    tipo: tipo,
+    filtro: filtro,
     mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
+    negrito: document.getElementById('mod-negrito').checked,
     atualizadoEm: Date.now()
   };
   if(filtro === 'categoria'){
@@ -2934,8 +3037,8 @@ function iniciarListenerImpressao(){
 
 function imprimirPedidoAutomatico(pedido){
   if(!_modelos.length || !_impressoras.length) return;
-  // Para cada modelo, gera cupom e envia se tiver itens aplicáveis
-  _modelos.forEach(function(modelo){
+  // SÓ usa modelos do tipo "pedido" (não fechamento)
+  _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido'; }).forEach(function(modelo){
     var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
     if(!imp) return;
     var cupom = gerarCupomPedido(pedido, modelo);
@@ -3072,8 +3175,21 @@ function processarComandoImpressao(cmdId, cmd){
       else if(cmd.subtipo === 'completa') cupom = gerarCupomContaCompleta(conta);
       else                                cupom = gerarCupomContaFinal(conta);
       if(!cupom){ showToast('Sem dados pra imprimir','#f7a34f'); return; }
-      // Imprime em todas as impressoras configuradas (ou a que escolher futuramente)
-      _impressoras.forEach(function(imp){
+      // Imprime APENAS nas impressoras dos modelos de FECHAMENTO
+      var modelosFechamento = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
+      var impsAlvo = [];
+      if(modelosFechamento.length){
+        // Pega impressoras únicas dos modelos de fechamento
+        modelosFechamento.forEach(function(modelo){
+          var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+          if(imp && impsAlvo.indexOf(imp) < 0) impsAlvo.push(imp);
+        });
+      } else {
+        // Fallback: se não houver modelo de fechamento, imprime em todas (compat)
+        impsAlvo = _impressoras.slice();
+        showToast('⚠️ Nenhum modelo de "Fechamento" cadastrado. Imprimindo em todas.','#f7a34f', 4000);
+      }
+      impsAlvo.forEach(function(imp){
         enviarParaImpressora(imp, cupom);
       });
     }).catch(function(e){ console.warn('cupom conta:', e); })
@@ -3083,45 +3199,70 @@ function processarComandoImpressao(cmdId, cmd){
   }
 }
 
+// ─── Helper: encontra modelo de fechamento p/ aplicar negrito ───
+function _modeloFechamento(){
+  return _modelos.find(function(m){ return m.tipo === 'fechamento'; }) || {};
+}
+function _aplicaNegrito(modelo){
+  return modelo && modelo.negrito;
+}
+
 // ─── Gera cupom PARCIAL (apenas itens pagos no último pagamento) ───
 function gerarCupomContaParcial(conta){
   var cfg = _configImp;
   var L = 48;
+  var modelo = _modeloFechamento();
   var pgtos = conta.pagamentos || [];
   if(!pgtos.length) return null;
   var ultimo = pgtos[pgtos.length-1];
   var itensPagos = (conta.itens||[]).filter(function(it){ return it.pagamentoId === ultimo.id; });
+
+  function linhaValor(lbl, val){
+    var espaco = L - lbl.length - val.length;
+    if(espaco < 1) return lbl + ' ' + val + '\n';
+    return lbl + new Array(espaco+1).join(' ') + val + '\n';
+  }
+
   var s = escposInit();
-  s += escposCenter() + escposBold(true) + escposLarge(true);
-  s += (cfg.restauranteNome||'') + '\n';
-  s += escposLarge(false);
-  s += 'PAGAMENTO PARCIAL\n';
-  s += escposBold(false);
-  s += linha('=', L) + '\n';
+  if(_aplicaNegrito(modelo)) s += escposBold(true);
+
   s += escposLeft();
-  s += escposBold(true) + 'MESA: ' + conta.mesa + escposBold(false) + '\n';
+  s += linha('=', L) + '\n';
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += 'MESA ' + conta.mesa + '\n';
+  s += escposLarge(false);
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
+  s += escposLeft();
+  s += 'PAGAMENTO PARCIAL\n';
   s += 'Hora: ' + new Date(ultimo.pagoEm||Date.now()).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += 'Recebido por: ' + (ultimo.recebidoPor||'—') + '\n';
   s += linha('-', L) + '\n';
+
   if(itensPagos.length){
     itensPagos.forEach(function(it){
-      var nome = (it.qtd||1) + 'x ' + (it.nome||'');
+      var nome = (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
       var preco = (it.preco||0)*(it.qtd||1);
-      s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
+      var precoStr = 'R$ ' + formatarPreco(preco);
+      var espaco = L - nome.length - precoStr.length;
+      if(espaco < 1){ s += nome + '\n' + padR(precoStr, L) + '\n'; }
+      else s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
     });
     s += linha('-', L) + '\n';
   } else {
-    s += 'Pagamento como CRÉDITO (sem itens vinculados)\n';
+    s += 'Pagamento como CREDITO (sem itens vinculados)\n';
     s += linha('-', L) + '\n';
   }
-  s += escposBold(true) + escposLarge(true);
-  s += pad('VALOR PAGO', Math.floor(L/2)) + padR('R$ ' + formatarPreco(ultimo.valor), Math.ceil(L/2)) + '\n';
-  s += escposLarge(false) + escposBold(false);
-  s += linha('-', L) + '\n';
-  // Mostra restante atual
+
+  s += escposBold(true);
+  s += linhaValor('VALOR PAGO', 'R$ ' + formatarPreco(ultimo.valor));
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
+
   var totais = calcularTotaisContaPDV(conta);
-  s += pad('Restante da mesa', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.restante), Math.ceil(L/2)) + '\n';
-  s += '\n\n';
+  s += linhaValor('Restante', 'R$ ' + formatarPreco(totais.restante));
+  s += linha('=', L) + '\n';
+
+  s += '\n';
+  if(_aplicaNegrito(modelo)) s += escposBold(false);
   if(cfg.cortePapel) s += escposCut();
   return s;
 }
@@ -3130,38 +3271,7 @@ function gerarCupomContaParcial(conta){
 function gerarCupomContaCompleta(conta){
   var cfg = _configImp;
   var L = 48;
-  var s = escposInit();
-
-  // ─── CABEÇALHO ───
-  s += escposLeft();
-  s += linha('=', L) + '\n';
-  s += escposCenter() + escposBold(true) + escposLarge(true);
-  s += 'MESA ' + conta.mesa + '\n';
-  s += escposLarge(false) + escposBold(false) + escposLeft();
-  s += 'Garcom: ' + (conta.garcomPrincipal||'—') + '\n';
-  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
-  s += linha('-', L) + '\n';
-
-  // ─── ITENS ───
-  var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
-  itensValidos.forEach(function(it){
-    var marca = it.status === 'pago' ? '[PAGO] ' : '';
-    var nome = marca + (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
-    var preco = (it.preco||0)*(it.qtd||1);
-    var precoStr = 'R$ ' + formatarPreco(preco);
-    var espaco = L - nome.length - precoStr.length;
-    if(espaco < 1){
-      s += nome + '\n';
-      s += padR(precoStr, L) + '\n';
-    } else {
-      s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
-    }
-    if(it.obs) s += '  ** ' + it.obs + '\n';
-  });
-  s += linha('-', L) + '\n';
-
-  // ─── TOTAIS ───
-  var totais = calcularTotaisContaPDV(conta);
+  var modelo = _modeloFechamento();
 
   function linhaValor(lbl, val){
     var espaco = L - lbl.length - val.length;
@@ -3169,119 +3279,116 @@ function gerarCupomContaCompleta(conta){
     return lbl + new Array(espaco+1).join(' ') + val + '\n';
   }
 
-  s += linhaValor('Subtotal', 'R$ ' + formatarPreco(totais.subtotal));
-  s += linhaValor('10% Garcom', 'R$ ' + formatarPreco(totais.taxa10));
+  var s = escposInit();
+  if(_aplicaNegrito(modelo)) s += escposBold(true);
+
+  s += escposLeft();
+  s += linha('=', L) + '\n';
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += 'MESA ' + conta.mesa + '\n';
+  s += escposLarge(false);
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
+  s += escposLeft();
+  s += 'Garcom: ' + (conta.garcomPrincipal||'—') + '\n';
+  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += linha('-', L) + '\n';
+
+  var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  itensValidos.forEach(function(it){
+    var marca = it.status === 'pago' ? '[PAGO] ' : '';
+    var nome = marca + (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
+    var preco = (it.preco||0)*(it.qtd||1);
+    var precoStr = 'R$ ' + formatarPreco(preco);
+    var espaco = L - nome.length - precoStr.length;
+    if(espaco < 1){ s += nome + '\n' + padR(precoStr, L) + '\n'; }
+    else s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
+    if(it.obs) s += '  ** ' + it.obs + '\n';
+  });
+  s += linha('=', L) + '\n';
+  s += escposCenter() + 'Fechamento\n' + escposLeft();
+  s += '\n';
+
+  var totais = calcularTotaisContaPDV(conta);
+  s += linhaValor('Total dos itens', 'R$ ' + formatarPreco(totais.subtotal));
+  s += linhaValor('Taxa de servico (10%)', 'R$ ' + formatarPreco(totais.taxa10));
   s += escposBold(true);
-  s += linhaValor('TOTAL', 'R$ ' + formatarPreco(totais.total));
-  s += escposBold(false);
+  s += linhaValor('Total', 'R$ ' + formatarPreco(totais.total));
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
   s += linhaValor('Pago', 'R$ ' + formatarPreco(totais.pagoTotal));
   s += escposBold(true);
   s += linhaValor('RESTANTE', 'R$ ' + formatarPreco(totais.restante));
-  s += escposBold(false);
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
   s += linha('=', L) + '\n';
 
   s += '\n';
+  if(_aplicaNegrito(modelo)) s += escposBold(false);
   if(cfg.cortePapel) s += escposCut();
   return s;
 }
 
-// ─── Gera cupom FINAL (fechamento) ───
+// ─── Gera cupom FINAL (fechamento total da mesa) ───
 function gerarCupomContaFinal(conta){
   var cfg = _configImp;
   var L = 48;
-  var s = escposInit();
+  var modelo = _modeloFechamento();
 
-  // ─── CABEÇALHO ───
-  s += escposCenter();
-  s += linha('=', L) + '\n';
-  s += escposBold(true);
-  s += 'Mesa ' + conta.mesa + '\n';
-  s += escposBold(false);
-  if(conta.abertaEm){
-    s += 'Abertura em ' + new Date(conta.abertaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
+  function linhaValor(lbl, val){
+    var espaco = L - lbl.length - val.length;
+    if(espaco < 1) return lbl + ' ' + val + '\n';
+    return lbl + new Array(espaco+1).join(' ') + val + '\n';
   }
-  s += linha('=', L) + '\n';
-  s += '\n';
 
-  // ─── CLIENTE ───
+  var s = escposInit();
+  if(_aplicaNegrito(modelo)) s += escposBold(true);
+
   s += escposLeft();
-  s += 'Cliente: ' + (conta.cliente || 'Nao Identificado') + '\n';
+  s += linha('=', L) + '\n';
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += 'MESA ' + conta.mesa + '\n';
+  s += escposLarge(false);
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
+  s += escposLeft();
+  s += 'Garcom: ' + (conta.garcomPrincipal||'—') + '\n';
+  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += linha('-', L) + '\n';
 
-  // ─── ITENS ───
   var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
   itensValidos.forEach(function(it){
-    var nome = '(' + (it.qtd||1) + ') ' + (it.nome||'').toUpperCase();
+    var nome = (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
     var preco = (it.preco||0)*(it.qtd||1);
-    var precoStr = 'R$ ' + padR(formatarPreco(preco), 8);
+    var precoStr = 'R$ ' + formatarPreco(preco);
     var espaco = L - nome.length - precoStr.length;
-    if(espaco < 1){
-      // Quebra em duas linhas se não cabe
-      s += nome + '\n';
-      s += padR(precoStr, L) + '\n';
-    } else {
-      s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
-    }
-    if(it.obs) s += '   ** ' + it.obs + '\n';
+    if(espaco < 1){ s += nome + '\n' + padR(precoStr, L) + '\n'; }
+    else s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
+    if(it.obs) s += '  ** ' + it.obs + '\n';
   });
-  s += linha('-', L) + '\n';
+  s += linha('=', L) + '\n';
+  s += escposCenter() + 'Fechamento\n' + escposLeft();
   s += '\n';
 
-  // ─── FECHAMENTO ───
   var totais = calcularTotaisContaPDV(conta);
-  s += escposCenter();
-  s += escposBold(true) + 'Fechamento' + escposBold(false) + '\n';
-  s += '\n';
-  s += escposLeft();
-
-  // Total dos itens
-  var lblItens = 'Total dos itens';
-  var valItens = 'R$ ' + padR(formatarPreco(totais.subtotal), 8);
-  s += lblItens + new Array(L - lblItens.length - valItens.length + 1).join(' ') + valItens + '\n';
-
-  // Taxa de serviço (10%)
-  var lblTaxa = 'Taxa de servico (10%)';
-  var valTaxa = 'R$ ' + padR(formatarPreco(totais.taxa10), 8);
-  s += lblTaxa + new Array(L - lblTaxa.length - valTaxa.length + 1).join(' ') + valTaxa + '\n';
-
-  // Linha tracejada antes do total
-  s += new Array(L - 11).join(' ') + '----------\n';
-
-  // Total final
-  var lblTotal = 'Total';
-  var valTotal = 'R$ ' + padR(formatarPreco(totais.total), 8);
+  s += linhaValor('Total dos itens', 'R$ ' + formatarPreco(totais.subtotal));
+  s += linhaValor('Taxa de servico (10%)', 'R$ ' + formatarPreco(totais.taxa10));
   s += escposBold(true);
-  s += lblTotal + new Array(L - lblTotal.length - valTotal.length + 1).join(' ') + valTotal + '\n';
-  s += escposBold(false);
+  s += linhaValor('Total', 'R$ ' + formatarPreco(totais.total));
+  if(!_aplicaNegrito(modelo)) s += escposBold(false);
 
-  // ─── PAGAMENTOS (se tiver) ───
+  // Pagamentos (se tiver)
   if((conta.pagamentos||[]).length){
-    s += '\n';
     s += linha('-', L) + '\n';
-    s += escposBold(true) + 'PAGAMENTOS:' + escposBold(false) + '\n';
     conta.pagamentos.forEach(function(p){
       var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
       var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Credito');
-      var lbl = ' ' + hora + ' ' + tipo;
-      var val = 'R$ ' + padR(formatarPreco(p.valor), 8);
-      s += lbl + new Array(L - lbl.length - val.length + 1).join(' ') + val + '\n';
+      s += linhaValor(hora + ' ' + tipo, 'R$ ' + formatarPreco(p.valor));
     });
   }
+  s += linha('=', L) + '\n';
 
-  // ─── RODAPÉ ───
-  s += '\n\n';
-  s += escposCenter();
-  if(cfg.rodape){
-    s += cfg.rodape + '\n';
-  } else {
-    s += 'Bavaro PDV\n';
-  }
-  s += escposLeft();
-  s += '\n\n';
+  s += '\n';
+  if(_aplicaNegrito(modelo)) s += escposBold(false);
   if(cfg.cortePapel) s += escposCut();
   return s;
 }
-
 // ─── Gera cupom de REIMPRESSÃO (com itens cancelados destacados) ───
 function gerarCupomReimpressao(pedido, modelo, motivo){
   var c = _configImp;
@@ -3443,13 +3550,27 @@ function calcularTotaisContaPDV(c){
     <div class="modal-body">
       <div class="f-grupo">
         <label class="f-label">Nome do Modelo *</label>
-        <input type="text" class="f-input" id="mod-nome" maxlength="30" placeholder="Ex: Bebidas, Cozinha">
+        <input type="text" class="f-input" id="mod-nome" maxlength="30" placeholder="Ex: Bebidas, Cozinha, Conta">
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Tipo do Modelo *</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="pedido" checked onchange="atualizarTipoModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">📝 Pedido</span>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="fechamento" onchange="atualizarTipoModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">🏁 Fechamento</span>
+          </label>
+        </div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa.</div>
       </div>
       <div class="f-grupo">
         <label class="f-label">Impressora *</label>
         <select class="f-select" id="mod-impressora"><option value="">— Selecione —</option></select>
       </div>
-      <div class="f-grupo">
+      <div class="f-grupo" id="mod-bloco-filtro">
         <label class="f-label">Tipo de Filtro</label>
         <div style="display:flex;gap:8px;">
           <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
@@ -3473,10 +3594,21 @@ function calcularTotaisContaPDV(c){
       </div>
       <div class="f-grupo">
         <label class="cfg-toggle">
-          <input type="checkbox" id="mod-mostrar-precos" checked>
+          <input type="checkbox" id="mod-mostrar-precos" checked onchange="atualizarPreviewCupom()">
           <span>Mostrar preços neste cupom</span>
         </label>
-        <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Desmarque para via da cozinha (sem preço)</div>
+      </div>
+      <div class="f-grupo">
+        <label class="cfg-toggle">
+          <input type="checkbox" id="mod-negrito" onchange="atualizarPreviewCupom()">
+          <span>Imprimir tudo em <strong>negrito</strong></span>
+        </label>
+        <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Deixa o cupom mais visível mas usa um pouco mais de tinta</div>
+      </div>
+      <!-- ─── PRÉ-VISUALIZAÇÃO ─── -->
+      <div class="f-grupo">
+        <label class="f-label">📄 Pré-visualização</label>
+        <pre id="mod-preview" style="background:#fff;color:#000;font-family:'Courier New',monospace;font-size:11px;line-height:1.4;padding:12px;border-radius:8px;white-space:pre;overflow-x:auto;border:1px solid #ddd;margin:0;max-height:280px;overflow-y:auto;"></pre>
       </div>
     </div>
     <div class="modal-footer">

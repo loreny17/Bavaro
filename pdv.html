@@ -3131,35 +3131,56 @@ function gerarCupomContaCompleta(conta){
   var cfg = _configImp;
   var L = 48;
   var s = escposInit();
-  s += escposCenter() + escposBold(true) + escposLarge(true);
-  s += (cfg.restauranteNome||'') + '\n';
-  s += escposLarge(false);
-  s += 'CONTA DA MESA\n';
-  s += escposBold(false);
-  s += linha('=', L) + '\n';
+
+  // ─── CABEÇALHO ───
   s += escposLeft();
-  s += escposBold(true) + 'MESA: ' + conta.mesa + escposBold(false) + '\n';
-  s += 'Hora: ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += linha('=', L) + '\n';
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += 'MESA ' + conta.mesa + '\n';
+  s += escposLarge(false) + escposBold(false) + escposLeft();
   s += 'Garcom: ' + (conta.garcomPrincipal||'—') + '\n';
+  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += linha('-', L) + '\n';
-  (conta.itens||[]).forEach(function(it){
-    var marca = it.status === 'pago' ? '[PAGO] ' : '       ';
-    var nome = marca + (it.qtd||1) + 'x ' + (it.nome||'');
+
+  // ─── ITENS ───
+  var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  itensValidos.forEach(function(it){
+    var marca = it.status === 'pago' ? '[PAGO] ' : '';
+    var nome = marca + (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
     var preco = (it.preco||0)*(it.qtd||1);
-    s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
+    var precoStr = 'R$ ' + formatarPreco(preco);
+    var espaco = L - nome.length - precoStr.length;
+    if(espaco < 1){
+      s += nome + '\n';
+      s += padR(precoStr, L) + '\n';
+    } else {
+      s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
+    }
+    if(it.obs) s += '  ** ' + it.obs + '\n';
   });
   s += linha('-', L) + '\n';
+
+  // ─── TOTAIS ───
   var totais = calcularTotaisContaPDV(conta);
-  s += pad('Subtotal', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.subtotal), Math.ceil(L/2)) + '\n';
-  s += pad('+ 10% Garcom', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.taxa10), Math.ceil(L/2)) + '\n';
+
+  function linhaValor(lbl, val){
+    var espaco = L - lbl.length - val.length;
+    if(espaco < 1) return lbl + ' ' + val + '\n';
+    return lbl + new Array(espaco+1).join(' ') + val + '\n';
+  }
+
+  s += linhaValor('Subtotal', 'R$ ' + formatarPreco(totais.subtotal));
+  s += linhaValor('10% Garcom', 'R$ ' + formatarPreco(totais.taxa10));
   s += escposBold(true);
-  s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.total), Math.ceil(L/2)) + '\n';
+  s += linhaValor('TOTAL', 'R$ ' + formatarPreco(totais.total));
   s += escposBold(false);
-  s += pad('Pago', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.pagoTotal), Math.ceil(L/2)) + '\n';
+  s += linhaValor('Pago', 'R$ ' + formatarPreco(totais.pagoTotal));
   s += escposBold(true);
-  s += pad('RESTANTE', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.restante), Math.ceil(L/2)) + '\n';
+  s += linhaValor('RESTANTE', 'R$ ' + formatarPreco(totais.restante));
   s += escposBold(false);
-  s += '\n\n';
+  s += linha('=', L) + '\n';
+
+  s += '\n';
   if(cfg.cortePapel) s += escposCut();
   return s;
 }

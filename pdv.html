@@ -2981,7 +2981,178 @@ function processarComandoImpressao(cmdId, cmd){
       showToast('✕ Cancelamento impresso','#f87171');
     }
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+  } else if(cmd.tipo === 'conta_mesa'){
+    // Busca a conta e gera o cupom solicitado
+    fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
+      if(!doc.exists){
+        // Pode estar em contas_fechadas
+        return fbDb.collection('contas_fechadas').doc(cmd.contaId).get();
+      }
+      return doc;
+    }).then(function(doc){
+      if(!doc || !doc.exists){
+        showToast('Conta não encontrada','#f87171');
+        return;
+      }
+      var conta = Object.assign({id:doc.id}, doc.data());
+      var cupom = null;
+      if(cmd.subtipo === 'parcial')      cupom = gerarCupomContaParcial(conta);
+      else if(cmd.subtipo === 'completa') cupom = gerarCupomContaCompleta(conta);
+      else                                cupom = gerarCupomContaFinal(conta);
+      if(!cupom){ showToast('Sem dados pra imprimir','#f7a34f'); return; }
+      // Imprime em todas as impressoras configuradas (ou a que escolher futuramente)
+      _impressoras.forEach(function(imp){
+        enviarParaImpressora(imp, cupom);
+      });
+    }).catch(function(e){ console.warn('cupom conta:', e); })
+      .finally(function(){
+        fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      });
   }
+}
+
+// ─── Gera cupom PARCIAL (apenas itens pagos no último pagamento) ───
+function gerarCupomContaParcial(conta){
+  var cfg = _configImp;
+  var L = 48;
+  var pgtos = conta.pagamentos || [];
+  if(!pgtos.length) return null;
+  var ultimo = pgtos[pgtos.length-1];
+  var itensPagos = (conta.itens||[]).filter(function(it){ return it.pagamentoId === ultimo.id; });
+  var s = escposInit();
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += (cfg.restauranteNome||'') + '\n';
+  s += escposLarge(false);
+  s += 'PAGAMENTO PARCIAL\n';
+  s += escposBold(false);
+  s += linha('=', L) + '\n';
+  s += escposLeft();
+  s += escposBold(true) + 'MESA: ' + conta.mesa + escposBold(false) + '\n';
+  s += 'Hora: ' + new Date(ultimo.pagoEm||Date.now()).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += 'Recebido por: ' + (ultimo.recebidoPor||'—') + '\n';
+  s += linha('-', L) + '\n';
+  if(itensPagos.length){
+    itensPagos.forEach(function(it){
+      var nome = (it.qtd||1) + 'x ' + (it.nome||'');
+      var preco = (it.preco||0)*(it.qtd||1);
+      s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
+    });
+    s += linha('-', L) + '\n';
+  } else {
+    s += 'Pagamento como CRÉDITO (sem itens vinculados)\n';
+    s += linha('-', L) + '\n';
+  }
+  s += escposBold(true) + escposLarge(true);
+  s += pad('VALOR PAGO', Math.floor(L/2)) + padR('R$ ' + formatarPreco(ultimo.valor), Math.ceil(L/2)) + '\n';
+  s += escposLarge(false) + escposBold(false);
+  s += linha('-', L) + '\n';
+  // Mostra restante atual
+  var totais = calcularTotaisContaPDV(conta);
+  s += pad('Restante da mesa', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.restante), Math.ceil(L/2)) + '\n';
+  s += '\n\n';
+  if(cfg.cortePapel) s += escposCut();
+  return s;
+}
+
+// ─── Gera cupom COMPLETO (todos os itens com pago/pendente) ───
+function gerarCupomContaCompleta(conta){
+  var cfg = _configImp;
+  var L = 48;
+  var s = escposInit();
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += (cfg.restauranteNome||'') + '\n';
+  s += escposLarge(false);
+  s += 'CONTA DA MESA\n';
+  s += escposBold(false);
+  s += linha('=', L) + '\n';
+  s += escposLeft();
+  s += escposBold(true) + 'MESA: ' + conta.mesa + escposBold(false) + '\n';
+  s += 'Hora: ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += 'Garcom: ' + (conta.garcomPrincipal||'—') + '\n';
+  s += linha('-', L) + '\n';
+  (conta.itens||[]).forEach(function(it){
+    var marca = it.status === 'pago' ? '[PAGO] ' : '       ';
+    var nome = marca + (it.qtd||1) + 'x ' + (it.nome||'');
+    var preco = (it.preco||0)*(it.qtd||1);
+    s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
+  });
+  s += linha('-', L) + '\n';
+  var totais = calcularTotaisContaPDV(conta);
+  s += pad('Subtotal', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.subtotal), Math.ceil(L/2)) + '\n';
+  s += pad('+ 10% Garcom', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.taxa10), Math.ceil(L/2)) + '\n';
+  s += escposBold(true);
+  s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.total), Math.ceil(L/2)) + '\n';
+  s += escposBold(false);
+  s += pad('Pago', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.pagoTotal), Math.ceil(L/2)) + '\n';
+  s += escposBold(true);
+  s += pad('RESTANTE', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.restante), Math.ceil(L/2)) + '\n';
+  s += escposBold(false);
+  s += '\n\n';
+  if(cfg.cortePapel) s += escposCut();
+  return s;
+}
+
+// ─── Gera cupom FINAL (fechamento) ───
+function gerarCupomContaFinal(conta){
+  var cfg = _configImp;
+  var L = 48;
+  var s = escposInit();
+  s += escposCenter() + escposBold(true) + escposLarge(true);
+  s += (cfg.restauranteNome||'') + '\n';
+  s += escposLarge(false);
+  s += '*** FECHAMENTO ***\n';
+  s += escposBold(false);
+  if(cfg.endereco1) s += cfg.endereco1 + '\n';
+  if(cfg.endereco2) s += cfg.endereco2 + '\n';
+  s += linha('=', L) + '\n';
+  s += escposLeft();
+  s += escposBold(true) + escposLarge(true);
+  s += 'MESA ' + conta.mesa + '\n';
+  s += escposLarge(false) + escposBold(false);
+  s += 'Aberta:   ' + (conta.abertaEm ? new Date(conta.abertaEm).toLocaleString('pt-BR') : '—') + '\n';
+  s += 'Fechada:  ' + new Date().toLocaleString('pt-BR') + '\n';
+  s += 'Garcom:   ' + (conta.garcomPrincipal||'—') + '\n';
+  s += linha('-', L) + '\n';
+  (conta.itens||[]).forEach(function(it){
+    var nome = (it.qtd||1) + 'x ' + (it.nome||'');
+    var preco = (it.preco||0)*(it.qtd||1);
+    s += pad(nome, L-12) + padR('R$ ' + formatarPreco(preco), 12) + '\n';
+    if(it.obs) s += '  ' + it.obs + '\n';
+  });
+  s += linha('-', L) + '\n';
+  var totais = calcularTotaisContaPDV(conta);
+  s += pad('Subtotal', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.subtotal), Math.ceil(L/2)) + '\n';
+  s += pad('+ 10% Garcom', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.taxa10), Math.ceil(L/2)) + '\n';
+  s += escposBold(true) + escposLarge(true);
+  s += pad('TOTAL', Math.floor(L/2)) + padR('R$ ' + formatarPreco(totais.total), Math.ceil(L/2)) + '\n';
+  s += escposLarge(false) + escposBold(false);
+  s += linha('-', L) + '\n';
+  // Pagamentos
+  if((conta.pagamentos||[]).length){
+    s += escposBold(true) + 'PAGAMENTOS:' + escposBold(false) + '\n';
+    conta.pagamentos.forEach(function(p){
+      var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+      var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Crédito');
+      s += pad(' ' + hora + ' ' + tipo, L-12) + padR('R$ ' + formatarPreco(p.valor), 12) + '\n';
+    });
+    s += linha('-', L) + '\n';
+  }
+  if(cfg.rodape){
+    s += '\n' + escposCenter() + cfg.rodape + '\n';
+  }
+  s += escposLeft();
+  s += '\n\n';
+  if(cfg.cortePapel) s += escposCut();
+  return s;
+}
+
+function calcularTotaisContaPDV(c){
+  var subtotal = (c.itens||[]).reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+  var taxa10 = subtotal * 0.10;
+  var total = subtotal + taxa10;
+  var pagoTotal = (c.pagamentos||[]).reduce(function(a,p){ return a + (p.valor||0); }, 0);
+  var restante = Math.max(0, total - pagoTotal);
+  return {subtotal:subtotal, taxa10:taxa10, total:total, pagoTotal:pagoTotal, restante:restante};
 }
 
 </script>

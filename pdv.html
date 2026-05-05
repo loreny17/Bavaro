@@ -2699,49 +2699,35 @@ function gerarCupomPedido(pedido, modelo){
   var L = imp ? (imp.largura||48) : 48;
   var s = escposInit();
 
-  // Filtra itens do modelo primeiro
+  // Filtra itens do modelo
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
   if(!itensFiltrados.length){ return null; }
 
-  // ─── CABEÇALHO ───
-  s += escposCenter();
-  s += linha('=', L) + '\n';
-  var d = pedido.criadoEm ? new Date(pedido.criadoEm) : new Date();
-  var dataHora = d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  s += dataHora + '\n';
-  s += escposBold(true);
-  s += (c.restauranteNome||'') + '\n';
-  s += escposBold(false);
-  s += linha('-', L) + '\n';
-  // Pedido pequeno
-  s += 'Pedido #' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
-  s += linha('=', L) + '\n';
-  s += '\n';
-
-  // ─── MESA EM DESTAQUE GIGANTE ───
-  if(c.imprimirMesa && pedido.mesa){
-    s += escposBold(true) + escposLarge(true);
-    s += 'MESA ' + pedido.mesa + '\n';
-    s += escposLarge(false) + escposBold(false);
-    s += '\n';
-  }
-
-  // ─── ITENS ───
+  // ─── MESA EM DESTAQUE (grande) ───
   s += escposLeft();
+  s += linha('=', L) + '\n';
+  if(c.imprimirMesa && pedido.mesa){
+    s += escposCenter() + escposBold(true) + escposLarge(true);
+    s += 'MESA ' + pedido.mesa + '\n';
+    s += escposLarge(false) + escposBold(false) + escposLeft();
+  }
+  // Garçom
+  if(c.imprimirGarcom && pedido.garcom){
+    s += 'Garcom: ' + pedido.garcom + '\n';
+  }
+  // Horário
+  var d = pedido.criadoEm ? new Date(pedido.criadoEm) : new Date();
+  s += d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += linha('-', L) + '\n';
-  s += escposBold(true) + 'Itens' + escposBold(false) + '\n';
-  s += linha('-', L) + '\n';
-  s += '\n';
 
-  itensFiltrados.forEach(function(it, idx){
-    var nomeItem = '(' + (it.qtd||1) + ') ' + (it.nome||'').toUpperCase();
+  // ─── ITENS COMPACTOS ───
+  itensFiltrados.forEach(function(it){
+    var nomeItem = (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
     if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
-      // Nome à esquerda, preço à direita na mesma linha
       var preco = (it.preco||0)*(it.qtd||1);
       var precoStr = 'R$ ' + formatarPreco(preco);
       var espaco = L - nomeItem.length - precoStr.length;
       if(espaco < 1){
-        // Quebra em duas linhas se não cabe
         s += nomeItem + '\n';
         s += padR(precoStr, L) + '\n';
       } else {
@@ -2750,56 +2736,40 @@ function gerarCupomPedido(pedido, modelo){
     } else {
       s += nomeItem + '\n';
     }
-    // Seleções (opções e adicionais)
+    // Seleções (opções/adicionais)
     if(it.selecoes && it.selecoes.length){
       it.selecoes.forEach(function(sel){
         var ext = (sel.precoExtra||0) > 0 && modelo.mostrarPrecos!==false ? ' (+R$'+formatarPreco(sel.precoExtra)+')' : '';
-        s += '   * ' + (sel.opcao||'') + ext + '\n';
+        s += '  * ' + (sel.opcao||'') + ext + '\n';
       });
     }
     // Observação
     if(c.imprimirObs && it.obs){
-      var obsLin = quebrarLinha('   ** ' + it.obs, L);
-      obsLin.forEach(function(ln){ s += ln + '\n'; });
-    }
-    // Linha tracejada entre itens (não no último)
-    if(idx < itensFiltrados.length - 1){
-      s += '        ' + linha('-', 10) + '\n';
+      s += '  ** ' + it.obs + '\n';
     }
   });
-  s += '\n';
 
-  // ─── TOTAIS COM 10% ───
+  // ─── TOTAL (só se modelo permite preços) ───
   if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
-    s += linha('=', L) + '\n';
+    s += linha('-', L) + '\n';
     var subtotal = itensFiltrados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
     var taxa10 = subtotal * 0.10;
     var total = subtotal + taxa10;
-    s += escposCenter();
-    s += pad('Subtotal:', 16) + padR('R$ ' + formatarPreco(subtotal), 12) + '\n';
-    s += pad('10% Garcom:', 16) + padR('R$ ' + formatarPreco(taxa10), 12) + '\n';
-    s += '          ' + linha('-', 25) + '\n';
-    s += escposBold(true) + escposLarge(true);
-    s += pad('TOTAL:', 8) + 'R$ ' + formatarPreco(total) + '\n';
-    s += escposLarge(false) + escposBold(false);
-    s += escposLeft();
-  } else {
-    s += linha('=', L) + '\n';
+    var lblSub = 'Subtotal';
+    var valSub = 'R$ ' + formatarPreco(subtotal);
+    s += lblSub + new Array(L - lblSub.length - valSub.length + 1).join(' ') + valSub + '\n';
+    var lblTaxa = '10% Garcom';
+    var valTaxa = 'R$ ' + formatarPreco(taxa10);
+    s += lblTaxa + new Array(L - lblTaxa.length - valTaxa.length + 1).join(' ') + valTaxa + '\n';
+    s += escposBold(true);
+    var lblTot = 'TOTAL';
+    var valTot = 'R$ ' + formatarPreco(total);
+    s += lblTot + new Array(L - lblTot.length - valTot.length + 1).join(' ') + valTot + '\n';
+    s += escposBold(false);
   }
+  s += linha('=', L) + '\n';
 
-  // ─── RODAPÉ ───
   s += '\n';
-  s += escposCenter();
-  if(c.imprimirGarcom && pedido.garcom){
-    s += 'Garcom: ' + pedido.garcom + '\n';
-  }
-  if(c.rodape){
-    s += c.rodape + '\n';
-  } else {
-    s += 'Bavaro PDV\n';
-  }
-  s += escposLeft();
-  s += '\n\n';
   if(c.beep) s += escposBeep();
   if(c.cortePapel) s += escposCut();
   return s;
@@ -3203,78 +3173,82 @@ function gerarCupomContaFinal(conta){
   // ─── CABEÇALHO ───
   s += escposCenter();
   s += linha('=', L) + '\n';
-  s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += escposBold(true);
-  s += (cfg.restauranteNome||'') + '\n';
+  s += 'Mesa ' + conta.mesa + '\n';
   s += escposBold(false);
-  s += linha('-', L) + '\n';
-  s += '*** FECHAMENTO ***\n';
+  if(conta.abertaEm){
+    s += 'Abertura em ' + new Date(conta.abertaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
+  }
   s += linha('=', L) + '\n';
   s += '\n';
 
-  // ─── MESA EM DESTAQUE GIGANTE ───
-  s += escposBold(true) + escposLarge(true);
-  s += 'MESA ' + conta.mesa + '\n';
-  s += escposLarge(false) + escposBold(false);
-  s += '\n';
-
-  // ─── DADOS ───
+  // ─── CLIENTE ───
   s += escposLeft();
+  s += 'Cliente: ' + (conta.cliente || 'Nao Identificado') + '\n';
   s += linha('-', L) + '\n';
-  if(conta.abertaEm) s += 'Aberta:   ' + new Date(conta.abertaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
-  s += 'Fechada:  ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
-  s += 'Garcom:   ' + (conta.garcomPrincipal||'—') + '\n';
-  s += linha('-', L) + '\n';
-  s += escposBold(true) + 'Itens' + escposBold(false) + '\n';
-  s += linha('-', L) + '\n';
-  s += '\n';
 
   // ─── ITENS ───
   var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
-  itensValidos.forEach(function(it, idx){
+  itensValidos.forEach(function(it){
     var nome = '(' + (it.qtd||1) + ') ' + (it.nome||'').toUpperCase();
     var preco = (it.preco||0)*(it.qtd||1);
-    var precoStr = 'R$ ' + formatarPreco(preco);
+    var precoStr = 'R$ ' + padR(formatarPreco(preco), 8);
     var espaco = L - nome.length - precoStr.length;
     if(espaco < 1){
+      // Quebra em duas linhas se não cabe
       s += nome + '\n';
       s += padR(precoStr, L) + '\n';
     } else {
       s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
     }
     if(it.obs) s += '   ** ' + it.obs + '\n';
-    if(idx < itensValidos.length - 1){
-      s += '        ' + linha('-', 10) + '\n';
-    }
   });
+  s += linha('-', L) + '\n';
   s += '\n';
 
-  // ─── TOTAIS ───
+  // ─── FECHAMENTO ───
   var totais = calcularTotaisContaPDV(conta);
-  s += linha('=', L) + '\n';
   s += escposCenter();
-  s += pad('Subtotal:', 16) + padR('R$ ' + formatarPreco(totais.subtotal), 12) + '\n';
-  s += pad('10% Garcom:', 16) + padR('R$ ' + formatarPreco(totais.taxa10), 12) + '\n';
-  s += '          ' + linha('-', 25) + '\n';
-  s += escposBold(true) + escposLarge(true);
-  s += pad('TOTAL:', 8) + 'R$ ' + formatarPreco(totais.total) + '\n';
-  s += escposLarge(false) + escposBold(false);
+  s += escposBold(true) + 'Fechamento' + escposBold(false) + '\n';
+  s += '\n';
   s += escposLeft();
 
-  // ─── PAGAMENTOS ───
+  // Total dos itens
+  var lblItens = 'Total dos itens';
+  var valItens = 'R$ ' + padR(formatarPreco(totais.subtotal), 8);
+  s += lblItens + new Array(L - lblItens.length - valItens.length + 1).join(' ') + valItens + '\n';
+
+  // Taxa de serviço (10%)
+  var lblTaxa = 'Taxa de servico (10%)';
+  var valTaxa = 'R$ ' + padR(formatarPreco(totais.taxa10), 8);
+  s += lblTaxa + new Array(L - lblTaxa.length - valTaxa.length + 1).join(' ') + valTaxa + '\n';
+
+  // Linha tracejada antes do total
+  s += new Array(L - 11).join(' ') + '----------\n';
+
+  // Total final
+  var lblTotal = 'Total';
+  var valTotal = 'R$ ' + padR(formatarPreco(totais.total), 8);
+  s += escposBold(true);
+  s += lblTotal + new Array(L - lblTotal.length - valTotal.length + 1).join(' ') + valTotal + '\n';
+  s += escposBold(false);
+
+  // ─── PAGAMENTOS (se tiver) ───
   if((conta.pagamentos||[]).length){
+    s += '\n';
     s += linha('-', L) + '\n';
     s += escposBold(true) + 'PAGAMENTOS:' + escposBold(false) + '\n';
     conta.pagamentos.forEach(function(p){
       var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
       var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Credito');
-      s += pad(' ' + hora + ' ' + tipo, L-12) + padR('R$ ' + formatarPreco(p.valor), 12) + '\n';
+      var lbl = ' ' + hora + ' ' + tipo;
+      var val = 'R$ ' + padR(formatarPreco(p.valor), 8);
+      s += lbl + new Array(L - lbl.length - val.length + 1).join(' ') + val + '\n';
     });
   }
-  s += linha('=', L) + '\n';
 
   // ─── RODAPÉ ───
-  s += '\n';
+  s += '\n\n';
   s += escposCenter();
   if(cfg.rodape){
     s += cfg.rodape + '\n';

@@ -2150,11 +2150,11 @@ function abrirMenuMesa(num, eOcupada){
           '<div class="sub-pequeno">Adicionar itens à mesa</div>'+
         '</div>'+
       '</button>'+
-      '<button class="mesa-menu-item" onclick="acaoMesa(\'ver-conta\')">'+
+      '<button class="mesa-menu-item" onclick="acaoMesa(\'ver-pedidos\')">'+
         '<span class="icone-grande">📋</span>'+
         '<div style="flex:1;text-align:left;">'+
-          '<div class="titulo-grande">Ver Conta da Mesa</div>'+
-          '<div class="sub-pequeno">Itens, pagamentos e total</div>'+
+          '<div class="titulo-grande">Ver Pedidos da Mesa</div>'+
+          '<div class="sub-pequeno">Editar, cancelar ou adicionar itens</div>'+
         '</div>'+
       '</button>'+
       '<button class="mesa-menu-item" onclick="acaoMesa(\'transferir\')">'+
@@ -2203,8 +2203,8 @@ function acaoMesa(acao){
   } else if(acao === 'pedido'){
     selecionarMesa(num);
     pushHistory('cardapio:null');
-  } else if(acao === 'ver-conta'){
-    abrirVerContaMesa(num);
+  } else if(acao === 'ver-pedidos'){
+    abrirVerPedidosMesa(num);
   } else if(acao === 'fechar'){
     abrirFecharConta(num);
   } else if(acao === 'transferir'){
@@ -2868,9 +2868,145 @@ function imprimirContaMesa(tipo){
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
-// Função auxiliar para "Ver Conta" (apenas leitura)
+// ════════════════════════════════════════
+//  VER PEDIDOS DA MESA (tela cheia)
+// ════════════════════════════════════════
+var _verPedidosMesaNum = null;
+var _verPedidosUnsub = null;
+
+function abrirVerPedidosMesa(num){
+  _verPedidosMesaNum = num;
+  // Cria modal em tela cheia
+  var ex = document.getElementById('modal-ver-pedidos');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal show';
+  mod.id = 'modal-ver-pedidos';
+  mod.style.cssText = 'background:var(--bg);';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:none;width:100%;height:100%;border-radius:0;display:flex;flex-direction:column;background:var(--bg);">'+
+      '<div class="modal-header" style="background:var(--surface);border-bottom:1px solid var(--border);">'+
+        '<button onclick="fecharVerPedidosMesa()" style="background:transparent;border:none;color:var(--text);font-size:1.5rem;cursor:pointer;margin-right:8px;font-family:inherit;">‹</button>'+
+        '<div class="modal-titulo">PEDIDOS — MESA '+num+'</div>'+
+        '<button class="modal-fechar" onclick="fecharVerPedidosMesa()">×</button>'+
+      '</div>'+
+      '<div class="modal-body" style="flex:1;overflow-y:auto;padding:14px;" id="ver-pedidos-body">'+
+        '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>'+
+      '</div>'+
+      '<div style="padding:12px;border-top:1px solid var(--border);background:var(--surface);">'+
+        '<button class="f-btn" style="width:100%;" onclick="fazerNovoPedidoMesa('+num+')">'+
+          '<span style="font-size:1.2rem;margin-right:6px;">+</span> Adicionar Novo Pedido'+
+        '</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  pushHistory('ver-pedidos:'+num);
+
+  // Escuta pedidos da mesa em tempo real
+  if(_verPedidosUnsub) _verPedidosUnsub();
+  _verPedidosUnsub = fbDb.collection('pedidos')
+    .where('restauranteId','==',_restauranteId)
+    .where('mesa','==', parseInt(num) || num)
+    .onSnapshot(function(snap){
+      var lista = [];
+      snap.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
+      lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+      renderVerPedidosMesa(lista);
+    }, function(){
+      var body = document.getElementById('ver-pedidos-body');
+      if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro ao carregar</div></div>';
+    });
+}
+
+function fecharVerPedidosMesa(){
+  if(_verPedidosUnsub){ _verPedidosUnsub(); _verPedidosUnsub = null; }
+  var m = document.getElementById('modal-ver-pedidos');
+  if(m) m.remove();
+  _verPedidosMesaNum = null;
+}
+
+function fazerNovoPedidoMesa(num){
+  fecharVerPedidosMesa();
+  fecharMenuMesa();
+  selecionarMesa(num);
+  pushHistory('cardapio:null');
+}
+
+function renderVerPedidosMesa(pedidos){
+  var body = document.getElementById('ver-pedidos-body');
+  if(!body) return;
+  // Filtra só pedidos com itens não-cancelados
+  var validos = pedidos.filter(function(p){
+    var visiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    return visiveis.length > 0;
+  });
+  if(!validos.length){
+    body.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-titulo">Nenhum pedido</div><div class="empty-sub">Ainda não há pedidos nesta mesa.</div></div>';
+    return;
+  }
+  // Atualiza _meusPedidos pra que as funções de editar/cancelar funcionem
+  _meusPedidos = validos;
+  
+  var html = '';
+  var statusMap = { 'aguardando':'⏳ Aguardando', 'preparo':'🔥 Em Preparo', 'pronto':'✓ Pronto', 'entregue':'✅ Entregue' };
+  
+  validos.forEach(function(p){
+    var hora = '';
+    if(p.criadoEm){ var d = new Date(p.criadoEm); hora = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+    var st = p.status || 'aguardando';
+    var podeEditar = (st === 'aguardando' || st === 'preparo');
+    var itensVisiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var total = itensVisiveis.reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
+    
+    var itensHtml = itensVisiveis.map(function(it){
+      var idx = (p.itens||[]).indexOf(it);
+      var acoes = podeEditar
+        ? '<div style="display:flex;gap:6px;margin-top:6px;">'+
+            '<button onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')" style="flex:1;background:var(--surface3);border:1px solid var(--border2);color:var(--text);padding:7px;border-radius:8px;font-size:0.74rem;font-family:inherit;cursor:pointer;">✏️ Editar</button>'+
+            '<button onclick="cancelarItemGarcom(\''+p.id+'\','+idx+')" style="flex:1;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:7px;border-radius:8px;font-size:0.74rem;font-family:inherit;cursor:pointer;">✕ Cancelar</button>'+
+          '</div>'
+        : '';
+      var selsHtml = '';
+      if(it.selecoes && it.selecoes.length){
+        selsHtml = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">'+ 
+          it.selecoes.map(function(s){ return '• '+esc(s.opcao||''); }).join(' ') +'</div>';
+      }
+      return '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;margin-bottom:8px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;">'+
+          '<span style="background:var(--accent);color:#000;border-radius:5px;padding:2px 7px;font-size:0.74rem;font-weight:700;">'+(it.qtd||1)+'x</span>'+
+          '<span style="flex:1;font-weight:600;font-size:0.88rem;">'+esc(it.nome||'')+'</span>'+
+          '<span style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.05rem;">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
+        '</div>'+
+        selsHtml+
+        (it.obs?'<div style="font-size:0.72rem;color:var(--muted);margin-top:3px;">📝 '+esc(it.obs)+'</div>':'')+
+        acoes+
+      '</div>';
+    }).join('');
+    
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:0.94rem;">Pedido #'+p.id.slice(-4).toUpperCase()+'</div>'+
+          '<div style="font-size:0.72rem;color:var(--muted);">'+hora+' • '+esc(p.garcom||'—')+'</div>'+
+        '</div>'+
+        '<span style="background:var(--surface3);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;font-size:0.72rem;font-weight:600;">'+(statusMap[st]||st)+'</span>'+
+      '</div>'+
+      itensHtml+
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border2);">'+
+        '<button onclick="iniciarAdicionarItemGarcom(\''+p.id+'\')" style="background:transparent;border:1px dashed var(--border2);color:var(--accent);padding:7px 12px;border-radius:8px;font-size:0.78rem;font-family:inherit;cursor:pointer;">'+
+          '+ Adicionar item'+
+        '</button>'+
+        '<div style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+fmtPreco(total)+'</div>'+
+      '</div>'+
+      (podeEditar?'':'<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center;">Pedido em '+(statusMap[st]||st)+' — edição bloqueada</div>')+
+    '</div>';
+  });
+  body.innerHTML = html;
+}
+
+// Função auxiliar para "Ver Conta" (compat - leva pra tela de fechar)
 function abrirVerContaMesa(num){
-  abrirFecharConta(num); // Reusa a tela, fica em modo leitura natural
+  abrirFecharConta(num);
 }
 
 // ════════════════════════════════════════

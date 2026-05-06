@@ -967,6 +967,15 @@ function escutarMesasOcupadas(){
       // Senão é mesa
       var mesa = String(d.mesa||'');
       if(mesa){
+        // Mesa só "ocupada" se tem itens em aberto OU pagamentos
+        var temPagamento = (d.pagamentos||[]).length > 0;
+        var temItem = itensAbertos.length > 0;
+        if(!temItem && !temPagamento){
+          // Conta aberta sem itens nem pagamentos = mesa ainda livre na visualização
+          // mas mantém no cache pra continuar usando a conta
+          _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
+          return;
+        }
         _mesasOcupadas[mesa] = {
           contaId: doc.id,
           garcom: d.garcomPrincipal||'',
@@ -1655,7 +1664,7 @@ function executarCancelamento(pedidoId, idx){
   } else {
     motivo = (document.getElementById('cancel-outro-texto')||{}).value || '';
   }
-  if(!motivo.trim()){ showToast('Informe o motivo','#f7a34f'); return; }
+  if(!motivo.trim()){ motivo = '(sem motivo informado)'; }
 
   var item = ped.itens[idx];
   var agora = Date.now();
@@ -2051,8 +2060,8 @@ function renderGruposNoModal(){
         marcado = (_selecoesGrupos[g.id]||[]).indexOf(idx) !== -1;
       }
       opcoesHtml +=
-        '<label style="display:flex;align-items:center;gap:10px;padding:9px;background:'+(marcado?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(marcado?'var(--accent)':'var(--border2)')+';border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;transition:all 0.15s;">'+
-          '<input type="'+(g.tipo==='opcao'?'radio':'checkbox')+'" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' onchange="toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')" style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
+        '<label style="display:flex;align-items:center;gap:10px;padding:9px;background:'+(marcado?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(marcado?'var(--accent)':'var(--border2)')+';border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;transition:all 0.15s;" onclick="event.preventDefault();toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')">'+
+          '<input type="'+(g.tipo==='opcao'?'radio':'checkbox')+'" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);pointer-events:none;">'+
           '<span style="flex:1;">'+esc(op.nome||'')+precoTxt+'</span>'+
         '</label>';
     });
@@ -2063,8 +2072,14 @@ function renderGruposNoModal(){
 }
 
 function toggleGrupoOpcao(grupoId, opcaoIdx, tipo){
+  var grupo = _gruposItemAtual.find(function(g){ return g.id === grupoId; });
   if(tipo === 'opcao'){
-    _selecoesGrupos[grupoId] = opcaoIdx;
+    // Opção tipo radio - se já está selecionada e NÃO é obrigatório, desmarcar
+    if(_selecoesGrupos[grupoId] === opcaoIdx && grupo && !grupo.obrigatorio){
+      _selecoesGrupos[grupoId] = null;
+    } else {
+      _selecoesGrupos[grupoId] = opcaoIdx;
+    }
   } else {
     var arr = _selecoesGrupos[grupoId] || [];
     var pos = arr.indexOf(opcaoIdx);

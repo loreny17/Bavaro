@@ -62,9 +62,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .h-btn:hover,.h-btn:active{background:rgba(212,168,67,0.12);border-color:var(--accent);color:var(--accent);}
 
 /* ─── Tabs ─── */
-.tabs{position:sticky;top:60px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;padding:0 14px;z-index:40;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;mask-image:linear-gradient(to right,black calc(100% - 24px),transparent 100%);-webkit-mask-image:linear-gradient(to right,black calc(100% - 24px),transparent 100%);}
+.tabs{position:sticky;top:60px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;gap:0;padding:0 4px;z-index:40;justify-content:space-around;}
 .tabs::-webkit-scrollbar{display:none;}
-.tab{padding:12px 12px;font-size:0.82rem;font-weight:600;color:var(--muted);white-space:nowrap;position:relative;flex-shrink:0;background:none;border:none;font-family:inherit;cursor:pointer;}
+.tab{padding:12px 4px;font-size:0.74rem;font-weight:600;color:var(--muted);white-space:nowrap;position:relative;flex:1;min-width:0;background:none;border:none;font-family:inherit;cursor:pointer;text-align:center;overflow:hidden;text-overflow:ellipsis;}
+.tab .tab-text{display:inline;}
+@media(max-width:480px){.tab{font-size:1.1rem;padding:12px 2px;}.tab .tab-text{display:none;}}
 .tab.active{color:var(--accent);}
 .tab.active::after{content:"";position:absolute;left:14px;right:14px;bottom:0;height:2px;background:var(--accent);border-radius:2px;}
 
@@ -277,12 +279,12 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
   <!-- Tabs -->
   <div class="tabs">
-    <button class="tab active" id="tab-btn-cardapio" onclick="showTab('cardapio')">📋 Cardápio</button>
-    <button class="tab" id="tab-btn-grupos" onclick="showTab('grupos')">🎛️ Grupos</button>
-    <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾 Pedidos <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
-    <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜 Histórico</button>
-    <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥 Garçons</button>
-    <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️ Impressão</button>
+    <button class="tab active" id="tab-btn-cardapio" onclick="showTab('cardapio')">📋<span class="tab-text"> Cardápio</span></button>
+    <button class="tab" id="tab-btn-grupos" onclick="showTab('grupos')">🎛️<span class="tab-text"> Grupos</span></button>
+    <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾<span class="tab-text"> Pedidos</span> <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
+    <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜<span class="tab-text"> Histórico</span></button>
+    <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥<span class="tab-text"> Garçons</span></button>
+    <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️<span class="tab-text"> Impressão</span></button>
   </div>
 
   <!-- Painel Grupos -->
@@ -299,12 +301,14 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
   <!-- Painel Pedidos -->
   <div id="painel-pedidos" style="display:none;padding-bottom:90px;">
-    <div style="display:flex;gap:8px;padding:10px 14px;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--surface);">
+    <div style="display:flex;gap:8px;padding:10px 14px;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--surface);align-items:center;">
       <button class="status-filtro active" onclick="filtrarPedidos(this,'todos')">Todos</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'aguardando')">⏳ Aguardando</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'preparo')">👨‍🍳 Preparo</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'pronto')">✅ Pronto</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'entregue')">🚀 Entregue</button>
+      <div style="flex:1;"></div>
+      <button class="status-filtro" style="background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.3);color:#f87171;" onclick="limparPedidosAntigos()" title="Limpar todos os pedidos exibidos">🗑 Limpar tudo</button>
     </div>
     <div id="pedidos-lista" style="padding:14px;"></div>
   </div>
@@ -1392,9 +1396,30 @@ function renderPedidosPDV() {
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button class="p-btn secondary" style="flex:1;" onclick="reimprimirPedido(\'' + p.id + '\')">🖨️ Reimprimir</button>' +
+        '<button class="p-btn secondary" style="flex:0 0 auto;background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.3);color:#f87171;" onclick="excluirPedidoVisualizacao(\'' + p.id + '\')" title="Remover este pedido da lista">🗑</button>' +
       '</div>';
     wrap.appendChild(card);
   });
+}
+
+function excluirPedidoVisualizacao(pedidoId){
+  if(!confirm('Remover este pedido da lista?\n\nO pedido será apagado permanentemente.\nA conta da mesa NÃO será afetada (itens permanecem).')) return;
+  fbDb.collection('pedidos').doc(pedidoId).delete()
+    .then(function(){ showToast('✓ Pedido removido','#4ade80'); })
+    .catch(function(e){ showToast('❌ ' + e.message,'#f87171'); });
+}
+
+function limparPedidosAntigos(){
+  var lista = _pedidosPDV.slice();
+  if(!lista.length){ showToast('Nenhum pedido pra limpar','#f7a34f'); return; }
+  if(!confirm('Limpar TODOS os '+lista.length+' pedidos da lista?\n\nIsso vai apagar os pedidos exibidos aqui (não afeta as contas das mesas).')) return;
+  var batch = fbDb.batch();
+  lista.forEach(function(p){
+    batch.delete(fbDb.collection('pedidos').doc(p.id));
+  });
+  batch.commit()
+    .then(function(){ showToast('✓ '+lista.length+' pedidos removidos','#4ade80'); })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
 function ciclarStatus(id, atual) {

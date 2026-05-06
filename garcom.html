@@ -200,6 +200,14 @@ header{
 
 /* ─── Grid de itens ─── */
 .itens-grid{padding:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding-bottom:100px;}
+.itens-grid.lista-cat{display:flex;flex-direction:column;gap:8px;padding:12px;}
+.itens-grid.lista-cat .cat-list-card{display:flex;align-items:center;background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px;cursor:pointer;gap:14px;transition:all 0.15s;}
+.itens-grid.lista-cat .cat-list-card:active{transform:scale(0.98);background:var(--surface3);border-color:var(--accent);}
+.itens-grid.lista-cat .cat-list-card .cat-emoji{font-size:1.7rem;width:42px;height:42px;background:var(--surface3);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.itens-grid.lista-cat .cat-list-card .cat-info{flex:1;min-width:0;}
+.itens-grid.lista-cat .cat-list-card .cat-nome{font-weight:700;font-size:0.96rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.itens-grid.lista-cat .cat-list-card .cat-count{font-size:0.74rem;color:var(--muted);margin-top:2px;}
+.itens-grid.lista-cat .cat-list-card .cat-arrow{color:var(--muted);font-size:1.3rem;flex-shrink:0;}
 
 /* Modo compacto (lista) */
 .itens-grid.compacto{display:flex;flex-direction:column;gap:8px;padding:12px;}
@@ -1392,7 +1400,12 @@ function renderCatBar(){
 function renderItens(){
   var grid = document.getElementById('itens-grid');
   if(!grid) return;
-  grid.className = 'itens-grid' + (_modoCompacto && _catAtiva !== null ? ' compacto' : '');
+  // Lista compacta para tela de categorias, grade normal/compacta para itens
+  if(_catAtiva === null){
+    grid.className = 'itens-grid lista-cat';
+  } else {
+    grid.className = 'itens-grid' + (_modoCompacto ? ' compacto' : '');
+  }
   var buscaInput = document.getElementById('busca-input');
   var buscaBar = document.querySelector('.busca-bar');
 
@@ -1400,22 +1413,23 @@ function renderItens(){
   if(_catAtiva === null){
     if(buscaBar) buscaBar.style.display = 'none';
     if(!_categorias.length){
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">📂</div><div class="empty-titulo">Sem categorias</div><div class="empty-sub">Cadastre categorias e itens no PDV.</div></div>';
+      grid.innerHTML = '<div class="empty"><div class="empty-icon">📂</div><div class="empty-titulo">Sem categorias</div><div class="empty-sub">Cadastre categorias e itens no PDV.</div></div>';
       return;
     }
     grid.innerHTML = '';
-    // Cards de categorias
+    // Cards de categorias em formato de lista compacta
     _categorias.forEach(function(cat){
       var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
       if(!count) return;
       var card = document.createElement('div');
-      card.className = 'item-card';
+      card.className = 'cat-list-card';
       card.innerHTML =
-        '<div class="item-foto" style="font-size:3rem;background:linear-gradient(135deg,#2a2a2a,#1a1a1a);">'+(cat.emoji||'📂')+'</div>'+
-        '<div class="item-info" style="text-align:center;">'+
-          '<div class="item-nome">'+esc(cat.nome)+'</div>'+
-          '<div class="item-desc" style="text-align:center;">'+count+' '+(count===1?'item':'itens')+'</div>'+
-        '</div>';
+        '<div class="cat-emoji">'+(cat.emoji||'📂')+'</div>'+
+        '<div class="cat-info">'+
+          '<div class="cat-nome">'+esc(cat.nome)+'</div>'+
+          '<div class="cat-count">'+count+' '+(count===1?'item':'itens')+'</div>'+
+        '</div>'+
+        '<div class="cat-arrow">›</div>';
       card.onclick = (function(id){ return function(){ _catAtiva=id; pushHistory('cardapio:'+id); renderCatBar(); renderItens(); }; })(cat.id);
       grid.appendChild(card);
     });

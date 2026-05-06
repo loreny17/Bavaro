@@ -104,7 +104,22 @@ button{cursor:pointer;border:none;background:none;}
   background-repeat:no-repeat;background-position:12px center;
 }
 .mesa-search input:focus{border-color:var(--accent);}
-.mesas-grid{flex:1;overflow-y:auto;padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-content:start;padding-bottom:30px;}
+.mesas-grid{flex:1;overflow-y:auto;padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-content:start;padding-bottom:30px;position:relative;}
+.mesas-grid::before{content:"";position:fixed;left:0;right:0;top:0;bottom:0;background-image:url('/icon-garcom-512.png');background-repeat:no-repeat;background-position:center 60%;background-size:55% auto;opacity:0.05;pointer-events:none;z-index:0;}
+.mesas-grid > *{position:relative;z-index:1;}
+.comandas-lista::before{content:"";position:fixed;left:0;right:0;top:0;bottom:0;background-image:url('/icon-garcom-512.png');background-repeat:no-repeat;background-position:center 60%;background-size:55% auto;opacity:0.05;pointer-events:none;z-index:0;}
+.comandas-lista > *{position:relative;z-index:1;}
+.abas-topo{display:flex;background:var(--surface);border-bottom:1px solid var(--border);padding:0;flex-shrink:0;}
+.aba-btn{flex:1;background:transparent;border:none;color:var(--muted);padding:14px 8px;font-family:inherit;font-size:0.92rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;border-bottom:3px solid transparent;transition:all 0.2s;}
+.aba-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(212,168,67,0.05);}
+.comanda-card{background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:14px;margin-bottom:10px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:12px;}
+.comanda-card:active{transform:scale(0.98);}
+.comanda-card.aberta{border-color:rgba(74,222,128,0.4);background:rgba(74,222,128,0.05);}
+.comanda-card-icone{width:42px;height:42px;border-radius:50%;background:var(--surface3);display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;}
+.comanda-card-info{flex:1;min-width:0;}
+.comanda-card-nome{font-weight:700;font-size:1rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.comanda-card-sub{font-size:0.74rem;color:var(--muted);margin-top:3px;}
+.comanda-card-valor{font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.3rem;flex-shrink:0;}
 @media(min-width:400px){.mesas-grid{grid-template-columns:repeat(4,1fr);}}
 @media(min-width:600px){.mesas-grid{grid-template-columns:repeat(5,1fr);}}
 .mesa-card{
@@ -452,10 +467,26 @@ header{
     </div>
     <div class="mesa-header-garcom" id="garcom-badge">—</div>
   </div>
-  <div class="mesa-search">
+  <!-- Abas: Mesas | Comandas -->
+  <div class="abas-topo">
+    <button class="aba-btn active" id="aba-mesas-btn" onclick="trocarAba('mesas')">
+      <span style="font-size:1.05rem;">🪑</span> Mesas
+    </button>
+    <button class="aba-btn" id="aba-comandas-btn" onclick="trocarAba('comandas')">
+      <span style="font-size:1.05rem;">📝</span> Comandas
+    </button>
+  </div>
+  <div class="mesa-search" id="mesa-search-bar">
     <input type="text" id="mesa-search-input" placeholder="Buscar mesa..." inputmode="numeric" oninput="renderMesas()">
   </div>
+  <div class="mesa-search" id="comanda-search-bar" style="display:none;">
+    <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
+  </div>
   <div class="mesas-grid" id="mesas-grid"></div>
+  <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
+  <button id="btn-nova-comanda" onclick="abrirNovaComanda()" style="display:none;position:fixed;bottom:20px;right:20px;background:var(--accent);color:#000;border:none;border-radius:50px;padding:14px 22px;font-family:inherit;font-weight:700;font-size:0.9rem;box-shadow:0 4px 16px rgba(212,168,67,0.4);cursor:pointer;z-index:50;display:none;align-items:center;gap:8px;">
+    <span style="font-size:1.2rem;">+</span> Nova Comanda
+  </button>
 
   <!-- Menu Lateral -->
   <div class="menu-lateral-overlay" id="menu-lateral-overlay" onclick="fecharMenuLateral()"></div>
@@ -808,6 +839,20 @@ document.addEventListener('DOMContentLoaded', function(){
 var _TOTAL_MESAS = 99;
 var _mesasOcupadas = {}; // {num: {contaId, garcom, abertaEm, count, total}}
 var _contasMesaCache = {}; // {num: contaCompleta}
+var _comandasAvulsas = []; // [{id, cliente, ...contaCompleta}]
+var _abaAtual = 'mesas';
+
+function trocarAba(aba){
+  _abaAtual = aba;
+  document.getElementById('aba-mesas-btn').classList.toggle('active', aba==='mesas');
+  document.getElementById('aba-comandas-btn').classList.toggle('active', aba==='comandas');
+  document.getElementById('mesa-search-bar').style.display = aba==='mesas' ? '' : 'none';
+  document.getElementById('comanda-search-bar').style.display = aba==='comandas' ? '' : 'none';
+  document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
+  document.getElementById('comandas-lista').style.display = aba==='comandas' ? '' : 'none';
+  document.getElementById('btn-nova-comanda').style.display = aba==='comandas' ? 'flex' : 'none';
+  if(aba==='comandas') renderComandas();
+}
 
 function mostrarMesas(){
   document.getElementById('mesa-screen').classList.remove('hidden');
@@ -897,18 +942,25 @@ function carregarTenantParaMesas(){
 }
 
 function escutarMesasOcupadas(){
-  // Escuta as contas abertas das mesas
+  // Escuta as contas abertas das mesas E das comandas avulsas
   var ref = fbDb.collection('contas_mesa')
     .where('restauranteId','==',_restauranteId)
     .where('status','==','aberta');
   ref.onSnapshot(function(snap){
     _mesasOcupadas = {};
     _contasMesaCache = {};
+    _comandasAvulsas = [];
     snap.forEach(function(doc){
       var d = doc.data();
+      var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
+      // Se for comanda avulsa
+      if(d.tipoConta === 'avulsa'){
+        _comandasAvulsas.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
+        return;
+      }
+      // Senão é mesa
       var mesa = String(d.mesa||'');
       if(mesa){
-        var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
         _mesasOcupadas[mesa] = {
           contaId: doc.id,
           garcom: d.garcomPrincipal||'',
@@ -920,7 +972,10 @@ function escutarMesasOcupadas(){
         _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
       }
     });
+    // Ordena comandas por mais recente
+    _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
+    if(_abaAtual === 'comandas') renderComandas();
   }, function(){ renderMesas(); });
 }
 
@@ -945,7 +1000,211 @@ function renderMesas(){
   }
 }
 
-function selecionarMesa(num){
+// ════════════════════════════════════════
+//  COMANDAS AVULSAS (por nome)
+// ════════════════════════════════════════
+function renderComandas(){
+  var lista = document.getElementById('comandas-lista');
+  var input = document.getElementById('comanda-search-input');
+  var busca = input ? (input.value||'').toLowerCase().trim() : '';
+  var filtradas = _comandasAvulsas.filter(function(c){
+    if(!busca) return true;
+    return (c.cliente||'').toLowerCase().includes(busca);
+  });
+  if(!filtradas.length){
+    lista.innerHTML = '<div class="empty" style="padding:40px 20px;">'+
+      '<div class="empty-icon">📝</div>'+
+      '<div class="empty-titulo">'+(busca ? 'Nenhuma comanda encontrada' : 'Nenhuma comanda aberta')+'</div>'+
+      '<div class="empty-sub">'+(busca ? 'Tente outro nome' : 'Toque em "+ Nova Comanda" para criar uma')+'</div>'+
+    '</div>';
+    return;
+  }
+  var html = '';
+  filtradas.forEach(function(c){
+    var hora = c.abertaEm ? new Date(c.abertaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    html += '<div class="comanda-card aberta" onclick="abrirMenuComanda(\''+c.id+'\')">'+
+      '<div class="comanda-card-icone">👤</div>'+
+      '<div class="comanda-card-info">'+
+        '<div class="comanda-card-nome">'+esc(c.cliente||'(sem nome)')+'</div>'+
+        '<div class="comanda-card-sub">'+(c._itensAbertosCount||0)+' itens • '+esc(c.garcomPrincipal||'—')+' • '+hora+'</div>'+
+      '</div>'+
+      '<div class="comanda-card-valor">R$ '+fmtPreco(c.total||0)+'</div>'+
+    '</div>';
+  });
+  lista.innerHTML = html;
+}
+
+function abrirNovaComanda(){
+  var nome = prompt('Nome do cliente:');
+  if(!nome) return;
+  nome = nome.trim();
+  if(!nome){ showToast('Digite um nome','#f7a34f'); return; }
+  // Verifica se já existe comanda aberta com esse nome
+  var existe = _comandasAvulsas.find(function(c){ return (c.cliente||'').toLowerCase() === nome.toLowerCase(); });
+  if(existe){
+    if(!confirm('Já existe uma comanda aberta para "'+nome+'". Abrir outra mesmo assim?')){
+      return;
+    }
+  }
+  // Cria nova comanda avulsa
+  fbDb.collection('contas_mesa').add({
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    tipoConta: 'avulsa',
+    cliente: nome,
+    mesa: null,
+    status: 'aberta',
+    itens: [],
+    pagamentos: [],
+    subtotal: 0,
+    taxa10: 0,
+    total: 0,
+    pagoTotal: 0,
+    restante: 0,
+    garcomPrincipal: _nomeGarcom,
+    abertaEm: Date.now(),
+    abertaPor: _nomeGarcom
+  }).then(function(){
+    showToast('✓ Comanda de '+nome+' aberta','#4ade80');
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
+  });
+}
+
+// Menu da comanda avulsa - similar ao da mesa mas com "cliente" ao invés de número
+function abrirMenuComanda(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c){ showToast('Comanda não encontrada','#f87171'); return; }
+  _comandaMenuAtual = comandaId;
+  document.getElementById('mesa-menu-titulo').textContent = '👤 ' + (c.cliente||'').toUpperCase();
+  var qtdAbertos = c._itensAbertosCount||0;
+  var totalAbertos = (c.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); }, 0);
+  var body = document.querySelector('#modal-mesa-menu .modal-body');
+  body.innerHTML =
+    '<div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);border-radius:12px;padding:14px;margin-bottom:14px;">'+
+      '<div style="color:#4ade80;font-weight:700;font-size:0.92rem;">✓ Comanda aberta</div>'+
+      '<div style="color:var(--muted);font-size:0.8rem;margin-top:4px;">Garçom: '+esc(c.garcomPrincipal||'—')+' • '+qtdAbertos+' itens em aberto</div>'+
+      '<div style="color:var(--accent);margin-top:6px;font-family:Bebas Neue,sans-serif;font-size:1.4rem;">R$ '+fmtPreco(totalAbertos)+'</div>'+
+    '</div>'+
+    '<button class="mesa-menu-item" onclick="acaoComanda(\'pedido\')">'+
+      '<span class="icone-grande">📝</span>'+
+      '<div style="flex:1;text-align:left;">'+
+        '<div class="titulo-grande">Fazer Pedido</div>'+
+        '<div class="sub-pequeno">Adicionar itens à comanda</div>'+
+      '</div>'+
+    '</button>'+
+    '<button class="mesa-menu-item" onclick="acaoComanda(\'ver-pedidos\')">'+
+      '<span class="icone-grande">📋</span>'+
+      '<div style="flex:1;text-align:left;">'+
+        '<div class="titulo-grande">Ver Pedidos</div>'+
+        '<div class="sub-pequeno">Editar, cancelar ou adicionar itens</div>'+
+      '</div>'+
+    '</button>'+
+    '<button class="mesa-menu-item" onclick="acaoComanda(\'fechar\')">'+
+      '<span class="icone-grande">💰</span>'+
+      '<div style="flex:1;text-align:left;">'+
+        '<div class="titulo-grande">Pagar / Fechar Comanda</div>'+
+        '<div class="sub-pequeno">Receber pagamento ou encerrar</div>'+
+      '</div>'+
+    '</button>';
+  document.getElementById('modal-mesa-menu').classList.add('show');
+  pushHistory('menu-comanda:' + comandaId);
+}
+
+var _comandaMenuAtual = null;
+
+function acaoComanda(acao){
+  var c = _comandasAvulsas.find(function(x){ return x.id === _comandaMenuAtual; });
+  if(!c) return;
+  fecharMenuMesa();
+  if(acao === 'pedido'){
+    selecionarComanda(c);
+  } else if(acao === 'ver-pedidos'){
+    abrirVerPedidosComanda(c.id);
+  } else if(acao === 'fechar'){
+    abrirFecharContaComanda(c.id);
+  }
+}
+
+// Seleciona uma comanda avulsa para fazer pedido (similar a selecionarMesa)
+function selecionarComanda(c){
+  _mesaSelecionada = null;
+  _comandaSelecionada = c.id;
+  _carrinho = [];
+  document.getElementById('mesa-header-sub').textContent = 'Comanda: ' + (c.cliente||'');
+  // Vai pra tela do cardápio
+  showTela('tela-categorias');
+  pushHistory('categorias:null');
+}
+
+var _comandaSelecionada = null;
+
+// Tela de Ver Pedidos da Comanda (reusa o modal de Ver Pedidos da mesa)
+function abrirVerPedidosComanda(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  // Reusa a infraestrutura de ver pedidos, mas filtrando por comandaId
+  _verPedidosComandaId = comandaId;
+  _verPedidosMesaNum = null;
+  var ex = document.getElementById('modal-ver-pedidos');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal show';
+  mod.id = 'modal-ver-pedidos';
+  mod.style.cssText = 'background:var(--bg);';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:none;width:100%;height:100%;border-radius:0;display:flex;flex-direction:column;background:var(--bg);">'+
+      '<div class="modal-header" style="background:var(--surface);border-bottom:1px solid var(--border);">'+
+        '<button onclick="fecharVerPedidosMesa()" style="background:transparent;border:none;color:var(--text);font-size:1.5rem;cursor:pointer;margin-right:8px;font-family:inherit;">‹</button>'+
+        '<div class="modal-titulo">PEDIDOS — '+esc(c.cliente||'')+'</div>'+
+        '<button class="modal-fechar" onclick="fecharVerPedidosMesa()">×</button>'+
+      '</div>'+
+      '<div class="modal-body" style="flex:1;overflow-y:auto;padding:14px;" id="ver-pedidos-body">'+
+        '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>'+
+      '</div>'+
+      '<div style="padding:12px;border-top:1px solid var(--border);background:var(--surface);">'+
+        '<button class="f-btn" style="width:100%;" onclick="fazerNovoPedidoComanda(\''+comandaId+'\')">'+
+          '<span style="font-size:1.2rem;margin-right:6px;">+</span> Adicionar Novo Pedido'+
+        '</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  pushHistory('ver-pedidos-comanda:'+comandaId);
+
+  // Escuta pedidos da comanda
+  if(_verPedidosUnsub) _verPedidosUnsub();
+  _verPedidosUnsub = fbDb.collection('pedidos')
+    .where('restauranteId','==',_restauranteId)
+    .where('contaId','==', comandaId)
+    .onSnapshot(function(snap){
+      var lista = [];
+      snap.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
+      lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+      renderVerPedidosMesa(lista);
+    });
+}
+
+var _verPedidosComandaId = null;
+
+function fazerNovoPedidoComanda(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  fecharVerPedidosMesa();
+  fecharMenuMesa();
+  selecionarComanda(c);
+}
+
+// Fechar conta da comanda avulsa - reusa abrirFecharConta mas com comandaId
+function abrirFecharContaComanda(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  // Coloca a comanda no _contasMesaCache temporariamente usando o id como chave especial
+  var chaveTemp = 'avulsa_' + comandaId;
+  _contasMesaCache[chaveTemp] = c;
+  abrirFecharConta(chaveTemp);
+}
+
+
   _mesaAtiva = num;
   _carrinho = [];
   _catAtiva = null;  // Volta para grade de categorias
@@ -1967,15 +2226,28 @@ function enviarPedido(){
   var btn = document.getElementById('btn-enviar-pedido');
   btn.disabled = true;
   btn.textContent = 'Enviando...';
-  var mesaInt = parseInt(_mesaAtiva) || _mesaAtiva;
-  // Busca conta da mesa (precisa estar aberta)
-  var conta = _contasMesaCache[String(_mesaAtiva)];
-  if(!conta){
-    showToast('❌ Conta da mesa não está aberta. Volte e abra a conta.','#f87171');
-    btn.disabled = false;
-    btn.textContent = 'Enviar Pedido 🚀';
-    return;
+
+  // Detecta se é comanda avulsa ou mesa
+  var conta;
+  var ehComanda = !!_comandaSelecionada;
+  if(ehComanda){
+    conta = _comandasAvulsas.find(function(x){ return x.id === _comandaSelecionada; });
+    if(!conta){
+      showToast('❌ Comanda não encontrada','#f87171');
+      btn.disabled = false;
+      btn.textContent = 'Enviar Pedido 🚀';
+      return;
+    }
+  } else {
+    conta = _contasMesaCache[String(_mesaAtiva)];
+    if(!conta){
+      showToast('❌ Conta da mesa não está aberta. Volte e abra a conta.','#f87171');
+      btn.disabled = false;
+      btn.textContent = 'Enviar Pedido 🚀';
+      return;
+    }
   }
+  var mesaInt = ehComanda ? null : (parseInt(_mesaAtiva) || _mesaAtiva);
   var contaId = conta.id;
   var itensPedido = _carrinho.map(function(it){
     return {
@@ -1991,6 +2263,8 @@ function enviarPedido(){
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: contaId,
+    tipoConta: ehComanda ? 'avulsa' : 'mesa',
+    cliente: ehComanda ? (conta.cliente||'') : null,
     status: 'preparo',
     criadoEm: Date.now(),
     itens: itensPedido,

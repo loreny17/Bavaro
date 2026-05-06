@@ -595,13 +595,32 @@ header{
         <label>Observação (opcional)</label>
         <textarea id="det-obs" placeholder="Ex: sem cebola, ponto da carne..."></textarea>
       </div>
-      <div class="qtd-row">
+      <!-- Bloco de quantidade (item normal) -->
+      <div class="qtd-row" id="qtd-row-normal">
         <span class="qtd-label">Quantidade</span>
         <div class="qtd-ctrl">
           <button class="qtd-btn" onclick="alterarQtd(-1)">−</button>
           <span class="qtd-val" id="qtd-val">1</span>
           <button class="qtd-btn" onclick="alterarQtd(1)">+</button>
         </div>
+      </div>
+      <!-- Bloco de pesagem (item por kg) — escondido por padrão -->
+      <div id="kg-row" style="display:none;background:rgba(212,168,67,0.08);border:1.5px solid rgba(212,168,67,0.3);border-radius:14px;padding:14px;margin-top:10px;">
+        <div style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+          ⚖️ <span>Pesagem</span>
+          <span id="kg-preco-info" style="margin-left:auto;font-size:0.74rem;color:var(--muted);font-weight:500;"></span>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">Peso (gramas)</label>
+            <input type="text" id="kg-peso" inputmode="decimal" placeholder="450" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
+          </div>
+          <div style="flex:1;">
+            <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">Valor (R$)</label>
+            <input type="text" id="kg-valor" inputmode="decimal" placeholder="35,95" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
+          </div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:8px;">Digite o peso OU o valor — o outro campo se ajusta automaticamente.</div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1093,7 +1112,10 @@ function abrirMenuComanda(comandaId){
   _comandaMenuAtual = comandaId;
   document.getElementById('mesa-menu-titulo').textContent = '👤 ' + (c.cliente||'').toUpperCase();
   var qtdAbertos = c._itensAbertosCount||0;
-  var totalAbertos = (c.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); }, 0);
+  var totalAbertos = (c.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){
+    if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
+    return a + (i.preco||0)*(i.qtd||1);
+  }, 0);
   var body = document.querySelector('#modal-mesa-menu .modal-body');
   body.innerHTML =
     '<div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);border-radius:12px;padding:14px;margin-bottom:14px;">'+
@@ -1467,11 +1489,13 @@ function renderItens(){
     var badge = qtdNoCarrinho > 0
       ? '<div class="item-add-badge" style="position:absolute;bottom:6px;right:6px;">'+qtdNoCarrinho+'</div>'
       : '';
+    var ehKg = it.tipoVenda === 'kg';
+    var sufixoPreco = ehKg ? '<span style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
     card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+'</div>'+
       '<div class="item-info">'+
         '<div class="item-nome">'+esc(it.nome)+'</div>'+
         (it.desc ? '<div class="item-desc">'+esc(it.desc)+'</div>' : '')+
-        '<div class="item-preco">R$ '+fmtPreco(it.preco)+'</div>'+
+        '<div class="item-preco">R$ '+fmtPreco(it.preco)+sufixoPreco+'</div>'+
       '</div>';
     card.onclick = (function(item){ return function(){ abrirModalItem(item); }; })(it);
     grid.appendChild(card);
@@ -1489,13 +1513,25 @@ function renderPedidos(){
   _meusPedidos.forEach(function(p){
     var hora = '';
     if(p.criadoEm){ var d = new Date(p.criadoEm); hora = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
-    var total = (p.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
+    var total = (p.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).reduce(function(acc,i){
+      if(i.tipoVenda === 'kg' && i.peso) return acc + (i.preco||0);
+      return acc + (i.preco||0)*(i.qtd||1);
+    }, 0);
     var st = p.status || 'aguardando';
     var podeEditar = (st === 'aguardando' || st === 'preparo');
     var itensVisiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
     if(!itensVisiveis.length){ return; } // Pedido todo cancelado: pula
     var itensHtml = itensVisiveis.map(function(it){
       var idx = (p.itens||[]).indexOf(it);
+      var ehKg = it.tipoVenda === 'kg' && it.peso;
+      var precoTotalIt = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+      var qtdEl = ehKg ? '1x' : (esc(String(it.qtd||1))+'x');
+      var pesoEl = '';
+      if(ehKg){
+        var pesoFmt = it.peso < 1000 ? it.peso + 'g' : (it.peso/1000).toFixed(3).replace('.', ',') + 'kg';
+        var pkg = it.precoBase ? ' x R$ ' + fmtPreco(it.precoBase) + '/kg' : '';
+        pesoEl = '<div style="font-size:0.68rem;color:var(--accent);padding-left:30px;margin-top:2px;font-weight:600;">⚖️ '+pesoFmt+pkg+'</div>';
+      }
       var acoes = podeEditar
         ? '<div class="pedido-item-actions">'+
             '<button class="pi-btn edit" onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')">✏️ Editar</button>'+
@@ -1513,10 +1549,11 @@ function renderPedidos(){
       }
       return '<div class="pedido-item-row">'+
         '<div class="pedido-item-top">'+
-          '<span class="pedido-item-qtd">'+esc(String(it.qtd||1))+'x</span>'+
+          '<span class="pedido-item-qtd">'+qtdEl+'</span>'+
           '<span class="pedido-item-nome">'+esc(it.nome||'')+'</span>'+
-          '<span class="pedido-item-preco">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
+          '<span class="pedido-item-preco">R$ '+fmtPreco(precoTotalIt)+'</span>'+
         '</div>'+
+        pesoEl+
         selecoesEl+
         (it.obs ? '<div class="pedido-item-obs">📝 '+esc(it.obs)+'</div>' : '')+
         acoes+
@@ -2021,14 +2058,64 @@ function abrirModalItem(it){
   document.getElementById('det-nome').textContent = it.nome;
   document.getElementById('det-desc').textContent = it.desc||'';
   document.getElementById('det-desc').style.display = it.desc ? 'block' : 'none';
-  document.getElementById('det-preco').textContent = 'R$ ' + fmtPreco(it.preco);
+  // Preço: se for kg, mostra "R$ XX,XX/kg" pra ficar claro
+  var ehKg = it.tipoVenda === 'kg';
+  if(ehKg){
+    document.getElementById('det-preco').innerHTML = 'R$ ' + fmtPreco(it.preco) + '<span style="font-size:0.7em;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>';
+  } else {
+    document.getElementById('det-preco').textContent = 'R$ ' + fmtPreco(it.preco);
+  }
   document.getElementById('det-obs').value = '';
   document.getElementById('qtd-val').textContent = 1;
+  // Alterna UI de quantidade vs pesagem
+  document.getElementById('qtd-row-normal').style.display = ehKg ? 'none' : '';
+  document.getElementById('kg-row').style.display = ehKg ? '' : 'none';
+  if(ehKg){
+    // Reseta campos de pesagem
+    document.getElementById('kg-peso').value = '';
+    document.getElementById('kg-valor').value = '';
+    document.getElementById('kg-preco-info').textContent = 'R$ ' + fmtPreco(it.preco) + '/kg';
+    _conectarSyncKgCampos();
+  }
   var fotoEl = document.getElementById('det-foto');
   fotoEl.innerHTML = it.foto ? '<img src="'+it.foto+'" alt="'+it.nome+'">' : '🍽️';
   renderGruposNoModal();
   atualizarBtnAdd();
   document.getElementById('modal-item').classList.add('show');
+}
+
+// Conecta os 2 campos peso/valor pra sincronizarem
+var _kgSyncConectado = false;
+function _conectarSyncKgCampos(){
+  if(_kgSyncConectado) return;
+  _kgSyncConectado = true;
+  var inpPeso = document.getElementById('kg-peso');
+  var inpValor = document.getElementById('kg-valor');
+  if(!inpPeso || !inpValor) return;
+  function parseNum(s){
+    if(!s) return 0;
+    var n = parseFloat(String(s).replace(',', '.').replace(/[^\d.]/g, ''));
+    return isNaN(n) ? 0 : n;
+  }
+  // Quando digita peso → calcula valor
+  inpPeso.addEventListener('input', function(){
+    if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
+    var peso = parseNum(inpPeso.value);
+    if(peso <= 0){ inpValor.value = ''; atualizarBtnAdd(); return; }
+    var valor = (peso * (_itemAberto.preco || 0)) / 1000;
+    inpValor.value = fmtPreco(valor);
+    atualizarBtnAdd();
+  });
+  // Quando digita valor → calcula peso
+  inpValor.addEventListener('input', function(){
+    if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
+    var valor = parseNum(inpValor.value);
+    var precoKg = _itemAberto.preco || 0;
+    if(valor <= 0 || precoKg <= 0){ inpPeso.value = ''; atualizarBtnAdd(); return; }
+    var peso = (valor * 1000) / precoKg;
+    inpPeso.value = Math.round(peso);
+    atualizarBtnAdd();
+  });
 }
 
 function renderGruposNoModal(){
@@ -2121,9 +2208,28 @@ function alterarQtd(delta){
 }
 function atualizarBtnAdd(){
   if(!_itemAberto) return;
-  var precoUnit = (_itemAberto.preco||0) + calcularPrecoExtras();
-  var total = precoUnit * _qtdTemp;
-  document.getElementById('btn-add-carrinho').textContent = 'Adicionar — R$ ' + fmtPreco(total);
+  var btn = document.getElementById('btn-add-carrinho');
+  var ehKg = _itemAberto.tipoVenda === 'kg';
+  if(ehKg){
+    var inpValor = document.getElementById('kg-valor');
+    var valorTxt = inpValor ? inpValor.value : '';
+    var valorNum = parseFloat(String(valorTxt).replace(',', '.').replace(/[^\d.]/g, ''));
+    if(isNaN(valorNum) || valorNum <= 0){
+      btn.textContent = 'Informe peso ou valor';
+      btn.style.opacity = '0.6';
+    } else {
+      // Adicionais (se houver) somam ao valor da pesagem
+      var extras = calcularPrecoExtras();
+      var total = valorNum + extras;
+      btn.textContent = 'Adicionar — R$ ' + fmtPreco(total);
+      btn.style.opacity = '1';
+    }
+  } else {
+    var precoUnit = (_itemAberto.preco||0) + calcularPrecoExtras();
+    var total = precoUnit * _qtdTemp;
+    btn.textContent = 'Adicionar — R$ ' + fmtPreco(total);
+    btn.style.opacity = '1';
+  }
 }
 
 function adicionarAoCarrinho(){
@@ -2139,6 +2245,23 @@ function adicionarAoCarrinho(){
         showToast('⚠️ Escolha: ' + g.nome, '#f7a34f');
         return;
       }
+    }
+  }
+  var ehKg = _itemAberto.tipoVenda === 'kg';
+  var pesoG = 0;
+  var valorPesagem = 0;
+  if(ehKg){
+    var inpPeso = document.getElementById('kg-peso');
+    var inpValor = document.getElementById('kg-valor');
+    pesoG = parseInt(String(inpPeso.value || '').replace(/[^\d]/g, ''), 10);
+    valorPesagem = parseFloat(String(inpValor.value || '').replace(',', '.').replace(/[^\d.]/g, ''));
+    if(!pesoG || pesoG <= 0 || isNaN(valorPesagem) || valorPesagem <= 0){
+      showToast('⚠️ Informe o peso ou o valor', '#f7a34f');
+      return;
+    }
+    if(pesoG > 10000){
+      showToast('⚠️ Peso muito alto (máx 10kg)', '#f7a34f');
+      return;
     }
   }
   var obs = document.getElementById('det-obs').value.trim();
@@ -2157,17 +2280,37 @@ function adicionarAoCarrinho(){
     }
   });
   var extras = calcularPrecoExtras();
-  _carrinho.push({
-    id: _itemAberto.id,
-    nome: _itemAberto.nome,
-    preco: (_itemAberto.preco||0) + extras,
-    precoBase: _itemAberto.preco||0,
-    extras: extras,
-    qtd: _qtdTemp,
-    obs: obs,
-    foto: _itemAberto.foto||'',
-    selecoes: selecoes
-  });
+  var itemCarrinho;
+  if(ehKg){
+    // Item por kg: preço final = valor da pesagem + extras
+    itemCarrinho = {
+      id: _itemAberto.id,
+      nome: _itemAberto.nome,
+      tipoVenda: 'kg',
+      peso: pesoG,                              // gramas
+      precoBase: _itemAberto.preco || 0,        // preço por kg
+      preco: valorPesagem + extras,             // valor total da porção (com adicionais)
+      extras: extras,
+      qtd: 1,                                   // sempre 1 (porção pesada)
+      obs: obs,
+      foto: _itemAberto.foto || '',
+      selecoes: selecoes
+    };
+  } else {
+    itemCarrinho = {
+      id: _itemAberto.id,
+      nome: _itemAberto.nome,
+      tipoVenda: 'unidade',
+      preco: (_itemAberto.preco||0) + extras,
+      precoBase: _itemAberto.preco||0,
+      extras: extras,
+      qtd: _qtdTemp,
+      obs: obs,
+      foto: _itemAberto.foto||'',
+      selecoes: selecoes
+    };
+  }
+  _carrinho.push(itemCarrinho);
   fecharModalItem();
   atualizarCarrinhoBadge();
   renderItens();
@@ -2207,7 +2350,9 @@ function renderCarrinho(){
   wrap.innerHTML = '';
   var total = 0;
   _carrinho.forEach(function(it, idx){
-    total += (it.preco||0)*(it.qtd||1);
+    var ehKg = it.tipoVenda === 'kg' && it.peso;
+    var subtotalItem = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+    total += subtotalItem;
     var div = document.createElement('div');
     div.className = 'cart-item';
     var selecoesHtml = '';
@@ -2219,18 +2364,32 @@ function renderCarrinho(){
       });
       selecoesHtml += '</div>';
     }
+    var pesoHtml = '';
+    if(ehKg){
+      var pesoFmt = it.peso < 1000 ? it.peso + 'g' : (it.peso/1000).toFixed(3).replace('.', ',') + 'kg';
+      var pkg = it.precoBase ? ' x R$ ' + fmtPreco(it.precoBase) + '/kg' : '';
+      pesoHtml = '<div style="font-size:0.72rem;color:var(--accent);font-weight:600;margin-top:3px;">⚖️ '+pesoFmt+pkg+'</div>';
+    }
+    // Controles diferentes pra item kg vs unidade
+    var controleQtdHtml;
+    if(ehKg){
+      controleQtdHtml = '<button class="cart-qtd-btn" onclick="cartEditarPeso('+idx+')" title="Editar pesagem" style="width:auto;padding:0 12px;font-size:0.72rem;font-weight:700;">⚖️ Editar</button>';
+    } else {
+      controleQtdHtml = '<div class="cart-qtd-ctrl">'+
+        '<button class="cart-qtd-btn" onclick="cartAlterarQtd('+idx+',-1)">−</button>'+
+        '<span class="cart-qtd-val">'+it.qtd+'</span>'+
+        '<button class="cart-qtd-btn" onclick="cartAlterarQtd('+idx+',1)">+</button>'+
+      '</div>';
+    }
     div.innerHTML =
       '<div class="cart-item-info">'+
         '<div class="cart-item-nome">'+esc(it.nome)+'</div>'+
+        pesoHtml+
         selecoesHtml+
         (it.obs?'<div class="cart-item-obs">📝 '+esc(it.obs)+'</div>':'')+
         '<div class="cart-item-sub">'+
-          '<span class="cart-preco">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</span>'+
-          '<div class="cart-qtd-ctrl">'+
-            '<button class="cart-qtd-btn" onclick="cartAlterarQtd('+idx+',-1)">−</button>'+
-            '<span class="cart-qtd-val">'+it.qtd+'</span>'+
-            '<button class="cart-qtd-btn" onclick="cartAlterarQtd('+idx+',1)">+</button>'+
-          '</div>'+
+          '<span class="cart-preco">R$ '+fmtPreco(subtotalItem)+'</span>'+
+          controleQtdHtml+
           '<button class="cart-del" onclick="cartRemover('+idx+')" title="Remover">🗑</button>'+
         '</div>'+
       '</div>';
@@ -2240,10 +2399,31 @@ function renderCarrinho(){
   totalRow.style.display = 'flex';
 }
 function cartAlterarQtd(idx, delta){
+  // Ignora pra itens kg (eles têm botão "Editar" próprio)
+  if(_carrinho[idx].tipoVenda === 'kg') return;
   _carrinho[idx].qtd = Math.max(1, (_carrinho[idx].qtd||1)+delta);
   atualizarCarrinhoBadge();
   renderCarrinho();
   renderItens();
+}
+function cartEditarPeso(idx){
+  var it = _carrinho[idx];
+  if(!it || it.tipoVenda !== 'kg') return;
+  // Pequeno modal inline pra editar peso
+  var pesoAtual = it.peso || 0;
+  var precoBase = it.precoBase || 0;
+  var pesoStr = prompt('Editar peso da pesagem (em gramas):\n\nAtual: ' + pesoAtual + 'g\nPreço/kg: R$ ' + fmtPreco(precoBase), pesoAtual);
+  if(pesoStr === null) return;
+  var novoPeso = parseInt(String(pesoStr).replace(/[^\d]/g, ''), 10);
+  if(!novoPeso || novoPeso <= 0 || novoPeso > 10000){
+    showToast('⚠️ Peso inválido (1g a 10kg)','#f7a34f');
+    return;
+  }
+  it.peso = novoPeso;
+  it.preco = (novoPeso * precoBase / 1000) + (it.extras || 0);
+  atualizarCarrinhoBadge();
+  renderCarrinho();
+  showToast('✓ Pesagem atualizada','#4ade80');
 }
 function cartRemover(idx){
   _carrinho.splice(idx,1);
@@ -2284,13 +2464,24 @@ function enviarPedido(){
   var mesaInt = ehComanda ? null : (parseInt(_mesaAtiva) || _mesaAtiva);
   var contaId = conta.id;
   var itensPedido = _carrinho.map(function(it){
-    return {
+    var ehKg = it.tipoVenda === 'kg' && it.peso;
+    var item = {
       id:it.id, nome:it.nome, preco:it.preco, qtd:it.qtd, obs:it.obs||'',
       selecoes: it.selecoes || [],
       precoBase: it.precoBase || it.preco,
       extras: it.extras || 0
     };
+    // Itens por kg: passa tipoVenda + peso pro cupom mostrar corretamente
+    if(ehKg){
+      item.tipoVenda = 'kg';
+      item.peso = it.peso;
+    }
+    return item;
   });
+  var totalPedido = _carrinho.reduce(function(acc,it){
+    if(it.tipoVenda === 'kg' && it.peso) return acc + (it.preco||0);
+    return acc + (it.preco||0)*(it.qtd||1);
+  }, 0);
   var pedido = {
     garcom: _nomeGarcom,
     mesa: mesaInt,
@@ -2302,14 +2493,14 @@ function enviarPedido(){
     status: 'preparo',
     criadoEm: Date.now(),
     itens: itensPedido,
-    total: _carrinho.reduce(function(acc,it){ return acc+(it.preco||0)*(it.qtd||1); },0)
+    total: totalPedido
   };
   // 1. Cria pedido (vai pra cozinha imprimir)
   fbDb.collection('pedidos').add(pedido).then(function(ref){
     var pedidoId = ref.id;
     // 2. Adiciona itens na conta da mesa (com status: aberto)
     var itensConta = itensPedido.map(function(it){
-      return {
+      var item = {
         itemKey: pedidoId + '_' + Math.random().toString(36).substring(2,8),
         pedidoId: pedidoId,
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
@@ -2319,6 +2510,13 @@ function enviarPedido(){
         adicionadoEm: Date.now(),
         adicionadoPor: _nomeGarcom
       };
+      // Preserva campos de pesagem
+      if(it.tipoVenda === 'kg' && it.peso){
+        item.tipoVenda = 'kg';
+        item.peso = it.peso;
+        item.precoBase = it.precoBase || 0;
+      }
+      return item;
     });
     var contaAtual = _contasMesaCache[String(_mesaAtiva)] || {};
     var todosItens = (contaAtual.itens||[]).concat(itensConta);
@@ -2353,11 +2551,16 @@ function enviarPedido(){
 
 // ─── Cálculo de totais da conta ───
 function calcularTotaisConta(c){
+  // Helper: calcula valor de um item (item por kg = preço total da pesagem; senão = preço * qtd)
+  function valorItem(i){
+    if(i.tipoVenda === 'kg' && i.peso) return i.preco || 0;
+    return (i.preco || 0) * (i.qtd || 1);
+  }
   // Ignora itens cancelados em todos os totais
   var ativos = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; });
-  var subtotal = ativos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+  var subtotal = ativos.reduce(function(a,i){ return a + valorItem(i); }, 0);
   var subtotalAberto = ativos.filter(function(i){ return i.status!=='pago'; })
-    .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    .reduce(function(a,i){ return a + valorItem(i); }, 0);
   var taxa10 = subtotal * 0.10;
   var total = subtotal + taxa10;
   var pagoTotal = (c.pagamentos||[]).reduce(function(a,p){ return a + (p.valor||0); }, 0);

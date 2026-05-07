@@ -3606,10 +3606,10 @@ function processarComandoImpressao(cmdId, cmd){
         return;
       }
       var conta = Object.assign({id:doc.id}, doc.data());
-      var cupom = null;
-      if(cmd.subtipo === 'parcial')      cupom = gerarCupomContaParcial(conta);
-      else if(cmd.subtipo === 'completa') cupom = gerarCupomContaCompleta(conta);
-      else                                cupom = gerarCupomContaFinal(conta);
+      // Sempre gera o cupom de fechamento único (final).
+      // Subtipos antigos (parcial/completa) ainda chegam pra retrocompatibilidade,
+      // mas todos caem no mesmo cupom único agora.
+      var cupom = gerarCupomContaFinal(conta);
       if(!cupom){ showToast('Sem dados pra imprimir','#f7a34f'); return; }
       // Imprime APENAS nas impressoras dos modelos de FECHAMENTO
       var modelosFechamento = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
@@ -3802,20 +3802,33 @@ function gerarCupomContaFinal(conta){
   s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + '\n';
   s += linha('-', L) + '\n';
 
+  // Filtra: NÃO inclui itens cancelados no fechamento (você pediu)
   var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  // Conta quantos pagos pra mostrar legenda no rodapé
+  var qtdPagos = itensValidos.filter(function(it){ return it.status === 'pago' || it.pagamentoId; }).length;
+  var temPagosSeparados = qtdPagos > 0 && qtdPagos < itensValidos.length;
+
   itensValidos.forEach(function(it){
+    var ehPago = it.status === 'pago' || it.pagamentoId;
     s += _aplicarEstilo(estItens);
     var ehKg = it.tipoVenda === 'kg' && it.peso;
     var nome = ehKg
       ? '1x ' + (it.nome||'').toUpperCase()
       : (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
+    // Marca [PAGO] após o nome se já foi pago
+    var marcaPago = ehPago ? ' [PAGO]' : '';
     var preco = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
     var precoStr = 'R$ ' + formatarPreco(preco);
     var fatorL = (estItens.tamanho === 'grande' || estItens.tamanho === 'largo' || estItens.tamanho === 'extra') ? 2 : 1;
     var Lefetivo = Math.max(10, Math.floor(L / fatorL));
-    var espaco = Lefetivo - nome.length - precoStr.length;
-    if(espaco < 1){ s += nome + '\n' + _resetarEstilo() + padR(precoStr, L) + '\n'; }
-    else s += nome + new Array(espaco+1).join(' ') + precoStr + '\n';
+    var nomeComMarca = nome + marcaPago;
+    var espaco = Lefetivo - nomeComMarca.length - precoStr.length;
+    if(espaco < 1){
+      // Não cabe na mesma linha — quebra
+      s += nomeComMarca + '\n' + _resetarEstilo() + padR(precoStr, L) + '\n';
+    } else {
+      s += nomeComMarca + new Array(espaco+1).join(' ') + precoStr + '\n';
+    }
     s += _resetarEstilo();
     // Linha de pesagem
     if(ehKg){
@@ -3852,7 +3865,7 @@ function gerarCupomContaFinal(conta){
   s += _resetarEstilo();
   if(_aplicaNegrito(modelo)) s += escposBold(true);
 
-  // Pagamentos (se tiver)
+  // Resumo de pagamentos (se houver)
   if((conta.pagamentos||[]).length){
     s += linha('-', L) + '\n';
     conta.pagamentos.forEach(function(p){
@@ -3860,6 +3873,20 @@ function gerarCupomContaFinal(conta){
       var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Credito');
       s += linhaValor(hora + ' ' + tipo, 'R$ ' + formatarPreco(p.valor));
     });
+    // Total já pago e total a pagar
+    if(totais.pagoTotal > 0){
+      s += linha('-', L) + '\n';
+      s += linhaValor('Pago ate agora', 'R$ ' + formatarPreco(totais.pagoTotal));
+      if(totais.restante > 0.005){
+        // Ainda tem saldo a pagar — destaca em negrito
+        s += escposBold(true);
+        s += linhaValor('A PAGAR', 'R$ ' + formatarPreco(totais.restante));
+        s += escposBold(false);
+        if(_aplicaNegrito(modelo)) s += escposBold(true);
+      } else {
+        s += linhaValor('A PAGAR', 'R$ 0,00 (QUITADO)');
+      }
+    }
   }
   s += linha('=', L) + '\n';
 

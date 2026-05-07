@@ -1933,15 +1933,34 @@ function renderGrupos(){
   });
 }
 
+// ─── Estado da edição do grupo ───
+// _grupoCatsAplicar / _grupoItensAplicar: arrays de IDs (categorias e itens) marcados na aba "Onde aplicar"
+// _grupoCatsAplicarOriginal / _grupoItensAplicarOriginal: snapshot ao abrir (pra calcular adicionados/removidos)
+var _grupoCatsAplicar = [];
+var _grupoItensAplicar = [];
+var _grupoCatsAplicarOriginal = [];
+var _grupoItensAplicarOriginal = [];
+var _grupoBuscaItens = '';
+
 function abrirNovoGrupo(){
   _grupoEditandoId = null;
   _grupoOpcoesTemp = [{nome:'', precoExtra:0}];
+  _grupoCatsAplicar = [];
+  _grupoItensAplicar = [];
+  _grupoCatsAplicarOriginal = [];
+  _grupoItensAplicarOriginal = [];
+  _grupoBuscaItens = '';
   document.getElementById('modal-grupo-titulo').textContent = 'NOVO GRUPO';
   document.getElementById('grupo-nome').value = '';
   document.querySelector('input[name="grupo-tipo"][value="opcao"]').checked = true;
   document.getElementById('grupo-obrigatorio').checked = true;
   document.getElementById('btn-excluir-grupo').style.display = 'none';
+  document.getElementById('grupo-busca-itens').value = '';
+  trocarAbaGrupo('config');
   renderGrupoOpcoes();
+  renderGrupoCategorias();
+  renderGrupoItens();
+  atualizarContadorAplicar();
   document.getElementById('modal-grupo').classList.add('show');
 }
 
@@ -1949,13 +1968,202 @@ function abrirEditarGrupo(g){
   _grupoEditandoId = g.id;
   _grupoOpcoesTemp = (g.opcoes||[]).map(function(o){ return {nome:o.nome||'', precoExtra:o.precoExtra||0}; });
   if(!_grupoOpcoesTemp.length) _grupoOpcoesTemp.push({nome:'',precoExtra:0});
+  // Carrega vínculos existentes do grupo
+  _grupoCatsAplicar = Array.isArray(g.aplicaEm && g.aplicaEm.categorias) ? g.aplicaEm.categorias.slice() : [];
+  _grupoItensAplicar = Array.isArray(g.aplicaEm && g.aplicaEm.itens) ? g.aplicaEm.itens.slice() : [];
+  _grupoCatsAplicarOriginal = _grupoCatsAplicar.slice();
+  _grupoItensAplicarOriginal = _grupoItensAplicar.slice();
+  _grupoBuscaItens = '';
   document.getElementById('modal-grupo-titulo').textContent = 'EDITAR GRUPO';
   document.getElementById('grupo-nome').value = g.nome||'';
   document.querySelector('input[name="grupo-tipo"][value="'+(g.tipo||'opcao')+'"]').checked = true;
   document.getElementById('grupo-obrigatorio').checked = g.obrigatorio !== false;
   document.getElementById('btn-excluir-grupo').style.display = 'inline-flex';
+  document.getElementById('grupo-busca-itens').value = '';
+  trocarAbaGrupo('config');
   renderGrupoOpcoes();
+  renderGrupoCategorias();
+  renderGrupoItens();
+  atualizarContadorAplicar();
   document.getElementById('modal-grupo').classList.add('show');
+}
+
+function trocarAbaGrupo(aba){
+  document.querySelectorAll('[data-grupo-tab]').forEach(function(btn){
+    var ativa = btn.getAttribute('data-grupo-tab') === aba;
+    btn.style.color = ativa ? 'var(--accent)' : 'var(--muted)';
+    btn.style.borderBottomColor = ativa ? 'var(--accent)' : 'transparent';
+  });
+  document.getElementById('grupo-aba-config').style.display = aba === 'config' ? '' : 'none';
+  document.getElementById('grupo-aba-aplicar').style.display = aba === 'aplicar' ? '' : 'none';
+}
+
+// Renderiza checkboxes de categorias
+function renderGrupoCategorias(){
+  var wrap = document.getElementById('grupo-cats-lista');
+  if(!wrap) return;
+  if(!_categorias.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:14px;">Nenhuma categoria cadastrada.</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  _categorias.forEach(function(cat){
+    var qtdItens = _itens.filter(function(i){ return (i.categoria||'') === cat.id; }).length;
+    var checked = _grupoCatsAplicar.indexOf(cat.id) >= 0;
+    var label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;';
+    label.innerHTML =
+      '<input type="checkbox" '+(checked?'checked':'')+' data-cat-id="'+cat.id+'" onchange="grupoToggleCategoria(\''+cat.id+'\')">'+
+      '<span style="font-size:1.1rem;">'+(cat.emoji||'📂')+'</span>'+
+      '<span style="flex:1;font-size:0.86rem;">'+escapeHtml(cat.nome)+'</span>'+
+      '<span style="font-size:0.7rem;color:var(--muted);">'+qtdItens+' '+(qtdItens===1?'item':'itens')+'</span>';
+    wrap.appendChild(label);
+  });
+}
+
+function grupoToggleCategoria(catId){
+  var idx = _grupoCatsAplicar.indexOf(catId);
+  if(idx >= 0) _grupoCatsAplicar.splice(idx, 1);
+  else _grupoCatsAplicar.push(catId);
+  atualizarContadorAplicar();
+  // Re-render itens pra mostrar quais já estão indiretamente cobertos pela categoria
+  renderGrupoItens();
+}
+
+function grupoToggleTodasCategorias(){
+  var todasMarcadas = _categorias.every(function(c){ return _grupoCatsAplicar.indexOf(c.id) >= 0; });
+  if(todasMarcadas){
+    _grupoCatsAplicar = [];
+  } else {
+    _grupoCatsAplicar = _categorias.map(function(c){ return c.id; });
+  }
+  renderGrupoCategorias();
+  renderGrupoItens();
+  atualizarContadorAplicar();
+}
+
+// Renderiza lista de itens (com busca + indicação de cobertos por categoria)
+function grupoFiltrarItens(){
+  _grupoBuscaItens = (document.getElementById('grupo-busca-itens').value||'').toLowerCase();
+  renderGrupoItens();
+}
+
+function renderGrupoItens(){
+  var wrap = document.getElementById('grupo-itens-lista');
+  var resumoEl = document.getElementById('grupo-itens-resumo');
+  if(!wrap) return;
+  if(!_itens.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:14px;">Nenhum item cadastrado.</div>';
+    if(resumoEl) resumoEl.textContent = '';
+    return;
+  }
+  var lista = _itens.slice();
+  if(_grupoBuscaItens){
+    lista = lista.filter(function(it){ return (it.nome||'').toLowerCase().indexOf(_grupoBuscaItens) >= 0; });
+  }
+  wrap.innerHTML = '';
+  if(!lista.length){
+    wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:14px;">Nada encontrado.</div>';
+  }
+  lista.forEach(function(it){
+    var checkedDireto = _grupoItensAplicar.indexOf(it.id) >= 0;
+    var cobertoPorCat = _grupoCatsAplicar.indexOf(it.categoria||'') >= 0;
+    var label = document.createElement('label');
+    var bg = (checkedDireto || cobertoPorCat) ? 'rgba(212,168,67,0.06)' : 'var(--surface)';
+    var border = (checkedDireto || cobertoPorCat) ? 'rgba(212,168,67,0.3)' : 'var(--border)';
+    label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 10px;background:'+bg+';border:1px solid '+border+';border-radius:7px;cursor:pointer;';
+    var info = cobertoPorCat
+      ? '<span style="font-size:0.66rem;background:rgba(74,222,128,0.15);color:#4ade80;padding:1px 7px;border-radius:5px;font-weight:700;">via categoria</span>'
+      : '';
+    label.innerHTML =
+      '<input type="checkbox" '+(checkedDireto?'checked':'')+(cobertoPorCat&&!checkedDireto?' disabled':'')+' onchange="grupoToggleItem(\''+it.id+'\')">'+
+      '<span style="flex:1;font-size:0.84rem;'+(cobertoPorCat?'opacity:0.7;':'')+'">'+escapeHtml(it.nome)+'</span>'+
+      info;
+    wrap.appendChild(label);
+  });
+  // Resumo
+  var totalItens = _itens.length;
+  var marcadosDiretos = _grupoItensAplicar.length;
+  var cobertosCat = _itens.filter(function(it){ return _grupoCatsAplicar.indexOf(it.categoria||'') >= 0; }).length;
+  if(resumoEl){
+    resumoEl.textContent = marcadosDiretos > 0 ? marcadosDiretos+' marcados' : '';
+  }
+}
+
+function grupoToggleItem(itemId){
+  var idx = _grupoItensAplicar.indexOf(itemId);
+  if(idx >= 0) _grupoItensAplicar.splice(idx, 1);
+  else _grupoItensAplicar.push(itemId);
+  atualizarContadorAplicar();
+  renderGrupoItens();
+}
+
+function atualizarContadorAplicar(){
+  // Calcula quantos itens TOTAIS serão afetados (cat + diretos, sem duplicar)
+  var ids = {};
+  _itens.forEach(function(it){
+    if(_grupoCatsAplicar.indexOf(it.categoria||'') >= 0) ids[it.id] = true;
+  });
+  _grupoItensAplicar.forEach(function(id){ ids[id] = true; });
+  var total = Object.keys(ids).length;
+  var badge = document.getElementById('grupo-aplicar-count');
+  if(badge){
+    if(total > 0){
+      badge.textContent = total;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+  // Aviso de mudança
+  var aviso = document.getElementById('grupo-aplicar-aviso');
+  if(aviso){
+    if(_grupoEditandoId){
+      var dif = calcularMudancaAplicar();
+      if(dif.adicionar.length || dif.remover.length){
+        var partes = [];
+        if(dif.adicionar.length) partes.push('🔗 Vai adicionar a <strong>'+dif.adicionar.length+'</strong> item(s)');
+        if(dif.remover.length) partes.push('🔓 Vai remover de <strong>'+dif.remover.length+'</strong> item(s)');
+        aviso.innerHTML = partes.join(' &nbsp;·&nbsp; ');
+        aviso.style.display = 'block';
+      } else if(total > 0){
+        aviso.innerHTML = 'ℹ️ Sem mudanças desde a última edição.';
+        aviso.style.display = 'block';
+      } else {
+        aviso.style.display = 'none';
+      }
+    } else {
+      if(total > 0){
+        aviso.innerHTML = '🔗 Vai adicionar a <strong>'+total+'</strong> item(s) ao salvar.';
+        aviso.style.display = 'block';
+      } else {
+        aviso.style.display = 'none';
+      }
+    }
+  }
+}
+
+// Calcula diferença entre estado atual e original
+function calcularMudancaAplicar(){
+  // Conjunto FINAL de itens afetados
+  var atualSet = {};
+  _itens.forEach(function(it){
+    if(_grupoCatsAplicar.indexOf(it.categoria||'') >= 0) atualSet[it.id] = true;
+  });
+  _grupoItensAplicar.forEach(function(id){ atualSet[id] = true; });
+  // Conjunto ORIGINAL
+  var origSet = {};
+  _itens.forEach(function(it){
+    if(_grupoCatsAplicarOriginal.indexOf(it.categoria||'') >= 0) origSet[it.id] = true;
+  });
+  _grupoItensAplicarOriginal.forEach(function(id){ origSet[id] = true; });
+  // Adicionar = está no atual mas não no original
+  var adicionar = [];
+  Object.keys(atualSet).forEach(function(id){ if(!origSet[id]) adicionar.push(id); });
+  // Remover = estava no original mas não está no atual
+  var remover = [];
+  Object.keys(origSet).forEach(function(id){ if(!atualSet[id]) remover.push(id); });
+  return {adicionar: adicionar, remover: remover};
 }
 
 function renderGrupoOpcoes(){
@@ -1993,26 +2201,85 @@ function salvarGrupo(){
     tipo: tipoEl ? tipoEl.value : 'opcao',
     obrigatorio: document.getElementById('grupo-obrigatorio').checked,
     opcoes: opcoesValidas.map(function(o){ return {nome: o.nome.trim(), precoExtra: parseFloat(o.precoExtra)||0}; }),
+    aplicaEm: {
+      categorias: _grupoCatsAplicar.slice(),
+      itens: _grupoItensAplicar.slice()
+    },
     atualizadoEm: Date.now()
   };
-  var promessa;
+  // 1. Salva o grupo
+  var promessa, novoGrupoId = _grupoEditandoId;
   if(_grupoEditandoId){
     promessa = fbColCardapio('grupos_opcoes').doc(_grupoEditandoId).update(dados);
   } else {
     dados.criadoEm = Date.now();
-    promessa = fbColCardapio('grupos_opcoes').add(dados);
+    promessa = fbColCardapio('grupos_opcoes').add(dados).then(function(ref){
+      novoGrupoId = ref.id;
+    });
   }
   promessa.then(function(){
-    showToast('✓ Grupo salvo','#4ade80');
+    // 2. Aplica nos itens (merge / remove)
+    return aplicarGrupoNosItens(novoGrupoId);
+  }).then(function(stats){
+    var msg = '✓ Grupo salvo';
+    if(stats && (stats.adicionados || stats.removidos)){
+      var partes = [];
+      if(stats.adicionados) partes.push('+'+stats.adicionados+' aplicações');
+      if(stats.removidos) partes.push('-'+stats.removidos+' removidas');
+      msg += ' (' + partes.join(', ') + ')';
+    }
+    showToast(msg,'#4ade80');
     document.getElementById('modal-grupo').classList.remove('show');
-  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171', 5000); });
+}
+
+// Aplica o grupo (merge nos itens, remove dos não vinculados)
+function aplicarGrupoNosItens(grupoId){
+  if(!grupoId) return Promise.resolve({adicionados:0, removidos:0});
+  var dif = calcularMudancaAplicar();
+  if(!dif.adicionar.length && !dif.remover.length) return Promise.resolve({adicionados:0, removidos:0});
+  // Faz batch (Firestore aceita até 500 ops por batch — pra simplicidade fazemos 1 batch só)
+  var batch = fbDb.batch();
+  var rest = _restauranteAtivo;
+  var col = fbColCardapio('itens');
+  // ADICIONA: itemsToAdd → adiciona grupoId no array gruposIds (merge, sem duplicar)
+  dif.adicionar.forEach(function(itemId){
+    var it = _itens.find(function(x){ return x.id === itemId; });
+    if(!it) return;
+    var atual = (it.gruposIds||[]).slice();
+    if(atual.indexOf(grupoId) < 0) atual.push(grupoId);
+    batch.update(col.doc(itemId), { gruposIds: atual, atualizadoEm: Date.now() });
+  });
+  // REMOVE: itemsToRemove → remove grupoId do array
+  dif.remover.forEach(function(itemId){
+    var it = _itens.find(function(x){ return x.id === itemId; });
+    if(!it) return;
+    var atual = (it.gruposIds||[]).filter(function(g){ return g !== grupoId; });
+    batch.update(col.doc(itemId), { gruposIds: atual, atualizadoEm: Date.now() });
+  });
+  return batch.commit().then(function(){
+    return { adicionados: dif.adicionar.length, removidos: dif.remover.length };
+  });
 }
 
 function excluirGrupo(){
   if(!_grupoEditandoId) return;
   if(!confirm('Excluir este grupo?\n\nItens que usam esse grupo deixarão de mostrar essas opções.')) return;
-  fbColCardapio('grupos_opcoes').doc(_grupoEditandoId).delete().then(function(){
-    showToast('🗑️ Excluído','#f87171');
+  var grupoId = _grupoEditandoId;
+  // 1. Remove o grupoId de todos os itens que estavam usando
+  var itensComGrupo = _itens.filter(function(it){ return (it.gruposIds||[]).indexOf(grupoId) >= 0; });
+  var batch = fbDb.batch();
+  var col = fbColCardapio('itens');
+  itensComGrupo.forEach(function(it){
+    var atual = (it.gruposIds||[]).filter(function(g){ return g !== grupoId; });
+    batch.update(col.doc(it.id), { gruposIds: atual, atualizadoEm: Date.now() });
+  });
+  // 2. Deleta o documento do grupo
+  var promBatch = itensComGrupo.length ? batch.commit() : Promise.resolve();
+  promBatch.then(function(){
+    return fbColCardapio('grupos_opcoes').doc(grupoId).delete();
+  }).then(function(){
+    showToast('🗑️ Excluído (removido de '+itensComGrupo.length+' itens)','#f87171');
     document.getElementById('modal-grupo').classList.remove('show');
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
@@ -2742,6 +3009,9 @@ function abrirNovoModelo(){
   atualizarFiltroModelo();
   renderModeloCategorias([]);
   renderModeloItens([]);
+  // Estilos: novo modelo herda o global
+  preencherEstilosNoModeloUI(null); // null = pega do global
+  trocarAbaModelo('geral');
   document.getElementById('modal-modelo').classList.add('show');
   setTimeout(atualizarPreviewCupom, 100);
 }
@@ -2762,20 +3032,117 @@ function abrirEditarModelo(m){
   atualizarFiltroModelo();
   renderModeloCategorias(m.categorias || []);
   renderModeloItens(m.itens || []);
+  // Estilos do modelo (ou herda do global se não tiver)
+  preencherEstilosNoModeloUI(m);
+  trocarAbaModelo('geral');
   document.getElementById('modal-modelo').classList.add('show');
   setTimeout(atualizarPreviewCupom, 100);
+}
+
+function trocarAbaModelo(aba){
+  document.querySelectorAll('[data-modelo-tab]').forEach(function(btn){
+    var ativa = btn.getAttribute('data-modelo-tab') === aba;
+    btn.style.color = ativa ? 'var(--accent)' : 'var(--muted)';
+    btn.style.borderBottomColor = ativa ? 'var(--accent)' : 'transparent';
+  });
+  document.getElementById('modelo-aba-geral').style.display = aba === 'geral' ? '' : 'none';
+  document.getElementById('modelo-aba-estilo').style.display = aba === 'estilo' ? '' : 'none';
+}
+
+// Preenche os campos de estilo do modelo. Se modelo for null OU não tiver os campos,
+// usa os valores do global (_configImp). Se modelo tiver, usa os do modelo.
+function preencherEstilosNoModeloUI(modelo){
+  function v(id, val){ var el = document.getElementById(id); if(!el) return; if(el.type==='checkbox') el.checked = !!val; else el.value = val; }
+  // Cabeçalho — defaults do global
+  var ec = (modelo && modelo.estiloCabecalho) || _configImp.estiloCabecalho || {};
+  v('mod-cab-tamanho', ec.tamanho || 'grande');
+  v('mod-cab-alinhamento', ec.alinhamento || 'centro');
+  v('mod-cab-negrito', ec.negrito);
+  v('mod-cab-sublinhado', ec.sublinhado);
+  // Itens
+  var ei = (modelo && modelo.estiloItens) || _configImp.estiloItens || {};
+  v('mod-itens-tamanho', ei.tamanho || 'normal');
+  v('mod-itens-negrito', ei.negrito);
+  // Adicionais
+  var ea = (modelo && modelo.estiloAdicionais) || _configImp.estiloAdicionais || {};
+  v('mod-adic-tamanho', ea.tamanho || 'normal');
+  v('mod-adic-negrito', ea.negrito);
+  v('mod-adic-indentar', ea.indentar !== false);
+  // Total
+  var et = (modelo && modelo.estiloTotal) || _configImp.estiloTotal || {};
+  v('mod-tot-tamanho', et.tamanho || 'normal');
+  v('mod-tot-negrito', et.negrito !== false);
+  v('mod-tot-separador', et.separador || '=');
+  // Reimpressão
+  var er = (modelo && modelo.estiloReimpressao) || _configImp.estiloReimpressao || {};
+  v('mod-reimp-titulo-tamanho', er.tituloTamanho || 'grande');
+  v('mod-reimp-titulo-negrito', er.tituloNegrito !== false);
+  v('mod-reimp-itens-tamanho', er.itensTamanho || 'grande');
+  v('mod-reimp-itens-negrito', er.itensNegrito !== false);
+  v('mod-reimp-adic-tamanho', er.adicionaisTamanho || 'normal');
+  v('mod-reimp-adic-negrito', !!er.adicionaisNegrito);
+  v('mod-reimp-adic-indentar', er.adicionaisIndentar !== false);
+  v('mod-reimp-tot-tamanho', er.totalTamanho || 'normal');
+  v('mod-reimp-tot-negrito', er.totalNegrito !== false);
+}
+
+// Lê os campos de estilo da UI e retorna objetos pra salvar no modelo
+function lerEstilosDoModeloUI(){
+  function v(id){ var el = document.getElementById(id); if(!el) return ''; return el.type==='checkbox'?el.checked:el.value; }
+  return {
+    estiloCabecalho: {
+      tamanho: v('mod-cab-tamanho'),
+      alinhamento: v('mod-cab-alinhamento'),
+      negrito: v('mod-cab-negrito'),
+      sublinhado: v('mod-cab-sublinhado')
+    },
+    estiloItens: {
+      tamanho: v('mod-itens-tamanho'),
+      negrito: v('mod-itens-negrito')
+    },
+    estiloAdicionais: {
+      tamanho: v('mod-adic-tamanho'),
+      negrito: v('mod-adic-negrito'),
+      indentar: v('mod-adic-indentar')
+    },
+    estiloTotal: {
+      tamanho: v('mod-tot-tamanho'),
+      negrito: v('mod-tot-negrito'),
+      separador: v('mod-tot-separador')
+    },
+    estiloReimpressao: {
+      tituloTamanho: v('mod-reimp-titulo-tamanho'),
+      tituloNegrito: v('mod-reimp-titulo-negrito'),
+      itensTamanho: v('mod-reimp-itens-tamanho'),
+      itensNegrito: v('mod-reimp-itens-negrito'),
+      adicionaisTamanho: v('mod-reimp-adic-tamanho'),
+      adicionaisNegrito: v('mod-reimp-adic-negrito'),
+      adicionaisIndentar: v('mod-reimp-adic-indentar'),
+      totalTamanho: v('mod-reimp-tot-tamanho'),
+      totalNegrito: v('mod-reimp-tot-negrito')
+    }
+  };
+}
+
+function modeloRestaurarEstiloGlobal(){
+  preencherEstilosNoModeloUI(null);
+  showToast('↻ Estilos restaurados do global','#4ade80');
 }
 
 function atualizarTipoModelo(){
   var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
   var blocoFiltro = document.getElementById('mod-bloco-filtro');
+  var blocoReimp = document.getElementById('mod-bloco-reimp');
   // Modelo de fechamento NÃO precisa de filtro de categoria/item (sempre pega tudo)
   if(tipo === 'fechamento'){
     if(blocoFiltro) blocoFiltro.style.display = 'none';
     document.getElementById('mod-filtro-cat').style.display = 'none';
     document.getElementById('mod-filtro-itens').style.display = 'none';
+    // Reimpressão só faz sentido pra modelos de pedido (cozinha/bar)
+    if(blocoReimp) blocoReimp.style.display = 'none';
   } else {
     if(blocoFiltro) blocoFiltro.style.display = '';
+    if(blocoReimp) blocoReimp.style.display = '';
     atualizarFiltroModelo();
   }
   atualizarPreviewCupom();
@@ -2929,12 +3296,18 @@ function salvarModelo(){
   if(!impId){ showToast('Selecione a impressora','#f7a34f'); return; }
   var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
   var filtro = (document.querySelector('input[name="mod-filtro"]:checked')||{}).value || 'categoria';
+  var estilos = lerEstilosDoModeloUI();
   var dados = {
     nome: nome, impressoraId: impId,
     tipo: tipo,
     filtro: filtro,
     mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
     negrito: document.getElementById('mod-negrito').checked,
+    estiloCabecalho: estilos.estiloCabecalho,
+    estiloItens: estilos.estiloItens,
+    estiloAdicionais: estilos.estiloAdicionais,
+    estiloTotal: estilos.estiloTotal,
+    estiloReimpressao: estilos.estiloReimpressao,
     atualizadoEm: Date.now()
   };
   if(tipo === 'fechamento'){
@@ -3133,6 +3506,13 @@ function escposCut(){ return GS + 'V' + 'A' + '\x10'; }
 function escposBeep(){ return ESC + 'B' + '\x03' + '\x05'; }
 
 // ─── HELPERS DE ESTILO PERSONALIZADO ───
+// Retorna o estilo de uma seção, dando preferência ao MODELO; cai no GLOBAL se modelo não tiver
+function _estiloDoModelo(modelo, secao){
+  // secao: 'estiloCabecalho' | 'estiloItens' | 'estiloAdicionais' | 'estiloTotal' | 'estiloReimpressao'
+  if(modelo && modelo[secao]) return modelo[secao];
+  if(_configImp && _configImp[secao]) return _configImp[secao];
+  return {};
+}
 // Aplica o estilo de uma seção (cabeçalho, itens, adicionais, total)
 function _aplicarEstilo(estilo, mergeDefault){
   var est = Object.assign({tamanho:'normal', negrito:false, sublinhado:false, alinhamento:'esquerda'}, mergeDefault||{}, estilo||{});
@@ -3178,10 +3558,11 @@ function gerarCupomPedido(pedido, modelo){
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
   if(!itensFiltrados.length){ return null; }
 
-  var estCab = c.estiloCabecalho || {};
-  var estItens = c.estiloItens || {};
-  var estAdc = c.estiloAdicionais || {};
-  var estTot = c.estiloTotal || {};
+  // Estilos: prefere os do modelo, cai no global como fallback
+  var estCab = _estiloDoModelo(modelo, 'estiloCabecalho');
+  var estItens = _estiloDoModelo(modelo, 'estiloItens');
+  var estAdc = _estiloDoModelo(modelo, 'estiloAdicionais');
+  var estTot = _estiloDoModelo(modelo, 'estiloTotal');
 
   // ─── MESA OU COMANDA EM DESTAQUE (estilo personalizado) ───
   s += _resetarEstilo();
@@ -3772,10 +4153,11 @@ function gerarCupomContaFinal(conta){
   var cfg = _configImp;
   var L = 42;
   var modelo = _modeloFechamento();
-  var estCab = cfg.estiloCabecalho || {};
-  var estItens = cfg.estiloItens || {};
-  var estAdc = cfg.estiloAdicionais || {};
-  var estTot = cfg.estiloTotal || {};
+  // Estilos: usa do modelo de fechamento, fallback no global
+  var estCab = _estiloDoModelo(modelo, 'estiloCabecalho');
+  var estItens = _estiloDoModelo(modelo, 'estiloItens');
+  var estAdc = _estiloDoModelo(modelo, 'estiloAdicionais');
+  var estTot = _estiloDoModelo(modelo, 'estiloTotal');
 
   function linhaValor(lbl, val){
     var espaco = L - lbl.length - val.length;
@@ -3904,8 +4286,8 @@ function gerarCupomReimpressao(pedido, modelo, motivo){
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
   if(!itensFiltrados.length) return null; // não imprime se nenhum item desse modelo
 
-  // Estilos da reimpressão (separados — você pediu pra ser personalizável)
-  var er = c.estiloReimpressao || {};
+  // Estilos da reimpressão: prefere os do modelo, fallback no global
+  var er = _estiloDoModelo(modelo, 'estiloReimpressao');
   var estTitulo = { tamanho: er.tituloTamanho||'grande', negrito: er.tituloNegrito!==false, alinhamento:'esquerda' };
   var estItens = { tamanho: er.itensTamanho||'grande', negrito: er.itensNegrito!==false };
   var estAdc = { tamanho: er.adicionaisTamanho||'normal', negrito: !!er.adicionaisNegrito, indentar: er.adicionaisIndentar!==false };
@@ -4284,7 +4666,14 @@ function calcularTotaisContaPDV(c){
       <div class="modal-titulo" id="modal-modelo-titulo">NOVO MODELO</div>
       <button class="modal-fechar" onclick="document.getElementById('modal-modelo').classList.remove('show')">×</button>
     </div>
+    <!-- Sub-abas -->
+    <div style="display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;flex-shrink:0;">
+      <button class="modelo-subtab" data-modelo-tab="geral" onclick="trocarAbaModelo('geral')" style="padding:12px 16px;background:transparent;border:none;color:var(--accent);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid var(--accent);transition:all 0.15s;">⚙️ Geral</button>
+      <button class="modelo-subtab" data-modelo-tab="estilo" onclick="trocarAbaModelo('estilo')" style="padding:12px 16px;background:transparent;border:none;color:var(--muted);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;transition:all 0.15s;">🎨 Estilo do Cupom</button>
+    </div>
     <div class="modal-body">
+      <!-- Aba Geral (conteúdo original) -->
+      <div id="modelo-aba-geral">
       <div class="f-grupo">
         <label class="f-label">Nome do Modelo *</label>
         <input type="text" class="f-input" id="mod-nome" maxlength="30" placeholder="Ex: Bebidas, Cozinha, Conta">
@@ -4346,6 +4735,135 @@ function calcularTotaisContaPDV(c){
       <div class="f-grupo">
         <label class="f-label">📄 Pré-visualização</label>
         <pre id="mod-preview" style="background:#fff;color:#000;font-family:'Courier New',monospace;font-size:11px;line-height:1.4;padding:12px;border-radius:8px;white-space:pre;overflow-x:auto;border:1px solid #ddd;margin:0;max-height:280px;overflow-y:auto;"></pre>
+      </div>
+      </div><!-- fim aba Geral -->
+
+      <!-- Aba Estilo (novo) -->
+      <div id="modelo-aba-estilo" style="display:none;">
+        <div style="font-size:0.78rem;color:var(--muted);background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:11px 13px;margin-bottom:14px;line-height:1.5;">
+          🎨 Estilos exclusivos deste modelo. <strong>Sobrescrevem</strong> as configurações globais.
+          <br>Para usar os defaults novamente, clique em "Restaurar do global" no fim.
+        </div>
+
+        <!-- Cabeçalho -->
+        <div class="cfg-bloco" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">🏷️ Cabeçalho (MESA / COMANDA)</h3>
+          <div class="f-grupo">
+            <label class="f-label">Tamanho</label>
+            <select class="f-select" id="mod-cab-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="largo">Largo</option>
+              <option value="grande">Grande</option>
+              <option value="extra">Extra Grande</option>
+            </select>
+          </div>
+          <div class="f-grupo">
+            <label class="f-label">Alinhamento</label>
+            <select class="f-select" id="mod-cab-alinhamento">
+              <option value="centro">Centralizado</option>
+              <option value="esquerda">Esquerda</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-cab-negrito"><span>Negrito</span></label>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-cab-sublinhado"><span>Sublinhado</span></label>
+        </div>
+
+        <!-- Itens -->
+        <div class="cfg-bloco" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">🍽️ Itens</h3>
+          <div class="f-grupo">
+            <label class="f-label">Tamanho</label>
+            <select class="f-select" id="mod-itens-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="largo">Largo</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-itens-negrito"><span>Negrito</span></label>
+        </div>
+
+        <!-- Adicionais -->
+        <div class="cfg-bloco" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">➕ Adicionais / Observações</h3>
+          <div class="f-grupo">
+            <label class="f-label">Tamanho</label>
+            <select class="f-select" id="mod-adic-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-adic-negrito"><span>Negrito</span></label>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-adic-indentar"><span>Recuar (indentação)</span></label>
+        </div>
+
+        <!-- Total -->
+        <div class="cfg-bloco" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">💰 Total</h3>
+          <div class="f-grupo">
+            <label class="f-label">Tamanho</label>
+            <select class="f-select" id="mod-tot-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-tot-negrito"><span>Negrito</span></label>
+          <div class="f-grupo">
+            <label class="f-label">Linha separadora</label>
+            <select class="f-select" id="mod-tot-separador">
+              <option value="=">==== (dupla)</option>
+              <option value="-">---- (simples)</option>
+              <option value="nenhum">Nenhuma</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Reimpressão (visível só se for tipo pedido) -->
+        <div class="cfg-bloco" id="mod-bloco-reimp" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">🔁 Reimpressão de Comanda</h3>
+          <div style="font-size:0.7rem;color:var(--muted);margin-bottom:8px;">Quando reimprime esse modelo na cozinha/bar.</div>
+          <div class="f-grupo">
+            <label class="f-label">Título do pedido</label>
+            <select class="f-select" id="mod-reimp-titulo-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="grande">Grande</option>
+              <option value="extra">Extra Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-reimp-titulo-negrito"><span>Título em negrito</span></label>
+          <div class="f-grupo">
+            <label class="f-label">Itens</label>
+            <select class="f-select" id="mod-reimp-itens-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-reimp-itens-negrito"><span>Itens em negrito</span></label>
+          <div class="f-grupo">
+            <label class="f-label">Adicionais</label>
+            <select class="f-select" id="mod-reimp-adic-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-reimp-adic-negrito"><span>Adicionais em negrito</span></label>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-reimp-adic-indentar"><span>Recuar adicionais</span></label>
+          <div class="f-grupo">
+            <label class="f-label">Total da reimpressão</label>
+            <select class="f-select" id="mod-reimp-tot-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-reimp-tot-negrito"><span>Total em negrito</span></label>
+        </div>
+
+        <button class="p-btn secondary" style="width:100%;margin-top:8px;" onclick="modeloRestaurarEstiloGlobal()">↻ Restaurar estilos do global</button>
       </div>
     </div>
     <div class="modal-footer">
@@ -4435,40 +4953,76 @@ function calcularTotaisContaPDV(c){
       <div class="modal-titulo" id="modal-grupo-titulo">NOVO GRUPO</div>
       <button class="modal-fechar" onclick="document.getElementById('modal-grupo').classList.remove('show')">×</button>
     </div>
+    <!-- Sub-abas -->
+    <div style="display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;flex-shrink:0;">
+      <button class="grupo-subtab active" data-grupo-tab="config" onclick="trocarAbaGrupo('config')" style="padding:12px 16px;background:transparent;border:none;color:var(--accent);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid var(--accent);transition:all 0.15s;">⚙️ Configuração</button>
+      <button class="grupo-subtab" data-grupo-tab="aplicar" onclick="trocarAbaGrupo('aplicar')" style="padding:12px 16px;background:transparent;border:none;color:var(--muted);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;transition:all 0.15s;">📍 Onde aplicar <span id="grupo-aplicar-count" style="background:var(--surface3);color:var(--accent);font-size:0.66rem;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:700;display:none;"></span></button>
+    </div>
     <div class="modal-body">
-      <div class="f-grupo">
-        <label class="f-label">Nome do Grupo *</label>
-        <input type="text" class="f-input" id="grupo-nome" maxlength="40" placeholder="Ex: Ponto da carne, Tamanho, Adicionais">
-      </div>
-      <div class="f-grupo">
-        <label class="f-label">Tipo</label>
-        <div style="display:flex;gap:8px;">
-          <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="grupo-tipo" value="opcao" checked style="margin-top:2px;">
-            <div>
-              <div style="font-size:0.84rem;font-weight:600;">🔘 Opção</div>
-              <div style="font-size:0.7rem;color:var(--muted);">Escolhe 1 (radio)</div>
-            </div>
-          </label>
-          <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="grupo-tipo" value="adicional" style="margin-top:2px;">
-            <div>
-              <div style="font-size:0.84rem;font-weight:600;">☑️ Adicional</div>
-              <div style="font-size:0.7rem;color:var(--muted);">Vários (checkbox)</div>
-            </div>
+      <!-- Aba: Configuração -->
+      <div id="grupo-aba-config">
+        <div class="f-grupo">
+          <label class="f-label">Nome do Grupo *</label>
+          <input type="text" class="f-input" id="grupo-nome" maxlength="40" placeholder="Ex: Ponto da carne, Tamanho, Adicionais">
+        </div>
+        <div class="f-grupo">
+          <label class="f-label">Tipo</label>
+          <div style="display:flex;gap:8px;">
+            <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+              <input type="radio" name="grupo-tipo" value="opcao" checked style="margin-top:2px;">
+              <div>
+                <div style="font-size:0.84rem;font-weight:600;">🔘 Opção</div>
+                <div style="font-size:0.7rem;color:var(--muted);">Escolhe 1 (radio)</div>
+              </div>
+            </label>
+            <label style="flex:1;display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+              <input type="radio" name="grupo-tipo" value="adicional" style="margin-top:2px;">
+              <div>
+                <div style="font-size:0.84rem;font-weight:600;">☑️ Adicional</div>
+                <div style="font-size:0.7rem;color:var(--muted);">Vários (checkbox)</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div class="f-grupo">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="grupo-obrigatorio" checked>
+            <span style="font-size:0.85rem;">Obrigatório (cliente precisa escolher)</span>
           </label>
         </div>
+        <div class="f-grupo">
+          <label class="f-label">Opções deste grupo</label>
+          <div id="grupo-opcoes-lista"></div>
+          <button class="p-btn secondary" style="margin-top:8px;width:100%;" onclick="addOpcaoGrupo()">+ Adicionar opção</button>
+        </div>
       </div>
-      <div class="f-grupo">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" id="grupo-obrigatorio" checked>
-          <span style="font-size:0.85rem;">Obrigatório (cliente precisa escolher)</span>
-        </label>
-      </div>
-      <div class="f-grupo">
-        <label class="f-label">Opções deste grupo</label>
-        <div id="grupo-opcoes-lista"></div>
-        <button class="p-btn secondary" style="margin-top:8px;width:100%;" onclick="addOpcaoGrupo()">+ Adicionar opção</button>
+
+      <!-- Aba: Onde aplicar -->
+      <div id="grupo-aba-aplicar" style="display:none;">
+        <div style="font-size:0.78rem;color:var(--muted);background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:11px 13px;margin-bottom:14px;line-height:1.5;">
+          💡 Marque as <strong>categorias inteiras</strong> ou <strong>itens específicos</strong> em que esse grupo deve aparecer.<br>
+          <strong>Merge</strong>: itens marcados ganham esse grupo sem perder grupos antigos.<br>
+          <strong>Desmarcar</strong>: remove esse grupo do item automaticamente.
+        </div>
+
+        <div class="f-grupo">
+          <label class="f-label" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>📂 Categorias inteiras</span>
+            <button onclick="grupoToggleTodasCategorias()" style="background:transparent;border:none;color:var(--accent);font-size:0.74rem;font-weight:700;cursor:pointer;">Selecionar todas / nenhuma</button>
+          </label>
+          <div id="grupo-cats-lista" style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:8px;"></div>
+        </div>
+
+        <div class="f-grupo">
+          <label class="f-label" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>🍔 Itens específicos</span>
+            <span id="grupo-itens-resumo" style="font-size:0.7rem;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0;"></span>
+          </label>
+          <input type="text" class="f-input" id="grupo-busca-itens" placeholder="Buscar item..." style="margin-bottom:8px;" oninput="grupoFiltrarItens()">
+          <div id="grupo-itens-lista" style="display:flex;flex-direction:column;gap:4px;max-height:280px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:6px;"></div>
+        </div>
+
+        <div id="grupo-aplicar-aviso" style="font-size:0.74rem;color:var(--muted);background:var(--surface2);border-radius:8px;padding:9px 11px;line-height:1.5;display:none;"></div>
       </div>
     </div>
     <div class="modal-footer">

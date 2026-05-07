@@ -2953,13 +2953,16 @@ function testarImpressaoTodas(){
 }
 
 // ─── MODELOS CRUD ───
+var _unsubModelos = null;
 function carregarModelos(){
   if(!fbDb || !_restauranteAtivo) return;
-  fbColImpressao('modelos').get().then(function(snap){
+  // Se já está escutando, não cria outro listener
+  if(_unsubModelos){ return; }
+  _unsubModelos = fbColImpressao('modelos').onSnapshot(function(snap){
     _modelos = [];
     snap.forEach(function(d){ _modelos.push(Object.assign({id:d.id}, d.data())); });
     renderModelos();
-  }).catch(function(e){ console.warn('Modelos:', e); });
+  }, function(e){ console.warn('Modelos:', e); });
 }
 
 function renderModelos(){
@@ -4247,27 +4250,18 @@ function gerarCupomContaFinal(conta){
   s += _resetarEstilo();
   if(_aplicaNegrito(modelo)) s += escposBold(true);
 
-  // Resumo de pagamentos (se houver)
-  if((conta.pagamentos||[]).length){
+  // Resumo de pagamentos (se houver) — só "Pago até agora" e "A PAGAR"
+  if(totais.pagoTotal > 0){
     s += linha('-', L) + '\n';
-    conta.pagamentos.forEach(function(p){
-      var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-      var tipo = p.tipo === 'itens' ? 'Itens' : (p.tipo === 'tudo' ? 'Total' : 'Credito');
-      s += linhaValor(hora + ' ' + tipo, 'R$ ' + formatarPreco(p.valor));
-    });
-    // Total já pago e total a pagar
-    if(totais.pagoTotal > 0){
-      s += linha('-', L) + '\n';
-      s += linhaValor('Pago ate agora', 'R$ ' + formatarPreco(totais.pagoTotal));
-      if(totais.restante > 0.005){
-        // Ainda tem saldo a pagar — destaca em negrito
-        s += escposBold(true);
-        s += linhaValor('A PAGAR', 'R$ ' + formatarPreco(totais.restante));
-        s += escposBold(false);
-        if(_aplicaNegrito(modelo)) s += escposBold(true);
-      } else {
-        s += linhaValor('A PAGAR', 'R$ 0,00 (QUITADO)');
-      }
+    s += linhaValor('Pago ate agora', 'R$ ' + formatarPreco(totais.pagoTotal));
+    if(totais.restante > 0.005){
+      // Ainda tem saldo a pagar — destaca em negrito
+      s += escposBold(true);
+      s += linhaValor('A PAGAR', 'R$ ' + formatarPreco(totais.restante));
+      s += escposBold(false);
+      if(_aplicaNegrito(modelo)) s += escposBold(true);
+    } else {
+      s += linhaValor('A PAGAR', 'R$ 0,00 (QUITADO)');
     }
   }
   s += linha('=', L) + '\n';
@@ -4589,7 +4583,9 @@ function _renderPreview(){
 }
 
 function calcularTotaisContaPDV(c){
-  var subtotal = (c.itens||[]).reduce(function(a,i){
+  // IGNORA itens cancelados em todos os cálculos
+  var ativos = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; });
+  var subtotal = ativos.reduce(function(a,i){
     if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
     return a + (i.preco||0)*(i.qtd||1);
   }, 0);

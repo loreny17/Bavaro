@@ -439,6 +439,22 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
           <span>Mostrar preços (desmarque para via da cozinha)</span>
         </label>
         <label class="cfg-toggle">
+          <input type="checkbox" id="cfg-imprimir-numero-pedido" checked>
+          <span>Mostrar número do pedido em destaque (#1, #2, #3...)</span>
+        </label>
+        <div class="f-grupo" id="bloco-tam-num-pedido">
+          <label class="f-label">Tamanho do número do pedido</label>
+          <select class="f-select" id="cfg-tamanho-numero-pedido">
+            <option value="normal">Normal</option>
+            <option value="alto">Alto</option>
+            <option value="grande" selected>Grande</option>
+            <option value="extra">Extra Grande</option>
+          </select>
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;line-height:1.4;">
+            O número reseta todo dia às <strong>02h</strong> da manhã, voltando pra #1.
+          </div>
+        </div>
+        <label class="cfg-toggle">
           <input type="checkbox" id="cfg-corte-papel" checked>
           <span>Cortar papel automaticamente após imprimir</span>
         </label>
@@ -1629,7 +1645,7 @@ function renderPedidosPDV() {
     }).join('');
     card.innerHTML =
       '<div class="pedido-head">' +
-        '<span class="pedido-id">#' + p.id.slice(-4).toUpperCase() + '</span>' +
+        '<span class="pedido-id">#' + (p.numeroSequencial || p.id.slice(-4).toUpperCase()) + '</span>' +
         '<span class="pedido-mesa-tag">Mesa ' + (p.mesa||'—') + '</span>' +
         '<span class="pedido-garcom">👤 ' + escapeHtml(p.garcom||'—') + '</span>' +
         '<span class="pedido-hora">' + hora + '</span>' +
@@ -2669,6 +2685,7 @@ var _configImp = {
   cancelMotivos: 'Cliente desistiu\nErro no pedido\nDemorou demais',
   imprimirMesa: true, imprimirGarcom: true, imprimirHora: true,
   imprimirObs: true, imprimirPrecos: true,
+  imprimirNumeroPedido: true, tamanhoNumeroPedido: 'grande',
   cortePapel: true, beep: true,
   // ─── Estilos personalizáveis (NOVOS) ───
   // tamanho: 'normal'|'alto'|'largo'|'grande'|'extra'
@@ -3399,6 +3416,8 @@ function aplicarConfigImpNaTela(){
   v('cfg-imprimir-hora', c.imprimirHora);
   v('cfg-imprimir-obs', c.imprimirObs);
   v('cfg-imprimir-precos', c.imprimirPrecos);
+  v('cfg-imprimir-numero-pedido', c.imprimirNumeroPedido !== false);
+  v('cfg-tamanho-numero-pedido', c.tamanhoNumeroPedido || 'grande');
   v('cfg-corte-papel', c.cortePapel);
   v('cfg-beep', c.beep);
   var selImp = document.getElementById('cfg-cancel-impressora');
@@ -3451,6 +3470,8 @@ function salvarConfigImpressao(){
     imprimirHora: v('cfg-imprimir-hora'),
     imprimirObs: v('cfg-imprimir-obs'),
     imprimirPrecos: v('cfg-imprimir-precos'),
+    imprimirNumeroPedido: v('cfg-imprimir-numero-pedido'),
+    tamanhoNumeroPedido: v('cfg-tamanho-numero-pedido'),
     cortePapel: v('cfg-corte-papel'),
     beep: v('cfg-beep'),
     estiloCabecalho: {
@@ -3640,6 +3661,15 @@ function gerarCupomPedido(pedido, modelo){
     s += 'MESA ' + pedido.mesa + '\n';
     s += _resetarEstilo();
   }
+  // ─── NÚMERO DO PEDIDO (configurável) ───
+  // Imprime # número em destaque se a config global "imprimirNumeroPedido" estiver ligada
+  // Tamanho controlado por "tamanhoNumeroPedido" (normal | alto | grande | extra)
+  if(c.imprimirNumeroPedido !== false && pedido.numeroSequencial){
+    var tamNum = c.tamanhoNumeroPedido || 'grande';
+    s += escposCenter() + escposBold(true) + escposSize(tamNum);
+    s += '# ' + pedido.numeroSequencial + '\n';
+    s += _resetarEstilo();
+  }
   // Garçom (sempre estilo normal)
   if(c.imprimirGarcom && pedido.garcom){
     s += 'Garcom: ' + pedido.garcom + '\n';
@@ -3776,7 +3806,7 @@ function gerarCupomCancelamento(pedido, motivo){
     s += _resetarEstilo();
   }
   s += 'Cancelado: ' + new Date().toLocaleString('pt-BR') + '\n';
-  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  s += '#' + (pedido.numeroSequencial || (pedido.id||'').slice(-6).toUpperCase()) + '\n';
   s += linha('-', L) + '\n';
   if(motivo){
     s += escposBold(true) + 'MOTIVO:\n' + escposBold(false);
@@ -4366,7 +4396,7 @@ function gerarCupomReimpressao(pedido, modelo, motivo){
   if(c.imprimirMesa && pedido.mesa) s += escposBold(true) + 'MESA: ' + pedido.mesa + escposBold(false) + '\n';
   if(c.imprimirGarcom && pedido.garcom) s += 'Garcom: ' + pedido.garcom + '\n';
   s += 'Hora: ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
-  s += '#' + (pedido.id||'').slice(-6).toUpperCase() + '\n';
+  s += '#' + (pedido.numeroSequencial || (pedido.id||'').slice(-6).toUpperCase()) + '\n';
   if(motivo){
     s += escposBold(true) + 'Motivo: ' + escposBold(false) + motivo + '\n';
   }

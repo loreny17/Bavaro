@@ -1777,7 +1777,7 @@ function renderPedidos(){
     card.className = 'pedido-card';
     card.innerHTML =
       '<div class="pedido-card-head">'+
-        '<span class="pedido-num">#'+p.id.slice(-4).toUpperCase()+'</span>'+
+        '<span class="pedido-num">#'+_numPedido(p)+'</span>'+
         '<span class="pedido-mesa">Mesa '+p.mesa+'</span>'+
         '<span class="pedido-hora">'+hora+'</span>'+
       '</div>'+
@@ -1888,7 +1888,7 @@ function abrirModalCancelarPedidoInteiro(pedidoId, ped, itensCancelaveis, motivo
       '</div>'+
       '<div class="modal-body">'+
         '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:10px;padding:12px;margin-bottom:14px;">'+
-          '<div style="font-size:0.78rem;color:#f87171;font-weight:700;">Pedido #'+pedidoId.slice(-4).toUpperCase()+'</div>'+
+          '<div style="font-size:0.78rem;color:#f87171;font-weight:700;">Pedido #'+_numPedido(ped)+'</div>'+
           '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;">Mesa '+(ped.mesa||'—')+' • '+esc(ped.garcom||'—')+'</div>'+
         '</div>'+
         listaItensHtml +
@@ -2061,7 +2061,7 @@ function abrirModalCancelarItem(pedidoId, idx, item, motivos, pedeSenha){
       '<div class="modal-body">'+
         '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:10px;padding:12px;margin-bottom:14px;">'+
           '<div style="font-size:0.78rem;color:#f87171;font-weight:700;">'+(item.qtd||1)+'x '+esc(item.nome||'')+'</div>'+
-          '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;">Mesa '+(_meusPedidos.find(function(p){return p.id===pedidoId;})||{}).mesa+' • Pedido #'+pedidoId.slice(-4).toUpperCase()+'</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;">Mesa '+(_meusPedidos.find(function(p){return p.id===pedidoId;})||{}).mesa+' • Pedido #'+_numPedidoById(pedidoId)+'</div>'+
         '</div>'+
         motivosHtml +
         senhaHtml +
@@ -2407,7 +2407,7 @@ var _gAdicionarPedId = null;
 function iniciarAdicionarItemGarcom(pedidoId){
   _gAdicionarPedId = pedidoId;
   showTab('cardapio');
-  showToast('Toque no item para adicioná-lo ao pedido #'+pedidoId.slice(-4).toUpperCase(), '#d4a843');
+  showToast('Toque no item para adicioná-lo ao pedido #'+_numPedidoById(pedidoId), '#d4a843');
   window._modoAdicionarGarcom = true;
   setTimeout(function(){ if(window._modoAdicionarGarcom){ window._modoAdicionarGarcom=false; _gAdicionarPedId=null; } }, 8000);
 }
@@ -3040,6 +3040,64 @@ function cartEditar(idx){
 // ════════════════════════════════════════
 //  ENVIAR PEDIDO
 // ════════════════════════════════════════
+// ═══ NÚMERO SEQUENCIAL DE PEDIDOS ═══
+// Helper: retorna o número formatado pra exibir. Se o pedido tem numeroSequencial, usa.
+// Senão (pedidos antigos), usa os 4 últimos chars do ID em maiúscula.
+function _numPedido(pedido){
+  if(!pedido) return '';
+  if(pedido.numeroSequencial) return String(pedido.numeroSequencial);
+  return (pedido.id || '').slice(-4).toUpperCase();
+}
+// Helper: dado um pedidoId, busca o pedido em _meusPedidos e retorna o número formatado
+function _numPedidoById(pedidoId){
+  var p = (_meusPedidos||[]).find(function(x){ return x.id === pedidoId; });
+  if(p) return _numPedido(p);
+  return (pedidoId || '').slice(-4).toUpperCase();
+}
+
+// Reseta todo dia às 02:00 da manhã. Usa transação atômica pra evitar números duplicados.
+// Retorna uma Promise com o número sequencial gerado.
+function gerarNumeroSequencial(){
+  if(!fbDb || !_restauranteId) return Promise.resolve(null);
+  var ref = fbDb.collection('restaurantes_publicos').doc(_restauranteId)
+    .collection('contadores').doc('pedidos');
+  // Calcula o "dia operacional" - resetando às 02h
+  // Se agora é < 02h, o "dia" ainda é o anterior. Se >= 02h, é o dia atual.
+  function calcularDiaOperacional(ts){
+    var d = new Date(ts);
+    if(d.getHours() < 2){
+      d.setDate(d.getDate() - 1);
+    }
+    // Formato YYYY-MM-DD
+    var ano = d.getFullYear();
+    var mes = String(d.getMonth()+1).padStart(2,'0');
+    var dia = String(d.getDate()).padStart(2,'0');
+    return ano + '-' + mes + '-' + dia;
+  }
+  var diaAtual = calcularDiaOperacional(Date.now());
+  return fbDb.runTransaction(function(t){
+    return t.get(ref).then(function(doc){
+      var dados = doc.exists ? doc.data() : {};
+      var novoNumero;
+      if(dados.dia !== diaAtual){
+        // Dia diferente — reseta
+        novoNumero = 1;
+      } else {
+        novoNumero = (dados.numero || 0) + 1;
+      }
+      t.set(ref, {
+        dia: diaAtual,
+        numero: novoNumero,
+        atualizadoEm: Date.now()
+      });
+      return novoNumero;
+    });
+  }).catch(function(e){
+    console.warn('Erro ao gerar número sequencial:', e);
+    return null;
+  });
+}
+
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
   var btn = document.getElementById('btn-enviar-pedido');
@@ -3100,8 +3158,11 @@ function enviarPedido(){
     itens: itensPedido,
     total: totalPedido
   };
-  // 1. Cria pedido (vai pra cozinha imprimir)
-  fbDb.collection('pedidos').add(pedido).then(function(ref){
+  // 1. Gera número sequencial e cria pedido
+  gerarNumeroSequencial().then(function(numero){
+    if(numero) pedido.numeroSequencial = numero;
+    return fbDb.collection('pedidos').add(pedido);
+  }).then(function(ref){
     var pedidoId = ref.id;
     // 2. Adiciona itens na conta da mesa (com status: aberto)
     var itensConta = itensPedido.map(function(it){
@@ -3146,7 +3207,7 @@ function enviarPedido(){
     btn.disabled = false;
     btn.textContent = 'Enviar Pedido 🚀';
     // Toast de sucesso e volta direto pro mapa de mesas (sem modal "continuar?")
-    showToast('✓ Pedido #'+ref.id.slice(-4).toUpperCase()+' enviado!', '#4ade80');
+    showToast('✓ Pedido #'+(pedido.numeroSequencial || ref.id.slice(-4).toUpperCase())+' enviado!', '#4ade80');
     voltarParaMesas();
   }).catch(function(e){
     showToast('❌ Erro ao enviar: '+e.message);
@@ -4518,7 +4579,7 @@ function renderVerPedidosMesa(pedidos){
     html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:6px;flex-wrap:wrap;">'+
         '<div>'+
-          '<div style="font-weight:700;font-size:0.94rem;">Pedido #'+p.id.slice(-4).toUpperCase()+'</div>'+
+          '<div style="font-weight:700;font-size:0.94rem;">Pedido #'+_numPedido(p)+'</div>'+
           '<div style="font-size:0.72rem;color:var(--muted);">'+hora+' • '+esc(p.garcom||'—')+'</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+

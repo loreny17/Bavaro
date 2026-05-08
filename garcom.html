@@ -1754,8 +1754,10 @@ function renderPedidos(){
       if(it.selecoes && it.selecoes.length){
         selecoesEl = '<div style="font-size:0.68rem;color:var(--muted);padding-left:30px;margin-top:2px;line-height:1.4;">';
         it.selecoes.forEach(function(s){
-          var ext = (s.precoExtra||0) > 0 ? ' (+R$ '+fmtPreco(s.precoExtra)+')' : '';
-          selecoesEl += '• '+esc(s.opcao||'')+esc(ext)+'<br>';
+          var q = s.qtd || 1;
+          var prefQ = q > 1 ? q+'x ' : '';
+          var ext = ((s.precoExtra||0) * q) > 0 ? ' (+R$ '+fmtPreco((s.precoExtra||0)*q)+')' : '';
+          selecoesEl += '• '+esc(prefQ)+esc(s.opcao||'')+esc(ext)+'<br>';
         });
         selecoesEl += '</div>';
       }
@@ -2567,17 +2569,44 @@ function renderGruposNoModal(){
     (g.opcoes||[]).forEach(function(op, idx){
       var precoExtra = parseFloat(op.precoExtra)||0;
       var precoTxt = precoExtra > 0 ? ' <span style="color:var(--accent);font-size:0.78rem;">+R$ '+fmtPreco(precoExtra)+'</span>' : '';
-      var marcado = false;
       if(g.tipo === 'opcao'){
-        marcado = _selecoesGrupos[g.id] === idx;
+        // Opções (radio) - sem mudança
+        var marcado = _selecoesGrupos[g.id] === idx;
+        opcoesHtml +=
+          '<label style="display:flex;align-items:center;gap:10px;padding:9px;background:'+(marcado?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(marcado?'var(--accent)':'var(--border2)')+';border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;transition:all 0.15s;" onclick="event.preventDefault();toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')">'+
+            '<input type="radio" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);pointer-events:none;">'+
+            '<span style="flex:1;">'+esc(op.nome||'')+precoTxt+'</span>'+
+          '</label>';
       } else {
-        marcado = (_selecoesGrupos[g.id]||[]).indexOf(idx) !== -1;
+        // Adicionais — agora com quantidade!
+        // _selecoesGrupos[g.id] é um array de {idx, qtd}
+        var selArr = _selecoesGrupos[g.id] || [];
+        var sel = selArr.find(function(s){ return (typeof s === 'object' ? s.idx : s) === idx; });
+        var qtdSel = 0;
+        if(sel){ qtdSel = (typeof sel === 'object' ? (sel.qtd||1) : 1); }
+        var marcado = qtdSel > 0;
+        var bgColor = marcado ? 'rgba(212,168,67,0.1)' : 'var(--surface3)';
+        var borderColor = marcado ? 'var(--accent)' : 'var(--border2)';
+        // Controle de quantidade: aparece quando marcado
+        var ctrlHtml;
+        if(marcado){
+          ctrlHtml = '<div style="display:flex;align-items:center;gap:6px;margin-left:auto;" onclick="event.stopPropagation();">'+
+            '<button onclick="event.stopPropagation();alterarQtdAdicional(\''+g.id+'\','+idx+',-1)" style="width:30px;height:30px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);font-size:1.1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;">−</button>'+
+            '<span style="min-width:24px;text-align:center;font-family:Bebas Neue,sans-serif;font-size:1.15rem;color:var(--accent);">'+qtdSel+'</span>'+
+            '<button onclick="event.stopPropagation();alterarQtdAdicional(\''+g.id+'\','+idx+',1)" style="width:30px;height:30px;border-radius:50%;background:#22c55e;border:none;color:#fff;font-size:1.1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;font-weight:700;">+</button>'+
+          '</div>';
+        } else {
+          ctrlHtml = '';
+        }
+        opcoesHtml +=
+          '<div style="display:flex;align-items:center;gap:10px;padding:9px;background:'+bgColor+';border:1px solid '+borderColor+';border-radius:9px;margin-bottom:6px;font-size:0.86rem;transition:all 0.15s;">'+
+            '<label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0;" onclick="event.preventDefault();toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')">'+
+              '<input type="checkbox" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);pointer-events:none;flex-shrink:0;">'+
+              '<span style="flex:1;min-width:0;">'+esc(op.nome||'')+precoTxt+'</span>'+
+            '</label>'+
+            ctrlHtml +
+          '</div>';
       }
-      opcoesHtml +=
-        '<label style="display:flex;align-items:center;gap:10px;padding:9px;background:'+(marcado?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(marcado?'var(--accent)':'var(--border2)')+';border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:0.86rem;transition:all 0.15s;" onclick="event.preventDefault();toggleGrupoOpcao(\''+g.id+'\','+idx+',\''+g.tipo+'\')">'+
-          '<input type="'+(g.tipo==='opcao'?'radio':'checkbox')+'" name="grupo-'+g.id+'" '+(marcado?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);pointer-events:none;">'+
-          '<span style="flex:1;">'+esc(op.nome||'')+precoTxt+'</span>'+
-        '</label>';
     });
     box.innerHTML = titulo + opcoesHtml;
     wrap.appendChild(box);
@@ -2595,12 +2624,34 @@ function toggleGrupoOpcao(grupoId, opcaoIdx, tipo){
       _selecoesGrupos[grupoId] = opcaoIdx;
     }
   } else {
+    // Adicional: array de {idx, qtd}
     var arr = _selecoesGrupos[grupoId] || [];
-    var pos = arr.indexOf(opcaoIdx);
+    // Migra formato antigo (array de números) → novo (array de objetos) se necessário
+    arr = arr.map(function(s){ return typeof s === 'object' ? s : {idx: s, qtd: 1}; });
+    var pos = arr.findIndex(function(s){ return s.idx === opcaoIdx; });
     if(pos >= 0) arr.splice(pos, 1);
-    else arr.push(opcaoIdx);
+    else arr.push({idx: opcaoIdx, qtd: 1});
     _selecoesGrupos[grupoId] = arr;
   }
+  renderGruposNoModal();
+  atualizarBtnAdd();
+}
+
+// Altera quantidade de um adicional já marcado (- ou +)
+function alterarQtdAdicional(grupoId, opcaoIdx, delta){
+  var arr = _selecoesGrupos[grupoId] || [];
+  // Migra formato antigo se necessário
+  arr = arr.map(function(s){ return typeof s === 'object' ? s : {idx: s, qtd: 1}; });
+  var item = arr.find(function(s){ return s.idx === opcaoIdx; });
+  if(!item) return;
+  item.qtd = (item.qtd || 1) + delta;
+  if(item.qtd <= 0){
+    // Remove se zerou
+    arr = arr.filter(function(s){ return s.idx !== opcaoIdx; });
+  } else if(item.qtd > 50){
+    item.qtd = 50; // limite máximo razoável
+  }
+  _selecoesGrupos[grupoId] = arr;
   renderGruposNoModal();
   atualizarBtnAdd();
 }
@@ -2612,8 +2663,11 @@ function calcularPrecoExtras(){
     if(g.tipo === 'opcao' && typeof sel === 'number'){
       extras += parseFloat((g.opcoes[sel]||{}).precoExtra)||0;
     } else if(g.tipo === 'adicional' && Array.isArray(sel)){
-      sel.forEach(function(idx){
-        extras += parseFloat((g.opcoes[idx]||{}).precoExtra)||0;
+      sel.forEach(function(s){
+        // Aceita tanto formato antigo (idx) quanto novo ({idx, qtd})
+        var idx = (typeof s === 'object') ? s.idx : s;
+        var qtd = (typeof s === 'object') ? (s.qtd||1) : 1;
+        extras += (parseFloat((g.opcoes[idx]||{}).precoExtra)||0) * qtd;
       });
     }
   });
@@ -2696,7 +2750,7 @@ function adicionarAoCarrinho(){
     }
   }
   var obs = document.getElementById('det-obs').value.trim();
-  // Monta seleções legíveis
+  // Monta seleções legíveis (com qtd quando aplicável)
   var selecoes = [];
   _gruposItemAtual.forEach(function(g){
     var sel = _selecoesGrupos[g.id];
@@ -2704,9 +2758,16 @@ function adicionarAoCarrinho(){
       var op = g.opcoes[sel];
       if(op) selecoes.push({grupo:g.nome, opcao:op.nome, precoExtra: parseFloat(op.precoExtra)||0});
     } else if(g.tipo === 'adicional' && Array.isArray(sel)){
-      sel.forEach(function(idx){
+      sel.forEach(function(s){
+        var idx = (typeof s === 'object') ? s.idx : s;
+        var qtd = (typeof s === 'object') ? (s.qtd||1) : 1;
         var op = g.opcoes[idx];
-        if(op) selecoes.push({grupo:g.nome, opcao:op.nome, precoExtra: parseFloat(op.precoExtra)||0});
+        if(op) selecoes.push({
+          grupo: g.nome,
+          opcao: op.nome,
+          precoExtra: parseFloat(op.precoExtra)||0,
+          qtd: qtd
+        });
       });
     }
   });
@@ -2801,8 +2862,11 @@ function renderCarrinho(){
     if(it.selecoes && it.selecoes.length){
       selecoesHtml = '<div style="font-size:0.72rem;color:var(--muted);margin-top:3px;line-height:1.4;">';
       it.selecoes.forEach(function(s){
-        var extra = (s.precoExtra||0) > 0 ? ' (+R$ '+fmtPreco(s.precoExtra)+')' : '';
-        selecoesHtml += '• '+esc(s.opcao||'')+esc(extra)+'<br>';
+        var qtd = s.qtd || 1;
+        var prefixoQtd = qtd > 1 ? qtd+'x ' : '';
+        var precoTotal = (s.precoExtra||0) * qtd;
+        var extra = precoTotal > 0 ? ' (+R$ '+fmtPreco(precoTotal)+')' : '';
+        selecoesHtml += '• '+esc(prefixoQtd)+esc(s.opcao||'')+esc(extra)+'<br>';
       });
       selecoesHtml += '</div>';
     }
@@ -2924,11 +2988,12 @@ function cartEditar(idx){
             if(match){ _selecoesGrupos[g.id] = i; break; }
           }
         } else if(g.tipo === 'adicional'){
-          var idxs = [];
+          var arr = [];
           g.opcoes.forEach(function(op, i){
-            if(it.selecoes.find(function(s){ return s.grupo === g.nome && s.opcao === op.nome; })) idxs.push(i);
+            var sel = it.selecoes.find(function(s){ return s.grupo === g.nome && s.opcao === op.nome; });
+            if(sel){ arr.push({idx: i, qtd: sel.qtd || 1}); }
           });
-          _selecoesGrupos[g.id] = idxs;
+          _selecoesGrupos[g.id] = arr;
         }
       });
       // Re-render dos grupos pra mostrar as marcações
@@ -4394,7 +4459,7 @@ function renderVerPedidosMesa(pedidos){
       var selsHtml = '';
       if(it.selecoes && it.selecoes.length){
         selsHtml = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">'+ 
-          it.selecoes.map(function(s){ return '• '+esc(s.opcao||''); }).join(' ') +'</div>';
+          it.selecoes.map(function(s){ var q = s.qtd||1; return '• '+(q>1?q+'x ':'')+esc(s.opcao||''); }).join(' ') +'</div>';
       }
       return '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;margin-bottom:8px;">'+
         '<div style="display:flex;align-items:center;gap:8px;">'+

@@ -4235,12 +4235,8 @@ function gerarCupomContaFinal(conta){
       s += indKg + pesoStr + (it.precoBase ? ' x R$ ' + formatarPreco(it.precoBase) + '/kg' : '') + '\n';
       s += _resetarEstilo();
     }
-    if(it.obs){
-      s += _aplicarEstilo(estAdc);
-      var indent = estAdc.indentar !== false ? '  ' : '';
-      s += indent + '** ' + it.obs + '\n';
-      s += _resetarEstilo();
-    }
+    // OBS: observações foram removidas do cupom de fechamento.
+    // Elas continuam aparecendo nos cupons de pedido (cozinha/bar).
     if(_aplicaNegrito(modelo)) s += escposBold(true);
   });
   s += linha('=', L) + '\n';
@@ -4662,6 +4658,120 @@ function instalarPWA(){
   // Caso 4: outro navegador
   alert('Pra instalar:\n\n• Chrome/Edge no Android: toque nos 3 pontinhos do navegador → "Instalar app" ou "Adicionar à tela inicial"\n\n• Chrome/Edge no PC: clique no ícone de instalação (⊕) na barra de endereço');
 }
+
+// ═══ NAVEGAÇÃO COM BOTÃO VOLTAR (Android / gesture) ═══
+// Sem isso, apertar voltar fecha o app inteiro. Aqui:
+// 1. Se tem modal aberto → fecha modal
+// 2. Se tem confirm aberto → fecha confirm
+// 3. Se tá em outra aba → volta pra Cardápio
+// 4. Se tá em Cardápio → aí sim sai do app (comportamento padrão)
+
+function _temModalAberto(){
+  return document.querySelectorAll('.modal.show').length > 0;
+}
+function _temConfirmAberto(){
+  var ov = document.getElementById('confirm-overlay');
+  return ov && ov.classList.contains('show');
+}
+function _abaAtiva(){
+  // Usa a variável global do app se disponível
+  if(typeof _tabAtual === 'string' && _tabAtual) return _tabAtual;
+  var t = document.querySelector('.tab.active');
+  return t ? (t.id||'').replace('tab-btn-','') : 'cardapio';
+}
+
+// Fecha o modal mais recentemente aberto (último .show no DOM)
+function _fecharUltimoModal(){
+  var modais = document.querySelectorAll('.modal.show');
+  if(modais.length === 0) return false;
+  var ultimo = modais[modais.length - 1];
+  ultimo.classList.remove('show');
+  return true;
+}
+
+// Empurra um estado novo no histórico — usado pra "armar" a interceptação
+function _pushHistoricoApp(){
+  try{ history.pushState({pdvBavaroState: Date.now()}, '', ''); }catch(e){}
+}
+
+// Listener principal: dispara quando aperta voltar
+window.addEventListener('popstate', function(e){
+  // 1. Confirm overlay aberto → fecha primeiro
+  if(_temConfirmAberto()){
+    document.getElementById('confirm-overlay').classList.remove('show');
+    _pushHistoricoApp(); // re-arma pra próximo voltar
+    return;
+  }
+  // 2. Algum modal aberto → fecha
+  if(_temModalAberto()){
+    _fecharUltimoModal();
+    _pushHistoricoApp();
+    return;
+  }
+  // 3. Não está em "cardapio" → volta pra cardapio
+  var aba = _abaAtiva();
+  if(aba && aba !== 'cardapio' && typeof showTab === 'function'){
+    showTab('cardapio');
+    _pushHistoricoApp();
+    return;
+  }
+  // 4. Está na aba inicial — deixa o navegador sair (não empurra novo estado)
+});
+
+// Quando o app carrega, planta um estado inicial pra primeira "voltada" ser interceptada
+// Sem isso, o primeiro voltar já sairia do app.
+window.addEventListener('load', function(){
+  // Pequeno delay pra garantir que o navegador já registrou o estado inicial
+  setTimeout(function(){ _pushHistoricoApp(); }, 100);
+});
+
+// Toda vez que abrimos um modal manualmente, plantamos um estado novo pra ele.
+// Como há vários pontos onde modal é aberto (`.classList.add('show')`), uso um observador
+// ao invés de modificar cada chamada individual.
+(function(){
+  // MutationObserver detecta quando 'show' é adicionada em algum .modal
+  var observer = new MutationObserver(function(mutations){
+    mutations.forEach(function(m){
+      if(m.type === 'attributes' && m.attributeName === 'class'){
+        var el = m.target;
+        if(el.classList && el.classList.contains('modal') && el.classList.contains('show')){
+          // Modal acabou de abrir — empurra estado pra interceptar próximo voltar
+          // (só se o último estado não for de modal, pra não duplicar)
+          var st = history.state;
+          if(!st || !st.modalAberto){
+            try{ history.pushState({pdvBavaroState: Date.now(), modalAberto: true}, '', ''); }catch(e){}
+          }
+        }
+      }
+    });
+  });
+  // Observa todos os elementos .modal no DOM
+  function ativarObserver(){
+    document.querySelectorAll('.modal').forEach(function(m){
+      observer.observe(m, { attributes: true, attributeFilter: ['class'] });
+    });
+    // Também observa o confirm overlay
+    var conf = document.getElementById('confirm-overlay');
+    if(conf){
+      var obsConf = new MutationObserver(function(muts){
+        muts.forEach(function(mt){
+          if(mt.attributeName === 'class' && conf.classList.contains('show')){
+            var st = history.state;
+            if(!st || !st.confirmAberto){
+              try{ history.pushState({pdvBavaroState: Date.now(), confirmAberto: true}, '', ''); }catch(e){}
+            }
+          }
+        });
+      });
+      obsConf.observe(conf, { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ativarObserver);
+  } else {
+    ativarObserver();
+  }
+})();
 
 </script>
 

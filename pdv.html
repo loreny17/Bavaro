@@ -3581,6 +3581,13 @@ function _agruparItens(itens, tipo){
       grupos.push(Object.assign({}, it));
       return;
     }
+    // Itens com divisão PARCIALMENTE paga: nunca agrupa (cada um tem estado próprio)
+    var temDivisaoParcial = it.divisao && it.divisao.total > 1
+      && (it.divisao.pagas||0) > 0 && (it.divisao.pagas||0) < it.divisao.total;
+    if(temDivisaoParcial){
+      grupos.push(Object.assign({}, it));
+      return;
+    }
     var chave;
     if(tipo === 'fechamento'){
       // Fechamento: agrupa tudo do mesmo item + mesmo status (pago/aberto)
@@ -4291,13 +4298,17 @@ function gerarCupomContaFinal(conta){
 
   itensValidos.forEach(function(it){
     var ehPago = it.status === 'pago' || it.pagamentoId;
+    // Detecção: item dividido com pagamentos parciais (1 ou + partes pagas, mas nem todas)
+    var temDivisaoParcial = it.divisao && it.divisao.total > 1
+      && (it.divisao.pagas||0) > 0 && (it.divisao.pagas||0) < it.divisao.total;
     s += _aplicarEstilo(estItens);
     var ehKg = it.tipoVenda === 'kg' && it.peso;
     var nome = ehKg
       ? '1x ' + (it.nome||'').toUpperCase()
       : (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
-    // Marca [PAGO] após o nome se já foi pago
-    var marcaPago = ehPago ? ' [PAGO]' : '';
+    // Marca [PAGO] após o nome se já foi pago.
+    // Mas se está parcialmente dividido, não marca PAGO (porque ainda tem partes em aberto).
+    var marcaPago = (ehPago && !temDivisaoParcial) ? ' [PAGO]' : '';
     var preco = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
     var precoStr = 'R$ ' + formatarPreco(preco);
     var fatorL = (estItens.tamanho === 'grande' || estItens.tamanho === 'largo' || estItens.tamanho === 'extra') ? 2 : 1;
@@ -4317,6 +4328,27 @@ function gerarCupomContaFinal(conta){
       var indKg = estAdc.indentar !== false ? '  ' : '';
       var pesoStr = (it.peso < 1000) ? it.peso + 'g' : (it.peso/1000).toFixed(3).replace('.', ',') + 'kg';
       s += indKg + pesoStr + (it.precoBase ? ' x R$ ' + formatarPreco(it.precoBase) + '/kg' : '') + '\n';
+      s += _resetarEstilo();
+    }
+    // ─── PARTES DA DIVISÃO (item parcialmente pago) ───
+    if(temDivisaoParcial){
+      s += _aplicarEstilo(estAdc);
+      var indParte = estAdc.indentar !== false ? '  ' : '';
+      var totalP = it.divisao.total;
+      var pagasP = it.divisao.pagas||0;
+      var valorP = it.divisao.valorPorParte || (preco / totalP);
+      for(var p = 0; p < totalP; p++){
+        var parteNum = (p+1) + ' de ' + totalP;
+        var statusParte = p < pagasP ? '[PAGO]' : '';
+        var labelParte = indParte + 'Parte ' + parteNum + (statusParte ? ' ' + statusParte : '');
+        var valorParteStr = 'R$ ' + formatarPreco(valorP);
+        var espacoP = Lefetivo - labelParte.length - valorParteStr.length;
+        if(espacoP < 1){
+          s += labelParte + '\n' + valorParteStr + '\n';
+        } else {
+          s += labelParte + new Array(espacoP+1).join(' ') + valorParteStr + '\n';
+        }
+      }
       s += _resetarEstilo();
     }
     // OBS: observações foram removidas do cupom de fechamento.

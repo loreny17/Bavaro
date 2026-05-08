@@ -3544,6 +3544,8 @@ var _fecharConta = null;
 var _fecharModo = 'tudo';
 var _fecharOcultarPagos = false;
 var _fecharSelecaoItens = {};
+// Seleção de fragmentos (item dividido): {itemKey: [0,2]} = parte 0 e 2 do item marcadas
+var _fecharSelecaoFragmentos = {};
 var _fecharUnsub = null;
 
 function abrirFecharConta(num){
@@ -3601,18 +3603,60 @@ function renderFecharConta(){
     itensVisiveis.forEach(function(it){
       var pago = it.status === 'pago';
       var nomeStyle = pago ? 'text-decoration:line-through;opacity:0.55;' : '';
+      var valorTotal = (it.preco||0)*(it.qtd||1);
+
+      // ══ ITEM DIVIDIDO: renderiza fragmentos individuais ══
+      if(it.divisao && it.divisao.total > 1 && _fecharModo === 'itens' && !pago){
+        var div = it.divisao;
+        var partesPagas = div.pagas || 0;
+        var partesAbertas = div.total - partesPagas;
+        // Header do item com info de divisão
+        html += '<div style="background:rgba(212,168,67,0.04);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:10px;margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+          '<div style="flex:1;">'+
+            '<div style="font-size:0.84rem;font-weight:600;">'+esc((it.qtd||1)+'x '+it.nome)+'</div>'+
+            '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;">⚖️ Dividido em '+div.total+' partes • '+partesPagas+' já pagas</div>'+
+          '</div>'+
+          '<button onclick="event.stopPropagation();desfazerDivisao(\''+it.itemKey+'\')" title="Desfazer divisão" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:4px 9px;border-radius:6px;font-size:0.7rem;cursor:pointer;font-family:inherit;">↺ Unir</button>'+
+        '</div>';
+        // Lista os fragmentos como checkbox individual
+        var fragsMarcados = _fecharSelecaoFragmentos[it.itemKey] || [];
+        for(var f = 0; f < div.total; f++){
+          var jaPaga = f < partesPagas;
+          var fragMarcado = fragsMarcados.indexOf(f) >= 0;
+          var clickFrag = !jaPaga;
+          var checkF = jaPaga
+            ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>'
+            : '<div class="item-pgto-check '+(fragMarcado?'checked':'')+'" style="margin-right:8px;">'+(fragMarcado?'✓':'')+'</div>';
+          var styleFrag = jaPaga ? 'opacity:0.55;text-decoration:line-through;' : (clickFrag?'cursor:pointer;':'');
+          html += '<div class="item-pgto" style="padding:6px 8px;background:var(--surface);border-radius:7px;margin-bottom:4px;'+styleFrag+'" '+(clickFrag?'onclick="toggleFragmento(\''+it.itemKey+'\','+f+')"':'')+'>'+
+            checkF+
+            '<div style="flex:1;font-size:0.78rem;">Parte '+(f+1)+' de '+div.total+(jaPaga?' (paga)':'')+'</div>'+
+            '<div style="font-family:Bebas Neue,sans-serif;color:'+(jaPaga?'var(--muted)':'var(--accent)')+';font-size:0.95rem;">R$ '+fmtPreco(div.valorPorParte)+'</div>'+
+          '</div>';
+        }
+        html += '</div>';
+        return; // não renderiza o item normal
+      }
+
+      // ══ ITEM NORMAL ══
       var marcado = !!_fecharSelecaoItens[it.itemKey];
       var clickable = (_fecharModo === 'itens' && !pago);
       var checkboxHtml = clickable
         ? '<div class="item-pgto-check '+(marcado?'checked':'')+'" style="margin-right:8px;">'+(marcado?'✓':'')+'</div>'
         : (pago ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>' : '<span style="width:30px;display:inline-block;"></span>');
+      // Botão "÷" só pra itens não pagos no modo "pagar por itens"
+      var btnDividir = (clickable && (it.preco||0) > 0)
+        ? '<button onclick="event.stopPropagation();abrirModalDividirItem(\''+it.itemKey+'\')" title="Dividir item" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px;">÷</button>'
+        : '';
       html += '<div class="item-pgto" style="'+(clickable?'cursor:pointer;':'')+'" '+(clickable?'onclick="toggleItemSelecao(\''+it.itemKey+'\')"':'')+'>'+
         checkboxHtml+
         '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
           esc((it.qtd||1)+'x '+it.nome)+
           (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
         '</div>'+
-        '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco((it.preco||0)*(it.qtd||1))+'</div>'+
+        '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>'+
+        btnDividir+
       '</div>';
     });
     html += '</div>';
@@ -3680,7 +3724,8 @@ function renderFecharConta(){
     } else if(_fecharModo === 'parcial'){
       btnsHtml += '<button class="f-btn" style="flex:1.6;background:#7c5e1e;color:#fff;" onclick="abrirPagamentoParcial()">💵 Receber valor</button>';
     } else if(_fecharModo === 'itens'){
-      var algumSelec = Object.keys(_fecharSelecaoItens).some(function(k){ return _fecharSelecaoItens[k]; });
+      var algumSelec = Object.keys(_fecharSelecaoItens).some(function(k){ return _fecharSelecaoItens[k]; })
+        || Object.keys(_fecharSelecaoFragmentos).some(function(k){ return (_fecharSelecaoFragmentos[k]||[]).length > 0; });
       btnsHtml += '<button class="f-btn" style="flex:1.6;background:#7c5e1e;color:#fff;'+(algumSelec?'':'opacity:0.4;pointer-events:none;')+'" onclick="confirmarPagarPorItens()">✓ Pagar selecionados</button>';
     }
   } else {
@@ -3696,6 +3741,158 @@ function toggleItemSelecao(itemKey){
   if(_fecharSelecaoItens[itemKey]) delete _fecharSelecaoItens[itemKey];
   else _fecharSelecaoItens[itemKey] = true;
   renderFecharConta();
+}
+
+// ═══ DIVISÃO DE ITEM POR N PESSOAS ═══
+function toggleFragmento(itemKey, fragIdx){
+  if(!_fecharSelecaoFragmentos[itemKey]) _fecharSelecaoFragmentos[itemKey] = [];
+  var arr = _fecharSelecaoFragmentos[itemKey];
+  var i = arr.indexOf(fragIdx);
+  if(i >= 0) arr.splice(i, 1);
+  else arr.push(fragIdx);
+  if(arr.length === 0) delete _fecharSelecaoFragmentos[itemKey];
+  renderFecharConta();
+}
+
+function abrirModalDividirItem(itemKey){
+  var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
+  if(!it){ showToast('Item não encontrado','#f87171'); return; }
+  var valorTotal = (it.preco||0)*(it.qtd||1);
+  var ex = document.getElementById('modal-dividir');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-dividir';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:380px;border-radius:18px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo">DIVIDIR ITEM</div>'+
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-dividir\').remove()">×</button>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-bottom:14px;">'+
+          '<div style="font-size:0.84rem;font-weight:600;">'+esc((it.qtd||1)+'x '+it.nome)+'</div>'+
+          '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.5rem;margin-top:3px;">R$ '+fmtPreco(valorTotal)+'</div>'+
+        '</div>'+
+        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">Em quantas partes dividir?</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;" id="dividir-opcoes-grid"></div>'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+          '<span style="font-size:0.78rem;color:var(--muted);">Outro número:</span>'+
+          '<input type="number" id="dividir-custom" min="2" max="20" placeholder="Ex: 7" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:8px;padding:8px 12px;font-size:0.95rem;outline:none;">'+
+        '</div>'+
+        '<div id="dividir-preview" style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.25);border-radius:10px;padding:12px;text-align:center;margin-top:8px;display:none;">'+
+          '<div style="font-size:0.74rem;color:var(--muted);">Cada pessoa paga</div>'+
+          '<div id="dividir-valor-parte" style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.6rem;margin-top:3px;">R$ —</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-footer">'+
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-dividir\').remove()">Cancelar</button>'+
+        '<button class="f-btn" style="flex:1.4;" id="btn-aplicar-divisao" onclick="aplicarDivisao(\''+itemKey+'\')" disabled style="opacity:0.4;pointer-events:none;">Aplicar</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  // Botões padrão de divisão
+  var grid = document.getElementById('dividir-opcoes-grid');
+  [2, 3, 4, 5, 6, 7, 8, 10].forEach(function(n){
+    var b = document.createElement('button');
+    b.className = 'dividir-num-btn';
+    b.textContent = '÷' + n;
+    b.style.cssText = 'background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);padding:14px 8px;border-radius:10px;font-family:Bebas Neue,sans-serif;font-size:1.3rem;cursor:pointer;font-weight:700;letter-spacing:0.05em;';
+    b.dataset.num = n;
+    b.onclick = (function(num){ return function(){ selecionarDivisao(num, valorTotal); }; })(n);
+    grid.appendChild(b);
+  });
+  document.getElementById('dividir-custom').addEventListener('input', function(){
+    var n = parseInt(this.value, 10);
+    if(n >= 2 && n <= 50){
+      selecionarDivisao(n, valorTotal);
+    } else {
+      _dividirNumEscolhido = 0;
+      atualizarBotaoAplicar();
+    }
+  });
+}
+var _dividirNumEscolhido = 0;
+function selecionarDivisao(num, valorTotal){
+  _dividirNumEscolhido = num;
+  // Highlight
+  document.querySelectorAll('.dividir-num-btn').forEach(function(b){
+    var ativo = parseInt(b.dataset.num, 10) === num;
+    b.style.background = ativo ? 'var(--accent)' : 'var(--surface2)';
+    b.style.color = ativo ? '#000' : 'var(--text)';
+    b.style.borderColor = ativo ? 'var(--accent)' : 'var(--border2)';
+  });
+  // Limpa custom se foi clique em botão padrão
+  var custom = document.getElementById('dividir-custom');
+  if(custom && parseInt(custom.value,10) !== num) custom.value = '';
+  // Mostra preview
+  var preview = document.getElementById('dividir-preview');
+  var valorParte = valorTotal / num;
+  document.getElementById('dividir-valor-parte').textContent = 'R$ ' + fmtPreco(valorParte);
+  preview.style.display = 'block';
+  atualizarBotaoAplicar();
+}
+function atualizarBotaoAplicar(){
+  var btn = document.getElementById('btn-aplicar-divisao');
+  if(!btn) return;
+  if(_dividirNumEscolhido >= 2){
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = '';
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.4';
+    btn.style.pointerEvents = 'none';
+  }
+}
+
+function aplicarDivisao(itemKey){
+  if(_dividirNumEscolhido < 2) return;
+  var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
+  if(!it) return;
+  var valorTotal = (it.preco||0)*(it.qtd||1);
+  var valorPorParte = valorTotal / _dividirNumEscolhido;
+  var divisao = {
+    total: _dividirNumEscolhido,
+    pagas: 0,
+    valorPorParte: parseFloat(valorPorParte.toFixed(2))
+  };
+  var itensAtualizados = _fecharConta.itens.map(function(x){
+    if(x.itemKey === itemKey) return Object.assign({}, x, { divisao: divisao });
+    return x;
+  });
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+    itens: itensAtualizados, atualizadoEm: Date.now()
+  }).then(function(){
+    showToast('✓ Item dividido em ' + _dividirNumEscolhido + ' partes','#4ade80');
+    var m = document.getElementById('modal-dividir'); if(m) m.remove();
+    _dividirNumEscolhido = 0;
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function desfazerDivisao(itemKey){
+  var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
+  if(!it || !it.divisao) return;
+  if((it.divisao.pagas||0) > 0){
+    showToast('Já existem partes pagas — não dá pra desfazer','#f7a34f');
+    return;
+  }
+  if(!confirm('Desfazer a divisão deste item?')) return;
+  var itensAtualizados = _fecharConta.itens.map(function(x){
+    if(x.itemKey === itemKey){
+      var copia = Object.assign({}, x);
+      delete copia.divisao;
+      return copia;
+    }
+    return x;
+  });
+  // Limpa fragmentos selecionados desse item
+  delete _fecharSelecaoFragmentos[itemKey];
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+    itens: itensAtualizados, atualizadoEm: Date.now()
+  }).then(function(){
+    showToast('↺ Divisão desfeita','#4ade80');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 function fecharModalFechar(){
   document.getElementById('modal-fechar-conta').classList.remove('show');
@@ -3727,28 +3924,78 @@ function confirmarPagarTudo(){
 }
 
 function confirmarPagarPorItens(){
-  var selecionados = Object.keys(_fecharSelecaoItens).filter(function(k){ return _fecharSelecaoItens[k]; });
-  if(!selecionados.length){ showToast('Selecione itens','#f7a34f'); return; }
+  var itensSelecionados = Object.keys(_fecharSelecaoItens).filter(function(k){ return _fecharSelecaoItens[k]; });
+  // Conta também os fragmentos selecionados
+  var fragsKeys = Object.keys(_fecharSelecaoFragmentos).filter(function(k){
+    return (_fecharSelecaoFragmentos[k]||[]).length > 0;
+  });
+  if(!itensSelecionados.length && !fragsKeys.length){ showToast('Selecione itens ou frações','#f7a34f'); return; }
   var pagamentoId = 'p_' + Date.now() + '_' + Math.random().toString(36).substring(2,6);
   var totalItens = 0;
+  var fragsPagosCount = 0;
+
   var itensAtualizados = (_fecharConta.itens||[]).map(function(it){
-    if(selecionados.indexOf(it.itemKey) >= 0 && it.status !== 'pago'){
+    // Caso 1: item INTEIRO selecionado
+    if(itensSelecionados.indexOf(it.itemKey) >= 0 && it.status !== 'pago'){
+      // Se o item estava dividido com algumas partes pagas, paga o restante
+      if(it.divisao && it.divisao.total > 1){
+        var faltam = it.divisao.total - (it.divisao.pagas||0);
+        if(faltam > 0){
+          totalItens += it.divisao.valorPorParte * faltam;
+          return Object.assign({}, it, {
+            status: 'pago', pagamentoId: pagamentoId,
+            divisao: Object.assign({}, it.divisao, { pagas: it.divisao.total })
+          });
+        }
+        return it;
+      }
+      // Item normal
       totalItens += (it.preco||0)*(it.qtd||1);
       return Object.assign({}, it, {status:'pago', pagamentoId:pagamentoId});
     }
+    // Caso 2: item DIVIDIDO com fragmentos selecionados
+    var fragsMarcados = _fecharSelecaoFragmentos[it.itemKey];
+    if(fragsMarcados && fragsMarcados.length && it.divisao && it.divisao.total > 1){
+      var qtdNovasPartes = fragsMarcados.length;
+      var novasPagas = (it.divisao.pagas||0) + qtdNovasPartes;
+      totalItens += it.divisao.valorPorParte * qtdNovasPartes;
+      fragsPagosCount += qtdNovasPartes;
+      // Se completou todas as partes, marca status pago
+      if(novasPagas >= it.divisao.total){
+        return Object.assign({}, it, {
+          status:'pago', pagamentoId:pagamentoId,
+          divisao: Object.assign({}, it.divisao, { pagas: it.divisao.total })
+        });
+      }
+      // Senão, só atualiza o contador
+      return Object.assign({}, it, {
+        divisao: Object.assign({}, it.divisao, { pagas: novasPagas })
+      });
+    }
     return it;
   });
+
+  if(totalItens <= 0){ showToast('Nada para pagar','#f7a34f'); return; }
   var taxa = totalItens * 0.10;
   var valorPago = totalItens + taxa;
-  var pagamento = {id:pagamentoId, valor:valorPago, metodo:'dinheiro', tipo:'itens', itensIds:selecionados, pagoEm:Date.now(), recebidoPor:_nomeGarcom};
+  var pagamento = {
+    id: pagamentoId, valor: valorPago, metodo: 'dinheiro',
+    tipo: 'itens',
+    itensIds: itensSelecionados,
+    fragmentosIds: fragsKeys.length ? _fecharSelecaoFragmentos : {},
+    pagoEm: Date.now(), recebidoPor: _nomeGarcom
+  };
   var pagamentos = (_fecharConta.pagamentos||[]).concat([pagamento]);
   var novaTotais = calcularTotaisConta({itens:itensAtualizados, pagamentos:pagamentos});
   fbDb.collection('contas_mesa').doc(_fecharContaId).update({
     itens:itensAtualizados, pagamentos:pagamentos,
     pagoTotal:novaTotais.pagoTotal, restante:novaTotais.restante, atualizadoEm:Date.now()
   }).then(function(){
-    showToast('✓ R$ ' + fmtPreco(valorPago) + ' recebido','#4ade80');
+    var msg = '✓ R$ ' + fmtPreco(valorPago) + ' recebido';
+    if(fragsPagosCount) msg += ' ('+fragsPagosCount+' parte'+(fragsPagosCount>1?'s':'')+')';
+    showToast(msg,'#4ade80');
     _fecharSelecaoItens = {};
+    _fecharSelecaoFragmentos = {};
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
@@ -4133,38 +4380,79 @@ function verContaDetalhe(c){
 
 function restaurarConta(){
   if(!_contaDetalheAtual) return;
-  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA conta será reaberta e os pedidos voltarão.')) return;
+  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA mesa voltará a aparecer no mapa com os itens e pagamentos preservados.\nNADA será reimpresso.')) return;
   var c = _contaDetalheAtual;
   var mesaNum = parseInt(c.mesa) || c.mesa;
-  // Recria pedido único com todos os itens da conta
-  var itensRestaurados = (c.itens||[]).map(function(it){
-    return {
-      id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
-      selecoes: it.selecoes || [],
-      precoBase: it.precoBase || it.preco,
-      extras: it.extras || 0
-    };
-  });
-  if(!itensRestaurados.length){
+  if(!(c.itens||[]).length){
     showToast('❌ Conta sem itens, não é possível restaurar','#f87171');
     return;
   }
-  var pedido = {
+  var agora = Date.now();
+  // 1. Recria pedido com flag impresso=true (não vai imprimir automaticamente no PDV)
+  // Isso é só pra manter rastro/histórico. O importante é a conta_mesa.
+  var itensPedido = (c.itens||[])
+    .filter(function(it){ return it.status !== 'cancelado'; })
+    .map(function(it){
+      return {
+        id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
+        selecoes: it.selecoes || [],
+        precoBase: it.precoBase || it.preco,
+        extras: it.extras || 0,
+        status: it.status || 'ativo'
+      };
+    });
+  var pedidoData = {
     garcom: c.garcom || _nomeGarcom,
     mesa: mesaNum,
     restauranteId: c.restauranteId || _restauranteId,
     tenantId: c.tenantId || _tenantId,
-    status: 'preparo',
-    criadoEm: Date.now(),
-    itens: itensRestaurados,
-    total: c.subtotal || itensRestaurados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0),
+    status: 'entregue',          // já foi consumido na origem
+    criadoEm: c.abertaEm || agora,
+    atualizadoEm: agora,
+    itens: itensPedido,
+    total: c.subtotal || itensPedido.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0),
+    impresso: true,              // ⚠️ EVITA REIMPRESSÃO no PDV
     restaurado: true,
     contaOrigem: c.id
   };
-  fbDb.collection('pedidos').add(pedido).then(function(){
+  // 2. Cria conta_mesa com status 'aberta' preservando itens, pagamentos e status
+  fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
+    // Recria a conta_mesa com tudo preservado
+    var contaMesaData = {
+      mesa: mesaNum,
+      restauranteId: c.restauranteId || _restauranteId,
+      tenantId: c.tenantId || _tenantId,
+      garcomPrincipal: c.garcom || _nomeGarcom,
+      status: 'aberta',
+      abertaEm: c.abertaEm || agora,
+      atualizadoEm: agora,
+      tipoConta: c.tipoConta || 'mesa',
+      // Itens com pedidoId apontando pro novo pedido restaurado
+      itens: (c.itens||[]).map(function(it){
+        var copia = Object.assign({}, it);
+        // Atualiza pedidoId pra apontar pro novo pedido (caso o original tenha sido apagado)
+        copia.pedidoId = refPed.id;
+        // Garante que tem itemKey (criar se faltar)
+        if(!copia.itemKey){
+          copia.itemKey = refPed.id + '_' + Math.random().toString(36).substring(2,8);
+        }
+        return copia;
+      }),
+      pagamentos: c.pagamentos || [],
+      subtotal: c.subtotal || 0,
+      taxa10: c.taxa10 || 0,
+      total: c.total || 0,
+      pagoTotal: c.pagoTotal || 0,
+      restante: c.restante || 0,
+      restaurada: true,
+      contaOriginalId: c.id
+    };
+    return fbDb.collection('contas_mesa').add(contaMesaData);
+  }).then(function(){
+    // 3. Remove a conta_fechada (sai do histórico)
     return fbDb.collection('contas_fechadas').doc(c.id).delete();
   }).then(function(){
-    showToast('✅ Mesa ' + c.mesa + ' restaurada!','#4ade80');
+    showToast('✅ Mesa ' + c.mesa + ' restaurada (sem reimprimir)','#4ade80');
     document.getElementById('modal-conta-detalhe').classList.remove('show');
     document.getElementById('modal-historico').classList.remove('show');
   }).catch(function(e){

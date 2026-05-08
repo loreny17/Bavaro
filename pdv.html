@@ -3544,6 +3544,52 @@ function _resetarEstilo(){
   return escposSize('normal') + escposBold(false) + escposUnderline(false) + escposLeft();
 }
 
+// ─── AGRUPAMENTO DE ITENS ───
+// Junta itens iguais somando as quantidades. A "chave" muda conforme o tipo de cupom:
+// - 'pedido': mesmo id + obs + selecoes + status (itens com obs ficam separados pra cozinha ver)
+// - 'fechamento': mesmo id + status + ehKg + tipoVenda (ignora obs e adicionais — vão pra cozinha, não pro fechamento)
+// Itens KG (com peso) NUNCA agrupam (cada porção tem peso diferente)
+// Itens cancelados NUNCA agrupam (mantém individual pra histórico)
+function _agruparItens(itens, tipo){
+  if(!Array.isArray(itens)) return [];
+  var grupos = [];
+  var mapa = {}; // chave -> índice em grupos
+  itens.forEach(function(it){
+    // Itens KG ou cancelados ou pagamento já feito: não agrupa
+    if((it.tipoVenda === 'kg' && it.peso) || it.status === 'cancelado'){
+      grupos.push(Object.assign({}, it));
+      return;
+    }
+    var chave;
+    if(tipo === 'fechamento'){
+      // Fechamento: agrupa tudo do mesmo item + mesmo status (pago/aberto)
+      // Ignora obs e seleções (não vão sair no cupom)
+      var statusBase = (it.status === 'pago' || it.pagamentoId) ? 'pago' : 'aberto';
+      chave = (it.id||'') + '|' + statusBase + '|' + (it.preco||0);
+    } else {
+      // Pedido/cozinha: itens com obs ou seleções ficam separados (cozinha precisa de cada um)
+      var temObs = !!(it.obs && it.obs.trim());
+      var temSelecoes = (it.selecoes||[]).length > 0;
+      if(temObs || temSelecoes){
+        // Não agrupa — cada um sai numa linha separada
+        grupos.push(Object.assign({}, it));
+        return;
+      }
+      var statusBase2 = (it.status === 'pago' || it.pagamentoId) ? 'pago' : 'aberto';
+      chave = (it.id||'') + '|' + statusBase2 + '|' + (it.preco||0);
+    }
+    if(mapa[chave] !== undefined){
+      // Soma quantidade no grupo existente
+      var idx = mapa[chave];
+      grupos[idx].qtd = (grupos[idx].qtd || 1) + (it.qtd || 1);
+    } else {
+      mapa[chave] = grupos.length;
+      grupos.push(Object.assign({}, it));
+    }
+  });
+  return grupos;
+}
+
 function pad(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return s + new Array(n-s.length+1).join(' '); }
 function padR(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return new Array(n-s.length+1).join(' ') + s; }
 function linha(c, n){ return new Array(n+1).join(c||'-'); }
@@ -3572,6 +3618,8 @@ function gerarCupomPedido(pedido, modelo){
   // Filtra itens do modelo
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
   if(!itensFiltrados.length){ return null; }
+  // Agrupa iguais SEM observação/seleções (cozinha precisa ver as variantes)
+  itensFiltrados = _agruparItens(itensFiltrados, 'pedido');
 
   // Estilos: prefere os do modelo, cai no global como fallback
   var estCab = _estiloDoModelo(modelo, 'estiloCabecalho');
@@ -4201,6 +4249,9 @@ function gerarCupomContaFinal(conta){
 
   // Filtra: NÃO inclui itens cancelados no fechamento (você pediu)
   var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  // Agrupa TUDO igual (mesmo id + mesmo status) — você pediu pra agrupar no fechamento
+  // mesmo se tinham observação (porque obs não vai sair no cupom mesmo)
+  itensValidos = _agruparItens(itensValidos, 'fechamento');
   // Conta quantos pagos pra mostrar legenda no rodapé
   var qtdPagos = itensValidos.filter(function(it){ return it.status === 'pago' || it.pagamentoId; }).length;
   var temPagosSeparados = qtdPagos > 0 && qtdPagos < itensValidos.length;
@@ -4287,6 +4338,8 @@ function gerarCupomReimpressao(pedido, modelo, motivo){
   // Filtra itens deste modelo (categorias ou itens)
   var itensFiltrados = filtrarItensPorModelo(pedido.itens||[], modelo);
   if(!itensFiltrados.length) return null; // não imprime se nenhum item desse modelo
+  // Agrupa iguais SEM observação/seleções (cozinha precisa ver as variantes)
+  itensFiltrados = _agruparItens(itensFiltrados, 'pedido');
 
   // Estilos da reimpressão: prefere os do modelo, fallback no global
   var er = _estiloDoModelo(modelo, 'estiloReimpressao');

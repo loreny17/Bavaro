@@ -3546,11 +3546,15 @@ var _fecharOcultarPagos = false;
 var _fecharSelecaoItens = {};
 // Seleção de fragmentos (item dividido): {itemKey: [0,2]} = parte 0 e 2 do item marcadas
 var _fecharSelecaoFragmentos = {};
+// Quantidade de pessoas pra dividir o total no modo "Pagar tudo" (1 = sem dividir)
+var _fecharDividirPor = 1;
 var _fecharUnsub = null;
 
 function abrirFecharConta(num){
   _fecharMesaNum = num;
   _fecharSelecaoItens = {};
+  _fecharSelecaoFragmentos = {};
+  _fecharDividirPor = 1;
   _fecharModo = 'tudo';
   _fecharOcultarPagos = false;
   var conta = _contasMesaCache[String(num)];
@@ -3686,7 +3690,23 @@ function renderFecharConta(){
       '<button class="fechar-modo-btn '+(_fecharModo==='parcial'?'active':'')+'" onclick="setFecharModo(\'parcial\')">Valor parcial</button>'+
       '<button class="fechar-modo-btn '+(_fecharModo==='itens'?'active':'')+'" onclick="setFecharModo(\'itens\')">Por itens</button>'+
     '</div>';
-    if(_fecharModo === 'itens'){
+    if(_fecharModo === 'tudo'){
+      // Barra "Dividir por: − N +" sempre visível no modo Pagar tudo
+      var qtdDiv = _fecharDividirPor || 1;
+      var valorPorPessoa = totais.restante / qtdDiv;
+      html += '<div class="fechar-bloco" style="display:flex;align-items:center;gap:12px;padding:14px;">'+
+        '<div style="flex:1;">'+
+          '<div style="font-size:0.84rem;font-weight:600;color:var(--text);">Dividir por:</div>'+
+          (qtdDiv > 1 ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+qtdDiv+' × R$ '+fmtPreco(valorPorPessoa)+'</div>' : '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Sem dividir</div>')+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;">'+
+          '<button onclick="alterarDividirPor(-1)" style="width:36px;height:36px;border-radius:50%;background:var(--surface3);border:1.5px solid var(--border2);color:var(--text);font-size:1.4rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;'+(qtdDiv<=1?'opacity:0.3;pointer-events:none;':'')+'">−</button>'+
+          '<div style="min-width:36px;text-align:center;font-family:Bebas Neue,sans-serif;font-size:1.4rem;color:var(--accent);">'+qtdDiv+'</div>'+
+          '<button onclick="alterarDividirPor(1)" style="width:36px;height:36px;border-radius:50%;background:#22c55e;border:none;color:#fff;font-size:1.4rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;font-weight:700;">+</button>'+
+        '</div>'+
+        '<div style="font-family:Bebas Neue,sans-serif;font-size:1.3rem;color:var(--accent);min-width:90px;text-align:right;">R$ '+fmtPreco(valorPorPessoa)+'</div>'+
+      '</div>';
+    } else if(_fecharModo === 'itens'){
       var totalSelecionado = 0;
       (c.itens||[]).forEach(function(it){
         if(_fecharSelecaoItens[it.itemKey] && it.status!=='pago'){
@@ -3720,7 +3740,11 @@ function renderFecharConta(){
   btnsHtml += '<button class="f-btn secondary" style="flex:1;" onclick="fecharModalFechar()">Voltar</button>';
   if(totais.restante > 0.01){
     if(_fecharModo === 'tudo'){
-      btnsHtml += '<button class="f-btn" style="flex:1.6;background:#7c5e1e;color:#fff;" onclick="confirmarPagarTudo()">💵 Pagar R$ '+fmtPreco(totais.restante)+'</button>';
+      var qtdDivBtn = _fecharDividirPor || 1;
+      var labelBtn = (qtdDivBtn > 1)
+        ? '💵 Pagar R$ '+fmtPreco(totais.restante)+' (÷'+qtdDivBtn+')'
+        : '💵 Pagar R$ '+fmtPreco(totais.restante);
+      btnsHtml += '<button class="f-btn" style="flex:1.6;background:#7c5e1e;color:#fff;" onclick="confirmarPagarTudo()">'+labelBtn+'</button>';
     } else if(_fecharModo === 'parcial'){
       btnsHtml += '<button class="f-btn" style="flex:1.6;background:#7c5e1e;color:#fff;" onclick="abrirPagamentoParcial()">💵 Receber valor</button>';
     } else if(_fecharModo === 'itens'){
@@ -3904,8 +3928,21 @@ function fecharModalFechar(){
 function confirmarPagarTudo(){
   var totais = calcularTotaisConta(_fecharConta);
   if(totais.restante <= 0.01) return;
-  // Abre modal perguntando se quer dividir antes de cobrar
-  abrirModalPagarTudoDividir(totais.restante);
+  // Cobra direto, considerando o divisor atual (1 = sem dividir)
+  var qtd = Math.max(1, _fecharDividirPor || 1);
+  if(qtd > 1){
+    _executarPagarTudo({tipoSubdiv: 'dividido', numPessoas: qtd, valorPorPessoa: totais.restante / qtd});
+  } else {
+    _executarPagarTudo({tipoSubdiv: null});
+  }
+  // Reset divisor após cobrar
+  _fecharDividirPor = 1;
+}
+
+// Altera quantidade de pessoas pra dividir (botões − +)
+function alterarDividirPor(delta){
+  _fecharDividirPor = Math.max(1, Math.min(50, (_fecharDividirPor||1) + delta));
+  renderFecharConta();
 }
 
 // Modal: pergunta se quer dividir o total entre N pessoas (B1 — cobra tudo de uma vez)

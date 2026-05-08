@@ -2013,18 +2013,10 @@ function executarCancelamentoPedidoInteiro(pedidoId){
       });
     }
   }).then(function(){
-    // Reimprime a comanda inteira (com itens riscados)
-    return fbDb.collection('comandos_impressao').add({
-      tipo: 'reimpressao',
-      restauranteId: _restauranteId,
-      pedidoId: pedidoId,
-      motivo: 'Cancelamento do pedido inteiro ('+nomesCancelados.length+' itens)',
-      solicitadoPor: _nomeGarcom,
-      solicitadoEm: agora
-    });
-  }).then(function(){
+    // Cancelamento concluído. Pergunta se quer reimprimir.
     showToast('✕ Pedido cancelado ('+nomesCancelados.length+' itens)','#f87171');
     var m = document.getElementById('modal-cancelar-pedido'); if(m) m.remove();
+    perguntarReimpressao(pedidoId, 'Cancelamento do pedido inteiro ('+nomesCancelados.length+' itens)');
   }).catch(function(e){
     showToast('❌ '+e.message,'#f87171');
   });
@@ -2193,19 +2185,55 @@ function executarCancelamento(pedidoId, idx){
       });
     }
   }).then(function(){
-    // Solicita REIMPRESSÃO da comanda completa (com itens riscados)
-    return fbDb.collection('comandos_impressao').add({
-      tipo: 'reimpressao',
-      restauranteId: _restauranteId,
-      pedidoId: pedidoId,
-      motivo: 'Cancelamento de item: ' + item.nome,
-      solicitadoPor: _nomeGarcom,
-      solicitadoEm: agora
-    });
-  }).then(function(){
-    showToast('✕ Item cancelado e reimpressão enviada','#f87171');
+    // Cancelamento concluído. Pergunta se quer reimprimir.
+    showToast('✕ Item cancelado','#f87171');
     var m = document.getElementById('modal-cancelar-item');
     if(m) m.remove();
+    perguntarReimpressao(pedidoId, 'Cancelamento de item: ' + item.nome);
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
+  });
+}
+
+// ── PERGUNTA SE QUER REIMPRIMIR (após cancelamento) ──
+function perguntarReimpressao(pedidoId, motivo){
+  var ex = document.getElementById('modal-pergunta-reimp');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-pergunta-reimp';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:380px;">'+
+      '<div class="modal-header">'+
+        '<div class="modal-titulo">REIMPRIMIR COMANDA?</div>'+
+      '</div>'+
+      '<div class="modal-body">'+
+        '<div style="font-size:0.92rem;color:var(--text);line-height:1.5;text-align:center;padding:6px 0;">'+
+          '🖨️ Deseja enviar uma reimpressão da comanda atualizada para a cozinha?'+
+        '</div>'+
+        '<div style="font-size:0.74rem;color:var(--muted);margin-top:10px;text-align:center;line-height:1.4;">'+
+          'A reimpressão mostra os itens cancelados riscados,<br>pra cozinha saber das mudanças.'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-footer">'+
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-pergunta-reimp\').remove()">Não, só cancelar</button>'+
+        '<button class="f-btn" style="flex:1.2;background:var(--accent);color:#000;font-weight:700;" onclick="executarReimpressaoAposCancelamento(\''+pedidoId+'\',\''+(motivo||'').replace(/'/g, "\\'")+'\')">🖨️ Sim, reimprimir</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function executarReimpressaoAposCancelamento(pedidoId, motivo){
+  fbDb.collection('comandos_impressao').add({
+    tipo: 'reimpressao',
+    restauranteId: _restauranteId,
+    pedidoId: pedidoId,
+    motivo: motivo || 'Reimpressão após cancelamento',
+    solicitadoPor: _nomeGarcom,
+    solicitadoEm: Date.now()
+  }).then(function(){
+    showToast('🖨️ Reimpressão enviada','#4ade80');
+    var m = document.getElementById('modal-pergunta-reimp'); if(m) m.remove();
   }).catch(function(e){
     showToast('❌ '+e.message,'#f87171');
   });
@@ -3774,8 +3802,22 @@ function renderFecharConta(){
     } else if(_fecharModo === 'itens'){
       var totalSelecionado = 0;
       (c.itens||[]).forEach(function(it){
-        if(_fecharSelecaoItens[it.itemKey] && it.status!=='pago'){
-          totalSelecionado += (it.preco||0)*(it.qtd||1);
+        if(it.status === 'pago' || it.status === 'cancelado') return;
+        // Item INTEIRO selecionado (marcou a linha inteira)
+        if(_fecharSelecaoItens[it.itemKey]){
+          // Se está dividido com partes pagas, soma só o que falta
+          if(it.divisao && it.divisao.total > 1){
+            var faltam = it.divisao.total - (it.divisao.pagas||0);
+            totalSelecionado += (it.divisao.valorPorParte||0) * faltam;
+          } else {
+            totalSelecionado += (it.preco||0)*(it.qtd||1);
+          }
+          return;
+        }
+        // FRAGMENTOS marcados (item dividido com algumas partes selecionadas)
+        var frags = _fecharSelecaoFragmentos[it.itemKey];
+        if(frags && frags.length && it.divisao && it.divisao.total > 1){
+          totalSelecionado += (it.divisao.valorPorParte||0) * frags.length;
         }
       });
       var taxaSelec = totalSelecionado * 0.10;

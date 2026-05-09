@@ -1042,12 +1042,16 @@ function atualizarResumoMesasAbertas(){
   if(!bloco || !totalEl || !qtdEl) return;
   var totalMesas = 0;
   var subtotalGeral = 0;
-  Object.keys(_contasMesaCache).forEach(function(k){
-    var c = _contasMesaCache[k];
-    if(!c || c.status !== 'aberta') return;
+  // Usa a estrutura _mesasOcupadas (já filtrada) em vez de _contasMesaCache (que tem mesas vazias).
+  // Mesas vazias (sem itens em aberto e sem pagamentos) não aparecem em _mesasOcupadas.
+  Object.keys(_mesasOcupadas || {}).forEach(function(numMesa){
+    var info = _mesasOcupadas[numMesa];
+    if(!info) return;
+    var conta = _contasMesaCache[numMesa];
+    if(!conta) return;
     totalMesas++;
     // Soma só os itens NÃO cancelados e NÃO pagos (o que ainda falta receber)
-    (c.itens||[]).forEach(function(it){
+    (conta.itens||[]).forEach(function(it){
       if(it.status === 'cancelado' || it.status === 'pago') return;
       // Considera divisão parcial: se algumas partes pagas, subtrai
       if(it.divisao && it.divisao.total > 1 && (it.divisao.pagas||0) > 0){
@@ -1058,12 +1062,40 @@ function atualizarResumoMesasAbertas(){
       }
     });
   });
-  if(totalMesas === 0){
+  // Inclui comandas avulsas também (que estão em _comandasAvulsas, não em _mesasOcupadas)
+  var totalComandas = 0;
+  (_comandasAvulsas || []).forEach(function(c){
+    if(c.status !== 'aberta') return;
+    var temItens = (c.itens||[]).some(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
+    var temPagto = (c.pagamentos||[]).length > 0;
+    if(!temItens && !temPagto) return;
+    totalComandas++;
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado' || it.status === 'pago') return;
+      if(it.divisao && it.divisao.total > 1 && (it.divisao.pagas||0) > 0){
+        var falta = it.divisao.total - it.divisao.pagas;
+        subtotalGeral += (it.divisao.valorPorParte || 0) * falta;
+      } else {
+        subtotalGeral += (it.preco || 0) * (it.qtd || 1);
+      }
+    });
+  });
+  var totalGeral = totalMesas + totalComandas;
+  if(totalGeral === 0){
     bloco.style.display = 'none';
     return;
   }
   bloco.style.display = '';
-  qtdEl.textContent = totalMesas + ' ' + (totalMesas === 1 ? 'mesa' : 'mesas');
+  // Mostra mesas + comandas (ex: "2 mesas + 1 comanda" ou só "2 mesas")
+  var label;
+  if(totalMesas > 0 && totalComandas > 0){
+    label = totalMesas + ' '+(totalMesas===1?'mesa':'mesas')+' + ' + totalComandas + ' '+(totalComandas===1?'comanda':'comandas');
+  } else if(totalComandas > 0){
+    label = totalComandas + ' ' + (totalComandas === 1 ? 'comanda' : 'comandas');
+  } else {
+    label = totalMesas + ' ' + (totalMesas === 1 ? 'mesa' : 'mesas');
+  }
+  qtdEl.textContent = label;
   totalEl.textContent = 'R$ ' + fmtPreco(subtotalGeral);
 }
 function fecharMenuLateral(){

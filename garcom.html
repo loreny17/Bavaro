@@ -984,6 +984,7 @@ document.addEventListener('DOMContentLoaded', function(){
 var _TOTAL_MESAS = 99;
 var _mesasOcupadas = {}; // {num: {contaId, garcom, abertaEm, count, total}}
 var _contasMesaCache = {}; // {num: contaCompleta}
+var _ultimoContaIdEscutado = null; // último contaId que está sendo escutado em escutarMeusPedidos
 var _comandasAvulsas = []; // [{id, cliente, ...contaCompleta}]
 var _abaAtual = 'mesas';
 
@@ -1198,6 +1199,16 @@ function escutarMesasOcupadas(){
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
     if(_abaAtual === 'comandas') renderComandas();
+    // Se o garçom está dentro de uma mesa e o contaId mudou (ex: cache atualizou após abrir mesa),
+    // refaz o listener de pedidos pra apontar pra conta correta.
+    if(_mesaAtiva !== null && _mesaAtiva !== undefined){
+      var contaAt = _contasMesaCache[String(_mesaAtiva)] || _contasMesaCache[_mesaAtiva];
+      var idNovo = contaAt ? contaAt.id : null;
+      if(idNovo !== _ultimoContaIdEscutado){
+        _ultimoContaIdEscutado = idNovo;
+        escutarMeusPedidos();
+      }
+    }
   }, function(){ renderMesas(); });
 }
 
@@ -1444,6 +1455,7 @@ function voltarParaMesas(){
     if(!confirm('Você tem itens no carrinho. Ao voltar, o carrinho será mantido.\nDeseja continuar?')) return;
   }
   _comandaSelecionada = null;
+  _ultimoContaIdEscutado = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('mesa-screen').classList.remove('hidden');
   if(_unsubPedidos){ _unsubPedidos(); _unsubPedidos = null; }
@@ -1578,11 +1590,22 @@ function iniciarListeners(){
 function escutarMeusPedidos(){
   // Só escuta se há uma mesa ativa (no pré-load isso é null)
   if(_mesaAtiva === null || _mesaAtiva === undefined) return;
+  // Pega o contaId atual (cada vez que a mesa abre/fecha, é uma conta diferente)
+  // Sem isso, puxaríamos pedidos antigos de quando a mesa estava fechada antes.
+  var contaAtual = _contasMesaCache[String(_mesaAtiva)] || _contasMesaCache[_mesaAtiva];
+  var contaIdAtual = contaAtual ? contaAtual.id : null;
   if(_unsubPedidos) _unsubPedidos();
-  // Escuta TODOS os pedidos da mesa (qualquer garçom pode ver e editar)
+  if(!contaIdAtual){
+    // Sem conta aberta — limpa lista e não escuta
+    _meusPedidos = [];
+    if(typeof renderPedidos === 'function') renderPedidos();
+    if(typeof atualizarNavPedidos === 'function') atualizarNavPedidos();
+    return;
+  }
+  // Filtra pelo contaId atual (não pelo número da mesa, pra não puxar histórico de contas antigas)
   _unsubPedidos = fbDb.collection('pedidos')
     .where('restauranteId','==',_restauranteId)
-    .where('mesa','==',parseInt(_mesaAtiva)||_mesaAtiva)
+    .where('contaId','==', contaIdAtual)
     .onSnapshot(function(snap){
       _meusPedidos = [];
       snap.forEach(function(d){
@@ -4600,11 +4623,21 @@ function abrirVerPedidosMesa(num){
   document.body.appendChild(mod);
   pushHistory('ver-pedidos:'+num);
 
-  // Escuta pedidos da mesa em tempo real
+  // Escuta pedidos da mesa em tempo real, FILTRANDO pela conta atual aberta
+  // Sem isso, pegaríamos pedidos de contas antigas que já foram fechadas
+  // (mesa 50 abriu/fechou várias vezes — cada uma tem contaId diferente).
+  var contaAtual = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  var contaIdAtual = contaAtual ? contaAtual.id : null;
   if(_verPedidosUnsub) _verPedidosUnsub();
+  if(!contaIdAtual){
+    // Sem conta aberta — não tem pedidos válidos pra mostrar
+    var body0 = document.getElementById('ver-pedidos-body');
+    if(body0) body0.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-titulo">Sem pedidos</div><div class="empty-sub">Esta mesa não tem conta aberta no momento.</div></div>';
+    return;
+  }
   _verPedidosUnsub = fbDb.collection('pedidos')
     .where('restauranteId','==',_restauranteId)
-    .where('mesa','==', parseInt(num) || num)
+    .where('contaId','==', contaIdAtual)
     .onSnapshot(function(snap){
       var lista = [];
       snap.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });

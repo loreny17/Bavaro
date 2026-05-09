@@ -4752,8 +4752,10 @@ function executarLimpezaAutomaticaGarcom(){
   var ultimaLimpeza = parseInt(localStorage.getItem('garcom_ultima_limpeza_'+_restauranteId) || '0');
   var agora = Date.now();
   var UM_DIA = 24*60*60*1000;
+  // Roda no máximo 1x por dia
   if(ultimaLimpeza && (agora - ultimaLimpeza) < UM_DIA) return;
-  var limite = agora - UM_DIA;
+  // Apaga contas fechadas há mais de 3 dias (72h)
+  var limite = agora - (3 * UM_DIA);
   fbDb.collection('contas_fechadas')
     .where('restauranteId','==', _restauranteId)
     .where('fechadoEm','<', limite)
@@ -4786,28 +4788,82 @@ function abrirHistorico(){
         body.innerHTML = '<div class="empty"><div class="empty-icon">📜</div><div class="empty-titulo">Nenhuma conta fechada</div><div class="empty-sub">Suas contas fechadas aparecerão aqui.</div></div>';
         return;
       }
+      // ── Agrupa por dia operacional (reset às 02h, igual número de pedido) ──
+      function calcularDiaOperacional(ts){
+        var d = new Date(ts);
+        if(d.getHours() < 2){
+          d.setDate(d.getDate() - 1);
+        }
+        d.setHours(0,0,0,0);
+        return d.getTime();
+      }
+      function rotuloDia(diaTs){
+        var hoje = calcularDiaOperacional(Date.now());
+        var ontem = hoje - 24*60*60*1000;
+        var anteontem = ontem - 24*60*60*1000;
+        if(diaTs === hoje) return 'HOJE';
+        if(diaTs === ontem) return 'ONTEM';
+        if(diaTs === anteontem) return 'ANTEONTEM';
+        return new Date(diaTs).toLocaleDateString('pt-BR', {weekday:'long'}).toUpperCase();
+      }
+      function dataFmt(diaTs){
+        return new Date(diaTs).toLocaleDateString('pt-BR', {day:'2-digit', month:'short'}).replace('.','');
+      }
+      // Constrói grupos: { diaTs: { contas: [...], total: 0 } }
+      var grupos = {};
+      var ordemDias = [];
+      lista.slice(0, 200).forEach(function(c){
+        var diaTs = calcularDiaOperacional(c.fechadoEm || Date.now());
+        if(!grupos[diaTs]){
+          grupos[diaTs] = { contas: [], total: 0 };
+          ordemDias.push(diaTs);
+        }
+        grupos[diaTs].contas.push(c);
+        grupos[diaTs].total += (c.total || 0);
+      });
+      // Render
       body.innerHTML = '';
-      lista.slice(0, 50).forEach(function(c){
-        var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-        var card = document.createElement('div');
-        card.className = 'hist-card';
-        card.style.position = 'relative';
-        card.innerHTML =
-          '<div class="hist-head">'+
-            '<span class="hist-mesa">Mesa ' + c.mesa + '</span>'+
-            '<span style="font-size:0.74rem;color:var(--muted);">👤 ' + esc(c.garcom||'—') + '</span>'+
-            '<span class="hist-data" style="margin-right:30px;">' + data + '</span>'+
+      ordemDias.forEach(function(diaTs){
+        var g = grupos[diaTs];
+        var rotulo = rotuloDia(diaTs);
+        var data = dataFmt(diaTs);
+        var qtdMesas = g.contas.length;
+        // Cabeçalho da data
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 8px;padding:10px 12px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:10px;';
+        header.innerHTML =
+          '<div>'+
+            '<div style="font-size:0.78rem;font-weight:800;color:var(--accent);letter-spacing:0.06em;">'+rotulo+'</div>'+
+            '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+data+' • '+qtdMesas+' '+(qtdMesas===1?'mesa':'mesas')+'</div>'+
           '</div>'+
-          '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-            '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
-            '<span class="hist-total">R$ ' + fmtPreco(c.total||0) + '</span>'+
-          '</div>'+
-          '<button onclick="event.stopPropagation();excluirContaGarcom(\''+c.id+'\',\''+c.mesa+'\')" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:0.85rem;font-family:inherit;">🗑</button>';
-        card.onclick = (function(conta){ return function(e){
-          if(e.target.tagName === 'BUTTON') return;
-          verContaDetalhe(conta);
-        }; })(c);
-        body.appendChild(card);
+          '<div style="text-align:right;">'+
+            '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Total do dia</div>'+
+            '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.4rem;line-height:1.1;">R$ '+fmtPreco(g.total)+'</div>'+
+          '</div>';
+        body.appendChild(header);
+        // Cards das contas daquele dia
+        g.contas.forEach(function(c){
+          var hora = c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+          var card = document.createElement('div');
+          card.className = 'hist-card';
+          card.style.position = 'relative';
+          card.innerHTML =
+            '<div class="hist-head">'+
+              '<span class="hist-mesa">Mesa ' + c.mesa + '</span>'+
+              '<span style="font-size:0.74rem;color:var(--muted);">👤 ' + esc(c.garcom||'—') + '</span>'+
+              '<span class="hist-data" style="margin-right:30px;">' + hora + '</span>'+
+            '</div>'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+              '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
+              '<span class="hist-total">R$ ' + fmtPreco(c.total||0) + '</span>'+
+            '</div>'+
+            '<button onclick="event.stopPropagation();excluirContaGarcom(\''+c.id+'\',\''+c.mesa+'\')" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:0.85rem;font-family:inherit;">🗑</button>';
+          card.onclick = (function(conta){ return function(e){
+            if(e.target.tagName === 'BUTTON') return;
+            verContaDetalhe(conta);
+          }; })(c);
+          body.appendChild(card);
+        });
       });
     }).catch(function(e){
       body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';

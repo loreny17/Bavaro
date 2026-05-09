@@ -4988,7 +4988,7 @@ function verContaDetalhe(c){
 
 function restaurarConta(){
   if(!_contaDetalheAtual) return;
-  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA mesa voltará a aparecer no mapa com os itens e pagamentos preservados.\nNADA será reimpresso.')) return;
+  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA mesa voltará a aparecer no mapa com TODOS os itens e pagamentos preservados exatamente como estavam.\nNADA será reimpresso.')) return;
   var c = _contaDetalheAtual;
   var mesaNum = parseInt(c.mesa) || c.mesa;
   if(!(c.itens||[]).length){
@@ -4997,18 +4997,29 @@ function restaurarConta(){
   }
   var agora = Date.now();
   // 1. Recria pedido com flag impresso=true (não vai imprimir automaticamente no PDV)
-  // Isso é só pra manter rastro/histórico. O importante é a conta_mesa.
-  var itensPedido = (c.itens||[])
+  // IMPORTANTE: incluímos TODOS os itens (inclusive pagos e cancelados) pra que
+  // a tela "Ver pedidos da mesa" mostre o histórico completo.
+  // O pedido restaurado é só um registro — o que importa de fato é a conta_mesa.
+  var itensPedido = (c.itens||[]).map(function(it){
+    return {
+      id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
+      selecoes: it.selecoes || [],
+      precoBase: it.precoBase || it.preco,
+      extras: it.extras || 0,
+      status: it.status || 'ativo',
+      // Preserva info de cancelamento se houver
+      canceladoEm: it.canceladoEm || null,
+      canceladoPor: it.canceladoPor || null,
+      motivoCancelamento: it.motivoCancelamento || null,
+      // Preserva info de pagamento se já foi pago
+      pagamentoId: it.pagamentoId || null,
+      // Preserva divisão se houver
+      divisao: it.divisao || null
+    };
+  });
+  var totalCalc = (c.itens||[])
     .filter(function(it){ return it.status !== 'cancelado'; })
-    .map(function(it){
-      return {
-        id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
-        selecoes: it.selecoes || [],
-        precoBase: it.precoBase || it.preco,
-        extras: it.extras || 0,
-        status: it.status || 'ativo'
-      };
-    });
+    .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
   var pedidoData = {
     garcom: c.garcom || _nomeGarcom,
     mesa: mesaNum,
@@ -5018,14 +5029,14 @@ function restaurarConta(){
     criadoEm: c.abertaEm || agora,
     atualizadoEm: agora,
     itens: itensPedido,
-    total: c.subtotal || itensPedido.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0),
+    total: c.subtotal || totalCalc,
     impresso: true,              // ⚠️ EVITA REIMPRESSÃO no PDV
     restaurado: true,
     contaOrigem: c.id
   };
-  // 2. Cria conta_mesa com status 'aberta' preservando itens, pagamentos e status
+  // 2. Cria conta_mesa com status 'aberta' preservando TUDO (itens, pagamentos, status individuais)
   fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
-    // Recria a conta_mesa com tudo preservado
+    // Recria a conta_mesa com tudo preservado exatamente como estava
     var contaMesaData = {
       mesa: mesaNum,
       restauranteId: c.restauranteId || _restauranteId,
@@ -5035,7 +5046,9 @@ function restaurarConta(){
       abertaEm: c.abertaEm || agora,
       atualizadoEm: agora,
       tipoConta: c.tipoConta || 'mesa',
-      // Itens com pedidoId apontando pro novo pedido restaurado
+      // Cliente da comanda avulsa (se for o caso)
+      cliente: c.cliente || null,
+      // Itens preservados COM seus status (pago/cancelado/ativo) e contaId atualizado
       itens: (c.itens||[]).map(function(it){
         var copia = Object.assign({}, it);
         // Atualiza pedidoId pra apontar pro novo pedido (caso o original tenha sido apagado)
@@ -5055,7 +5068,21 @@ function restaurarConta(){
       restaurada: true,
       contaOriginalId: c.id
     };
-    return fbDb.collection('contas_mesa').add(contaMesaData);
+    // IMPORTANTE: precisamos atualizar contaId nos itens também pra apontar pra nova conta
+    return fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){
+      // Atualiza o pedido com o contaId correto (assim "Ver pedidos da mesa" filtra certo)
+      return fbDb.collection('pedidos').doc(refPed.id).update({
+        contaId: refConta.id
+      }).then(function(){
+        // Atualiza também os itens da conta_mesa com o contaId pra ficar consistente
+        var itensComContaId = contaMesaData.itens.map(function(it){
+          return Object.assign({}, it, { contaId: refConta.id });
+        });
+        return fbDb.collection('contas_mesa').doc(refConta.id).update({
+          itens: itensComContaId
+        });
+      });
+    });
   }).then(function(){
     // 3. Remove a conta_fechada (sai do histórico)
     return fbDb.collection('contas_fechadas').doc(c.id).delete();

@@ -3116,6 +3116,14 @@ function preencherEstilosNoModeloUI(modelo){
   v('mod-reimp-adic-indentar', er.adicionaisIndentar !== false);
   v('mod-reimp-tot-tamanho', er.totalTamanho || 'normal');
   v('mod-reimp-tot-negrito', er.totalNegrito !== false);
+  // Número do Pedido — defaults: usa do modelo se tiver, senão do global
+  var enp = (modelo && modelo.estiloNumeroPedido) || {};
+  // Se o modelo NÃO tem campo definido, usa a config global como base
+  var mostrar = enp.mostrar !== undefined ? enp.mostrar : (_configImp.imprimirNumeroPedido !== false);
+  v('mod-num-pedido-mostrar', mostrar);
+  v('mod-num-pedido-tamanho', enp.tamanho || _configImp.tamanhoNumeroPedido || 'grande');
+  v('mod-num-pedido-negrito', enp.negrito !== false);
+  v('mod-num-pedido-alinhamento', enp.alinhamento || 'centro');
 }
 
 // Lê os campos de estilo da UI e retorna objetos pra salvar no modelo
@@ -3152,6 +3160,12 @@ function lerEstilosDoModeloUI(){
       adicionaisIndentar: v('mod-reimp-adic-indentar'),
       totalTamanho: v('mod-reimp-tot-tamanho'),
       totalNegrito: v('mod-reimp-tot-negrito')
+    },
+    estiloNumeroPedido: {
+      mostrar: v('mod-num-pedido-mostrar'),
+      tamanho: v('mod-num-pedido-tamanho'),
+      negrito: v('mod-num-pedido-negrito'),
+      alinhamento: v('mod-num-pedido-alinhamento')
     }
   };
 }
@@ -3165,6 +3179,9 @@ function atualizarTipoModelo(){
   var tipo = (document.querySelector('input[name="mod-tipo"]:checked')||{}).value || 'pedido';
   var blocoFiltro = document.getElementById('mod-bloco-filtro');
   var blocoReimp = document.getElementById('mod-bloco-reimp');
+  // Bloco do número do pedido: só faz sentido pra modelos de pedido (cozinha/bar)
+  var blocoNumPed = document.getElementById('mod-num-pedido-mostrar');
+  var blocoNumPedWrap = blocoNumPed ? blocoNumPed.closest('.cfg-bloco') : null;
   // Modelo de fechamento NÃO precisa de filtro de categoria/item (sempre pega tudo)
   if(tipo === 'fechamento'){
     if(blocoFiltro) blocoFiltro.style.display = 'none';
@@ -3172,9 +3189,12 @@ function atualizarTipoModelo(){
     document.getElementById('mod-filtro-itens').style.display = 'none';
     // Reimpressão só faz sentido pra modelos de pedido (cozinha/bar)
     if(blocoReimp) blocoReimp.style.display = 'none';
+    // Número do pedido também só pra pedido
+    if(blocoNumPedWrap) blocoNumPedWrap.style.display = 'none';
   } else {
     if(blocoFiltro) blocoFiltro.style.display = '';
     if(blocoReimp) blocoReimp.style.display = '';
+    if(blocoNumPedWrap) blocoNumPedWrap.style.display = '';
     atualizarFiltroModelo();
   }
   atualizarPreviewCupom();
@@ -3668,14 +3688,27 @@ function gerarCupomPedido(pedido, modelo){
     s += 'MESA ' + pedido.mesa + '\n';
     s += _resetarEstilo();
   }
-  // ─── NÚMERO DO PEDIDO (configurável) ───
-  // Imprime # número em destaque se a config global "imprimirNumeroPedido" estiver ligada
-  // Tamanho controlado por "tamanhoNumeroPedido" (normal | alto | grande | extra)
-  if(c.imprimirNumeroPedido !== false && pedido.numeroSequencial){
-    var tamNum = c.tamanhoNumeroPedido || 'grande';
-    s += escposCenter() + escposBold(true) + escposSize(tamNum);
-    s += '# ' + pedido.numeroSequencial + '\n';
-    s += _resetarEstilo();
+  // ─── NÚMERO DO PEDIDO (configurável por modelo, com fallback no global) ───
+  // Cada modelo pode ter sua própria config (estiloNumeroPedido).
+  // Se o modelo não tem campos definidos, usa as configs globais (c.imprimirNumeroPedido / c.tamanhoNumeroPedido).
+  if(pedido.numeroSequencial){
+    var enp = (modelo && modelo.estiloNumeroPedido) || {};
+    // Prioridade: modelo > global. Se o modelo tem mostrar=false explicitamente, não imprime.
+    var devoMostrar;
+    if(enp.mostrar !== undefined) devoMostrar = !!enp.mostrar;
+    else devoMostrar = (c.imprimirNumeroPedido !== false);
+    if(devoMostrar){
+      var tamNum = enp.tamanho || c.tamanhoNumeroPedido || 'grande';
+      var alinNum = enp.alinhamento || 'centro';
+      var negNum = enp.negrito !== false;
+      // Aplica
+      if(alinNum === 'centro') s += escposCenter();
+      else s += escposLeft();
+      if(negNum) s += escposBold(true);
+      s += escposSize(tamNum);
+      s += '# ' + pedido.numeroSequencial + '\n';
+      s += _resetarEstilo();
+    }
   }
   // Garçom (sempre estilo normal)
   if(c.imprimirGarcom && pedido.garcom){
@@ -5061,6 +5094,35 @@ window.addEventListener('load', function(){
           </div>
           <label class="cfg-toggle"><input type="checkbox" id="mod-cab-negrito"><span>Negrito</span></label>
           <label class="cfg-toggle"><input type="checkbox" id="mod-cab-sublinhado"><span>Sublinhado</span></label>
+        </div>
+
+        <!-- Número do Pedido -->
+        <div class="cfg-bloco" style="margin-bottom:14px;">
+          <h3 class="cfg-titulo" style="margin-top:0;">🔢 Número do Pedido (#1, #2, #3...)</h3>
+          <div style="font-size:0.7rem;color:var(--muted);margin-bottom:8px;line-height:1.4;">
+            Reseta todo dia às 02h da manhã. Se nada for marcado abaixo, usa a configuração global.
+          </div>
+          <label class="cfg-toggle">
+            <input type="checkbox" id="mod-num-pedido-mostrar" checked>
+            <span>Mostrar número do pedido em destaque neste modelo</span>
+          </label>
+          <div class="f-grupo">
+            <label class="f-label">Tamanho</label>
+            <select class="f-select" id="mod-num-pedido-tamanho">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="grande">Grande</option>
+              <option value="extra">Extra Grande</option>
+            </select>
+          </div>
+          <label class="cfg-toggle"><input type="checkbox" id="mod-num-pedido-negrito" checked><span>Negrito</span></label>
+          <div class="f-grupo">
+            <label class="f-label">Alinhamento</label>
+            <select class="f-select" id="mod-num-pedido-alinhamento">
+              <option value="centro">Centralizado</option>
+              <option value="esquerda">Esquerda</option>
+            </select>
+          </div>
         </div>
 
         <!-- Itens -->

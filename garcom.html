@@ -613,6 +613,19 @@ header{
           <div style="font-size:0.72rem;color:var(--muted);">Trocar de garçom</div>
         </div>
       </button>
+
+      <!-- ═══ Resumo rápido das mesas em aberto ═══ -->
+      <div id="menu-resumo-aberto" style="margin:24px 4px 8px;padding:12px 14px;background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.18);border-radius:10px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+          <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;">Em aberto</div>
+          <div style="font-size:0.7rem;color:var(--muted);" id="menu-resumo-qtd">— mesas</div>
+        </div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;">
+          <div style="font-size:0.7rem;color:var(--muted);">Total a receber</div>
+          <div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.5rem;line-height:1;" id="menu-resumo-total">R$ 0,00</div>
+        </div>
+        <div style="font-size:0.62rem;color:var(--muted);margin-top:4px;text-align:right;">sem taxa de serviço</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1018,6 +1031,40 @@ function abrirMenuLateral(){
   document.getElementById('menu-lateral-overlay').classList.add('show');
   atualizarBtnCompacto();
   aplicarPrefsAparencia();
+  atualizarResumoMesasAbertas();
+}
+
+// Calcula soma rápida das mesas em aberto (SEM os 10% de taxa)
+function atualizarResumoMesasAbertas(){
+  var bloco = document.getElementById('menu-resumo-aberto');
+  var totalEl = document.getElementById('menu-resumo-total');
+  var qtdEl = document.getElementById('menu-resumo-qtd');
+  if(!bloco || !totalEl || !qtdEl) return;
+  var totalMesas = 0;
+  var subtotalGeral = 0;
+  Object.keys(_contasMesaCache).forEach(function(k){
+    var c = _contasMesaCache[k];
+    if(!c || c.status !== 'aberta') return;
+    totalMesas++;
+    // Soma só os itens NÃO cancelados e NÃO pagos (o que ainda falta receber)
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado' || it.status === 'pago') return;
+      // Considera divisão parcial: se algumas partes pagas, subtrai
+      if(it.divisao && it.divisao.total > 1 && (it.divisao.pagas||0) > 0){
+        var falta = it.divisao.total - it.divisao.pagas;
+        subtotalGeral += (it.divisao.valorPorParte || 0) * falta;
+      } else {
+        subtotalGeral += (it.preco || 0) * (it.qtd || 1);
+      }
+    });
+  });
+  if(totalMesas === 0){
+    bloco.style.display = 'none';
+    return;
+  }
+  bloco.style.display = '';
+  qtdEl.textContent = totalMesas + ' ' + (totalMesas === 1 ? 'mesa' : 'mesas');
+  totalEl.textContent = 'R$ ' + fmtPreco(subtotalGeral);
 }
 function fecharMenuLateral(){
   document.getElementById('menu-lateral').classList.remove('show');

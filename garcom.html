@@ -2262,12 +2262,14 @@ function abrirEditarItemGarcom(pedidoId, idx) {
   if(!ped) return;
   var it = ped.itens[idx];
   _gPedId = pedidoId; _gPedIdx = idx;
+  _gSubstBusca = '';
+  _gSubstCatAtiva = 'todas';
   var ex = document.getElementById('modal-edit-garcom');
   if(ex) ex.remove();
   var mod = document.createElement('div');
   mod.className = 'modal show'; mod.id = 'modal-edit-garcom';
   mod.innerHTML =
-    '<div class="modal-box" style="max-width:420px;">'+
+    '<div class="modal-box" style="max-width:480px;">'+
       '<div class="modal-header">'+
         '<div class="modal-titulo">EDITAR ITEM</div>'+
         '<button class="modal-fechar" onclick="document.getElementById(\'modal-edit-garcom\').remove()">×</button>'+
@@ -2276,12 +2278,12 @@ function abrirEditarItemGarcom(pedidoId, idx) {
         '<div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:8px;padding:10px 12px;font-size:0.82rem;color:var(--accent);margin-bottom:16px;">✏️ '+esc(it.nome||'')+'</div>'+
         '<div class="login-campo"><label>Quantidade</label><input type="number" class="login-campo input" id="g-edit-qtd" min="1" max="99" value="'+(it.qtd||1)+'" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:1rem;outline:none;"></div>'+
         '<div class="login-campo" style="margin-top:12px;"><label>Observação</label><textarea id="g-edit-obs" placeholder="Ex: sem cebola..." style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:12px 14px;font-size:0.9rem;outline:none;resize:vertical;min-height:60px;">'+esc(it.obs||'')+'</textarea></div>'+
-        '<div class="login-campo" style="margin-top:12px;"><label>Substituir por outro item</label>'+
-          '<div id="g-subst-wrap" style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;margin-top:6px;">'+
-          _itens.filter(function(i){ return i.disponivel && i.id !== (it.id||''); }).map(function(i){
-            return '<button style="padding:5px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:18px;font-size:0.75rem;color:var(--text);cursor:pointer;" onclick="substituirItemGarcom(\''+i.id+'\')">'+esc(i.nome)+'</button>';
-          }).join('')+
-        '</div></div>'+
+        '<div class="login-campo" style="margin-top:14px;">'+
+          '<label>Substituir por outro item</label>'+
+          '<input type="text" id="g-subst-busca" placeholder="🔍 Buscar item..." oninput="atualizarSubstituicaoBusca(this.value)" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:12px;padding:11px 14px;font-size:0.92rem;outline:none;margin-top:6px;margin-bottom:8px;">'+
+          '<div id="g-subst-pills" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;"></div>'+
+          '<div id="g-subst-lista" style="max-height:240px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:8px;"></div>'+
+        '</div>'+
       '</div>'+
       '<div class="modal-footer">'+
         '<button class="f-btn secondary" style="flex:0 0 auto;padding:11px 16px;" onclick="document.getElementById(\'modal-edit-garcom\').remove()">Cancelar</button>'+
@@ -2289,6 +2291,109 @@ function abrirEditarItemGarcom(pedidoId, idx) {
       '</div>'+
     '</div>';
   document.body.appendChild(mod);
+  // Renderiza pills de categoria + lista
+  renderSubstituicaoPills(it.id);
+  renderSubstituicaoLista(it.id);
+}
+
+// Estado de filtros do "substituir por outro item"
+var _gSubstBusca = '';
+var _gSubstCatAtiva = 'todas'; // 'todas' ou ID de categoria
+
+function atualizarSubstituicaoBusca(valor){
+  _gSubstBusca = (valor||'').toLowerCase().trim();
+  // Quando há busca, esconde pills (busca é global)
+  var pills = document.getElementById('g-subst-pills');
+  if(pills) pills.style.display = _gSubstBusca ? 'none' : '';
+  var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });
+  var it = ped && ped.itens ? ped.itens[_gPedIdx] : null;
+  renderSubstituicaoLista(it ? it.id : '');
+}
+
+function renderSubstituicaoPills(itemAtualId){
+  var wrap = document.getElementById('g-subst-pills');
+  if(!wrap) return;
+  // Pega categorias que têm pelo menos 1 item disponível diferente do atual
+  var catsComItens = (_categorias||[]).filter(function(cat){
+    return _itens.some(function(i){ return i.disponivel && i.id !== itemAtualId && (i.categoriaId||'') === cat.id; });
+  });
+  var html = '';
+  // Pill "Todas"
+  html += '<button onclick="setSubstCat(\'todas\')" style="flex-shrink:0;padding:6px 14px;background:'+(_gSubstCatAtiva==='todas'?'var(--accent)':'var(--surface3)')+';color:'+(_gSubstCatAtiva==='todas'?'#000':'var(--text)')+';border:1.5px solid '+(_gSubstCatAtiva==='todas'?'var(--accent)':'var(--border2)')+';border-radius:18px;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Todas</button>';
+  // Pills por categoria
+  catsComItens.forEach(function(cat){
+    var ativa = _gSubstCatAtiva === cat.id;
+    html += '<button onclick="setSubstCat(\''+cat.id+'\')" style="flex-shrink:0;padding:6px 14px;background:'+(ativa?'var(--accent)':'var(--surface3)')+';color:'+(ativa?'#000':'var(--text)')+';border:1.5px solid '+(ativa?'var(--accent)':'var(--border2)')+';border-radius:18px;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">'+(_mostrarEmoji?(cat.emoji||'📂')+' ':'')+esc(cat.nome)+'</button>';
+  });
+  wrap.innerHTML = html;
+}
+
+function setSubstCat(catId){
+  _gSubstCatAtiva = catId;
+  var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });
+  var it = ped && ped.itens ? ped.itens[_gPedIdx] : null;
+  renderSubstituicaoPills(it ? it.id : '');
+  renderSubstituicaoLista(it ? it.id : '');
+}
+
+function renderSubstituicaoLista(itemAtualId){
+  var wrap = document.getElementById('g-subst-lista');
+  if(!wrap) return;
+  // Filtra: disponíveis, diferente do atual, e que match na busca/categoria
+  var filtrados = _itens.filter(function(i){
+    if(!i.disponivel) return false;
+    if(i.id === itemAtualId) return false;
+    // Filtro de busca
+    if(_gSubstBusca){
+      if((i.nome||'').toLowerCase().indexOf(_gSubstBusca) === -1) return false;
+      return true; // se tem busca, ignora filtro de categoria
+    }
+    // Filtro de categoria
+    if(_gSubstCatAtiva !== 'todas'){
+      if((i.categoriaId||'') !== _gSubstCatAtiva) return false;
+    }
+    return true;
+  });
+  if(!filtrados.length){
+    wrap.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);text-align:center;padding:18px;">Nenhum item encontrado.</div>';
+    return;
+  }
+  // Se está vendo "Todas" sem busca: agrupa visualmente por categoria
+  if(!_gSubstBusca && _gSubstCatAtiva === 'todas'){
+    var html = '';
+    (_categorias||[]).forEach(function(cat){
+      var doCat = filtrados.filter(function(i){ return (i.categoriaId||'') === cat.id; });
+      if(!doCat.length) return;
+      html += '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:6px 4px 6px;">'+(_mostrarEmoji?(cat.emoji||'📂')+' ':'')+esc(cat.nome)+'</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">';
+      doCat.forEach(function(i){
+        html += '<button style="padding:6px 12px;background:var(--surface);border:1px solid var(--border2);border-radius:18px;font-size:0.78rem;color:var(--text);cursor:pointer;font-family:inherit;" onclick="substituirItemGarcom(\''+i.id+'\')">'+esc(i.nome)+'</button>';
+      });
+      html += '</div>';
+    });
+    // Itens sem categoria
+    var semCat = filtrados.filter(function(i){
+      var c = i.categoriaId||'';
+      return !c || !(_categorias||[]).find(function(x){ return x.id === c; });
+    });
+    if(semCat.length){
+      html += '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:6px 4px 6px;">📦 Outros</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">';
+      semCat.forEach(function(i){
+        html += '<button style="padding:6px 12px;background:var(--surface);border:1px solid var(--border2);border-radius:18px;font-size:0.78rem;color:var(--text);cursor:pointer;font-family:inherit;" onclick="substituirItemGarcom(\''+i.id+'\')">'+esc(i.nome)+'</button>';
+      });
+      html += '</div>';
+    }
+    wrap.innerHTML = html;
+  } else {
+    // Lista plana (busca ou categoria filtrada)
+    var html2 = '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+    filtrados.forEach(function(i){
+      html2 += '<button style="padding:6px 12px;background:var(--surface);border:1px solid var(--border2);border-radius:18px;font-size:0.78rem;color:var(--text);cursor:pointer;font-family:inherit;" onclick="substituirItemGarcom(\''+i.id+'\')">'+esc(i.nome)+'</button>';
+    });
+    html2 += '</div>';
+    wrap.innerHTML = html2;
+  }
 }
 function salvarEditItemGarcom(){
   var ped = _meusPedidos.find(function(p){ return p.id === _gPedId; });

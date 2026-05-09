@@ -1309,9 +1309,206 @@ function renderMesas(){
     el.className = cls;
     el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
       '<div class="mesa-status">' + status + '</div>';
-    el.onclick = (function(n, ocupada){ return function(){ abrirMenuMesa(n, ocupada); }; })(num, eOcupada);
+    el.onclick = (function(n, ocupada){ return function(){
+      // Se acabou de disparar long press, ignora click subsequente
+      if(_longPressDisparou){ _longPressDisparou = false; return; }
+      abrirMenuMesa(n, ocupada);
+    }; })(num, eOcupada);
+    // Long press apenas pra mesas ocupadas (mesas livres não tem o que reaproveitar)
+    if(eOcupada){
+      anexarLongPress(el, num);
+    }
     grid.appendChild(el);
   }
+}
+
+// ═══ LONG PRESS — Pedido rápido ═══
+// Segura na mesa por 600ms → abre popup com itens já consumidos pra mandar +1
+var _longPressTimer = null;
+var _longPressDisparou = false;
+var _longPressX = 0;
+var _longPressY = 0;
+function anexarLongPress(el, numMesa){
+  function iniciar(e){
+    _longPressDisparou = false;
+    var ponto = e.touches ? e.touches[0] : e;
+    _longPressX = ponto.clientX || 0;
+    _longPressY = ponto.clientY || 0;
+    if(_longPressTimer) clearTimeout(_longPressTimer);
+    _longPressTimer = setTimeout(function(){
+      _longPressDisparou = true;
+      // Vibração leve confirmando que disparou
+      if(navigator.vibrate) navigator.vibrate(50);
+      abrirPedidoRapido(numMesa);
+    }, 600);
+  }
+  function mover(e){
+    if(!_longPressTimer) return;
+    var ponto = e.touches ? e.touches[0] : e;
+    var dx = Math.abs((ponto.clientX||0) - _longPressX);
+    var dy = Math.abs((ponto.clientY||0) - _longPressY);
+    // Se moveu mais de 10px (provável scroll), cancela
+    if(dx > 10 || dy > 10){
+      clearTimeout(_longPressTimer);
+      _longPressTimer = null;
+    }
+  }
+  function cancelar(){
+    if(_longPressTimer){
+      clearTimeout(_longPressTimer);
+      _longPressTimer = null;
+    }
+  }
+  el.addEventListener('touchstart', iniciar, {passive:true});
+  el.addEventListener('touchmove', mover, {passive:true});
+  el.addEventListener('touchend', cancelar);
+  el.addEventListener('touchcancel', cancelar);
+  // Suporte também pra desktop (mouse)
+  el.addEventListener('mousedown', iniciar);
+  el.addEventListener('mousemove', mover);
+  el.addEventListener('mouseup', cancelar);
+  el.addEventListener('mouseleave', cancelar);
+}
+
+// Abre popup com itens distintos que a mesa já consumiu
+function abrirPedidoRapido(numMesa){
+  var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
+  if(!conta){
+    // Mesa sem conta — silencioso, não faz nada (decisão do usuário)
+    return;
+  }
+  // Agrupa itens distintos pelo ID, ignorando obs/seleções (decisão B do usuário)
+  // Filtra: kg de fora, cancelados de fora
+  var distintos = {};
+  (conta.itens||[]).forEach(function(it){
+    if(it.status === 'cancelado') return;
+    if(it.tipoVenda === 'kg') return;
+    if(!it.id) return;
+    if(!distintos[it.id]){
+      distintos[it.id] = {
+        id: it.id,
+        nome: it.nome,
+        preco: it.precoBase || it.preco // preço sem extras
+      };
+    }
+  });
+  var lista = Object.keys(distintos).map(function(k){ return distintos[k]; });
+  if(!lista.length){
+    // Mesa aberta mas sem itens consumíveis — silencioso
+    return;
+  }
+  // Monta o modal
+  var ex = document.getElementById('modal-pedido-rapido');
+  if(ex) ex.remove();
+  var html = '<div class="modal-box" style="max-width:440px;border-radius:18px;">'+
+    '<div class="modal-header">'+
+      '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
+      '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
+    '</div>'+
+    '<div class="modal-body">'+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque pra mandar +1 do mesmo item</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">';
+  lista.forEach(function(it){
+    // Busca o item completo do cardápio pra pegar foto/categoria se quiser
+    var itCardapio = _itens.find(function(x){ return x.id === it.id; });
+    var foto = itCardapio && itCardapio.foto;
+    var emoji = '🍽️';
+    if(itCardapio && itCardapio.categoriaId){
+      var cat = (_categorias||[]).find(function(c){ return c.id === itCardapio.categoriaId; });
+      if(cat && cat.emoji) emoji = cat.emoji;
+    }
+    html += '<button onclick="enviarPedidoRapido(\''+numMesa+'\',\''+it.id+'\')" '+
+      'style="background:var(--surface2);border:1.5px solid var(--border2);border-radius:14px;padding:14px 12px;cursor:pointer;font-family:inherit;color:var(--text);text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:110px;justify-content:center;transition:all 0.15s;" '+
+      'onmousedown="this.style.transform=\'scale(0.96)\';this.style.borderColor=\'var(--accent)\'" '+
+      'onmouseup="this.style.transform=\'\';this.style.borderColor=\'var(--border2)\'" '+
+      'ontouchstart="this.style.transform=\'scale(0.96)\';this.style.borderColor=\'var(--accent)\'" '+
+      'ontouchend="this.style.transform=\'\';this.style.borderColor=\'var(--border2)\'">'+
+      '<div style="font-size:1.6rem;">'+emoji+'</div>'+
+      '<div style="font-size:0.84rem;font-weight:700;line-height:1.2;">'+esc(it.nome)+'</div>'+
+      '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.1rem;">R$ '+fmtPreco(it.preco||0)+'</div>'+
+    '</button>';
+  });
+  html += '</div></div>'+
+    '<div class="modal-footer">'+
+      '<button class="f-btn" style="flex:1;" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">Fechar</button>'+
+    '</div>'+
+  '</div>';
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-pedido-rapido';
+  mod.innerHTML = html;
+  document.body.appendChild(mod);
+}
+
+// Envia +1 do item escolhido direto pra mesa (sem cardápio, sem confirmação)
+function enviarPedidoRapido(numMesa, itemId){
+  var itCardapio = _itens.find(function(x){ return x.id === itemId; });
+  if(!itCardapio){
+    showToast('❌ Item não encontrado','#f87171');
+    return;
+  }
+  var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
+  if(!conta || !conta.id){
+    showToast('❌ Mesa sem conta aberta','#f87171');
+    return;
+  }
+  var precoBase = parseFloat(itCardapio.preco)||0;
+  var item = {
+    id: itCardapio.id,
+    nome: itCardapio.nome,
+    preco: precoBase,
+    precoBase: precoBase,
+    extras: 0,
+    qtd: 1,
+    obs: '',
+    foto: itCardapio.foto||'',
+    selecoes: []
+  };
+  var pedido = {
+    garcom: _nomeGarcom,
+    mesa: parseInt(numMesa) || numMesa,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    contaId: conta.id,
+    tipoConta: 'mesa',
+    cliente: null,
+    status: 'preparo',
+    criadoEm: Date.now(),
+    itens: [item],
+    total: precoBase
+  };
+  // Gera número sequencial e cria pedido
+  gerarNumeroSequencial().then(function(numero){
+    if(numero) pedido.numeroSequencial = numero;
+    return fbDb.collection('pedidos').add(pedido);
+  }).then(function(refPed){
+    var pedidoId = refPed.id;
+    // Adiciona o item na conta_mesa
+    var itemKey = pedidoId + '_0';
+    var itemConta = Object.assign({}, item, {
+      itemKey: itemKey,
+      pedidoId: pedidoId,
+      contaId: conta.id,
+      status: 'aberto',
+      criadoEm: Date.now()
+    });
+    var itensConta = (conta.itens||[]).concat([itemConta]);
+    var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+    return fbDb.collection('contas_mesa').doc(conta.id).update({
+      itens: itensConta,
+      subtotal: totais.subtotal,
+      taxa10: totais.taxa10,
+      total: totais.total,
+      restante: totais.restante,
+      atualizadoEm: Date.now()
+    });
+  }).then(function(){
+    // Vibração leve + toast (popup não fecha — usuário pode mandar mais)
+    if(navigator.vibrate) navigator.vibrate(30);
+    showToast('✓ +1 '+itCardapio.nome+' → Mesa '+numMesa,'#4ade80');
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
+  });
 }
 
 // ════════════════════════════════════════

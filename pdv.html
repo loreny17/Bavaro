@@ -836,12 +836,15 @@ window.addEventListener('load', function(){
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
-    // Dados aparecem instantâneo do cache, sincroniza com servidor depois
-    try{
+    // Tenta habilitar — mas NÃO trava o boot se falhar.
+    // O app inicia o Auth em paralelo, sem esperar persistence.
+    if(fbDb.enablePersistence){
       fbDb.enablePersistence({synchronizeTabs:true}).catch(function(err){
-        console.log('Firestore persistence:', err.code);
+        // failed-precondition = múltiplas abas / unimplemented = browser sem suporte
+        // Em ambos os casos o app funciona normal, só sem cache local.
+        console.log('Firestore persistence não habilitado:', err.code);
       });
-    }catch(e){ /* navegador antigo */ }
+    }
     fbAuth = firebase.auth();
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     fbAuth.onAuthStateChanged(function(user){
@@ -857,7 +860,8 @@ window.addEventListener('load', function(){
     });
   } catch(e){
     console.error('Init error:', e);
-    document.getElementById('loading').innerHTML = '<div style="color:#f87171;text-align:center;padding:20px;">❌ Erro ao iniciar.<br><br>'+e.message+'</div>';
+    var loading = document.getElementById('loading');
+    if(loading) loading.innerHTML = '<div style="color:#f87171;text-align:center;padding:20px;">❌ Erro ao iniciar.<br><br>'+e.message+'</div>';
   }
 });
 

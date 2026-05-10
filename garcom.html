@@ -2405,6 +2405,13 @@ function executarCancelamentoPedidoInteiro(pedidoId){
     motivo: motivo
   }]);
 
+  // ═══ UI OTIMISTA ═══
+  // Fecha modal, mostra toast e pergunta reimpressão IMEDIATAMENTE.
+  // O Firebase atualiza em background.
+  var mPed = document.getElementById('modal-cancelar-pedido'); if(mPed) mPed.remove();
+  showToast('✕ Pedido cancelado ('+nomesCancelados.length+' itens)','#f87171');
+  perguntarReimpressao(pedidoId, 'Cancelamento do pedido inteiro ('+nomesCancelados.length+' itens)');
+
   // Atualiza pedido
   fbDb.collection('pedidos').doc(pedidoId).update({
     itens: itensAtualizados,
@@ -2441,12 +2448,10 @@ function executarCancelamentoPedidoInteiro(pedidoId){
       });
     }
   }).then(function(){
-    // Cancelamento concluído. Pergunta se quer reimprimir.
-    showToast('✕ Pedido cancelado ('+nomesCancelados.length+' itens)','#f87171');
-    var m = document.getElementById('modal-cancelar-pedido'); if(m) m.remove();
-    perguntarReimpressao(pedidoId, 'Cancelamento do pedido inteiro ('+nomesCancelados.length+' itens)');
+    // Sucesso confirmado pelo Firebase — UI já mostrou tudo no início.
   }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
+    // Falhou — avisa
+    showToast('❌ Falha ao cancelar — tente novamente','#f87171');
   });
 }
 
@@ -2576,6 +2581,14 @@ function executarCancelamento(pedidoId, idx){
     motivo: motivo
   }]);
 
+  // ═══ UI OTIMISTA ═══
+  // Fecha modal, mostra toast e pergunta reimpressão IMEDIATAMENTE.
+  // O Firebase atualiza em background.
+  var m = document.getElementById('modal-cancelar-item');
+  if(m) m.remove();
+  showToast('✕ Item cancelado','#f87171');
+  perguntarReimpressao(pedidoId, 'Cancelamento de item: ' + item.nome);
+
   // Atualiza pedido
   fbDb.collection('pedidos').doc(pedidoId).update({
     itens: itensAtualizados,
@@ -2613,13 +2626,10 @@ function executarCancelamento(pedidoId, idx){
       });
     }
   }).then(function(){
-    // Cancelamento concluído. Pergunta se quer reimprimir.
-    showToast('✕ Item cancelado','#f87171');
-    var m = document.getElementById('modal-cancelar-item');
-    if(m) m.remove();
-    perguntarReimpressao(pedidoId, 'Cancelamento de item: ' + item.nome);
+    // Sucesso confirmado pelo Firebase — UI já mostrou tudo no início.
   }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
+    // Falhou — avisa pra tentar de novo
+    showToast('❌ Falha ao cancelar — tente novamente','#f87171');
   });
 }
 
@@ -3678,6 +3688,22 @@ function enviarPedido(){
     if(it.tipoVenda === 'kg' && it.peso) return acc + (it.preco||0);
     return acc + (it.preco||0)*(it.qtd||1);
   }, 0);
+
+  // ═══ UI OTIMISTA ═══
+  // Limpa carrinho, fecha modal e volta pro mapa ANTES do Firebase responder.
+  // O usuário tem feedback imediato; o trabalho de rede acontece em background.
+  // Se algo falhar, mostramos um toast de erro depois.
+  // Guardamos uma cópia do carrinho pra restaurar em caso de erro.
+  var carrinhoBackup = _carrinho.slice();
+  _carrinho = [];
+  atualizarCarrinhoBadge();
+  renderItens();
+  fecharModalCarrinho();
+  btn.disabled = false;
+  btn.textContent = 'Enviar Pedido 🚀';
+  // Toast otimista (sem número ainda — vamos atualizar quando vier)
+  showToast('✓ Pedido enviado!', '#4ade80');
+  voltarParaMesas();
   var pedido = {
     garcom: _nomeGarcom,
     mesa: mesaInt,
@@ -3732,20 +3758,16 @@ function enviarPedido(){
       return ref;
     });
   }).then(function(ref){
-    // Limpa carrinho
-    _carrinho = [];
-    atualizarCarrinhoBadge();
-    renderItens();
-    fecharModalCarrinho();
-    btn.disabled = false;
-    btn.textContent = 'Enviar Pedido 🚀';
-    // Toast de sucesso e volta direto pro mapa de mesas (sem modal "continuar?")
-    showToast('✓ Pedido #'+(pedido.numeroSequencial || ref.id.slice(-4).toUpperCase())+' enviado!', '#4ade80');
-    voltarParaMesas();
+    // Sucesso confirmado pelo Firebase. UI já mostrou tudo.
+    // Atualiza o toast com o número correto se disponível
+    if(pedido.numeroSequencial){
+      showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
+    }
   }).catch(function(e){
-    showToast('❌ Erro ao enviar: '+e.message);
-    btn.disabled = false;
-    btn.textContent = 'Enviar Pedido 🚀';
+    // Falhou no Firebase — restaura carrinho e avisa
+    _carrinho = carrinhoBackup;
+    atualizarCarrinhoBadge();
+    showToast('❌ Falha ao enviar — toque no carrinho pra tentar de novo','#f87171');
   });
 }
 

@@ -1401,10 +1401,12 @@ function abrirPedidoRapido(numMesa){
     // Mesa aberta mas sem itens consumíveis — silencioso
     return;
   }
-  // Estado inicial: cada item começa com qtd 1
+  // Estado inicial: cada item começa com qtd 0 (apagado).
+  // Toca no card direto → manda 1 (atalho rápido pra "mais um daquele")
+  // Toca no + → começa a acumular (1, 2, 3...) e usa "Enviar tudo"
   _qtdsRapidas = {};
   _mesaRapidaAtual = numMesa;
-  lista.forEach(function(it){ _qtdsRapidas[it.id] = 1; });
+  lista.forEach(function(it){ _qtdsRapidas[it.id] = 0; });
   // Renderiza
   var ex = document.getElementById('modal-pedido-rapido');
   if(ex) ex.remove();
@@ -1419,12 +1421,12 @@ function abrirPedidoRapido(numMesa){
         '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
       '</div>'+
       '<div class="modal-body">'+
-        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque no card pra mandar só ele, ou ajuste as quantidades e use "Enviar tudo"</div>'+
+        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque no card pra mandar +1. Use os botões pra escolher mais quantidades e "Enviar tudo".</div>'+
         '<div id="pedido-rapido-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;"></div>'+
       '</div>'+
       '<div class="modal-footer">'+
         '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">Fechar</button>'+
-        '<button class="f-btn" style="flex:1.6;background:var(--accent);color:#000;font-weight:700;" onclick="enviarTodosRapidos()">📨 Enviar tudo</button>'+
+        '<button class="f-btn" id="btn-enviar-tudo-rapido" style="flex:1.6;background:var(--accent);color:#000;font-weight:700;opacity:0.4;pointer-events:none;" onclick="enviarTodosRapidos()">📨 Enviar tudo</button>'+
       '</div>'+
     '</div>';
   document.body.appendChild(mod);
@@ -1438,42 +1440,64 @@ function renderPedidoRapidoGrid(){
   if(!grid || !mod) return;
   var lista = JSON.parse(mod.dataset.lista || '[]');
   var html = '';
+  // Conta quantos itens têm qtd > 0 (pra ativar/desativar o botão "Enviar tudo")
+  var algumComQtd = false;
   lista.forEach(function(it){
-    var qtd = _qtdsRapidas[it.id] || 1;
+    var qtd = _qtdsRapidas[it.id] || 0;
+    if(qtd > 0) algumComQtd = true;
     var itCardapio = _itens.find(function(x){ return x.id === it.id; });
     var emoji = '🍽️';
     if(itCardapio && itCardapio.categoriaId){
       var cat = (_categorias||[]).find(function(c){ return c.id === itCardapio.categoriaId; });
       if(cat && cat.emoji) emoji = cat.emoji;
     }
-    html += '<div class="ped-rap-card" style="background:var(--surface2);border:1.5px solid var(--border2);border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:140px;cursor:pointer;transition:all 0.15s;" '+
+    // Visual: card "apagado" quando qtd=0, destacado quando qtd>0
+    var cardStyle = qtd > 0
+      ? 'background:rgba(212,168,67,0.1);border:1.5px solid var(--accent);'
+      : 'background:var(--surface2);border:1.5px solid var(--border2);';
+    var qtdColor = qtd > 0 ? 'var(--accent)' : 'var(--muted)';
+    html += '<div class="ped-rap-card" style="'+cardStyle+'border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:140px;cursor:pointer;transition:all 0.15s;" '+
       'onclick="cardRapidoTap(event, \''+it.id+'\')">'+
       '<div style="font-size:1.6rem;">'+emoji+'</div>'+
       '<div style="font-size:0.84rem;font-weight:700;line-height:1.2;text-align:center;">'+esc(it.nome)+'</div>'+
       '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1rem;line-height:1;">R$ '+fmtPreco(it.preco||0)+'</div>'+
       // Controle de quantidade — clique aqui NÃO dispara o tap do card
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;" onclick="event.stopPropagation();">'+
-        '<button onclick="event.stopPropagation();qtdRapida(\''+it.id+'\',-1)" style="width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;'+(qtd<=1?'opacity:0.3;pointer-events:none;':'')+'">−</button>'+
-        '<span style="min-width:24px;text-align:center;font-family:Bebas Neue,sans-serif;font-size:1.15rem;color:var(--accent);">'+qtd+'</span>'+
+        '<button onclick="event.stopPropagation();qtdRapida(\''+it.id+'\',-1)" style="width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;'+(qtd<=0?'opacity:0.3;pointer-events:none;':'')+'">−</button>'+
+        '<span style="min-width:24px;text-align:center;font-family:Bebas Neue,sans-serif;font-size:1.15rem;color:'+qtdColor+';">'+qtd+'</span>'+
         '<button onclick="event.stopPropagation();qtdRapida(\''+it.id+'\',1)" style="width:28px;height:28px;border-radius:50%;background:#22c55e;border:none;color:#fff;font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;font-weight:700;">+</button>'+
       '</div>'+
     '</div>';
   });
   grid.innerHTML = html;
+  // Atualiza estado do botão "Enviar tudo"
+  var btnEnviarTudo = document.getElementById('btn-enviar-tudo-rapido');
+  if(btnEnviarTudo){
+    if(algumComQtd){
+      btnEnviarTudo.style.opacity = '1';
+      btnEnviarTudo.style.pointerEvents = '';
+    } else {
+      btnEnviarTudo.style.opacity = '0.4';
+      btnEnviarTudo.style.pointerEvents = 'none';
+    }
+  }
 }
 
 // Tocou no card (mas pode ter sido nos botões − +) — só envia se foi no card mesmo
 function cardRapidoTap(evt, itemId){
   // Se o clique veio dos botões − + (que tem stopPropagation), nem chega aqui.
-  // Se chegou aqui foi clique no card — manda só este item com sua qtd.
-  var qtd = _qtdsRapidas[itemId] || 1;
+  // Se chegou aqui foi clique no card.
+  // Se qtd estiver 0, manda 1 (atalho rápido pra "+ 1 desse").
+  // Se qtd > 0, manda essa qtd.
+  var qtd = _qtdsRapidas[itemId] || 0;
+  if(qtd === 0) qtd = 1;
   enviarPedidoRapido(_mesaRapidaAtual, itemId, qtd);
 }
 
 // Altera qtd de um item específico no popup
 function qtdRapida(itemId, delta){
-  var atual = _qtdsRapidas[itemId] || 1;
-  var novo = Math.max(1, Math.min(99, atual + delta));
+  var atual = _qtdsRapidas[itemId] || 0;
+  var novo = Math.max(0, Math.min(99, atual + delta));
   _qtdsRapidas[itemId] = novo;
   renderPedidoRapidoGrid();
   // Vibração leve

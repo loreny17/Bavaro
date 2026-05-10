@@ -1946,8 +1946,35 @@ function renderGrupos(){
     lista.innerHTML = '<div class="empty"><div class="empty-icon">🎛️</div><div class="empty-titulo">Nenhum grupo cadastrado</div><div class="empty-sub">Crie grupos como "Ponto da carne", "Tamanho", "Adicionais" e use em vários itens.</div></div>';
     return;
   }
-  lista.innerHTML = '';
+  // ── Agrupa grupos por categoria ──
+  // Cada grupo tem `aplicaEm.categorias[]` e/ou `aplicaEm.itens[]`.
+  // Se aplicado em itens, descobrimos a categoria desses itens.
+  // Um grupo pode aparecer em múltiplas categorias.
+  // Grupos sem aplicação caem em "Sem categoria definida".
+  function categoriasDoGrupo(g){
+    var cats = {}; // setUnique
+    var aplicaEm = g.aplicaEm || {};
+    (aplicaEm.categorias||[]).forEach(function(catId){ cats[catId] = true; });
+    (aplicaEm.itens||[]).forEach(function(itemId){
+      var it = (_itens||[]).find(function(x){ return x.id === itemId; });
+      if(it && it.categoriaId) cats[it.categoriaId] = true;
+    });
+    return Object.keys(cats);
+  }
+  // Map: catId -> array de grupos
+  var porCategoria = {};
+  var semCategoria = [];
   _grupos.forEach(function(g){
+    var cats = categoriasDoGrupo(g);
+    if(!cats.length){ semCategoria.push(g); return; }
+    cats.forEach(function(catId){
+      if(!porCategoria[catId]) porCategoria[catId] = [];
+      porCategoria[catId].push(g);
+    });
+  });
+  // Ordem de exibição: igual ordem das categorias do cardápio
+  lista.innerHTML = '';
+  function renderCard(g, contexto){
     var card = document.createElement('div');
     card.className = 'grupo-card';
     var opcoesPreview = (g.opcoes||[]).slice(0,4).map(function(o){
@@ -1955,17 +1982,50 @@ function renderGrupos(){
       return escapeHtml(o.nome||'') + preco;
     }).join(' • ');
     if((g.opcoes||[]).length > 4) opcoesPreview += ' • +' + ((g.opcoes||[]).length - 4);
+    var totalCats = categoriasDoGrupo(g).length;
+    var avisoMult = totalCats > 1
+      ? '<span style="font-size:0.66rem;color:var(--accent);margin-left:auto;background:rgba(212,168,67,0.1);border-radius:4px;padding:1px 6px;">Em '+totalCats+' categorias</span>'
+      : '<span style="font-size:0.74rem;color:var(--muted);margin-left:auto;">'+(g.opcoes||[]).length+' opções</span>';
     card.innerHTML =
       '<div class="grupo-card-head">'+
         '<span class="grupo-tipo-tag '+g.tipo+'">'+(g.tipo==='opcao'?'🔘 Opção':'☑️ Adicional')+'</span>'+
         (g.obrigatorio ? '<span class="grupo-obrig-tag">OBRIGATÓRIO</span>' : '')+
-        '<span style="font-size:0.74rem;color:var(--muted);margin-left:auto;">'+(g.opcoes||[]).length+' opções</span>'+
+        avisoMult+
       '</div>'+
       '<div style="font-weight:700;font-size:0.95rem;margin-bottom:4px;">'+escapeHtml(g.nome)+'</div>'+
       '<div style="font-size:0.76rem;color:var(--muted);">'+opcoesPreview+'</div>';
     card.onclick = (function(grupo){ return function(){ abrirEditarGrupo(grupo); }; })(g);
-    lista.appendChild(card);
+    return card;
+  }
+  function renderHeaderCategoria(titulo, qtd){
+    var h = document.createElement('div');
+    h.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 8px;padding:10px 12px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:10px;';
+    h.innerHTML =
+      '<div style="font-size:0.84rem;font-weight:800;color:var(--accent);letter-spacing:0.04em;">'+titulo+'</div>'+
+      '<div style="font-size:0.7rem;color:var(--muted);">'+qtd+' '+(qtd===1?'grupo':'grupos')+'</div>';
+    return h;
+  }
+  // Render por ordem das categorias do cardápio
+  (_categorias||[]).forEach(function(cat){
+    var grupos = porCategoria[cat.id];
+    if(!grupos || !grupos.length) return;
+    var titulo = (cat.emoji ? cat.emoji + ' ' : '') + (cat.nome||'').toUpperCase();
+    lista.appendChild(renderHeaderCategoria(titulo, grupos.length));
+    grupos.forEach(function(g){ lista.appendChild(renderCard(g, cat.id)); });
   });
+  // Categorias órfãs (grupo aponta pra categoria que não existe mais)
+  Object.keys(porCategoria).forEach(function(catId){
+    var existe = (_categorias||[]).find(function(c){ return c.id === catId; });
+    if(existe) return;
+    var grupos = porCategoria[catId];
+    lista.appendChild(renderHeaderCategoria('⚠️ CATEGORIA REMOVIDA', grupos.length));
+    grupos.forEach(function(g){ lista.appendChild(renderCard(g)); });
+  });
+  // Sem categoria
+  if(semCategoria.length){
+    lista.appendChild(renderHeaderCategoria('📦 SEM CATEGORIA DEFINIDA', semCategoria.length));
+    semCategoria.forEach(function(g){ lista.appendChild(renderCard(g)); });
+  }
 }
 
 // ─── Estado da edição do grupo ───

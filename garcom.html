@@ -126,6 +126,18 @@ button{cursor:pointer;border:none;background:none;}
 .md-conta-titulo{font-weight:600;font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .md-conta-sub{font-size:0.7rem;color:var(--muted);margin-top:2px;}
 .md-conta-valor{font-family:'Bebas Neue',sans-serif;color:var(--accent);font-size:1.05rem;flex-shrink:0;}
+/* Pedidos em andamento */
+.md-grupo-mesa{background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;margin-bottom:10px;}
+.md-grupo-mesa:last-child{margin-bottom:0;}
+.md-grupo-titulo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.92rem;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.md-grupo-titulo .md-grupo-icone{font-size:1.1rem;}
+.md-grupo-titulo .md-grupo-nome{flex:1;color:var(--accent);}
+.md-grupo-titulo .md-grupo-total{font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:var(--text);}
+.md-pedido-item{display:flex;align-items:flex-start;gap:8px;padding:6px 0;font-size:0.82rem;}
+.md-pedido-item:not(:last-child){border-bottom:1px dashed var(--border);}
+.md-pedido-hora{font-size:0.7rem;color:var(--muted);font-family:monospace;background:var(--surface3);padding:2px 6px;border-radius:5px;flex-shrink:0;line-height:1.2;}
+.md-pedido-itens{flex:1;color:var(--text);line-height:1.4;}
+.md-pedido-valor{font-family:'Bebas Neue',sans-serif;color:var(--accent);font-size:0.95rem;flex-shrink:0;}
 .mesa-search{padding:12px 16px;border-bottom:1px solid var(--border);}
 .mesa-search input{
   width:100%;background:var(--surface2);border:1.5px solid var(--border2);
@@ -1495,7 +1507,8 @@ function carregarMeuDia(){
   
   var rest = (window._restauranteAtivo && _restauranteAtivo.id) || _restauranteId || 'default';
   
-  fbDb.collection('contas_fechadas')
+  // Promise 1: contas fechadas no período
+  var promContasFechadas = fbDb.collection('contas_fechadas')
     .where('restauranteId','==', rest)
     .where('fechadoEm', '>=', faixa.ini)
     .where('fechadoEm', '<=', faixa.fim)
@@ -1503,12 +1516,34 @@ function carregarMeuDia(){
     .then(function(snap){
       var contas = [];
       snap.forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
-      // Filtra só as do garçom logado
-      var minhasContas = contas.filter(function(c){
+      return contas.filter(function(c){
         return (c.garcomPrincipal === _nomeGarcom) ||
                (c.garcons && c.garcons.indexOf(_nomeGarcom) !== -1);
       });
-      processarMeuDia(minhasContas, faixa);
+    });
+  
+  // Promise 2: pedidos em andamento (todos do garçom)
+  var promPedidosAtivos = fbDb.collection('pedidos')
+    .where('restauranteId','==', rest)
+    .where('garcom','==', _nomeGarcom)
+    .get()
+    .then(function(snap){
+      var lista = [];
+      snap.forEach(function(d){
+        var p = Object.assign({id:d.id}, d.data());
+        // Filtra os do período E ainda não pagos
+        if(p.criadoEm < faixa.ini || p.criadoEm > faixa.fim) return;
+        if(p.status === 'pago' || p.status === 'cancelado') return;
+        lista.push(p);
+      });
+      return lista;
+    });
+  
+  Promise.all([promContasFechadas, promPedidosAtivos])
+    .then(function(results){
+      var minhasContas = results[0];
+      var pedidosAtivos = results[1];
+      processarMeuDia(minhasContas, faixa, pedidosAtivos);
     })
     .catch(function(e){
       console.error('Erro Meu Dia:', e);
@@ -1520,7 +1555,7 @@ function carregarMeuDia(){
     });
 }
 
-function processarMeuDia(contas, faixa){
+function processarMeuDia(contas, faixa, pedidosAtivos){
   var totalVendas = 0, totalPedidos = 0;
   var horarios = {}; for(var h=0; h<24; h++) horarios[h] = 0;
   var itensVendidos = {};
@@ -1575,6 +1610,41 @@ function processarMeuDia(contas, faixa){
     return {nome:n, qtd:itensVendidos[n].qtd, valor:itensVendidos[n].valor};
   }).sort(function(a,b){ return b.qtd - a.qtd; }).slice(0, 5);
   
+  // Agrupa pedidos ativos por mesa/comanda
+  var grupos = {};
+  (pedidosAtivos||[]).forEach(function(p){
+    var chave, titulo, icone;
+    if(p.tipoConta === 'avulsa' || p.comandaId){
+      chave = 'comanda_'+(p.comandaId || p.cliente || 'sem');
+      titulo = 'Comanda • ' + (p.cliente || 'Sem nome');
+      icone = '📝';
+    } else if(p.mesa){
+      chave = 'mesa_'+p.mesa;
+      titulo = 'Mesa ' + p.mesa;
+      icone = '🪑';
+    } else {
+      chave = 'outros';
+      titulo = 'Outros pedidos';
+      icone = '📋';
+    }
+    if(!grupos[chave]){
+      grupos[chave] = {titulo: titulo, icone: icone, pedidos: [], total: 0, ultimaHora: 0};
+    }
+    var subt = (p.itens||[])
+      .filter(function(it){ return it.status !== 'cancelado'; })
+      .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    grupos[chave].pedidos.push(p);
+    grupos[chave].total += subt;
+    if(p.criadoEm > grupos[chave].ultimaHora) grupos[chave].ultimaHora = p.criadoEm;
+  });
+  // Converte em array ordenado pela última atividade
+  var listaGrupos = Object.keys(grupos).map(function(k){ return grupos[k]; })
+    .sort(function(a,b){ return b.ultimaHora - a.ultimaHora; });
+  // Ordena pedidos dentro de cada grupo (mais recentes primeiro)
+  listaGrupos.forEach(function(g){
+    g.pedidos.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+  });
+  
   renderMeuDia({
     vendas: totalVendas,
     comissao: totalVendas * 0.10,
@@ -1583,7 +1653,9 @@ function processarMeuDia(contas, faixa){
     horarios: horarios,
     ehMultiDia: ehMultiDia,
     topItens: topItens,
-    listaContas: listaContas
+    listaContas: listaContas,
+    grupos: listaGrupos,
+    totalPedidosAtivos: (pedidosAtivos||[]).length
   });
 }
 
@@ -1661,6 +1733,45 @@ function renderMeuDia(d){
       '</div>';
     });
     divContas.innerHTML = html;
+  }
+  
+  // Pedidos em andamento (agrupados)
+  var tituloPed = document.getElementById('md-pedidos-titulo');
+  if(tituloPed) tituloPed.textContent = '🕐 Pedidos em andamento (' + (d.totalPedidosAtivos||0) + ')';
+  var divPedidos = document.getElementById('md-pedidos-andamento');
+  if(!d.grupos || !d.grupos.length){
+    divPedidos.innerHTML = '<div style="text-align:center;color:var(--muted);padding:14px;font-size:0.82rem;">Nenhum pedido em andamento</div>';
+  } else {
+    var hp = '';
+    d.grupos.forEach(function(g){
+      hp += '<div class="md-grupo-mesa">';
+      hp += '<div class="md-grupo-titulo">'+
+        '<span class="md-grupo-icone">'+g.icone+'</span>'+
+        '<span class="md-grupo-nome">'+esc(g.titulo)+'</span>'+
+        '<span class="md-grupo-total">R$ '+fmtPreco(g.total)+'</span>'+
+      '</div>';
+      g.pedidos.forEach(function(p){
+        var dt = new Date(p.criadoEm || 0);
+        var hStr = String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+        var itensValidos = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+        var subtP = itensValidos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+        var resumoHtml;
+        if(!itensValidos.length){
+          resumoHtml = '<span style="color:var(--muted);font-style:italic;">Pedido vazio</span>';
+        } else {
+          resumoHtml = itensValidos.map(function(it){
+            return esc((it.qtd||1) + 'x ' + (it.nome||'?'));
+          }).join(' • ');
+        }
+        hp += '<div class="md-pedido-item">'+
+          '<div class="md-pedido-hora">'+hStr+'</div>'+
+          '<div class="md-pedido-itens">'+resumoHtml+'</div>'+
+          '<div class="md-pedido-valor">R$ '+fmtPreco(subtP)+'</div>'+
+        '</div>';
+      });
+      hp += '</div>';
+    });
+    divPedidos.innerHTML = hp;
   }
 }
 
@@ -6033,6 +6144,11 @@ try{ history.replaceState({appState: 'init'}, '', ''); }catch(e){}
       <div class="md-bloco">
         <div class="md-bloco-titulo">📋 Mesas/Comandas atendidas</div>
         <div id="md-lista-contas"></div>
+      </div>
+      <!-- Pedidos em andamento -->
+      <div class="md-bloco">
+        <div class="md-bloco-titulo" id="md-pedidos-titulo">🕐 Pedidos em andamento</div>
+        <div id="md-pedidos-andamento"></div>
       </div>
     </div>
     <!-- Botão Sair -->

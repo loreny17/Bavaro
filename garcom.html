@@ -1350,7 +1350,7 @@ var _longPressTimer = null;
 var _longPressDisparou = false;
 var _longPressX = 0;
 var _longPressY = 0;
-function anexarLongPress(el, numMesa){
+function anexarLongPress(el, numMesa, comandaId){
   function iniciar(e){
     _longPressDisparou = false;
     var ponto = e.touches ? e.touches[0] : e;
@@ -1361,7 +1361,8 @@ function anexarLongPress(el, numMesa){
       _longPressDisparou = true;
       // Vibração leve confirmando que disparou
       if(navigator.vibrate) navigator.vibrate(50);
-      abrirPedidoRapido(numMesa);
+      if(comandaId) abrirPedidoRapidoComanda(comandaId);
+      else abrirPedidoRapido(numMesa);
     }, 600);
   }
   function mover(e){
@@ -1398,15 +1399,30 @@ function anexarLongPress(el, numMesa){
 // Estado das quantidades no popup de pedido rápido
 var _qtdsRapidas = {}; // {itemId: qtd}
 var _mesaRapidaAtual = null;
+var _comandaRapidaAtual = null;
 
 // Abre popup com itens distintos que a mesa já consumiu
 function abrirPedidoRapido(numMesa){
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
-  if(!conta){
-    // Mesa sem conta — silencioso, não faz nada (decisão do usuário)
-    return;
-  }
-  // Agrupa itens distintos pelo ID, ignorando obs/seleções (decisão B do usuário)
+  if(!conta) return;
+  _mesaRapidaAtual = numMesa;
+  _comandaRapidaAtual = null;
+  _abrirPedidoRapidoCore(conta, '⚡ MESA '+numMesa+' — PEDIDO RÁPIDO');
+}
+
+// Versão pra comanda avulsa
+function abrirPedidoRapidoComanda(comandaId){
+  var conta = _comandasAvulsas.find(function(c){ return c.id === comandaId; });
+  if(!conta) return;
+  _mesaRapidaAtual = null;
+  _comandaRapidaAtual = comandaId;
+  var titulo = '⚡ ' + (conta.cliente||'COMANDA').toUpperCase() + ' — PEDIDO RÁPIDO';
+  _abrirPedidoRapidoCore(conta, titulo);
+}
+
+// Core comum (recebe a conta direto)
+function _abrirPedidoRapidoCore(conta, titulo){
+  // Agrupa itens distintos pelo ID, ignorando obs/seleções
   // Filtra: kg de fora, cancelados de fora
   var distintos = {};
   (conta.itens||[]).forEach(function(it){
@@ -1417,20 +1433,14 @@ function abrirPedidoRapido(numMesa){
       distintos[it.id] = {
         id: it.id,
         nome: it.nome,
-        preco: it.precoBase || it.preco // preço sem extras
+        preco: it.precoBase || it.preco
       };
     }
   });
   var lista = Object.keys(distintos).map(function(k){ return distintos[k]; });
-  if(!lista.length){
-    // Mesa aberta mas sem itens consumíveis — silencioso
-    return;
-  }
-  // Estado inicial: cada item começa com qtd 0 (apagado).
-  // Toca no card direto → manda 1 (atalho rápido pra "mais um daquele")
-  // Toca no + → começa a acumular (1, 2, 3...) e usa "Enviar tudo"
+  if(!lista.length) return;
+  // Estado inicial: cada item começa com qtd 0
   _qtdsRapidas = {};
-  _mesaRapidaAtual = numMesa;
   lista.forEach(function(it){ _qtdsRapidas[it.id] = 0; });
   // Renderiza
   var ex = document.getElementById('modal-pedido-rapido');
@@ -1438,11 +1448,11 @@ function abrirPedidoRapido(numMesa){
   var mod = document.createElement('div');
   mod.className = 'modal modal-centro show';
   mod.id = 'modal-pedido-rapido';
-  mod.dataset.lista = JSON.stringify(lista); // guarda lista pra render
+  mod.dataset.lista = JSON.stringify(lista);
   mod.innerHTML =
     '<div class="modal-box" style="max-width:440px;border-radius:18px;">'+
       '<div class="modal-header">'+
-        '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
+        '<div class="modal-titulo">'+titulo+'</div>'+
         '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
       '</div>'+
       '<div class="modal-body">'+
@@ -1534,10 +1544,17 @@ function enviarTodosRapidos(){
   var mod = document.getElementById('modal-pedido-rapido');
   if(!mod) return;
   var lista = JSON.parse(mod.dataset.lista || '[]');
-  var numMesa = _mesaRapidaAtual;
-  if(!numMesa) return;
-  var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
-  if(!conta || !conta.id){ showToast('❌ Mesa sem conta aberta','#f87171'); return; }
+  var ehComanda = !!_comandaRapidaAtual;
+  var conta;
+  if(ehComanda){
+    conta = _comandasAvulsas.find(function(c){ return c.id === _comandaRapidaAtual; });
+    if(!conta){ showToast('❌ Comanda não encontrada','#f87171'); return; }
+  } else {
+    var numMesa = _mesaRapidaAtual;
+    if(!numMesa) return;
+    conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
+    if(!conta || !conta.id){ showToast('❌ Mesa sem conta aberta','#f87171'); return; }
+  }
   // Monta lista de itens com qtd > 0
   var itensPedido = [];
   var totalPedido = 0;
@@ -1565,15 +1582,16 @@ function enviarTodosRapidos(){
   mod.remove();
   if(navigator.vibrate) navigator.vibrate(40);
   var qtdTotalUnidades = itensPedido.reduce(function(a,i){ return a + i.qtd; }, 0);
-  showToast('✓ '+qtdTotalUnidades+' '+(qtdTotalUnidades===1?'item':'itens')+' → Mesa '+numMesa,'#4ade80');
+  var destinoTxt = ehComanda ? (conta.cliente||'comanda') : ('Mesa '+_mesaRapidaAtual);
+  showToast('✓ '+qtdTotalUnidades+' '+(qtdTotalUnidades===1?'item':'itens')+' → '+destinoTxt,'#4ade80');
   var pedido = {
     garcom: _nomeGarcom,
-    mesa: parseInt(numMesa) || numMesa,
+    mesa: ehComanda ? null : (parseInt(_mesaRapidaAtual) || _mesaRapidaAtual),
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: conta.id,
-    tipoConta: 'mesa',
-    cliente: null,
+    tipoConta: ehComanda ? 'avulsa' : 'mesa',
+    cliente: ehComanda ? (conta.cliente||'') : null,
     status: 'preparo',
     criadoEm: Date.now(),
     itens: itensPedido,
@@ -1618,18 +1636,27 @@ function enviarPedidoRapido(numMesa, itemId, qtd){
     showToast('❌ Item não encontrado','#f87171');
     return;
   }
-  var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
-  if(!conta || !conta.id){
-    showToast('❌ Mesa sem conta aberta','#f87171');
-    return;
+  // Detecta se é comanda avulsa (via _comandaRapidaAtual) ou mesa
+  var ehComanda = !!_comandaRapidaAtual;
+  var conta;
+  if(ehComanda){
+    conta = _comandasAvulsas.find(function(c){ return c.id === _comandaRapidaAtual; });
+    if(!conta){ showToast('❌ Comanda não encontrada','#f87171'); return; }
+  } else {
+    conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
+    if(!conta || !conta.id){
+      showToast('❌ Mesa sem conta aberta','#f87171');
+      return;
+    }
   }
-  // Fecha popup IMEDIATAMENTE (volta pro mapa de mesas)
+  // Fecha popup IMEDIATAMENTE
   var modal = document.getElementById('modal-pedido-rapido');
   if(modal) modal.remove();
   // Vibração leve confirmando o toque
   if(navigator.vibrate) navigator.vibrate(30);
-  // Toast otimista — mostra antes mesmo do Firebase confirmar (sensação de instantâneo)
-  showToast('✓ +'+qtd+' '+itCardapio.nome+' → Mesa '+numMesa,'#4ade80');
+  // Toast otimista
+  var destinoTxt = ehComanda ? (conta.cliente||'comanda') : ('Mesa '+numMesa);
+  showToast('✓ +'+qtd+' '+itCardapio.nome+' → '+destinoTxt,'#4ade80');
   var precoBase = parseFloat(itCardapio.preco)||0;
   var item = {
     id: itCardapio.id,
@@ -1644,12 +1671,12 @@ function enviarPedidoRapido(numMesa, itemId, qtd){
   };
   var pedido = {
     garcom: _nomeGarcom,
-    mesa: parseInt(numMesa) || numMesa,
+    mesa: ehComanda ? null : (parseInt(numMesa) || numMesa),
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: conta.id,
-    tipoConta: 'mesa',
-    cliente: null,
+    tipoConta: ehComanda ? 'avulsa' : 'mesa',
+    cliente: ehComanda ? (conta.cliente||'') : null,
     status: 'preparo',
     criadoEm: Date.now(),
     itens: [item],
@@ -1708,19 +1735,23 @@ function renderComandas(){
     '</div>';
     return;
   }
-  var html = '';
+  lista.innerHTML = '';
   filtradas.forEach(function(c){
     var hora = c.abertaEm ? new Date(c.abertaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-    html += '<div class="comanda-card aberta" onclick="abrirMenuComanda(\''+c.id+'\')">'+
+    var card = document.createElement('div');
+    card.className = 'comanda-card aberta';
+    card.onclick = (function(id){ return function(){ abrirMenuComanda(id); }; })(c.id);
+    card.innerHTML =
       '<div class="comanda-card-icone">👤</div>'+
       '<div class="comanda-card-info">'+
         '<div class="comanda-card-nome">'+esc(c.cliente||'(sem nome)')+'</div>'+
         '<div class="comanda-card-sub">'+(c._itensAbertosCount||0)+' itens • '+esc(c.garcomPrincipal||'—')+' • '+hora+'</div>'+
       '</div>'+
-      '<div class="comanda-card-valor">R$ '+fmtPreco(c.total||0)+'</div>'+
-    '</div>';
+      '<div class="comanda-card-valor">R$ '+fmtPreco(c.total||0)+'</div>';
+    // Long press → abre pedido rápido (só se tem itens)
+    anexarLongPress(card, null, c.id);
+    lista.appendChild(card);
   });
-  lista.innerHTML = html;
 }
 
 function abrirNovaComanda(){

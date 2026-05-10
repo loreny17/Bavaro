@@ -2894,6 +2894,11 @@ function salvarEditItemGarcom(){
   });
   var pedidoId = _gPedId;
   var contaId = ped.contaId;
+
+  // ═══ UI OTIMISTA ═══ Fecha modal e mostra toast antes do Firebase
+  var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+  showToast('✓ Item atualizado','#4ade80');
+
   fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
     .then(function(){
       // Sincroniza com contas_mesa
@@ -2917,19 +2922,8 @@ function salvarEditItemGarcom(){
       }
     })
     .then(function(){
-      // Manda reimprimir comanda atualizada
-      return fbDb.collection('comandos_impressao').add({
-        tipo: 'reimpressao',
-        restauranteId: _restauranteId,
-        pedidoId: pedidoId,
-        motivo: 'Edição de item: ' + (itemAntigo.nome||''),
-        solicitadoPor: _nomeGarcom,
-        solicitadoEm: Date.now()
-      });
-    })
-    .then(function(){
-      showToast('✓ Item atualizado e reimpressão enviada','#4ade80');
-      var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+      // Pergunta se quer reimprimir (em vez de reimprimir automático)
+      perguntarReimpressao(pedidoId, 'Edição de item: ' + (itemAntigo.nome||''));
     })
     .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
@@ -2947,6 +2941,11 @@ function substituirItemGarcom(novoItemId){
   });
   var pedidoId = _gPedId;
   var contaId = ped.contaId;
+
+  // ═══ UI OTIMISTA ═══ Fecha modal e mostra toast antes do Firebase
+  var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+  showToast('✓ Substituído por '+novoItem.nome,'#4ade80');
+
   fbDb.collection('pedidos').doc(pedidoId).update({itens:itens,atualizadoEm:Date.now()})
     .then(function(){
       if(contaId){
@@ -2969,18 +2968,8 @@ function substituirItemGarcom(novoItemId){
       }
     })
     .then(function(){
-      return fbDb.collection('comandos_impressao').add({
-        tipo: 'reimpressao',
-        restauranteId: _restauranteId,
-        pedidoId: pedidoId,
-        motivo: 'Substituição: ' + (itemAntigo.nome||'') + ' → ' + novoItem.nome,
-        solicitadoPor: _nomeGarcom,
-        solicitadoEm: Date.now()
-      });
-    })
-    .then(function(){
-      showToast('✓ Substituído por '+novoItem.nome+' (reimpressão enviada)','#4ade80');
-      var m=document.getElementById('modal-edit-garcom'); if(m) m.remove();
+      // Pergunta se quer reimprimir
+      perguntarReimpressao(pedidoId, 'Substituição: ' + (itemAntigo.nome||'') + ' → ' + novoItem.nome);
     })
     .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }

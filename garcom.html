@@ -848,6 +848,20 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
+    // ═══ CACHE OFFLINE DO FIRESTORE ═══
+    // Quando o app abre, dados são lidos do cache local INSTANTANEAMENTE,
+    // depois sincronizados com servidor em background.
+    // Isso elimina o gap de 1-2s onde mesas apareciam vazias no início.
+    // enablePersistence retorna Promise; se falhar (ex: aba duplicada), só ignora
+    // e o app funciona normal sem cache.
+    try{
+      fbDb.enablePersistence({synchronizeTabs:true}).catch(function(err){
+        // failed-precondition = múltiplas abas abertas (não dá pra sync)
+        // unimplemented = navegador antigo sem suporte
+        // Em ambos os casos, app funciona normal — só sem cache offline.
+        console.log('Firestore persistence:', err.code);
+      });
+    }catch(e){ /* navegador muito antigo, ignora */ }
     // Não usa Firebase Auth — login só por nome
     document.getElementById('loading').classList.add('hidden');
     mostrarLoginOuMesas();
@@ -5022,30 +5036,24 @@ function executarEncerramento(){
     showToast('❌ ID da conta não encontrado','#f87171');
     return;
   }
-  // Desabilita o botão pra evitar clique duplo
-  var btnEncerrar = document.querySelector('#modal-encerrar .f-btn[onclick*="executarEncerramento"]');
-  if(btnEncerrar){
-    btnEncerrar.disabled = true;
-    btnEncerrar.textContent = 'Encerrando...';
-    btnEncerrar.style.opacity = '0.6';
-  }
+  // ═══ UI OTIMISTA ═══
+  // Fecha modal e volta pro mapa IMEDIATAMENTE.
+  // O Firebase faz a transação em background.
+  var contaIdParaApagar = _fecharContaId;
   var registro = Object.assign({}, c, {status:'fechada', fechadoEm:Date.now(), fechadoPor:_nomeGarcom});
   delete registro.id;
+
+  // Feedback imediato
+  var m = document.getElementById('modal-encerrar'); if(m) m.remove();
+  showToast('🏁 Mesa ' + c.mesa + ' encerrada','#4ade80');
+  fecharModalFechar();
+
+  // Firebase em background
   fbDb.collection('contas_fechadas').add(registro).then(function(){
-    return fbDb.collection('contas_mesa').doc(_fecharContaId).delete();
-  }).then(function(){
-    showToast('🏁 Mesa ' + c.mesa + ' encerrada','#4ade80');
-    var m = document.getElementById('modal-encerrar'); if(m) m.remove();
-    fecharModalFechar();
+    return fbDb.collection('contas_mesa').doc(contaIdParaApagar).delete();
   }).catch(function(e){
     console.error('Erro ao encerrar mesa:', e);
-    showToast('❌ Erro: '+e.message,'#f87171');
-    // Reabilita botão pra tentar de novo
-    if(btnEncerrar){
-      btnEncerrar.disabled = false;
-      btnEncerrar.textContent = '🏁 Encerrar';
-      btnEncerrar.style.opacity = '1';
-    }
+    showToast('❌ Falha ao encerrar — abra a mesa de novo pra tentar','#f87171');
   });
 }
 

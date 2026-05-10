@@ -75,6 +75,26 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .tabs::-webkit-scrollbar{display:none;}
 .tab{padding:12px 4px;font-size:0.74rem;font-weight:600;color:var(--muted);white-space:nowrap;position:relative;flex:1;min-width:0;background:none;border:none;font-family:inherit;cursor:pointer;text-align:center;overflow:hidden;text-overflow:ellipsis;}
 .tab .tab-text{display:inline;}
+/* ─── Relatórios ─── */
+.rel-pill{flex-shrink:0;padding:7px 14px;border-radius:18px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.78rem;font-weight:600;cursor:pointer;white-space:nowrap;}
+.rel-pill.active{border-color:var(--accent);background:var(--accent);color:#000;font-weight:700;}
+.rel-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;}
+.rel-card-label{font-size:0.74rem;color:var(--muted);font-weight:600;margin-bottom:6px;}
+.rel-card-valor{font-family:'Bebas Neue',sans-serif;font-size:1.85rem;color:var(--accent);line-height:1;letter-spacing:0.02em;}
+.rel-card-sub{font-size:0.7rem;color:var(--muted);margin-top:4px;}
+.rel-grafico-bar{flex:1;background:linear-gradient(180deg,var(--accent),rgba(212,168,67,0.6));border-radius:3px 3px 0 0;min-height:2px;position:relative;cursor:pointer;transition:opacity 0.15s;}
+.rel-grafico-bar:hover{opacity:0.85;}
+.rel-grafico-bar.zero{background:var(--surface3);}
+.rel-rank-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);}
+.rel-rank-row:last-child{border-bottom:none;}
+.rel-rank-pos{width:28px;height:28px;border-radius:50%;background:var(--surface3);color:var(--muted);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.78rem;flex-shrink:0;}
+.rel-rank-pos.top1{background:#fbbf24;color:#000;}
+.rel-rank-pos.top2{background:#cbd5e1;color:#000;}
+.rel-rank-pos.top3{background:#fb923c;color:#000;}
+.rel-rank-info{flex:1;min-width:0;}
+.rel-rank-nome{font-weight:600;font-size:0.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rel-rank-sub{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+.rel-rank-valor{font-family:'Bebas Neue',sans-serif;color:var(--accent);font-size:1.2rem;flex-shrink:0;}
 @media(max-width:480px){.tab{font-size:1.1rem;padding:12px 2px;}.tab .tab-text{display:none;}}
 .tab.active{color:var(--accent);}
 .tab.active::after{content:"";position:absolute;left:14px;right:14px;bottom:0;height:2px;background:var(--accent);border-radius:2px;}
@@ -295,6 +315,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
     <button class="tab" id="tab-btn-grupos" onclick="showTab('grupos')">🎛️<span class="tab-text"> Grupos</span></button>
     <button class="tab" id="tab-btn-pedidos" onclick="showTab('pedidos')">🧾<span class="tab-text"> Pedidos</span> <span id="pedidos-badge" style="display:none;background:#f87171;color:#fff;border-radius:10px;font-size:0.62rem;padding:1px 6px;font-weight:700;margin-left:2px;">0</span></button>
     <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜<span class="tab-text"> Histórico</span></button>
+    <button class="tab" id="tab-btn-relatorios" onclick="showTab('relatorios')">📊<span class="tab-text"> Relatórios</span></button>
     <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥<span class="tab-text"> Garçons</span></button>
     <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️<span class="tab-text"> Impressão</span></button>
   </div>
@@ -329,6 +350,86 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
   <!-- Painel Histórico -->
   <div id="painel-historico" style="display:none;padding:14px;padding-bottom:90px;">
     <div id="historico-pdv-lista"></div>
+  </div>
+
+  <!-- Painel Relatórios -->
+  <div id="painel-relatorios" style="display:none;padding:14px;padding-bottom:120px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:140px;">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.06em;">📊 RELATÓRIOS</div>
+        <div style="font-size:0.74rem;color:var(--muted);" id="rel-periodo-label">Hoje</div>
+      </div>
+      <button class="p-btn secondary" id="btn-rel-atualizar" onclick="atualizarRelatorios()" style="flex:0 0 auto;padding:8px 12px;">🔄</button>
+    </div>
+    <!-- Pills de período -->
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:14px;">
+      <button class="rel-pill active" onclick="setPeriodoRel('hoje')">Hoje</button>
+      <button class="rel-pill" onclick="setPeriodoRel('ontem')">Ontem</button>
+      <button class="rel-pill" onclick="setPeriodoRel('7dias')">7 dias</button>
+      <button class="rel-pill" onclick="setPeriodoRel('30dias')">30 dias</button>
+      <button class="rel-pill" onclick="setPeriodoRel('custom')">📅 Personalizado</button>
+    </div>
+    <!-- Datas customizadas (escondido por padrão) -->
+    <div id="rel-custom-dates" style="display:none;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:14px;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <label style="display:flex;flex-direction:column;flex:1;min-width:130px;">
+          <span style="font-size:0.7rem;color:var(--muted);margin-bottom:4px;">De</span>
+          <input type="date" id="rel-data-de" style="background:var(--surface3);color:var(--text);border:1px solid var(--border2);padding:8px;border-radius:8px;font-family:inherit;">
+        </label>
+        <label style="display:flex;flex-direction:column;flex:1;min-width:130px;">
+          <span style="font-size:0.7rem;color:var(--muted);margin-bottom:4px;">Até</span>
+          <input type="date" id="rel-data-ate" style="background:var(--surface3);color:var(--text);border:1px solid var(--border2);padding:8px;border-radius:8px;font-family:inherit;">
+        </label>
+        <button class="p-btn primary" onclick="aplicarPeriodoCustom()" style="flex:0 0 auto;align-self:flex-end;">Aplicar</button>
+      </div>
+    </div>
+    <!-- Indicador de loading -->
+    <div id="rel-loading" style="display:none;text-align:center;padding:30px;color:var(--muted);">
+      <div style="font-size:2rem;margin-bottom:8px;">⏳</div>
+      <div>Calculando relatório...</div>
+    </div>
+    <!-- Conteúdo principal -->
+    <div id="rel-conteudo">
+      <!-- Cards de métricas -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px;">
+        <div class="rel-card">
+          <div class="rel-card-label">💰 Faturamento</div>
+          <div class="rel-card-valor" id="rel-faturamento">R$ 0,00</div>
+          <div class="rel-card-sub" id="rel-faturamento-sub">—</div>
+        </div>
+        <div class="rel-card">
+          <div class="rel-card-label">🧾 Pedidos</div>
+          <div class="rel-card-valor" id="rel-pedidos">0</div>
+          <div class="rel-card-sub" id="rel-pedidos-sub">—</div>
+        </div>
+        <div class="rel-card">
+          <div class="rel-card-label">🎟️ Ticket Médio</div>
+          <div class="rel-card-valor" id="rel-ticket">R$ 0,00</div>
+          <div class="rel-card-sub" id="rel-ticket-sub">por pedido</div>
+        </div>
+        <div class="rel-card">
+          <div class="rel-card-label">🪑 Mesas/Comandas</div>
+          <div class="rel-card-valor" id="rel-mesas">0</div>
+          <div class="rel-card-sub" id="rel-mesas-sub">contas fechadas</div>
+        </div>
+      </div>
+      <!-- Gráfico de vendas por hora -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:18px;">
+        <div style="font-weight:700;font-size:0.92rem;margin-bottom:14px;">📈 Vendas por hora</div>
+        <div id="rel-grafico-horas" style="position:relative;height:180px;display:flex;align-items:flex-end;gap:2px;padding-bottom:24px;border-bottom:1px solid var(--border2);"></div>
+        <div id="rel-grafico-horas-labels" style="display:flex;gap:2px;margin-top:6px;font-size:0.62rem;color:var(--muted);"></div>
+      </div>
+      <!-- Top itens -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:18px;">
+        <div style="font-weight:700;font-size:0.92rem;margin-bottom:12px;">🏆 Top 10 Itens Mais Vendidos</div>
+        <div id="rel-top-itens"></div>
+      </div>
+      <!-- Top garçons -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-weight:700;font-size:0.92rem;margin-bottom:12px;">👥 Ranking de Garçons</div>
+        <div id="rel-top-garcons"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Painel Impressão -->
@@ -1515,12 +1616,14 @@ function showTab(tab) {
   var btnGr = document.getElementById('tab-btn-grupos');
   var btnP = document.getElementById('tab-btn-pedidos');
   var btnH = document.getElementById('tab-btn-historico');
+  var btnR = document.getElementById('tab-btn-relatorios');
   var btnG = document.getElementById('tab-btn-garcons');
   var btnI = document.getElementById('tab-btn-impressao');
   if(btnC) btnC.classList.toggle('active', tab === 'cardapio');
   if(btnGr) btnGr.classList.toggle('active', tab === 'grupos');
   if(btnP) btnP.classList.toggle('active', tab === 'pedidos');
   if(btnH) btnH.classList.toggle('active', tab === 'historico');
+  if(btnR) btnR.classList.toggle('active', tab === 'relatorios');
   if(btnG) btnG.classList.toggle('active', tab === 'garcons');
   if(btnI) btnI.classList.toggle('active', tab === 'impressao');
   var catBar = document.getElementById('cat-bar');
@@ -1529,6 +1632,7 @@ function showTab(tab) {
   var fab = document.getElementById('fab');
   var painelP = document.getElementById('painel-pedidos');
   var painelH = document.getElementById('painel-historico');
+  var painelR = document.getElementById('painel-relatorios');
   var painelG = document.getElementById('painel-garcons');
   var painelGr = document.getElementById('painel-grupos');
   var painelI = document.getElementById('painel-impressao');
@@ -1539,6 +1643,7 @@ function showTab(tab) {
   if(fab) fab.style.display = 'none';
   if(painelP) painelP.style.display = 'none';
   if(painelH) painelH.style.display = 'none';
+  if(painelR) painelR.style.display = 'none';
   if(painelG) painelG.style.display = 'none';
   if(painelGr) painelGr.style.display = 'none';
   if(painelI) painelI.style.display = 'none';
@@ -1556,6 +1661,9 @@ function showTab(tab) {
   } else if(tab === 'historico') {
     if(painelH) painelH.style.display = 'block';
     carregarHistoricoPDV();
+  } else if(tab === 'relatorios') {
+    if(painelR) painelR.style.display = 'block';
+    carregarRelatorios();
   } else if(tab === 'garcons') {
     if(painelG) painelG.style.display = 'block';
     carregarGarconsPDV();
@@ -1841,6 +1949,285 @@ function executarLimpezaAutomatica(){
         localStorage.setItem('pdv_ultima_limpeza_'+_restauranteAtivo.id, String(agora));
       });
     }).catch(function(e){ console.warn('Limpeza:', e); });
+}
+
+// ════════════════════════════════════════
+//  RELATÓRIOS / DASHBOARD
+// ════════════════════════════════════════
+var _relPeriodo = 'hoje';
+var _relCustomDe = null;
+var _relCustomAte = null;
+var _relDadosCache = null;
+
+function setPeriodoRel(p){
+  _relPeriodo = p;
+  document.querySelectorAll('.rel-pill').forEach(function(b){ b.classList.remove('active'); });
+  // marca a pill ativa
+  var pills = document.querySelectorAll('.rel-pill');
+  var labels = ['hoje','ontem','7dias','30dias','custom'];
+  pills.forEach(function(b, i){ if(labels[i] === p) b.classList.add('active'); });
+  // Mostra/esconde campo custom
+  document.getElementById('rel-custom-dates').style.display = (p === 'custom') ? 'block' : 'none';
+  if(p === 'custom'){
+    // Pré-preenche com últimos 7 dias
+    var hoje = new Date();
+    var seteDias = new Date(); seteDias.setDate(hoje.getDate() - 7);
+    document.getElementById('rel-data-de').value = seteDias.toISOString().slice(0,10);
+    document.getElementById('rel-data-ate').value = hoje.toISOString().slice(0,10);
+    return; // não carrega ainda, espera clicar Aplicar
+  }
+  carregarRelatorios();
+}
+
+function aplicarPeriodoCustom(){
+  var de = document.getElementById('rel-data-de').value;
+  var ate = document.getElementById('rel-data-ate').value;
+  if(!de || !ate){ showToast('Preencha as duas datas','#f7a34f'); return; }
+  if(de > ate){ showToast('Data inicial maior que final','#f7a34f'); return; }
+  _relCustomDe = de;
+  _relCustomAte = ate;
+  carregarRelatorios();
+}
+
+// Calcula faixa de timestamps do período selecionado
+function calcularFaixaPeriodo(){
+  var hoje = new Date();
+  hoje.setHours(0,0,0,0);
+  var inicioMs, fimMs, label;
+  if(_relPeriodo === 'hoje'){
+    inicioMs = hoje.getTime();
+    fimMs = inicioMs + 86400000 - 1;
+    label = 'Hoje (' + formatarDataBR(hoje) + ')';
+  } else if(_relPeriodo === 'ontem'){
+    var ontem = new Date(hoje); ontem.setDate(hoje.getDate() - 1);
+    inicioMs = ontem.getTime();
+    fimMs = inicioMs + 86400000 - 1;
+    label = 'Ontem (' + formatarDataBR(ontem) + ')';
+  } else if(_relPeriodo === '7dias'){
+    var seteAtras = new Date(hoje); seteAtras.setDate(hoje.getDate() - 6);
+    inicioMs = seteAtras.getTime();
+    fimMs = hoje.getTime() + 86400000 - 1;
+    label = 'Últimos 7 dias';
+  } else if(_relPeriodo === '30dias'){
+    var trintaAtras = new Date(hoje); trintaAtras.setDate(hoje.getDate() - 29);
+    inicioMs = trintaAtras.getTime();
+    fimMs = hoje.getTime() + 86400000 - 1;
+    label = 'Últimos 30 dias';
+  } else if(_relPeriodo === 'custom'){
+    if(!_relCustomDe || !_relCustomAte){
+      // sem datas ainda, retorna hoje
+      inicioMs = hoje.getTime();
+      fimMs = inicioMs + 86400000 - 1;
+      label = 'Selecione um período';
+    } else {
+      var pDe = new Date(_relCustomDe + 'T00:00:00');
+      var pAte = new Date(_relCustomAte + 'T23:59:59');
+      inicioMs = pDe.getTime();
+      fimMs = pAte.getTime();
+      label = formatarDataBR(pDe) + ' a ' + formatarDataBR(pAte);
+    }
+  }
+  return {inicio: inicioMs, fim: fimMs, label: label};
+}
+
+function formatarDataBR(d){
+  var dd = String(d.getDate()).padStart(2,'0');
+  var mm = String(d.getMonth()+1).padStart(2,'0');
+  var aa = String(d.getFullYear());
+  return dd+'/'+mm+'/'+aa;
+}
+
+function atualizarRelatorios(){ carregarRelatorios(); }
+
+function carregarRelatorios(){
+  if(!fbDb || !_restauranteAtivo){ return; }
+  var faixa = calcularFaixaPeriodo();
+  document.getElementById('rel-periodo-label').textContent = faixa.label;
+  document.getElementById('rel-loading').style.display = 'block';
+  document.getElementById('rel-conteudo').style.opacity = '0.4';
+  // Carrega contas_fechadas no período
+  var rest = _restauranteAtivo.id || 'default';
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', rest)
+    .where('fechadoEm', '>=', faixa.inicio)
+    .where('fechadoEm', '<=', faixa.fim)
+    .get()
+    .then(function(snap){
+      var contas = [];
+      snap.forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
+      _relDadosCache = processarDadosRelatorio(contas, faixa);
+      renderizarRelatorios(_relDadosCache);
+    })
+    .catch(function(e){
+      console.error('Erro ao carregar relatórios:', e);
+      showToast('❌ Erro ao carregar: ' + e.message, '#f87171');
+    })
+    .finally(function(){
+      document.getElementById('rel-loading').style.display = 'none';
+      document.getElementById('rel-conteudo').style.opacity = '1';
+    });
+}
+
+function processarDadosRelatorio(contas, faixa){
+  var totalFaturamento = 0;
+  var totalPedidos = 0;
+  var qtdContas = contas.length;
+  var vendasPorHora = {}; // {hora: valor}
+  var itensVendidos = {}; // {itemNome: {qtd, valor}}
+  var garconsRanking = {}; // {nome: {valor, mesas, pedidos}}
+  var ehMultiDia = (faixa.fim - faixa.inicio) > 86400000;
+
+  // Inicializa horas (só faz sentido pra um dia)
+  if(!ehMultiDia){
+    for(var h=0; h<24; h++){ vendasPorHora[h] = 0; }
+  }
+
+  contas.forEach(function(conta){
+    // IGNORA itens cancelados
+    var itensValidos = (conta.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    if(!itensValidos.length) return;
+    
+    var subtotal = itensValidos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+    var taxa10 = subtotal * 0.10;
+    var totalConta = subtotal + taxa10;
+    totalFaturamento += totalConta;
+    
+    // Agrega itens
+    itensValidos.forEach(function(it){
+      var nome = it.nome || '(sem nome)';
+      if(!itensVendidos[nome]) itensVendidos[nome] = {qtd: 0, valor: 0};
+      itensVendidos[nome].qtd += (it.qtd||1);
+      itensVendidos[nome].valor += (it.preco||0)*(it.qtd||1);
+    });
+    
+    // Agrega vendas por hora (só pra período de 1 dia)
+    if(!ehMultiDia){
+      var dt = new Date(conta.fechadoEm);
+      var hora = dt.getHours();
+      vendasPorHora[hora] = (vendasPorHora[hora] || 0) + totalConta;
+    }
+    
+    // Ranking garçom
+    var garcom = conta.garcomPrincipal || '(sem garçom)';
+    if(!garconsRanking[garcom]) garconsRanking[garcom] = {valor: 0, mesas: 0, pedidos: 0};
+    garconsRanking[garcom].valor += totalConta;
+    garconsRanking[garcom].mesas += 1;
+    
+    // Conta pedidos pelo número de pedidoIds únicos
+    var pedidosUnicos = {};
+    itensValidos.forEach(function(it){
+      if(it.pedidoId) pedidosUnicos[it.pedidoId] = true;
+    });
+    var qtdPedidos = Object.keys(pedidosUnicos).length || 1;
+    totalPedidos += qtdPedidos;
+    garconsRanking[garcom].pedidos += qtdPedidos;
+  });
+
+  // Top itens (ordenado por qtd)
+  var topItens = Object.keys(itensVendidos).map(function(nome){
+    return {nome: nome, qtd: itensVendidos[nome].qtd, valor: itensVendidos[nome].valor};
+  }).sort(function(a,b){ return b.qtd - a.qtd; }).slice(0, 10);
+
+  // Ranking garçons (ordenado por valor)
+  var topGarcons = Object.keys(garconsRanking).map(function(nome){
+    return {nome: nome, valor: garconsRanking[nome].valor, mesas: garconsRanking[nome].mesas, pedidos: garconsRanking[nome].pedidos};
+  }).sort(function(a,b){ return b.valor - a.valor; });
+
+  return {
+    totalFaturamento: totalFaturamento,
+    totalPedidos: totalPedidos,
+    qtdContas: qtdContas,
+    ticketMedio: totalPedidos > 0 ? (totalFaturamento / totalPedidos) : 0,
+    vendasPorHora: vendasPorHora,
+    ehMultiDia: ehMultiDia,
+    topItens: topItens,
+    topGarcons: topGarcons
+  };
+}
+
+function renderizarRelatorios(d){
+  if(!d){ return; }
+  // Cards
+  document.getElementById('rel-faturamento').textContent = 'R$ ' + formatarPreco(d.totalFaturamento);
+  document.getElementById('rel-pedidos').textContent = d.totalPedidos;
+  document.getElementById('rel-ticket').textContent = 'R$ ' + formatarPreco(d.ticketMedio);
+  document.getElementById('rel-mesas').textContent = d.qtdContas;
+  document.getElementById('rel-faturamento-sub').textContent = d.qtdContas + ' ' + (d.qtdContas===1?'conta':'contas');
+  document.getElementById('rel-pedidos-sub').textContent = 'pedidos enviados';
+
+  // Gráfico de vendas por hora
+  var grafico = document.getElementById('rel-grafico-horas');
+  var labels = document.getElementById('rel-grafico-horas-labels');
+  grafico.innerHTML = '';
+  labels.innerHTML = '';
+  if(d.ehMultiDia){
+    grafico.innerHTML = '<div style="width:100%;text-align:center;color:var(--muted);font-size:0.8rem;align-self:center;padding:30px;">📊 Gráfico de vendas por hora disponível apenas para período de 1 dia</div>';
+  } else {
+    var horas = [];
+    var maxVal = 0;
+    for(var h=0; h<24; h++){
+      var v = d.vendasPorHora[h] || 0;
+      horas.push(v);
+      if(v > maxVal) maxVal = v;
+    }
+    horas.forEach(function(v, h){
+      var pct = maxVal > 0 ? (v / maxVal * 100) : 0;
+      var bar = document.createElement('div');
+      bar.className = 'rel-grafico-bar' + (v === 0 ? ' zero' : '');
+      bar.style.height = (pct < 2 ? 2 : pct) + '%';
+      bar.title = h + 'h: R$ ' + formatarPreco(v);
+      grafico.appendChild(bar);
+    });
+    // Labels só para 0h, 6h, 12h, 18h, 23h
+    for(var h=0; h<24; h++){
+      var lbl = document.createElement('div');
+      lbl.style.flex = '1';
+      lbl.style.textAlign = 'center';
+      lbl.textContent = (h % 4 === 0) ? (h + 'h') : '';
+      labels.appendChild(lbl);
+    }
+  }
+
+  // Top itens
+  var divTopItens = document.getElementById('rel-top-itens');
+  if(!d.topItens.length){
+    divTopItens.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:0.84rem;">Sem vendas no período</div>';
+  } else {
+    var html = '';
+    d.topItens.forEach(function(it, idx){
+      var posClass = idx === 0 ? 'top1' : (idx === 1 ? 'top2' : (idx === 2 ? 'top3' : ''));
+      html += '<div class="rel-rank-row">'+
+        '<div class="rel-rank-pos '+posClass+'">'+(idx+1)+'</div>'+
+        '<div class="rel-rank-info">'+
+          '<div class="rel-rank-nome">'+escapeHtml(it.nome)+'</div>'+
+          '<div class="rel-rank-sub">'+it.qtd+' '+(it.qtd===1?'unidade':'unidades')+' • R$ '+formatarPreco(it.valor)+'</div>'+
+        '</div>'+
+        '<div class="rel-rank-valor">'+it.qtd+'x</div>'+
+      '</div>';
+    });
+    divTopItens.innerHTML = html;
+  }
+
+  // Top garçons
+  var divTopGarcons = document.getElementById('rel-top-garcons');
+  if(!d.topGarcons.length){
+    divTopGarcons.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:0.84rem;">Sem dados no período</div>';
+  } else {
+    var htmlG = '';
+    d.topGarcons.forEach(function(g, idx){
+      var posClass = idx === 0 ? 'top1' : (idx === 1 ? 'top2' : (idx === 2 ? 'top3' : ''));
+      var comissao = g.valor * 0.10;
+      htmlG += '<div class="rel-rank-row">'+
+        '<div class="rel-rank-pos '+posClass+'">'+(idx+1)+'</div>'+
+        '<div class="rel-rank-info">'+
+          '<div class="rel-rank-nome">'+escapeHtml(g.nome)+'</div>'+
+          '<div class="rel-rank-sub">'+g.mesas+' '+(g.mesas===1?'conta':'contas')+' • '+g.pedidos+' '+(g.pedidos===1?'pedido':'pedidos')+' • Comissão 10%: R$ '+formatarPreco(comissao)+'</div>'+
+        '</div>'+
+        '<div class="rel-rank-valor">R$ '+formatarPreco(g.valor)+'</div>'+
+      '</div>';
+    });
+    divTopGarcons.innerHTML = htmlG;
+  }
 }
 
 function carregarHistoricoPDV(){

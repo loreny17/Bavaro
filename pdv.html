@@ -308,6 +308,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       </div>
       <button class="p-btn primary" style="flex:0 0 auto;padding:10px 14px;" onclick="abrirNovoGrupo()">+ Novo</button>
     </div>
+    <div id="grupos-pills-bar" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:8px;-webkit-overflow-scrolling:touch;"></div>
     <div id="grupos-lista"></div>
   </div>
 
@@ -1944,20 +1945,20 @@ function verContaPDV(id){
 var _grupoEditandoId = null;
 var _grupoOpcoesTemp = []; // [{nome, precoExtra}]
 
+var _filtroGrupoCat = 'todas'; // 'todas' | 'sem-categoria' | catId
+
 function renderGrupos(){
   var lista = document.getElementById('grupos-lista');
   if(!lista) return;
   if(!_grupos.length){
     lista.innerHTML = '<div class="empty"><div class="empty-icon">🎛️</div><div class="empty-titulo">Nenhum grupo cadastrado</div><div class="empty-sub">Crie grupos como "Ponto da carne", "Tamanho", "Adicionais" e use em vários itens.</div></div>';
+    var pillsBar0 = document.getElementById('grupos-pills-bar');
+    if(pillsBar0) pillsBar0.innerHTML = '';
     return;
   }
   // ── Agrupa grupos por categoria ──
-  // Cada grupo tem `aplicaEm.categorias[]` e/ou `aplicaEm.itens[]`.
-  // Se aplicado em itens, descobrimos a categoria desses itens.
-  // Um grupo pode aparecer em múltiplas categorias.
-  // Grupos sem aplicação caem em "Sem categoria definida".
   function categoriasDoGrupo(g){
-    var cats = {}; // setUnique
+    var cats = {};
     var aplicaEm = g.aplicaEm || {};
     (aplicaEm.categorias||[]).forEach(function(catId){ cats[catId] = true; });
     (aplicaEm.itens||[]).forEach(function(itemId){
@@ -1966,7 +1967,6 @@ function renderGrupos(){
     });
     return Object.keys(cats);
   }
-  // Map: catId -> array de grupos
   var porCategoria = {};
   var semCategoria = [];
   _grupos.forEach(function(g){
@@ -1977,7 +1977,32 @@ function renderGrupos(){
       porCategoria[catId].push(g);
     });
   });
-  // Ordem de exibição: igual ordem das categorias do cardápio
+
+  // ─── PILLS DE CATEGORIA (atalhos pra rolar/filtrar) ───
+  var pillsBar = document.getElementById('grupos-pills-bar');
+  if(pillsBar){
+    pillsBar.innerHTML = '';
+    function makePill(label, filtro, count){
+      var ativa = _filtroGrupoCat === filtro;
+      var p = document.createElement('button');
+      p.style.cssText = 'flex-shrink:0;padding:7px 12px;border-radius:18px;border:1px solid '+(ativa?'var(--accent)':'var(--border2)')+';background:'+(ativa?'var(--accent)':'var(--surface2)')+';color:'+(ativa?'#000':'var(--text)')+';font-family:inherit;font-size:0.78rem;font-weight:'+(ativa?'700':'600')+';cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px;';
+      p.innerHTML = label + (count !== null ? '<span style="font-size:0.7rem;opacity:0.7;">'+count+'</span>' : '');
+      p.onclick = (function(f){ return function(){ _filtroGrupoCat = f; renderGrupos(); }; })(filtro);
+      return p;
+    }
+    pillsBar.appendChild(makePill('Todas', 'todas', _grupos.length));
+    (_categorias||[]).forEach(function(cat){
+      var grupos = porCategoria[cat.id];
+      if(!grupos || !grupos.length) return;
+      var lbl = (cat.emoji?cat.emoji+' ':'') + (cat.nome||'');
+      pillsBar.appendChild(makePill(lbl, cat.id, grupos.length));
+    });
+    if(semCategoria.length){
+      pillsBar.appendChild(makePill('📦 Sem categoria', 'sem-categoria', semCategoria.length));
+    }
+  }
+
+  // ─── LISTA FILTRADA ───
   lista.innerHTML = '';
   function renderCard(g, contexto){
     var card = document.createElement('div');
@@ -2010,7 +2035,31 @@ function renderGrupos(){
       '<div style="font-size:0.7rem;color:var(--muted);">'+qtd+' '+(qtd===1?'grupo':'grupos')+'</div>';
     return h;
   }
-  // Render por ordem das categorias do cardápio
+
+  // ─── FILTRO ATIVO: mostra apenas a seção selecionada ───
+  if(_filtroGrupoCat === 'sem-categoria'){
+    if(semCategoria.length){
+      lista.appendChild(renderHeaderCategoria('📦 SEM CATEGORIA DEFINIDA', semCategoria.length));
+      semCategoria.forEach(function(g){ lista.appendChild(renderCard(g)); });
+    } else {
+      lista.innerHTML = '<div class="empty"><div class="empty-icon">📦</div><div class="empty-titulo">Nenhum grupo nesta seção</div></div>';
+    }
+    return;
+  }
+  if(_filtroGrupoCat !== 'todas'){
+    var cat = (_categorias||[]).find(function(c){ return c.id === _filtroGrupoCat; });
+    var grupos = porCategoria[_filtroGrupoCat];
+    if(grupos && grupos.length){
+      var titulo = cat ? ((cat.emoji?cat.emoji+' ':'') + (cat.nome||'').toUpperCase()) : '⚠️ CATEGORIA REMOVIDA';
+      lista.appendChild(renderHeaderCategoria(titulo, grupos.length));
+      grupos.forEach(function(g){ lista.appendChild(renderCard(g, _filtroGrupoCat)); });
+    } else {
+      lista.innerHTML = '<div class="empty"><div class="empty-icon">📂</div><div class="empty-titulo">Nenhum grupo nesta categoria</div></div>';
+    }
+    return;
+  }
+
+  // ─── TODAS: comportamento original (todas as seções em ordem) ───
   (_categorias||[]).forEach(function(cat){
     var grupos = porCategoria[cat.id];
     if(!grupos || !grupos.length) return;
@@ -2018,7 +2067,6 @@ function renderGrupos(){
     lista.appendChild(renderHeaderCategoria(titulo, grupos.length));
     grupos.forEach(function(g){ lista.appendChild(renderCard(g, cat.id)); });
   });
-  // Categorias órfãs (grupo aponta pra categoria que não existe mais)
   Object.keys(porCategoria).forEach(function(catId){
     var existe = (_categorias||[]).find(function(c){ return c.id === catId; });
     if(existe) return;
@@ -2026,7 +2074,6 @@ function renderGrupos(){
     lista.appendChild(renderHeaderCategoria('⚠️ CATEGORIA REMOVIDA', grupos.length));
     grupos.forEach(function(g){ lista.appendChild(renderCard(g)); });
   });
-  // Sem categoria
   if(semCategoria.length){
     lista.appendChild(renderHeaderCategoria('📦 SEM CATEGORIA DEFINIDA', semCategoria.length));
     semCategoria.forEach(function(g){ lista.appendChild(renderCard(g)); });

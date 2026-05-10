@@ -4020,18 +4020,22 @@ function abrirContaMesa(num){
     abertaEm: Date.now(),
     abertaPor: _nomeGarcom
   };
-  fbDb.collection('contas_mesa').add(conta).then(function(ref){
-    showToast('✓ Conta da Mesa ' + num + ' aberta','#4ade80');
-    // Já vai pra tela de cardápio para começar a atender
-    setTimeout(function(){
-      _mesaAtiva = num;
-      _carrinho = [];
-      _catAtiva = null;
-      document.getElementById('mesa-screen').classList.add('hidden');
-      iniciarApp();
-    }, 200);
-  }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
+  // ═══ UI OTIMISTA ═══
+  // Quando enablePersistence está ativo, .add() pode ficar pendurado se a conexão
+  // com servidor ainda não estabeleceu — o usuário tocava em "Abrir" e nada acontecia.
+  // Agora mostramos feedback imediato e vamos pra tela de cardápio na hora.
+  // O cache offline do Firestore garante que o "add" fica registrado mesmo se
+  // estiver temporariamente sem internet (sincroniza depois).
+  showToast('✓ Conta da Mesa ' + num + ' aberta','#4ade80');
+  _mesaAtiva = num;
+  _carrinho = [];
+  _catAtiva = null;
+  document.getElementById('mesa-screen').classList.add('hidden');
+  iniciarApp();
+  // Cria no Firestore em background (não bloqueia a UI)
+  fbDb.collection('contas_mesa').add(conta).catch(function(e){
+    console.error('Erro ao criar conta:', e);
+    showToast('❌ Falha ao criar conta — verifique conexão','#f87171');
   });
 }
 

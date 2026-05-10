@@ -4976,8 +4976,13 @@ function estornarPagamento(pagamentoId){
 }
 
 function encerrarMesa(){
+  if(!_fecharConta){
+    showToast('❌ Conta não carregada — tente fechar e abrir de novo','#f87171');
+    return;
+  }
   var totais = calcularTotaisConta(_fecharConta);
-  if(totais.restante > 0.01){
+  // Tolerância de até 5 centavos pra erro de arredondamento (divisões, %)
+  if(totais.restante > 0.05){
     showToast('⚠️ Ainda há R$ '+fmtPreco(totais.restante)+' em aberto','#f7a34f');
     return;
   }
@@ -5009,7 +5014,21 @@ function encerrarMesa(){
 
 function executarEncerramento(){
   var c = _fecharConta;
-  if(!c) return;
+  if(!c){
+    showToast('❌ Conta não carregada','#f87171');
+    return;
+  }
+  if(!_fecharContaId){
+    showToast('❌ ID da conta não encontrado','#f87171');
+    return;
+  }
+  // Desabilita o botão pra evitar clique duplo
+  var btnEncerrar = document.querySelector('#modal-encerrar .f-btn[onclick*="executarEncerramento"]');
+  if(btnEncerrar){
+    btnEncerrar.disabled = true;
+    btnEncerrar.textContent = 'Encerrando...';
+    btnEncerrar.style.opacity = '0.6';
+  }
   var registro = Object.assign({}, c, {status:'fechada', fechadoEm:Date.now(), fechadoPor:_nomeGarcom});
   delete registro.id;
   fbDb.collection('contas_fechadas').add(registro).then(function(){
@@ -5018,7 +5037,16 @@ function executarEncerramento(){
     showToast('🏁 Mesa ' + c.mesa + ' encerrada','#4ade80');
     var m = document.getElementById('modal-encerrar'); if(m) m.remove();
     fecharModalFechar();
-  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+  }).catch(function(e){
+    console.error('Erro ao encerrar mesa:', e);
+    showToast('❌ Erro: '+e.message,'#f87171');
+    // Reabilita botão pra tentar de novo
+    if(btnEncerrar){
+      btnEncerrar.disabled = false;
+      btnEncerrar.textContent = '🏁 Encerrar';
+      btnEncerrar.style.opacity = '1';
+    }
+  });
 }
 
 // Fechamento único: imprime direto sem abrir menu de opções

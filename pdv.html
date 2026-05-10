@@ -2040,13 +2040,22 @@ function formatarDataBR(d){
 function atualizarRelatorios(){ carregarRelatorios(); }
 
 function carregarRelatorios(){
-  if(!fbDb || !_restauranteAtivo){ return; }
+  if(!fbDb){ console.warn('Relatórios: fbDb não disponível'); return; }
+  if(!_restauranteAtivo || !_restauranteAtivo.id){
+    console.warn('Relatórios: restaurante não selecionado');
+    var c = document.getElementById('rel-conteudo');
+    if(c) c.innerHTML = '<div class="empty"><div class="empty-icon">🏢</div><div class="empty-titulo">Selecione um restaurante</div><div class="empty-sub">Volte ao início e escolha um restaurante para ver os relatórios.</div></div>';
+    return;
+  }
   var faixa = calcularFaixaPeriodo();
-  document.getElementById('rel-periodo-label').textContent = faixa.label;
-  document.getElementById('rel-loading').style.display = 'block';
-  document.getElementById('rel-conteudo').style.opacity = '0.4';
+  var lblPeriodo = document.getElementById('rel-periodo-label');
+  if(lblPeriodo) lblPeriodo.textContent = faixa.label;
+  var loading = document.getElementById('rel-loading');
+  var conteudo = document.getElementById('rel-conteudo');
+  if(loading) loading.style.display = 'block';
+  if(conteudo) conteudo.style.opacity = '0.4';
   // Carrega contas_fechadas no período
-  var rest = _restauranteAtivo.id || 'default';
+  var rest = _restauranteAtivo.id;
   fbDb.collection('contas_fechadas')
     .where('restauranteId','==', rest)
     .where('fechadoEm', '>=', faixa.inicio)
@@ -2060,11 +2069,11 @@ function carregarRelatorios(){
     })
     .catch(function(e){
       console.error('Erro ao carregar relatórios:', e);
-      showToast('❌ Erro ao carregar: ' + e.message, '#f87171');
+      if(typeof showToast === 'function') showToast('❌ Erro ao carregar: ' + e.message, '#f87171');
     })
     .finally(function(){
-      document.getElementById('rel-loading').style.display = 'none';
-      document.getElementById('rel-conteudo').style.opacity = '1';
+      if(loading) loading.style.display = 'none';
+      if(conteudo) conteudo.style.opacity = '1';
     });
 }
 

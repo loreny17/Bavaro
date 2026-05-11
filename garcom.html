@@ -349,6 +349,10 @@ header{
 .modal-titulo{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:0.06em;color:var(--accent);flex:1;}
 .modal-fechar{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
   width:32px;height:32px;border-radius:8px;font-size:1.3rem;line-height:1;}
+.acao-rapida-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
+  width:32px;height:32px;border-radius:8px;font-size:1rem;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all 0.15s;font-family:inherit;}
+.acao-rapida-btn:hover,.acao-rapida-btn:active{background:rgba(212,168,67,0.15);border-color:var(--accent);transform:scale(0.95);}
 .modal-body{padding:18px;flex:1;}
 .modal-footer{padding:14px 18px;border-top:1px solid var(--border);
   display:flex;gap:10px;background:var(--surface);position:sticky;bottom:0;}
@@ -2257,6 +2261,9 @@ function abrirMenuComanda(comandaId){
         '<div class="sub-pequeno">Receber pagamento ou encerrar</div>'+
       '</div>'+
     '</button>';
+  // Comanda: tem ação rápida apenas se tem itens (pra repetir)
+  var temItensComanda = qtdAbertos > 0;
+  configurarAcoesRapidas(temItensComanda, true);
   document.getElementById('modal-mesa-menu').classList.add('show');
   pushHistory('menu-comanda:' + comandaId);
 }
@@ -4429,13 +4436,66 @@ function abrirMenuMesa(num, eOcupada){
         '</div>'+
       '</button>';
   }
+  // Configura visibilidade dos botões de ação rápida
+  configurarAcoesRapidas(eOcupada, eOcupada);
   document.getElementById('modal-mesa-menu').classList.add('show');
   pushHistory('menu-mesa:' + num);
+}
+
+// Mostra/esconde os ícones rápidos ⚡ 🖨️ no topo do menu
+function configurarAcoesRapidas(temItens, temConta){
+  var btnP = document.getElementById('btn-acao-rapida-pedido');
+  var btnI = document.getElementById('btn-acao-rapida-imprimir');
+  if(btnP) btnP.style.display = temItens ? '' : 'none';
+  if(btnI) btnI.style.display = temConta ? '' : 'none';
+}
+
+// ─── Ações rápidas no topo do menu da mesa/comanda ───
+function acaoRapidaPedido(){
+  // Usa _mesaMenuAtual (mesa) ou _comandaMenuAtual (comanda avulsa)
+  if(_mesaMenuAtual !== null && _mesaMenuAtual !== undefined){
+    fecharMenuMesa();
+    abrirPedidoRapido(_mesaMenuAtual);
+  } else if(_comandaMenuAtual){
+    // Comandas avulsas: vai direto pro cardápio (não tem long press hoje)
+    var c = _comandasAvulsas.find(function(x){ return x.id === _comandaMenuAtual; });
+    if(c){
+      fecharMenuMesa();
+      selecionarComanda(c);
+    }
+  }
+}
+
+function acaoRapidaImprimir(){
+  // Imprime cupom de fechamento (pra cliente pagar)
+  var contaId = null, mesa = null;
+  if(_mesaMenuAtual !== null && _mesaMenuAtual !== undefined){
+    var conta = _contasMesaCache[String(_mesaMenuAtual)] || _contasMesaCache[_mesaMenuAtual];
+    if(!conta){ showToast('❌ Conta da mesa não encontrada','#f87171'); return; }
+    contaId = conta.id;
+    mesa = _mesaMenuAtual;
+  } else if(_comandaMenuAtual){
+    contaId = _comandaMenuAtual;
+  } else {
+    showToast('❌ Sem mesa/comanda selecionada','#f87171'); return;
+  }
+  fbDb.collection('comandos_impressao').add({
+    tipo:'conta_mesa', subtipo:'final',
+    restauranteId:_restauranteId,
+    contaId:contaId,
+    mesa:mesa,
+    solicitadoPor:_nomeGarcom,
+    solicitadoEm:Date.now()
+  }).then(function(){
+    showToast('🖨️ Imprimindo conta...','#4ade80');
+    fecharMenuMesa();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
 function fecharMenuMesa(){
   document.getElementById('modal-mesa-menu').classList.remove('show');
   _mesaMenuAtual = null;
+  _comandaMenuAtual = null;
 }
 
 function acaoMesa(acao){
@@ -6048,7 +6108,11 @@ try{
   <div class="modal-box" style="max-width:340px;">
     <div class="modal-header">
       <div class="modal-titulo" id="mesa-menu-titulo">MESA —</div>
-      <button class="modal-fechar" onclick="fecharMenuMesa()">×</button>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button class="acao-rapida-btn" id="btn-acao-rapida-pedido" onclick="acaoRapidaPedido()" title="Pedido Rápido">⚡</button>
+        <button class="acao-rapida-btn" id="btn-acao-rapida-imprimir" onclick="acaoRapidaImprimir()" title="Imprimir Conta">🖨️</button>
+        <button class="modal-fechar" onclick="fecharMenuMesa()">×</button>
+      </div>
     </div>
     <div class="modal-body" style="padding:8px;">
       <button class="mesa-menu-item" onclick="acaoMesa('pedido')">

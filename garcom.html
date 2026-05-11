@@ -353,6 +353,8 @@ header{
   width:32px;height:32px;border-radius:8px;font-size:1rem;line-height:1;cursor:pointer;
   display:flex;align-items:center;justify-content:center;transition:all 0.15s;font-family:inherit;}
 .acao-rapida-btn:hover,.acao-rapida-btn:active{background:rgba(212,168,67,0.15);border-color:var(--accent);transform:scale(0.95);}
+.acao-rapida-centro{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38px;height:38px;font-size:1.15rem;background:rgba(212,168,67,0.12);border-color:rgba(212,168,67,0.35);}
+.acao-rapida-centro:hover,.acao-rapida-centro:active{background:rgba(212,168,67,0.25);transform:translate(-50%,-50%) scale(0.95);}
 .modal-body{padding:18px;flex:1;}
 .modal-footer{padding:14px 18px;border-top:1px solid var(--border);
   display:flex;gap:10px;background:var(--surface);position:sticky;bottom:0;}
@@ -789,7 +791,7 @@ header{
 </div>
 
 <!-- Modal: Carrinho -->
-<div class="modal" id="modal-carrinho">
+<div class="modal" id="modal-carrinho" onclick="if(event.target===this) fecharModalCarrinho()">
   <div class="modal-box">
     <div class="modal-header">
       <div class="modal-titulo">CARRINHO</div>
@@ -892,6 +894,53 @@ var _carrinho = [];        // [{id, nome, preco, qtd, obs, foto, catNome}]
 var _itemAberto = null;    // item sendo visualizado no modal
 var _qtdTemp = 1;
 var _editandoCartIdx = null; // índice do carrinho em edição, null = modo adicionar
+
+// ─── Persistência do carrinho (resiste a fechar acidental do app) ───
+function chaveCarrinho(){
+  if(_comandaSelecionada) return 'cart_comanda_' + _comandaSelecionada;
+  if(_mesaAtiva) return 'cart_mesa_' + _mesaAtiva;
+  return null;
+}
+function salvarCarrinho(){
+  var k = chaveCarrinho();
+  if(!k) return;
+  try{
+    if(_carrinho && _carrinho.length){
+      localStorage.setItem(k, JSON.stringify({
+        itens: _carrinho,
+        garcom: _nomeGarcom,
+        ts: Date.now()
+      }));
+    } else {
+      localStorage.removeItem(k);
+    }
+  }catch(e){}
+}
+function carregarCarrinho(){
+  var k = chaveCarrinho();
+  if(!k) return;
+  try{
+    var raw = localStorage.getItem(k);
+    if(!raw) return;
+    var d = JSON.parse(raw);
+    // Só restaura se for do mesmo garçom e tiver menos de 12h
+    if(d.garcom !== _nomeGarcom) return;
+    if(Date.now() - (d.ts||0) > 12*3600*1000){
+      localStorage.removeItem(k);
+      return;
+    }
+    if(d.itens && d.itens.length){
+      _carrinho = d.itens;
+      if(typeof showToast === 'function'){
+        showToast('🛒 Carrinho restaurado: ' + _carrinho.length + ' '+(_carrinho.length===1?'item':'itens'), '#4ade80', 2500);
+      }
+    }
+  }catch(e){}
+}
+function limparCarrinhoSalvo(){
+  var k = chaveCarrinho();
+  if(k){ try{ localStorage.removeItem(k); }catch(e){} }
+}
 var _modoCompacto = (function(){ try{ return localStorage.getItem('garcom_modo_compacto') === '1'; }catch(e){ return false; } })();
 var _meusPedidos = [];     // pedidos do garçom nessa mesa
 var _tabAtual = 'cardapio';
@@ -1067,12 +1116,28 @@ document.addEventListener('DOMContentLoaded', function(){
 // ════════════════════════════════════════
 //  MESAS
 // ════════════════════════════════════════
-var _TOTAL_MESAS = 99;
+var _TOTAL_MESAS = parseInt(localStorage.getItem('garcom_total_mesas') || '99');
 var _mesasOcupadas = {}; // {num: {contaId, garcom, abertaEm, count, total}}
 var _contasMesaCache = {}; // {num: contaCompleta}
 var _ultimoContaIdEscutado = null; // último contaId que está sendo escutado em escutarMeusPedidos
 var _comandasAvulsas = []; // [{id, cliente, ...contaCompleta}]
 var _abaAtual = 'mesas';
+
+// Carrega/escuta configuração de mesas (sync com PDV)
+function escutarConfigMesas(){
+  if(!fbDb || !_restauranteId) return;
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).onSnapshot(function(doc){
+    if(!doc.exists) return;
+    var d = doc.data();
+    var novo = parseInt(d.totalMesas) || 99;
+    if(novo !== _TOTAL_MESAS){
+      _TOTAL_MESAS = novo;
+      localStorage.setItem('garcom_total_mesas', String(novo));
+      // Re-renderiza o grid de mesas se estiver visível
+      if(typeof renderMesas === 'function') renderMesas();
+    }
+  }, function(e){ console.warn('escutar config mesas:', e); });
+}
 
 function trocarAba(aba){
   _abaAtual = aba;
@@ -1273,6 +1338,7 @@ function carregarTenantParaMesas(){
   // Se tem ambos, escuta direto
   if(_tenantId && _restauranteId){
     escutarMesasOcupadas();
+    escutarConfigMesas();
     renderMesas();
     // Pré-carrega o cardápio em paralelo pra não ter delay quando entrar na mesa
     iniciarListeners();
@@ -1293,6 +1359,7 @@ function carregarTenantParaMesas(){
     }
     if(!_restauranteId) _restauranteId = 'bavaro'; // fallback
     escutarMesasOcupadas();
+    escutarConfigMesas();
     renderMesas();
     // Pré-carrega cardápio em paralelo
     iniciarListeners();
@@ -1300,6 +1367,7 @@ function carregarTenantParaMesas(){
     if(!_restauranteId) _restauranteId = 'bavaro';
     console.warn('Erro ao buscar restaurantes publicos (mesas):', e);
     escutarMesasOcupadas();
+    escutarConfigMesas();
     renderMesas();
     iniciarListeners();
   });
@@ -2289,6 +2357,8 @@ function selecionarComanda(c){
   _comandaSelecionada = c.id;
   _carrinho = [];
   _catAtiva = null;
+  // Tenta restaurar carrinho salvo
+  carregarCarrinho();
   document.getElementById('mesa-screen').classList.add('hidden');
   iniciarApp();
 }
@@ -2365,19 +2435,23 @@ function selecionarMesa(num){
   _mesaAtiva = num;
   _carrinho = [];
   _catAtiva = null;  // Volta para grade de categorias
+  // Tenta restaurar carrinho salvo
+  carregarCarrinho();
   document.getElementById('mesa-screen').classList.add('hidden');
   iniciarApp();
 }
 
 function voltarParaMesas(){
-  if(_carrinho.length > 0){
-    if(!confirm('Você tem itens no carrinho. Ao voltar, o carrinho será mantido.\nDeseja continuar?')) return;
-  }
+  // O carrinho é salvo automaticamente — pode voltar sem perguntar
+  if(_carrinho.length > 0) salvarCarrinho();
   _comandaSelecionada = null;
+  _mesaAtiva = null;
+  _carrinho = []; // limpa em memória (mas continua salvo no localStorage)
   _ultimoContaIdEscutado = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('mesa-screen').classList.remove('hidden');
   if(_unsubPedidos){ _unsubPedidos(); _unsubPedidos = null; }
+  atualizarCarrinhoBadge();
 }
 
 // ════════════════════════════════════════
@@ -3911,6 +3985,8 @@ function atualizarCarrinhoBadge(){
   var btn = document.getElementById('btn-carrinho');
   badge.textContent = total;
   btn.classList.toggle('vazio', total===0);
+  // Auto-salva o carrinho a cada mudança
+  salvarCarrinho();
 }
 
 // ════════════════════════════════════════
@@ -4550,6 +4626,8 @@ function abrirContaMesa(num){
   _mesaAtiva = num;
   _carrinho = [];
   _catAtiva = null;
+  // Tenta restaurar carrinho salvo (mesa pode ter sido reaberta após falha)
+  carregarCarrinho();
   document.getElementById('mesa-screen').classList.add('hidden');
   iniciarApp();
   // Cria no Firestore em background (não bloqueia a UI)
@@ -6106,15 +6184,14 @@ try{
 }catch(e){}
 </script>
 <!-- Modal: Menu da Mesa (ao tocar) -->
-<div class="modal" id="modal-mesa-menu">
+<div class="modal" id="modal-mesa-menu" onclick="if(event.target===this) fecharMenuMesa()">
   <div class="modal-box" style="max-width:340px;">
-    <div class="modal-header">
+    <div class="modal-header" style="position:relative;">
       <div class="modal-titulo" id="mesa-menu-titulo">MESA —</div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <button class="acao-rapida-btn" id="btn-acao-rapida-pedido" onclick="acaoRapidaPedido()" title="Pedido Rápido">⚡</button>
-        <button class="acao-rapida-btn" id="btn-acao-rapida-imprimir" onclick="acaoRapidaImprimir()" title="Imprimir Conta">🖨️</button>
-        <button class="modal-fechar" onclick="fecharMenuMesa()">×</button>
-      </div>
+      <!-- Pedido rápido centralizado (longe dos cantos pra evitar toque acidental) -->
+      <button class="acao-rapida-btn acao-rapida-centro" id="btn-acao-rapida-pedido" onclick="acaoRapidaPedido()" title="Pedido Rápido">⚡</button>
+      <!-- Impressora no canto direito (onde antes era o X) -->
+      <button class="acao-rapida-btn" id="btn-acao-rapida-imprimir" onclick="acaoRapidaImprimir()" title="Imprimir Conta">🖨️</button>
     </div>
     <div class="modal-body" style="padding:8px;">
       <button class="mesa-menu-item" onclick="acaoMesa('pedido')">

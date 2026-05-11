@@ -549,6 +549,15 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       </div>
 
       <div class="cfg-bloco">
+        <h3 class="cfg-titulo">📱 App Garçom</h3>
+        <div class="f-grupo">
+          <label class="f-label">Número de mesas do salão</label>
+          <input type="number" class="f-input" id="cfg-total-mesas" min="1" max="999" placeholder="99">
+          <div style="font-size:0.74rem;color:var(--muted);margin-top:4px;">Define quantas mesas aparecem no app garçom (de 1 até esse número).</div>
+        </div>
+      </div>
+
+      <div class="cfg-bloco">
         <h3 class="cfg-titulo">🚫 Cancelamentos</h3>
         <label class="cfg-toggle">
           <input type="checkbox" id="cfg-cancel-imprimir" checked>
@@ -3282,6 +3291,7 @@ var _modelos = [];          // [{id, nome, impressoraId, filtro:'categoria'|'ite
 var _configImp = {
   restauranteNome: 'Bávaro Bar e Restaurante',
   endereco1: '', endereco2: '', rodape: 'Obrigado! Volte sempre!',
+  totalMesas: 99,
   cancelImprimir: true, cancelImpressora: 'todas',
   cancelSenha: false, cancelSenhaValor: '',
   cancelMotivos: 'Cliente desistiu\nErro no pedido\nDemorou demais',
@@ -4029,6 +4039,7 @@ function aplicarConfigImpNaTela(){
   v('cfg-endereco1', c.endereco1);
   v('cfg-endereco2', c.endereco2);
   v('cfg-rodape', c.rodape);
+  v('cfg-total-mesas', c.totalMesas || 99);
   v('cfg-cancel-imprimir', c.cancelImprimir);
   v('cfg-cancel-senha', c.cancelSenha);
   v('cfg-cancel-senha-valor', c.cancelSenhaValor);
@@ -4077,11 +4088,16 @@ function aplicarConfigImpNaTela(){
 
 function salvarConfigImpressao(){
   function v(id){ var el = document.getElementById(id); if(!el) return ''; return el.type==='checkbox'?el.checked:el.value; }
+  // Valida total de mesas
+  var totalMesasNum = parseInt(v('cfg-total-mesas')) || 99;
+  if(totalMesasNum < 1) totalMesasNum = 1;
+  if(totalMesasNum > 999) totalMesasNum = 999;
   var dados = {
     restauranteNome: v('cfg-restaurante-nome'),
     endereco1: v('cfg-endereco1'),
     endereco2: v('cfg-endereco2'),
     rodape: v('cfg-rodape'),
+    totalMesas: totalMesasNum,
     cancelImprimir: v('cfg-cancel-imprimir'),
     cancelImpressora: v('cfg-cancel-impressora'),
     cancelSenha: v('cfg-cancel-senha'),
@@ -4131,6 +4147,12 @@ function salvarConfigImpressao(){
   };
   fbDocConfigImp().set(dados, {merge:true}).then(function(){
     _configImp = Object.assign(_configImp, dados);
+    // Também publica totalMesas no doc público pra o app garçom ler
+    if(_restauranteAtivo && _restauranteAtivo.id){
+      fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
+        totalMesas: totalMesasNum
+      }, {merge:true}).catch(function(e){ console.warn('publicar totalMesas:', e); });
+    }
     showToast('✓ Configurações salvas','#4ade80');
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }

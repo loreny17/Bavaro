@@ -1948,16 +1948,20 @@ function abrirPedidoRapido(numMesa){
     // Mesa sem conta — silencioso, não faz nada (decisão do usuário)
     return;
   }
-  // Agrupa itens distintos pelo ID, ignorando obs/seleções (decisão B do usuário)
+  // Agrupa itens distintos, ignorando obs/seleções (decisão B do usuário)
   // Filtra: kg de fora, cancelados de fora
+  // Chave: prefere id, mas usa "nome|preco" como fallback se id estiver vazio
   var distintos = {};
   (conta.itens||[]).forEach(function(it){
     if(it.status === 'cancelado') return;
     if(it.tipoVenda === 'kg') return;
-    if(!it.id) return;
-    if(!distintos[it.id]){
-      distintos[it.id] = {
-        id: it.id,
+    if(!it.nome) return; // sem nome não dá pra mostrar nada
+    // Chave: id se tiver, senão nome+preço (pra ainda repetir item sem id)
+    var chave = it.id || ('nome:'+it.nome+'|p:'+(it.precoBase || it.preco || 0));
+    if(!distintos[chave]){
+      distintos[chave] = {
+        id: it.id || null,
+        chave: chave,
         nome: it.nome,
         preco: it.precoBase || it.preco // preço sem extras
       };
@@ -1969,11 +1973,9 @@ function abrirPedidoRapido(numMesa){
     return;
   }
   // Estado inicial: cada item começa com qtd 0 (apagado).
-  // Toca no card direto → manda 1 (atalho rápido pra "mais um daquele")
-  // Toca no + → começa a acumular (1, 2, 3...) e usa "Enviar tudo"
   _qtdsRapidas = {};
   _mesaRapidaAtual = numMesa;
-  lista.forEach(function(it){ _qtdsRapidas[it.id] = 0; });
+  lista.forEach(function(it){ _qtdsRapidas[it.chave] = 0; });
   // Renderiza
   var ex = document.getElementById('modal-pedido-rapido');
   if(ex) ex.remove();
@@ -2010,9 +2012,10 @@ function renderPedidoRapidoGrid(){
   // Conta quantos itens têm qtd > 0 (pra ativar/desativar o botão "Enviar tudo")
   var algumComQtd = false;
   lista.forEach(function(it){
-    var qtd = _qtdsRapidas[it.id] || 0;
+    var chave = it.chave || it.id; // chave de agrupamento (id ou nome+preco)
+    var qtd = _qtdsRapidas[chave] || 0;
     if(qtd > 0) algumComQtd = true;
-    var itCardapio = _itens.find(function(x){ return x.id === it.id; });
+    var itCardapio = it.id ? _itens.find(function(x){ return x.id === it.id; }) : null;
     var emoji = '🍽️';
     if(itCardapio && itCardapio.categoriaId){
       var cat = (_categorias||[]).find(function(c){ return c.id === itCardapio.categoriaId; });
@@ -2023,16 +2026,17 @@ function renderPedidoRapidoGrid(){
       ? 'background:rgba(212,168,67,0.1);border:1.5px solid var(--accent);'
       : 'background:var(--surface2);border:1.5px solid var(--border2);';
     var qtdColor = qtd > 0 ? 'var(--accent)' : 'var(--muted)';
+    var chaveEscaped = chave.replace(/'/g,"\\'").replace(/"/g,'&quot;');
     html += '<div class="ped-rap-card" style="'+cardStyle+'border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:140px;cursor:pointer;transition:all 0.15s;" '+
-      'onclick="cardRapidoTap(event, \''+it.id+'\')">'+
+      'onclick="cardRapidoTap(event, \''+chaveEscaped+'\')">'+
       '<div style="font-size:1.6rem;">'+emoji+'</div>'+
       '<div style="font-size:0.84rem;font-weight:700;line-height:1.2;text-align:center;">'+esc(it.nome)+'</div>'+
       '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1rem;line-height:1;">R$ '+fmtPreco(it.preco||0)+'</div>'+
       // Controle de quantidade — clique aqui NÃO dispara o tap do card
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;" onclick="event.stopPropagation();">'+
-        '<button onclick="event.stopPropagation();qtdRapida(\''+it.id+'\',-1)" style="width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;'+(qtd<=0?'opacity:0.3;pointer-events:none;':'')+'">−</button>'+
+        '<button onclick="event.stopPropagation();qtdRapida(\''+chaveEscaped+'\',-1)" style="width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;'+(qtd<=0?'opacity:0.3;pointer-events:none;':'')+'">−</button>'+
         '<span style="min-width:24px;text-align:center;font-family:Bebas Neue,sans-serif;font-size:1.15rem;color:'+qtdColor+';">'+qtd+'</span>'+
-        '<button onclick="event.stopPropagation();qtdRapida(\''+it.id+'\',1)" style="width:28px;height:28px;border-radius:50%;background:#22c55e;border:none;color:#fff;font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;font-weight:700;">+</button>'+
+        '<button onclick="event.stopPropagation();qtdRapida(\''+chaveEscaped+'\',1)" style="width:28px;height:28px;border-radius:50%;background:#22c55e;border:none;color:#fff;font-size:1rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;font-weight:700;">+</button>'+
       '</div>'+
     '</div>';
   });
@@ -2051,21 +2055,20 @@ function renderPedidoRapidoGrid(){
 }
 
 // Tocou no card (mas pode ter sido nos botões − +) — só envia se foi no card mesmo
-function cardRapidoTap(evt, itemId){
+function cardRapidoTap(evt, chave){
   // Se o clique veio dos botões − + (que tem stopPropagation), nem chega aqui.
-  // Se chegou aqui foi clique no card.
   // Se qtd estiver 0, manda 1 (atalho rápido pra "+ 1 desse").
   // Se qtd > 0, manda essa qtd.
-  var qtd = _qtdsRapidas[itemId] || 0;
+  var qtd = _qtdsRapidas[chave] || 0;
   if(qtd === 0) qtd = 1;
-  enviarPedidoRapido(_mesaRapidaAtual, itemId, qtd);
+  enviarPedidoRapido(_mesaRapidaAtual, chave, qtd);
 }
 
 // Altera qtd de um item específico no popup
-function qtdRapida(itemId, delta){
-  var atual = _qtdsRapidas[itemId] || 0;
+function qtdRapida(chave, delta){
+  var atual = _qtdsRapidas[chave] || 0;
   var novo = Math.max(0, Math.min(99, atual + delta));
-  _qtdsRapidas[itemId] = novo;
+  _qtdsRapidas[chave] = novo;
   renderPedidoRapidoGrid();
   // Vibração leve
   if(navigator.vibrate) navigator.vibrate(15);
@@ -2084,20 +2087,24 @@ function enviarTodosRapidos(){
   var itensPedido = [];
   var totalPedido = 0;
   lista.forEach(function(it){
-    var qtd = _qtdsRapidas[it.id] || 0;
+    var qtd = _qtdsRapidas[it.chave || it.id] || 0;
     if(qtd <= 0) return;
-    var itCard = _itens.find(function(x){ return x.id === it.id; });
-    if(!itCard) return;
-    var pBase = parseFloat(itCard.preco)||0;
+    // Tenta achar no cardápio (pra pegar preço/foto atualizados)
+    var itCard = it.id ? _itens.find(function(x){ return x.id === it.id; }) : null;
+    // Se não achou no cardápio (item antigo, removido, etc), usa os dados do próprio item da mesa
+    var nome = (itCard && itCard.nome) || it.nome;
+    var pBase = parseFloat((itCard && itCard.preco) || it.preco) || 0;
+    var foto = (itCard && itCard.foto) || '';
+    var idFinal = (itCard && itCard.id) || it.id || ('legado_'+nome.replace(/\s+/g,'_').toLowerCase());
     itensPedido.push({
-      id: itCard.id,
-      nome: itCard.nome,
+      id: idFinal,
+      nome: nome,
       preco: pBase,
       precoBase: pBase,
       extras: 0,
       qtd: qtd,
       obs: '',
-      foto: itCard.foto||'',
+      foto: foto,
       selecoes: []
     });
     totalPedido += pBase * qtd;
@@ -2160,35 +2167,53 @@ function enviarTodosRapidos(){
 
 // Envia +N do item escolhido direto pra mesa (sem cardápio, sem confirmação)
 // qtd default é 1 se não passado
-function enviarPedidoRapido(numMesa, itemId, qtd){
+function enviarPedidoRapido(numMesa, chave, qtd){
   qtd = qtd || 1;
-  var itCardapio = _itens.find(function(x){ return x.id === itemId; });
-  if(!itCardapio){
-    showToast('❌ Item não encontrado','#f87171');
-    return;
-  }
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
   if(!conta || !conta.id){
     showToast('❌ Mesa sem conta aberta','#f87171');
     return;
   }
+  // Busca info do item: primeiro tenta no cardápio (por id), senão usa o item da própria mesa
+  var itCardapio = null;
+  var itDaMesa = null;
+  // Procura no cardápio por id
+  itCardapio = _itens.find(function(x){ return x.id === chave; });
+  // Procura na mesa (por id ou por chave reconstruída)
+  (conta.itens||[]).forEach(function(it){
+    if(itDaMesa) return;
+    if(it.status === 'cancelado') return;
+    if(it.tipoVenda === 'kg') return;
+    var k = it.id || ('nome:'+it.nome+'|p:'+(it.precoBase || it.preco || 0));
+    if(k === chave || it.id === chave){
+      itDaMesa = it;
+    }
+  });
+  if(!itCardapio && !itDaMesa){
+    showToast('❌ Item não encontrado','#f87171');
+    return;
+  }
+  // Prefere cardápio (preço atualizado), cai pra dado da mesa
+  var nome = (itCardapio && itCardapio.nome) || (itDaMesa && itDaMesa.nome) || 'Item';
+  var precoBase = parseFloat((itCardapio && itCardapio.preco) || (itDaMesa && (itDaMesa.precoBase || itDaMesa.preco))) || 0;
+  var foto = (itCardapio && itCardapio.foto) || '';
+  var idFinal = (itCardapio && itCardapio.id) || (itDaMesa && itDaMesa.id) || ('legado_'+nome.replace(/\s+/g,'_').toLowerCase());
   // Fecha popup IMEDIATAMENTE (volta pro mapa de mesas)
   var modal = document.getElementById('modal-pedido-rapido');
   if(modal) modal.remove();
   // Vibração leve confirmando o toque
   if(navigator.vibrate) navigator.vibrate(30);
   // Toast otimista — mostra antes mesmo do Firebase confirmar (sensação de instantâneo)
-  showToast('✓ +'+qtd+' '+itCardapio.nome+' → Mesa '+numMesa,'#4ade80');
-  var precoBase = parseFloat(itCardapio.preco)||0;
+  showToast('✓ +'+qtd+' '+nome+' → Mesa '+numMesa,'#4ade80');
   var item = {
-    id: itCardapio.id,
-    nome: itCardapio.nome,
+    id: idFinal,
+    nome: nome,
     preco: precoBase,
     precoBase: precoBase,
     extras: 0,
     qtd: qtd,
     obs: '',
-    foto: itCardapio.foto||'',
+    foto: foto,
     selecoes: []
   };
   var pedido = {
@@ -6223,11 +6248,13 @@ try{
 <div class="modal" id="modal-mesa-menu" onclick="if(event.target===this) fecharMenuMesa()">
   <div class="modal-box" style="max-width:340px;">
     <div class="modal-header" style="position:relative;">
+      <!-- Impressora à esquerda do título -->
+      <button class="acao-rapida-btn" id="btn-acao-rapida-imprimir" onclick="acaoRapidaImprimir()" title="Imprimir Conta">🖨️</button>
       <div class="modal-titulo" id="mesa-menu-titulo">MESA —</div>
       <!-- Pedido rápido centralizado (longe dos cantos pra evitar toque acidental) -->
       <button class="acao-rapida-btn acao-rapida-centro" id="btn-acao-rapida-pedido" onclick="acaoRapidaPedido()" title="Pedido Rápido">⚡</button>
-      <!-- Impressora no canto direito (onde antes era o X) -->
-      <button class="acao-rapida-btn" id="btn-acao-rapida-imprimir" onclick="acaoRapidaImprimir()" title="Imprimir Conta">🖨️</button>
+      <!-- X no canto direito (posição original) -->
+      <button class="modal-fechar" onclick="fecharMenuMesa()">×</button>
     </div>
     <div class="modal-body" style="padding:8px;">
       <button class="mesa-menu-item" onclick="acaoMesa('pedido')">

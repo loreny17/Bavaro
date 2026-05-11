@@ -138,6 +138,10 @@ button{cursor:pointer;border:none;background:none;}
 .md-pedido-hora{font-size:0.7rem;color:var(--muted);font-family:monospace;background:var(--surface3);padding:2px 6px;border-radius:5px;flex-shrink:0;line-height:1.2;}
 .md-pedido-itens{flex:1;color:var(--text);line-height:1.4;}
 .md-pedido-valor{font-family:'Bebas Neue',sans-serif;color:var(--accent);font-size:0.95rem;flex-shrink:0;}
+/* Pills de long press */
+.lp-pill{flex:1;min-width:70px;padding:10px 8px;border-radius:10px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;text-align:center;line-height:1.2;transition:all 0.15s;}
+.lp-pill.active{background:rgba(212,168,67,0.15);border-color:var(--accent);color:var(--accent);}
+.lp-pill:active{transform:scale(0.96);}
 .mesa-search{padding:12px 16px;border-bottom:1px solid var(--border);}
 .mesa-search input{
   width:100%;background:var(--surface2);border:1.5px solid var(--border2);
@@ -1395,11 +1399,13 @@ function renderMesas(){
 }
 
 // ═══ LONG PRESS — Pedido rápido ═══
-// Segura na mesa por 600ms → abre popup com itens já consumidos pra mandar +1
+// Segura na mesa por X ms → abre popup com itens já consumidos pra mandar +1
 var _longPressTimer = null;
 var _longPressDisparou = false;
 var _longPressX = 0;
 var _longPressY = 0;
+// Duração configurável (padrão: 600ms). Salva em localStorage.
+var _longPressDuracao = parseInt(localStorage.getItem('garcom_longpress_ms') || '600');
 function anexarLongPress(el, numMesa){
   function iniciar(e){
     _longPressDisparou = false;
@@ -1412,7 +1418,7 @@ function anexarLongPress(el, numMesa){
       // Vibração leve confirmando que disparou
       if(navigator.vibrate) navigator.vibrate(50);
       abrirPedidoRapido(numMesa);
-    }, 600);
+    }, _longPressDuracao);
   }
   function mover(e){
     if(!_longPressTimer) return;
@@ -1460,6 +1466,65 @@ function abrirMeuDia(){
   document.getElementById('md-titulo').textContent = '👤 ' + _nomeGarcom.toUpperCase();
   document.getElementById('tela-meu-dia').style.display = 'block';
   carregarMeuDia();
+  // Atualiza estado dos botões de configuração e prepara o testador
+  atualizarUILongPress();
+  prepararTesteLongPress();
+}
+
+function setLongPressMs(ms){
+  _longPressDuracao = ms;
+  localStorage.setItem('garcom_longpress_ms', String(ms));
+  atualizarUILongPress();
+  if(typeof showToast === 'function') showToast('⚙️ Velocidade ajustada para ' + ms + 'ms','#4ade80');
+}
+
+function atualizarUILongPress(){
+  document.querySelectorAll('.lp-pill').forEach(function(b){
+    var ms = parseInt(b.getAttribute('data-ms'));
+    b.classList.toggle('active', ms === _longPressDuracao);
+  });
+  var lblAtual = document.getElementById('lp-atual');
+  if(lblAtual) lblAtual.textContent = _longPressDuracao + 'ms';
+}
+
+// Testador de long press na própria tela de config
+var _lpTesteTimer = null;
+function prepararTesteLongPress(){
+  var btn = document.getElementById('lp-teste-btn');
+  var msg = document.getElementById('lp-teste-msg');
+  if(!btn || btn._lpPreparado) return;
+  btn._lpPreparado = true;
+  
+  function iniciar(e){
+    e.preventDefault && e.preventDefault();
+    btn.style.transform = 'scale(0.95)';
+    btn.style.opacity = '0.7';
+    if(_lpTesteTimer) clearTimeout(_lpTesteTimer);
+    _lpTesteTimer = setTimeout(function(){
+      btn.style.transform = '';
+      btn.style.opacity = '';
+      btn.style.background = '#4ade80';
+      btn.textContent = '✓ Disparou!';
+      if(navigator.vibrate) navigator.vibrate(50);
+      if(msg) msg.innerHTML = '✓ Funcionou em <strong>' + _longPressDuracao + 'ms</strong>';
+      setTimeout(function(){
+        btn.style.background = '';
+        btn.textContent = 'Segura aqui pra testar';
+        if(msg) msg.innerHTML = 'Tempo atual: <strong id="lp-atual">' + _longPressDuracao + 'ms</strong>';
+      }, 1200);
+    }, _longPressDuracao);
+  }
+  function cancelar(){
+    btn.style.transform = '';
+    btn.style.opacity = '';
+    if(_lpTesteTimer){ clearTimeout(_lpTesteTimer); _lpTesteTimer = null; }
+  }
+  btn.addEventListener('touchstart', iniciar, {passive:false});
+  btn.addEventListener('touchend', cancelar);
+  btn.addEventListener('touchcancel', cancelar);
+  btn.addEventListener('mousedown', iniciar);
+  btn.addEventListener('mouseup', cancelar);
+  btn.addEventListener('mouseleave', cancelar);
 }
 
 function fecharMeuDia(){
@@ -6169,6 +6234,27 @@ try{
       <div class="md-bloco">
         <div class="md-bloco-titulo" id="md-pedidos-titulo">🕐 Pedidos em andamento</div>
         <div id="md-pedidos-andamento"></div>
+      </div>
+      <!-- Configurações -->
+      <div class="md-bloco">
+        <div class="md-bloco-titulo">⚙️ Configurações</div>
+        <div style="font-size:0.82rem;margin-bottom:10px;">
+          <div style="font-weight:600;margin-bottom:4px;">Velocidade do "segurar"</div>
+          <div style="color:var(--muted);font-size:0.74rem;margin-bottom:10px;">Tempo necessário pra abrir o Pedido Rápido segurando a mesa</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="lp-pill" data-ms="300" onclick="setLongPressMs(300)">⚡ Rápido<br><span style="font-size:0.65rem;opacity:0.7;">0.3s</span></button>
+          <button class="lp-pill" data-ms="500" onclick="setLongPressMs(500)">🏃 Médio<br><span style="font-size:0.65rem;opacity:0.7;">0.5s</span></button>
+          <button class="lp-pill" data-ms="600" onclick="setLongPressMs(600)">🚶 Normal<br><span style="font-size:0.65rem;opacity:0.7;">0.6s</span></button>
+          <button class="lp-pill" data-ms="800" onclick="setLongPressMs(800)">🐢 Lento<br><span style="font-size:0.65rem;opacity:0.7;">0.8s</span></button>
+        </div>
+        <div style="background:var(--surface2);border:1px dashed var(--border2);border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">🧪 Toca pra testar:</div>
+          <button id="lp-teste-btn" 
+            style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:14px 24px;font-family:inherit;font-weight:700;font-size:0.92rem;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;"
+            >Segura aqui pra testar</button>
+          <div id="lp-teste-msg" style="margin-top:8px;font-size:0.74rem;color:var(--muted);">Tempo atual: <strong id="lp-atual">600ms</strong></div>
+        </div>
       </div>
     </div>
     <!-- Botão Sair -->

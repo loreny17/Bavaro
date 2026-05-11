@@ -1380,6 +1380,7 @@ function renderMesas(){
       // Mesa LIVRE → cria conta e vai direto pro cardápio (não precisa confirmar)
       if(!ocupada){
         abrirContaMesa(n);
+        pushHistory('cardapio:null');
         return;
       }
       // Mesa OCUPADA → abre menu de opções (Pedir / Ver / Transferir / Pagar)
@@ -5941,28 +5942,41 @@ window.addEventListener('popstate', function(e){
   if(modaisAbertos.length > 0){
     var ultimo = modaisAbertos[modaisAbertos.length-1];
     ultimo.classList.remove('show');
+    // Re-push pra manter o app vivo (próximo voltar volta a cair aqui)
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
     return;
   }
-  // 2. Em uma categoria? Volta pra lista de categorias
+  // 2. Painel "Meu Dia" aberto? Fecha ele
+  var meuDia = document.getElementById('tela-meu-dia');
+  if(meuDia && meuDia.style.display !== 'none' && meuDia.style.display !== ''){
+    fecharMeuDia();
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
+    return;
+  }
+  // 3. Em uma categoria? Volta pra lista de categorias
   if(_catAtiva !== null && document.getElementById('app').style.display !== 'none'){
     _catAtiva = null;
     renderCatBar();
     renderItens();
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
     return;
   }
-  // 3. Está no app de uma mesa? Volta pra seleção de mesas
-  if(document.getElementById('app').style.display !== 'none' && document.getElementById('app').style.display !== ''){
+  // 4. Está no app de uma mesa/comanda? Volta pra seleção de mesas
+  var appEl = document.getElementById('app');
+  if(appEl && (appEl.style.display === 'flex' || (appEl.style.display !== 'none' && appEl.style.display !== ''))){
     voltarParaMesas();
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
     return;
   }
-  if(document.getElementById('app').style.display === 'flex'){
-    voltarParaMesas();
-    return;
-  }
+  // 5. Tela de mesas: re-push pra não sair do app
+  try{ history.pushState({appState: 'mapa'}, '', ''); }catch(e){}
 });
 
-// Push estado inicial pra que o voltar funcione
-try{ history.replaceState({appState: 'init'}, '', ''); }catch(e){}
+// Push estado inicial pra que o voltar funcione (armadilha pra não sair do app)
+try{ 
+  history.replaceState({appState: 'base'}, '', '');
+  history.pushState({appState: 'mapa'}, '', '');
+}catch(e){}
 </script>
 <!-- Modal: Menu da Mesa (ao tocar) -->
 <div class="modal" id="modal-mesa-menu">

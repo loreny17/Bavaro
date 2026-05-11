@@ -2126,25 +2126,32 @@ function enviarTodosRapidos(){
     return fbDb.collection('pedidos').add(pedido);
   }).then(function(refPed){
     var pedidoId = refPed.id;
-    // Adiciona itens na conta_mesa
-    var itensConta = (conta.itens||[]).slice();
-    itensPedido.forEach(function(it, i){
-      itensConta.push(Object.assign({}, it, {
-        itemKey: pedidoId + '_' + i,
-        pedidoId: pedidoId,
-        contaId: conta.id,
-        status: 'aberto',
-        criadoEm: Date.now()
-      }));
-    });
-    var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
-    return fbDb.collection('contas_mesa').doc(conta.id).update({
-      itens: itensConta,
-      subtotal: totais.subtotal,
-      taxa10: totais.taxa10,
-      total: totais.total,
-      restante: totais.restante,
-      atualizadoEm: Date.now()
+    // Usa transaction pra adicionar itens sem perder os existentes
+    return fbDb.runTransaction(function(tx){
+      var contaRef = fbDb.collection('contas_mesa').doc(conta.id);
+      return tx.get(contaRef).then(function(doc){
+        if(!doc.exists) throw new Error('Conta não encontrada');
+        var data = doc.data();
+        var itensConta = (data.itens||[]).slice();
+        itensPedido.forEach(function(it, i){
+          itensConta.push(Object.assign({}, it, {
+            itemKey: pedidoId + '_' + i,
+            pedidoId: pedidoId,
+            contaId: conta.id,
+            status: 'aberto',
+            criadoEm: Date.now()
+          }));
+        });
+        var totais = calcularTotaisConta({itens: itensConta, pagamentos: data.pagamentos||[]});
+        tx.update(contaRef, {
+          itens: itensConta,
+          subtotal: totais.subtotal,
+          taxa10: totais.taxa10,
+          total: totais.total,
+          restante: totais.restante,
+          atualizadoEm: Date.now()
+        });
+      });
     });
   }).catch(function(e){
     showToast('❌ Erro: '+e.message,'#f87171');
@@ -4300,6 +4307,9 @@ function enviarPedido(){
   // Se algo falhar, mostramos um toast de erro depois.
   // Guardamos uma cópia do carrinho pra restaurar em caso de erro.
   var carrinhoBackup = _carrinho.slice();
+  // IMPORTANTE: captura a mesa/comanda ANTES de voltarParaMesas (que limpa _mesaAtiva)
+  var mesaAtivaCaptura = _mesaAtiva;
+  var comandaCaptura = _comandaSelecionada;
   _carrinho = [];
   atualizarCarrinhoBadge();
   renderItens();
@@ -4348,17 +4358,29 @@ function enviarPedido(){
       }
       return item;
     });
-    var contaAtual = _contasMesaCache[String(_mesaAtiva)] || {};
-    var todosItens = (contaAtual.itens||[]).concat(itensConta);
-    var totais = calcularTotaisConta({itens: todosItens, pagamentos: contaAtual.pagamentos||[]});
-    return fbDb.collection('contas_mesa').doc(contaId).update({
-      itens: todosItens,
-      subtotal: totais.subtotal,
-      taxa10: totais.taxa10,
-      total: totais.total,
-      pagoTotal: totais.pagoTotal,
-      restante: totais.restante,
-      atualizadoEm: Date.now()
+    // USA TRANSAÇÃO pra garantir que não sobrescreve itens existentes
+    // (importante porque o cache local pode estar desatualizado após voltarParaMesas)
+    return fbDb.runTransaction(function(tx){
+      var contaRef = fbDb.collection('contas_mesa').doc(contaId);
+      return tx.get(contaRef).then(function(doc){
+        if(!doc.exists){
+          throw new Error('Conta não encontrada');
+        }
+        var data = doc.data();
+        var itensExistentes = data.itens || [];
+        var pagamentosExistentes = data.pagamentos || [];
+        var todosItens = itensExistentes.concat(itensConta);
+        var totais = calcularTotaisConta({itens: todosItens, pagamentos: pagamentosExistentes});
+        tx.update(contaRef, {
+          itens: todosItens,
+          subtotal: totais.subtotal,
+          taxa10: totais.taxa10,
+          total: totais.total,
+          pagoTotal: totais.pagoTotal,
+          restante: totais.restante,
+          atualizadoEm: Date.now()
+        });
+      });
     }).then(function(){
       return ref;
     });

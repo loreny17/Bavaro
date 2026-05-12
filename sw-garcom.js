@@ -2,7 +2,7 @@
 //  Bávaro Garçom — Service Worker
 //  Versão: incremente o número abaixo a cada deploy
 // ════════════════════════════════════════════════════════
-const CACHE_VERSION = 'bavaro-garcom-v3';
+const CACHE_VERSION = 'bavaro-garcom-v4';
 const URLS_TO_CACHE = [
   '/garcom.html',
   '/manifest-garcom.json',

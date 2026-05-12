@@ -3,7 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#0d0d0d">
+<meta name="theme-color" id="meta-theme-color" content="#0d0d0d">
+<script>
+  // Aplica tema salvo IMEDIATAMENTE (antes de qualquer CSS) pra evitar flash branco/preto
+  (function(){
+    try {
+      var t = localStorage.getItem('garcom_tema') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      var mt = document.getElementById('meta-theme-color');
+      if(mt) mt.setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0d');
+    } catch(e){}
+  })();
+</script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,6 +33,27 @@
   --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.14);
   --text:#f1f1f1; --muted:#888; --accent:#d4a843; --accent2:#e9b94a;
   --danger:#f87171; --success:#4ade80; --warning:#f7a34f;
+}
+/* ─── Modo Claro ─── */
+html[data-theme="light"]{
+  --bg:#fafafa; --surface:#ffffff; --surface2:#f1f1f1; --surface3:#e6e6e6;
+  --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+  --text:#1a1a1a; --muted:#6b7280; --accent:#b8862e; --accent2:#a47525;
+  --danger:#dc2626; --success:#16a34a; --warning:#d97706;
+}
+/* Ajuste de logos/imagens no modo claro (deixa o gradient escuro de login funcionar) */
+html[data-theme="light"] #login-screen{
+  background:radial-gradient(ellipse at 50% -5%,#fff7e6 0%,#fafafa 55%,#f1f1f1 100%);
+}
+html[data-theme="light"] .mesa-header,
+html[data-theme="light"] header{
+  background:rgba(255,255,255,0.95);
+}
+html[data-theme="light"] .modal{
+  background:rgba(0,0,0,0.4);
+}
+html[data-theme="light"] .toast{
+  color:#fff;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{
@@ -150,6 +182,10 @@ button{cursor:pointer;border:none;background:none;}
 .lp-pill{flex:1;min-width:70px;padding:10px 8px;border-radius:10px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;text-align:center;line-height:1.2;transition:all 0.15s;}
 .lp-pill.active{background:rgba(212,168,67,0.15);border-color:var(--accent);color:var(--accent);}
 .lp-pill:active{transform:scale(0.96);}
+/* Botões de tema */
+.tema-btn{flex:1;padding:12px;border-radius:10px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.15s;}
+.tema-btn.active{background:rgba(212,168,67,0.15);border-color:var(--accent);color:var(--accent);}
+.tema-btn:active{transform:scale(0.97);}
 .mesa-search{padding:12px 16px;border-bottom:1px solid var(--border);}
 .mesa-search input{
   width:100%;background:var(--surface2);border:1.5px solid var(--border2);
@@ -1680,7 +1716,27 @@ function abrirMeuDia(){
   carregarMeuDia();
   // Atualiza estado dos botões de configuração e prepara o testador
   atualizarUILongPress();
+  atualizarUITema();
   prepararTesteLongPress();
+}
+
+function setTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  try { localStorage.setItem('garcom_tema', tema); } catch(e){}
+  // Atualiza a meta tag pro Android colorir a status bar
+  var mt = document.getElementById('meta-theme-color');
+  if(mt) mt.setAttribute('content', tema === 'light' ? '#ffffff' : '#0d0d0d');
+  atualizarUITema();
+  if(typeof showToast === 'function'){
+    showToast(tema === 'light' ? '☀️ Modo claro ativado' : '🌙 Modo escuro ativado', '#4ade80', 1500);
+  }
+}
+
+function atualizarUITema(){
+  var temaAtual = document.documentElement.getAttribute('data-theme') || 'dark';
+  document.querySelectorAll('.tema-btn').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-tema') === temaAtual);
+  });
 }
 
 function setLongPressMs(ms){
@@ -6577,6 +6633,15 @@ try{
       <!-- Configurações -->
       <div class="md-bloco">
         <div class="md-bloco-titulo">⚙️ Configurações</div>
+        <!-- Tema (claro/escuro) -->
+        <div style="font-size:0.82rem;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border2);">
+          <div style="font-weight:600;margin-bottom:4px;">Aparência</div>
+          <div style="color:var(--muted);font-size:0.74rem;margin-bottom:10px;">Escolha o tema que prefere</div>
+          <div style="display:flex;gap:8px;">
+            <button class="tema-btn" data-tema="dark" onclick="setTema('dark')">🌙 Escuro</button>
+            <button class="tema-btn" data-tema="light" onclick="setTema('light')">☀️ Claro</button>
+          </div>
+        </div>
         <div style="font-size:0.82rem;margin-bottom:10px;">
           <div style="font-weight:600;margin-bottom:4px;">Velocidade do "segurar"</div>
           <div style="color:var(--muted);font-size:0.74rem;margin-bottom:10px;">Tempo necessário pra abrir o Pedido Rápido segurando a mesa</div>

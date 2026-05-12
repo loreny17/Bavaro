@@ -325,6 +325,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
     </button>
   </header>
+  <!-- Banner offline -->
+  <div id="banner-offline-pdv" style="display:none;background:linear-gradient(90deg,#f59e0b,#d97706);color:#000;padding:10px 14px;align-items:center;gap:10px;font-size:0.84rem;font-weight:600;">
+    <span style="font-size:1.1rem;">📡</span>
+    <span style="flex:1;">Sem internet — operando em modo offline</span>
+  </div>
 
   <!-- Tabs (escondidas - usadas via menu hamburguer) -->
   <div class="tabs" style="display:none;">
@@ -1015,6 +1020,34 @@ window.addEventListener('load', function(){
     }
     fbAuth = firebase.auth();
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    
+    // ═══ DETECÇÃO ONLINE/OFFLINE ═══
+    window._estaOnlinePDV = navigator.onLine !== false;
+    function _atualizarBannerOfflinePDV(){
+      var b = document.getElementById('banner-offline-pdv');
+      if(b) b.style.display = window._estaOnlinePDV ? 'none' : 'flex';
+    }
+    var _ultimoToastConexaoPDV = 0;
+    window.addEventListener('offline', function(){
+      if(!window._estaOnlinePDV) return;
+      window._estaOnlinePDV = false;
+      _atualizarBannerOfflinePDV();
+      if(Date.now() - _ultimoToastConexaoPDV > 3000){
+        _ultimoToastConexaoPDV = Date.now();
+        if(typeof showToast === 'function') showToast('📡 Sem internet — modo offline', '#f59e0b', 4000);
+      }
+    });
+    window.addEventListener('online', function(){
+      if(window._estaOnlinePDV) return;
+      window._estaOnlinePDV = true;
+      _atualizarBannerOfflinePDV();
+      if(Date.now() - _ultimoToastConexaoPDV > 3000){
+        _ultimoToastConexaoPDV = Date.now();
+        if(typeof showToast === 'function') showToast('✓ Conectado — sincronizando', '#4ade80', 3000);
+      }
+    });
+    setTimeout(_atualizarBannerOfflinePDV, 1000);
+    
     fbAuth.onAuthStateChanged(function(user){
       document.getElementById('loading').classList.add('hidden');
       if(user){
@@ -1788,7 +1821,24 @@ function iniciarListenerPedidos() {
       if(_tabAtual === 'pedidos') renderPedidosPDV();
       if(anterior.length > 0) {
         var novos = _pedidosPDV.filter(function(p){ return anterior.indexOf(p.id) === -1 && p.status === 'aguardando'; });
-        if(novos.length > 0) showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
+        if(novos.length > 0) {
+          showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
+          // Notifica via Electron desktop se disponível (notificação nativa + tray)
+          if(window.__BAVARO_DESKTOP__ && window.__BAVARO_DESKTOP__.notificarPedido){
+            novos.forEach(function(p){
+              try {
+                var subt = (p.itens||[]).reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+                var qtdItens = (p.itens||[]).reduce(function(a,i){ return a + (i.qtd||1); }, 0);
+                window.__BAVARO_DESKTOP__.notificarPedido({
+                  mesa: p.mesa || (p.cliente ? '📝 ' + p.cliente : '?'),
+                  qtdItens: qtdItens,
+                  total: subt.toFixed(2).replace('.', ','),
+                  garcom: p.garcom || '?'
+                });
+              } catch(e){ console.warn('Erro notif desktop:', e); }
+            });
+          }
+        }
       }
     }, function(e){ console.warn('Erro pedidos snapshot:', e); });
 }

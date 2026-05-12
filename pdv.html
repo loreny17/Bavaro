@@ -893,61 +893,64 @@ function mostrarErroLogin(msg){
 
 // ═══ TENANT ═══
 function carregarTenantECarrapio(){
-  // Lê o doc do usuário pra pegar tenantId
   fbDb.collection('users').doc(_user.uid).get().then(function(doc){
     if(!doc.exists || !doc.data().tenantId){
       mostrarErroSemTenant();
       return;
     }
     _tenantId = doc.data().tenantId;
-    // Busca o restaurante correto via restaurantes_publicos
-    // (mesma fonte que o garçom usa — garante que ambos apontam pro mesmo restaurante)
-    // Prioridade: 1) restaurante publicado do mesmo tenant, 2) primeiro restaurante do tenant
-    fbDb.collection('restaurantes_publicos')
-      .where('tenantId','==',_tenantId)
-      .limit(5).get().then(function(snap){
-        if(!snap.empty){
-          // Prefere o que tem nome "bavaro" ou pega o primeiro
-          var escolhido = snap.docs[0];
-          snap.docs.forEach(function(d){
-            var nome = (d.data().nome||'').toLowerCase();
-            if(nome.indexOf('bavaro') >= 0 || nome.indexOf('bávaro') >= 0) escolhido = d;
+    // Busca TODOS os restaurantes do tenant e escolhe o que tem itens
+    fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').get().then(function(snap){
+      if(snap.empty){
+        _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
+        iniciarApp();
+        return;
+      }
+      var restaurantes = [];
+      snap.forEach(function(d){
+        restaurantes.push({id:d.id, nome:d.data().nome||d.id, emoji:d.data().emoji||'🍽️'});
+      });
+      // Se só tem 1, usa ele direto
+      if(restaurantes.length === 1){
+        _restauranteAtivo = restaurantes[0];
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+        iniciarApp();
+        return;
+      }
+      // Se tem mais de 1, tenta achar qual tem itens no cardápio
+      // Verifica um por um em paralelo
+      var checks = restaurantes.map(function(rest){
+        return fbDb.collection('tenants').doc(_tenantId)
+          .collection('restaurantes').doc(rest.id)
+          .collection('cardapio').doc('data')
+          .collection('itens').limit(1).get()
+          .then(function(s){ return {rest:rest, temItens:!s.empty}; })
+          .catch(function(){ return {rest:rest, temItens:false}; });
+      });
+      Promise.all(checks).then(function(resultados){
+        // Prefere o que tem itens
+        var comItens = resultados.filter(function(r){ return r.temItens; });
+        var escolhido;
+        if(comItens.length > 0){
+          // Se mais de um tem itens, prefere "bavaro" ou "meu restaurante"
+          escolhido = comItens[0].rest;
+          comItens.forEach(function(r){
+            var n = (r.rest.nome||'').toLowerCase();
+            if(n.indexOf('bav') >= 0 || n.indexOf('meu') >= 0) escolhido = r.rest;
           });
-          var d = escolhido.data();
-          _restauranteAtivo = {
-            id: escolhido.id,
-            nome: d.nome || escolhido.id,
-            emoji: d.emoji || '🍽️'
-          };
-          // Salva pra próxima vez
-          try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-          iniciarApp();
         } else {
-          // Nenhum publicado ainda — busca direto na coleção de restaurantes do tenant
-          fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(1).get().then(function(snap2){
-            if(!snap2.empty){
-              var d2 = snap2.docs[0];
-              _restauranteAtivo = {id:d2.id, nome:d2.data().nome || d2.id, emoji:d2.data().emoji || '🍽️'};
-            } else {
-              _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-            }
-            try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-            iniciarApp();
-          }).catch(function(e){
-            console.warn('Erro restaurantes:', e);
-            _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-            iniciarApp();
-          });
+          // Nenhum tem itens — usa o primeiro
+          escolhido = restaurantes[0];
         }
-      }).catch(function(e){
-        console.warn('Erro restaurantes_publicos:', e);
-        // Fallback: usa localStorage antigo se tiver
-        var restSalvo = null;
-        try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e2){}
-        if(restSalvo){ try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e2){} }
-        if(!_restauranteAtivo) _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
+        _restauranteAtivo = escolhido;
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
         iniciarApp();
       });
+    }).catch(function(e){
+      console.error('Erro restaurantes:', e);
+      _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
+      iniciarApp();
+    });
   }).catch(function(e){
     console.error('Erro ao carregar tenant:', e);
     mostrarErroSemTenant();

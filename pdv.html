@@ -977,9 +977,28 @@ function iniciarApp(){
       atualizadoEm: Date.now()
     }, {merge: true}).catch(function(e){ console.warn('Publicar restaurante:', e); });
   } catch(e){ console.warn('Erro publicar:', e); }
-  // Listeners em tempo real
-  iniciarListeners();
-  try { iniciarListenerPedidos(); } catch(e){ console.warn('Erro pedidos:', e); }
+  // Antes de iniciar listeners, verifica se o restauranteAtivo atual tem cardápio.
+  // Se não tiver, tenta candidatos alternativos (resolve o problema de ID errado).
+  var candidatos = [
+    _restauranteAtivo.id,
+    'bavaro',
+    'default',
+    'meu-restaurante',
+    'restaurante'
+  ];
+  // Remove duplicatas
+  candidatos = candidatos.filter(function(v,i,a){ return v && a.indexOf(v)===i; });
+  descobrirRestauranteComCardapio(candidatos, function(idEncontrado){
+    if(idEncontrado && idEncontrado !== _restauranteAtivo.id){
+      console.log('Cardápio encontrado em restauranteId:', idEncontrado, '(era:', _restauranteAtivo.id, ')');
+      _restauranteAtivo = Object.assign({}, _restauranteAtivo, {id: idEncontrado});
+      try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+      document.getElementById('h-sub').textContent = (_restauranteAtivo.emoji || '🍽️') + ' ' + _restauranteAtivo.nome;
+    }
+    // Inicia listeners com o ID correto
+    iniciarListeners();
+    try { iniciarListenerPedidos(); } catch(e){ console.warn('Erro pedidos:', e); }
+  });
 }
 
 // ═══ LISTENERS ═══
@@ -988,6 +1007,33 @@ function fbColCardapio(sub){
     .collection('restaurantes').doc(_restauranteAtivo.id)
     .collection('cardapio').doc('data')
     .collection(sub);
+}
+
+// Tenta encontrar o restaurante correto testando IDs candidatos
+// e verificando qual tem itens no cardápio
+function descobrirRestauranteComCardapio(candidatos, callback){
+  var idx = 0;
+  function tentar(){
+    if(idx >= candidatos.length){
+      // Nenhum funcionou — usa o que estava
+      callback(null);
+      return;
+    }
+    var id = candidatos[idx++];
+    if(!id){ tentar(); return; }
+    fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(id)
+      .collection('cardapio').doc('data')
+      .collection('itens').limit(1).get()
+      .then(function(snap){
+        if(!snap.empty){
+          callback(id); // Achou!
+        } else {
+          tentar(); // Próximo candidato
+        }
+      }).catch(function(){ tentar(); });
+  }
+  tentar();
 }
 
 var _unsubItens = null, _unsubCats = null, _unsubGrupos = null;

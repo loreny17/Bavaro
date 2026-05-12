@@ -905,44 +905,55 @@ function carregarTenantECarrapio(){
       return;
     }
     _tenantId = doc.data().tenantId;
-    // Carrega o restaurante ativo (se houver) — usa último salvo no localStorage do app principal
+    // Lê o último restaurante usado (se houver) — usado pra abrir direto quando só tem 1
     var restSalvo = null;
     try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
+    var restSalvoObj = null;
     if(restSalvo){
-      try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){}
+      try{ restSalvoObj = JSON.parse(restSalvo); }catch(e){}
     }
-    if(!_restauranteAtivo){
-      // Busca TODOS os restaurantes do tenant (até 20)
-      fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(20).get().then(function(snap){
-        if(snap.empty){
-          // Nenhum restaurante ainda — usa default
-          _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-          try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-          iniciarApp();
-          return;
-        }
-        var restaurantes = [];
-        snap.forEach(function(d){
-          restaurantes.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'});
-        });
-        if(restaurantes.length === 1){
-          // Apenas 1 → abre direto
-          _restauranteAtivo = restaurantes[0];
-          try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-          iniciarApp();
-        } else {
-          // Múltiplos → mostra tela de seleção
-          mostrarSelecaoRestaurante(restaurantes);
-        }
-      }).catch(function(e){
-        console.warn('Erro restaurantes:', e);
+    // SEMPRE busca a lista atual de restaurantes (pra detectar matriz/filial corretamente)
+    fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(20).get().then(function(snap){
+      if(snap.empty){
+        // Nenhum restaurante ainda — usa default
         _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
         try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
         iniciarApp();
+        return;
+      }
+      var restaurantes = [];
+      snap.forEach(function(d){
+        restaurantes.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'});
       });
-    } else {
+      if(restaurantes.length === 1){
+        // Apenas 1 → abre direto nele (mesmo que o localStorage aponte pra outro)
+        _restauranteAtivo = restaurantes[0];
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+        iniciarApp();
+      } else {
+        // Múltiplos restaurantes
+        // Verifica se o salvo ainda EXISTE na lista atual
+        var salvoValido = restSalvoObj && restaurantes.find(function(r){ return r.id === restSalvoObj.id; });
+        if(salvoValido){
+          // Tem salvo válido → abre nele direto (próximas aberturas)
+          _restauranteAtivo = salvoValido;
+          iniciarApp();
+        } else {
+          // Não tem salvo, ou o salvo não existe mais → mostra tela de seleção
+          mostrarSelecaoRestaurante(restaurantes);
+        }
+      }
+    }).catch(function(e){
+      console.warn('Erro restaurantes:', e);
+      // Em caso de erro, usa o salvo se houver, senão default
+      if(restSalvoObj){
+        _restauranteAtivo = restSalvoObj;
+      } else {
+        _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+      }
       iniciarApp();
-    }
+    });
   }).catch(function(e){
     console.error('Erro ao carregar tenant:', e);
     mostrarErroSemTenant();

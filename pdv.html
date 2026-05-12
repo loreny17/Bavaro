@@ -914,18 +914,16 @@ function carregarTenantECarrapio(){
     }
     // SEMPRE busca a lista atual de restaurantes (pra detectar matriz/filial corretamente)
     fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(20).get().then(function(snap){
-      if(snap.empty){
-        // Nenhum restaurante ainda — usa default
-        _restauranteAtivo = {id:'default', nome:'Meu Restaurante', emoji:'🍽️'};
-        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-        iniciarApp();
-        return;
-      }
       var restaurantes = [];
       snap.forEach(function(d){
         restaurantes.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'});
       });
-      // Ordena alfabeticamente pelo nome (assim "Bávaro" vem antes de "Prinzen", etc)
+      // Sempre garante que "Bávaro" (id='bavaro') está na lista — é o restaurante principal/virtual
+      // que fica direto no tenant, igual o app principal faz (gestao_restaurantes)
+      if(!restaurantes.find(function(r){ return r.id === 'bavaro'; })){
+        restaurantes.unshift({id:'bavaro', nome:'Bávaro', emoji:'🍺'});
+      }
+      // Ordena alfabeticamente pelo nome (Bávaro geralmente vem primeiro)
       restaurantes.sort(function(a,b){ return a.nome.localeCompare(b.nome, 'pt-BR'); });
       
       if(restaurantes.length === 1){
@@ -1023,9 +1021,12 @@ function trocarRestaurante(){
   if(!_tenantId){ showToast('❌ Sem tenant carregado','#f87171'); return; }
   var atual = _restauranteAtivo;
   fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(20).get().then(function(snap){
-    if(snap.empty){ showToast('❌ Nenhum restaurante encontrado','#f87171'); return; }
     var lista = [];
     snap.forEach(function(d){ lista.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'}); });
+    // Garante o Bávaro virtual (igual o app principal)
+    if(!lista.find(function(r){ return r.id === 'bavaro'; })){
+      lista.unshift({id:'bavaro', nome:'Bávaro', emoji:'🍺'});
+    }
     lista.sort(function(a,b){ return a.nome.localeCompare(b.nome, 'pt-BR'); });
     if(lista.length === 1){ showToast('✓ Você só tem 1 restaurante','#f7a34f'); return; }
     // Para os listeners atuais
@@ -1042,11 +1043,16 @@ function iniciarApp(){
   document.getElementById('app').style.display = 'block';
   document.getElementById('fab').style.display = 'flex';
   document.getElementById('h-sub').textContent = (_restauranteAtivo.emoji || '🍽️') + ' ' + _restauranteAtivo.nome;
-  // Mostra botão "trocar restaurante" se o tenant tem 2+ restaurantes
+  // Mostra botão "trocar restaurante" se o tenant tem 2+ restaurantes (contando o Bávaro virtual)
   if(_tenantId){
     fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(5).get().then(function(snap){
       var btn = document.getElementById('btn-trocar-rest');
-      if(btn) btn.style.display = (snap.size > 1) ? 'flex' : 'none';
+      // Conta: tudo que tá na subcoleção + o Bávaro virtual (se já não estiver)
+      var total = snap.size;
+      var temBavaro = false;
+      snap.forEach(function(d){ if(d.id === 'bavaro') temBavaro = true; });
+      if(!temBavaro) total += 1;
+      if(btn) btn.style.display = (total > 1) ? 'flex' : 'none';
     }).catch(function(e){ console.warn('Check restaurantes:', e); });
   }
   // Publica tenantId em local público para o app do garçom poder ler

@@ -980,14 +980,21 @@ function iniciarApp(){
   // Antes de iniciar listeners, verifica se o restauranteAtivo atual tem cardápio.
   // Se não tiver, tenta candidatos alternativos (resolve o problema de ID errado).
   var candidatos = [
+    'default',           // ID correto confirmado
     _restauranteAtivo.id,
     'bavaro',
-    'default',
     'meu-restaurante',
     'restaurante'
   ];
-  // Remove duplicatas
-  candidatos = candidatos.filter(function(v,i,a){ return v && a.indexOf(v)===i; });
+  // Ignora IDs gerados automaticamente pelo outro chat (Prinzen/restaurantes novos)
+  // que não têm o cardápio original
+  candidatos = candidatos.filter(function(v,i,a){
+    if(!v) return false;
+    if(a.indexOf(v) !== i) return false; // remove duplicatas
+    // Ignora IDs com padrão "rest_NÚMEROS" (gerados automaticamente, não têm cardápio)
+    if(/^rest_\d+$/.test(v)) return false;
+    return true;
+  });
   descobrirRestauranteComCardapio(candidatos, function(idEncontrado){
     if(idEncontrado && idEncontrado !== _restauranteAtivo.id){
       console.log('Cardápio encontrado em restauranteId:', idEncontrado, '(era:', _restauranteAtivo.id, ')');

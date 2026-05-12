@@ -925,23 +925,19 @@ function carregarTenantECarrapio(){
       snap.forEach(function(d){
         restaurantes.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'});
       });
+      // Ordena alfabeticamente pelo nome (assim "Bávaro" vem antes de "Prinzen", etc)
+      restaurantes.sort(function(a,b){ return a.nome.localeCompare(b.nome, 'pt-BR'); });
+      
       if(restaurantes.length === 1){
-        // Apenas 1 → abre direto nele (mesmo que o localStorage aponte pra outro)
+        // Apenas 1 → abre direto nele
         _restauranteAtivo = restaurantes[0];
         try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
         iniciarApp();
       } else {
-        // Múltiplos restaurantes
-        // Verifica se o salvo ainda EXISTE na lista atual
-        var salvoValido = restSalvoObj && restaurantes.find(function(r){ return r.id === restSalvoObj.id; });
-        if(salvoValido){
-          // Tem salvo válido → abre nele direto (próximas aberturas)
-          _restauranteAtivo = salvoValido;
-          iniciarApp();
-        } else {
-          // Não tem salvo, ou o salvo não existe mais → mostra tela de seleção
-          mostrarSelecaoRestaurante(restaurantes);
-        }
+        // Múltiplos restaurantes → SEMPRE mostra tela de seleção
+        // (você pediu "Mostrar tela de seleção quando tiver mais de um")
+        // Passa o salvo pra destacar ele na tela
+        mostrarSelecaoRestaurante(restaurantes, restSalvoObj);
       }
     }).catch(function(e){
       console.warn('Erro restaurantes:', e);
@@ -967,7 +963,7 @@ function mostrarErroSemTenant(){
 }
 
 // ─── Tela de seleção de restaurante (quando o usuário tem 2+) ───
-function mostrarSelecaoRestaurante(restaurantes){
+function mostrarSelecaoRestaurante(restaurantes, ultimo){
   document.getElementById('app').style.display = 'none';
   document.getElementById('auth-overlay').classList.add('hidden');
   // Remove tela anterior se houver
@@ -976,7 +972,7 @@ function mostrarSelecaoRestaurante(restaurantes){
   // Cria nova tela
   var tela = document.createElement('div');
   tela.id = 'tela-selecao-restaurante';
-  tela.style.cssText = 'position:fixed;inset:0;background:radial-gradient(ellipse at 50% 0%,#1e1500 0%,#0d0d0d 50%,#080808 100%);z-index:8500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;overflow-y:auto;';
+  tela.style.cssText = 'position:fixed;inset:0;background:radial-gradient(ellipse at 50% 0%,#1e1500 0%,#0d0d0d 50%,#080808 100%);z-index:8500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;padding-top:max(24px,env(safe-area-inset-top));overflow-y:auto;';
   var html = ''+
     '<div style="text-align:center;margin-bottom:30px;">'+
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;color:var(--accent);letter-spacing:0.08em;">ESCOLHA O RESTAURANTE</div>'+
@@ -984,11 +980,14 @@ function mostrarSelecaoRestaurante(restaurantes){
     '</div>'+
     '<div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:380px;">';
   restaurantes.forEach(function(r, idx){
+    var eUltimo = ultimo && ultimo.id === r.id;
+    var badge = eUltimo ? '<div style="font-size:0.66rem;background:rgba(212,168,67,0.15);color:var(--accent);padding:3px 8px;border-radius:6px;margin-top:4px;display:inline-block;">ÚLTIMO USADO</div>' : '';
     html += '<button class="rest-card" data-idx="'+idx+'" style="background:var(--surface);border:2px solid var(--border);border-radius:14px;padding:18px;display:flex;align-items:center;gap:14px;cursor:pointer;font-family:inherit;color:var(--text);text-align:left;transition:all 0.2s;">'+
       '<div style="font-size:2.2rem;">'+(r.emoji||'🍽️')+'</div>'+
       '<div style="flex:1;min-width:0;">'+
         '<div style="font-weight:700;font-size:1.1rem;line-height:1.2;">'+escapeHtml(r.nome)+'</div>'+
         '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;">Tocar para abrir</div>'+
+        badge+
       '</div>'+
       '<div style="font-size:1.2rem;color:var(--accent);">→</div>'+
     '</button>';
@@ -1022,19 +1021,18 @@ function sairConta(){
 // Permite trocar de restaurante sem deslogar
 function trocarRestaurante(){
   if(!_tenantId){ showToast('❌ Sem tenant carregado','#f87171'); return; }
+  var atual = _restauranteAtivo;
   fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(20).get().then(function(snap){
     if(snap.empty){ showToast('❌ Nenhum restaurante encontrado','#f87171'); return; }
     var lista = [];
     snap.forEach(function(d){ lista.push({id:d.id, nome:d.data().nome || d.id, emoji:d.data().emoji || '🍽️'}); });
+    lista.sort(function(a,b){ return a.nome.localeCompare(b.nome, 'pt-BR'); });
     if(lista.length === 1){ showToast('✓ Você só tem 1 restaurante','#f7a34f'); return; }
-    // Limpa o atual e mostra a tela
-    _restauranteAtivo = null;
-    try { localStorage.removeItem('restauranteAtivo'); } catch(e){}
     // Para os listeners atuais
     if(typeof _unsubPedidosPDV === 'function'){ _unsubPedidosPDV(); _unsubPedidosPDV = null; }
     if(typeof _unsubItens === 'function' && _unsubItens){ _unsubItens(); _unsubItens = null; }
     if(typeof _unsubCats === 'function' && _unsubCats){ _unsubCats(); _unsubCats = null; }
-    mostrarSelecaoRestaurante(lista);
+    mostrarSelecaoRestaurante(lista, atual);
   }).catch(function(e){
     showToast('❌ '+e.message,'#f87171');
   });
@@ -1048,8 +1046,8 @@ function iniciarApp(){
   if(_tenantId){
     fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').limit(5).get().then(function(snap){
       var btn = document.getElementById('btn-trocar-rest');
-      if(btn) btn.style.display = (snap.size > 1) ? '' : 'none';
-    }).catch(function(){});
+      if(btn) btn.style.display = (snap.size > 1) ? 'flex' : 'none';
+    }).catch(function(e){ console.warn('Check restaurantes:', e); });
   }
   // Publica tenantId em local público para o app do garçom poder ler
   try {

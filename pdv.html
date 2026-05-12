@@ -5432,64 +5432,13 @@ function calcularTotaisContaPDV(c){
   return {subtotal:subtotal, taxa10:taxa10, total:total, pagoTotal:pagoTotal, restante:restante};
 }
 
-// ═══ PWA: INSTALAÇÃO COMO APP + AUTO-UPDATE ═══
+// ═══ PWA: INSTALAÇÃO COMO APP ═══
+// Registra o service worker (necessário pra browser permitir instalar)
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('/sw-pdv.js', { scope: '/pdv.html' })
-      .then(function(registration){
-        console.log('[PDV PWA] SW registrado');
-        // Detecta nova versão
-        registration.addEventListener('updatefound', function(){
-          var newSW = registration.installing;
-          if(!newSW) return;
-          newSW.addEventListener('statechange', function(){
-            if(newSW.state === 'installed' && navigator.serviceWorker.controller){
-              console.log('[PDV PWA] Nova versão disponível');
-              mostrarBannerUpdatePDV(registration);
-            }
-          });
-        });
-        // Checa updates a cada 5 min
-        setInterval(function(){
-          registration.update().catch(function(){});
-        }, 5 * 60 * 1000);
-        // Checa quando app fica visível
-        document.addEventListener('visibilitychange', function(){
-          if(document.visibilityState === 'visible'){
-            registration.update().catch(function(){});
-          }
-        });
-      })
       .catch(function(err){ console.warn('SW erro:', err); });
-    // Recarrega quando SW novo assume controle
-    var refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', function(){
-      if(refreshing) return;
-      refreshing = true;
-      window.location.reload();
-    });
   });
-}
-
-function mostrarBannerUpdatePDV(registration){
-  if(document.getElementById('banner-update-pdv')) return;
-  var banner = document.createElement('div');
-  banner.id = 'banner-update-pdv';
-  banner.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;padding:14px 20px;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:99998;display:flex;align-items:center;gap:12px;max-width:92vw;font-family:inherit;cursor:pointer;';
-  banner.innerHTML = 
-    '<div style="font-size:1.5rem;">🆕</div>'+
-    '<div style="flex:1;">'+
-      '<div style="font-weight:700;font-size:0.92rem;">Nova versão disponível</div>'+
-      '<div style="font-size:0.78rem;opacity:0.9;">Toque para atualizar</div>'+
-    '</div>'+
-    '<div style="background:rgba(255,255,255,0.2);padding:6px 14px;border-radius:8px;font-weight:700;font-size:0.84rem;">Atualizar</div>';
-  banner.onclick = function(){
-    banner.innerHTML = '<div style="text-align:center;flex:1;font-weight:700;">⏳ Atualizando...</div>';
-    if(registration.waiting){
-      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-    }
-  };
-  document.body.appendChild(banner);
 }
 // Captura o evento beforeinstallprompt (Chrome/Edge/Android) pra exibir o botão
 var _pwaPromptEvento = null;

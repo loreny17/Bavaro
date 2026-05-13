@@ -5573,7 +5573,11 @@ function toggleFragmento(itemKey, fragIdx){
 function abrirModalDividirItem(itemKey){
   var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
   if(!it){ showToast('Item não encontrado','#f87171'); return; }
-  var valorTotal = (it.preco||0)*(it.qtd||1);
+  var valorBruto = (it.preco||0)*(it.qtd||1);
+  // ⚠️ Usa o valor RESTANTE (descontando abatimentos parciais)
+  var valorTotal = valorRestanteItem(it);
+  if(valorTotal <= 0.01){ showToast('Este item já está pago','#f7a34f'); return; }
+  var temAbatimento = (it.valorAbatido||0) > 0.01;
   var ex = document.getElementById('modal-dividir');
   if(ex) ex.remove();
   var mod = document.createElement('div');
@@ -5588,6 +5592,12 @@ function abrirModalDividirItem(itemKey){
       '<div class="modal-body">'+
         '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-bottom:14px;">'+
           '<div style="font-size:0.84rem;font-weight:600;">'+esc((it.qtd||1)+'x '+it.nome)+'</div>'+
+          (temAbatimento
+            ? '<div style="font-size:0.72rem;color:var(--muted);text-decoration:line-through;margin-top:2px;">Original: R$ '+fmtPreco(valorBruto)+'</div>'+
+              '<div style="font-size:0.72rem;color:#4ade80;margin-top:2px;">💰 R$ '+fmtPreco(it.valorAbatido)+' já abatido</div>'+
+              '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.04em;">Restante a dividir</div>'
+            : ''
+          )+
           '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.5rem;margin-top:3px;">R$ '+fmtPreco(valorTotal)+'</div>'+
         '</div>'+
         '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">Em quantas partes dividir?</div>'+
@@ -5666,7 +5676,9 @@ function aplicarDivisao(itemKey){
   if(_dividirNumEscolhido < 2) return;
   var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
   if(!it) return;
-  var valorTotal = (it.preco||0)*(it.qtd||1);
+  // ⚠️ Divide só o RESTANTE (descontando abatimentos)
+  var valorTotal = valorRestanteItem(it);
+  if(valorTotal <= 0.01){ showToast('Nada para dividir','#f7a34f'); return; }
   var valorPorParte = valorTotal / _dividirNumEscolhido;
   var divisao = {
     total: _dividirNumEscolhido,

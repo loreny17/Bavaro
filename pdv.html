@@ -5117,11 +5117,15 @@ function mostrarSelecaoRestaurante(){
     return;
   }
 
-  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').get().then(function(snap){
+  // Usa restaurantes_publicos (mesma fonte do PDV original)
+  fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
     var lista = [];
     snap.forEach(function(doc){
       var d = doc.data() || {};
-      lista.push({id:doc.id, nome:d.nome || doc.id, emoji:d.emoji || '🍽️'});
+      // Só do mesmo tenant
+      if(d.tenantId && d.tenantId === _tenantId){
+        lista.push({id:doc.id, nome:d.nome || doc.id, emoji:d.emoji || '🍽️'});
+      }
     });
 
     // Garante que 'default' (Bávaro) esteja na lista
@@ -5183,11 +5187,71 @@ function abrirCopiarCardapio(){
   if(typeof _restauranteAtivo !== 'undefined' && _restauranteAtivo){
     document.getElementById('copy-origem').textContent = (_restauranteAtivo.emoji||'🍽️') + ' ' + _restauranteAtivo.nome + ' (id: ' + _restauranteAtivo.id + ')';
   }
-  document.getElementById('copy-destino-id').value = '';
   document.getElementById('copy-log').textContent = 'Aguardando...';
+  document.getElementById('copy-novo-rest').checked = false;
+  document.getElementById('copy-novo-rest-id').style.display = 'none';
+  document.getElementById('copy-novo-rest-id').value = '';
+  document.getElementById('copy-destino-id').style.display = '';
   var btn = document.getElementById('btn-executar-copia');
   btn.disabled = false;
   btn.textContent = 'Copiar';
+  // Carrega lista de restaurantes
+  carregarDestinosCopia();
+}
+
+function toggleNovoRestaurante(){
+  var check = document.getElementById('copy-novo-rest');
+  var inputNovo = document.getElementById('copy-novo-rest-id');
+  var selectDest = document.getElementById('copy-destino-id');
+  if(check.checked){
+    inputNovo.style.display = '';
+    selectDest.style.display = 'none';
+    inputNovo.focus();
+  } else {
+    inputNovo.style.display = 'none';
+    selectDest.style.display = '';
+    inputNovo.value = '';
+  }
+}
+
+function carregarDestinosCopia(){
+  var select = document.getElementById('copy-destino-id');
+  select.innerHTML = '<option value="">Carregando...</option>';
+  fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
+    var lista = [];
+    snap.forEach(function(doc){
+      var d = doc.data() || {};
+      // Só restaurantes do mesmo tenant
+      if(d.tenantId && d.tenantId === _tenantId){
+        lista.push({id:doc.id, nome:d.nome || doc.id, emoji:d.emoji || '🍽️'});
+      }
+    });
+    // Renomeia "Meu Restaurante" → "Bávaro"
+    lista = lista.map(function(r){
+      if(r.id === 'default' && (r.nome === 'Meu Restaurante' || !r.nome)){
+        return {id:'default', nome:'Bávaro', emoji:'🍺'};
+      }
+      return r;
+    });
+    // Remove a origem da lista
+    lista = lista.filter(function(r){
+      return !(_restauranteAtivo && r.id === _restauranteAtivo.id);
+    });
+    // Ordena alfabético
+    lista.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+
+    var html = '<option value="">— Selecione um restaurante —</option>';
+    lista.forEach(function(r){
+      html += '<option value="'+r.id+'">'+r.emoji+' '+r.nome+' (id: '+r.id+')</option>';
+    });
+    if(lista.length === 0){
+      html = '<option value="">Nenhum outro restaurante cadastrado</option>';
+    }
+    select.innerHTML = html;
+  }).catch(function(e){
+    console.error('Erro lista destinos:', e);
+    select.innerHTML = '<option value="">Erro ao carregar</option>';
+  });
 }
 function fecharCopiarCardapio(){
   document.getElementById('modal-copy').classList.remove('aberto');
@@ -5198,10 +5262,25 @@ function _logCopia(msg){
   log.scrollTop = log.scrollHeight;
 }
 async function executarCopiaCardapio(){
-  var destinoId = (document.getElementById('copy-destino-id').value || '').trim().toLowerCase();
-  if(!destinoId){ alert('Informe o ID do destino'); return; }
-  if(!/^[a-z0-9_-]+$/.test(destinoId)){ alert('ID inválido. Use a-z, 0-9, _ ou -'); return; }
+  // Pega destino: do select OU do input novo
+  var usarNovo = document.getElementById('copy-novo-rest').checked;
+  var destinoId, destinoNome, destinoEmoji;
+  if(usarNovo){
+    destinoId = (document.getElementById('copy-novo-rest-id').value || '').trim().toLowerCase();
+    if(!destinoId){ alert('Digite o ID do novo restaurante'); return; }
+    if(!/^[a-z0-9_-]+$/.test(destinoId)){ alert('ID inválido. Use a-z, 0-9, _ ou -'); return; }
+    destinoNome = destinoId.charAt(0).toUpperCase() + destinoId.slice(1);
+    destinoEmoji = '🍽️';
+  } else {
+    destinoId = document.getElementById('copy-destino-id').value;
+    if(!destinoId){ alert('Selecione um restaurante destino'); return; }
+    var opt = document.getElementById('copy-destino-id').options[document.getElementById('copy-destino-id').selectedIndex];
+    destinoNome = opt.text.replace(/^\S+\s/, '').replace(/\s\(id:.*\)$/, '');
+    destinoEmoji = '🍽️';
+  }
+
   if(_restauranteAtivo && destinoId === _restauranteAtivo.id){ alert('Destino igual à origem'); return; }
+
   var copiarCardapio = document.getElementById('copy-cardapio').checked;
   var copiarGrupos = document.getElementById('copy-grupos').checked;
   var copiarConfigImp = document.getElementById('copy-config-imp').checked;
@@ -5217,62 +5296,109 @@ async function executarCopiaCardapio(){
   _logCopia('Destino: ' + destinoId);
 
   try{
-    var origemRef = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id);
-    var destinoRef = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(destinoId);
-    _logCopia('→ Criando doc destino...');
-    var nomeDestino = destinoId.charAt(0).toUpperCase() + destinoId.slice(1);
-    await destinoRef.set({nome: nomeDestino, emoji:'🍽️'}, {merge:true});
+    var origemDoc = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id);
+    var destinoDoc = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(destinoId);
 
+    _logCopia('→ Criando/atualizando doc destino...');
+    await destinoDoc.set({nome: destinoNome, emoji: destinoEmoji}, {merge:true});
+
+    // 1. CARDÁPIO: cardapio/data/itens, cardapio/data/categorias
     if(copiarCardapio){
       _logCopia(''); _logCopia('=== CARDÁPIO ===');
-      var snap = await origemRef.collection('cardapio').get();
-      _logCopia('Documentos: ' + snap.size);
-      for(var i=0; i<snap.docs.length; i++){
-        var doc = snap.docs[i];
-        await destinoRef.collection('cardapio').doc(doc.id).set(doc.data());
-        _logCopia('  ✓ ' + doc.id);
+      // Itens
+      _logCopia('→ Copiando itens...');
+      var itensSnap = await origemDoc.collection('cardapio').doc('data').collection('itens').get();
+      _logCopia('  Itens encontrados: ' + itensSnap.size);
+      for(var i=0; i<itensSnap.docs.length; i++){
+        var doc = itensSnap.docs[i];
+        await destinoDoc.collection('cardapio').doc('data').collection('itens').doc(doc.id).set(doc.data());
       }
+      _logCopia('  ✓ ' + itensSnap.size + ' itens copiados');
+
+      // Categorias
+      _logCopia('→ Copiando categorias...');
+      var catSnap = await origemDoc.collection('cardapio').doc('data').collection('categorias').get();
+      _logCopia('  Categorias encontradas: ' + catSnap.size);
+      for(var i=0; i<catSnap.docs.length; i++){
+        var doc = catSnap.docs[i];
+        await destinoDoc.collection('cardapio').doc('data').collection('categorias').doc(doc.id).set(doc.data());
+      }
+      _logCopia('  ✓ ' + catSnap.size + ' categorias copiadas');
     }
+
+    // 2. GRUPOS: cardapio/data/grupos_opcoes
     if(copiarGrupos){
-      _logCopia(''); _logCopia('=== GRUPOS ===');
-      var snap = await origemRef.collection('grupos').get();
-      _logCopia('Documentos: ' + snap.size);
+      _logCopia(''); _logCopia('=== GRUPOS DE OPÇÕES ===');
+      var snap = await origemDoc.collection('cardapio').doc('data').collection('grupos_opcoes').get();
+      _logCopia('Grupos encontrados: ' + snap.size);
       for(var i=0; i<snap.docs.length; i++){
         var doc = snap.docs[i];
-        await destinoRef.collection('grupos').doc(doc.id).set(doc.data());
-        _logCopia('  ✓ ' + doc.id);
+        await destinoDoc.collection('cardapio').doc('data').collection('grupos_opcoes').doc(doc.id).set(doc.data());
       }
+      _logCopia('✓ ' + snap.size + ' grupos copiados');
     }
+
+    // 3. IMPRESSORAS: impressao/config/{sub} + impressao/config_geral
     if(copiarConfigImp){
       _logCopia(''); _logCopia('=== IMPRESSORAS ===');
-      var snap = await origemRef.collection('impressao').get();
-      _logCopia('Documentos: ' + snap.size);
-      for(var i=0; i<snap.docs.length; i++){
-        var doc = snap.docs[i];
-        await destinoRef.collection('impressao').doc(doc.id).set(doc.data());
-        _logCopia('  ✓ ' + doc.id);
-      }
-    }
-    if(copiarGarcons){
-      _logCopia(''); _logCopia('=== GARÇONS ===');
-      var snap = await origemRef.collection('garcons').get();
-      _logCopia('Documentos: ' + snap.size);
-      for(var i=0; i<snap.docs.length; i++){
-        var doc = snap.docs[i];
-        await destinoRef.collection('garcons').doc(doc.id).set(doc.data());
-        _logCopia('  ✓ ' + doc.id);
+      // config_geral (doc direto)
+      try{
+        var docGeral = await origemDoc.collection('impressao').doc('config_geral').get();
+        if(docGeral.exists){
+          await destinoDoc.collection('impressao').doc('config_geral').set(docGeral.data());
+          _logCopia('  ✓ config_geral');
+        }
+      }catch(e){ _logCopia('  ⚠ config_geral: ' + e.message); }
+      // Subcoleções de impressao/config
+      var subcols = ['impressoras', 'regras'];
+      for(var s=0; s<subcols.length; s++){
+        try{
+          var sub = subcols[s];
+          var snap = await origemDoc.collection('impressao').doc('config').collection(sub).get();
+          _logCopia('  ' + sub + ': ' + snap.size);
+          for(var i=0; i<snap.docs.length; i++){
+            var doc = snap.docs[i];
+            await destinoDoc.collection('impressao').doc('config').collection(sub).doc(doc.id).set(doc.data());
+          }
+        }catch(e){ _logCopia('  ⚠ ' + subcols[s] + ': ' + e.message); }
       }
     }
 
-    _logCopia(''); _logCopia('✅ CONCLUÍDO! Origem mantida intacta.');
+    // 4. GARÇONS: coleção direta
+    if(copiarGarcons){
+      _logCopia(''); _logCopia('=== GARÇONS ===');
+      var snap = await origemDoc.collection('garcons').get();
+      _logCopia('Garçons encontrados: ' + snap.size);
+      for(var i=0; i<snap.docs.length; i++){
+        var doc = snap.docs[i];
+        await destinoDoc.collection('garcons').doc(doc.id).set(doc.data());
+      }
+      _logCopia('✓ ' + snap.size + ' garçons copiados');
+    }
+
+    // 5. Publica em restaurantes_publicos
+    _logCopia('');
+    _logCopia('→ Publicando restaurante...');
+    await fbDb.collection('restaurantes_publicos').doc(destinoId).set({
+      tenantId: _tenantId,
+      restauranteId: destinoId,
+      nome: destinoNome,
+      emoji: destinoEmoji,
+      atualizadoEm: Date.now()
+    }, {merge:true});
+
+    _logCopia('');
+    _logCopia('✅ CONCLUÍDO! Origem (' + _restauranteAtivo.id + ') mantida intacta.');
     btn.textContent = '✓ Concluído';
     setTimeout(function(){
-      if(confirm('Cópia concluída! Trocar para "' + destinoId + '" agora?')){
-        trocarRestaurante(destinoId, nomeDestino, '🍽️');
+      if(confirm('Cópia concluída! Trocar para "' + destinoNome + '" agora?')){
+        trocarRestaurante(destinoId, destinoNome, destinoEmoji);
       }
     }, 500);
   }catch(e){
+    console.error(e);
     _logCopia(''); _logCopia('❌ ERRO: ' + (e.message || e));
+    _logCopia(e.stack || '');
     btn.disabled = false;
     btn.textContent = 'Tentar de novo';
   }
@@ -5808,8 +5934,17 @@ async function executarCopiaCardapio(){
       </div>
       <div class="copy-section">
         <div class="label">Destino (ID do restaurante)</div>
-        <input type="text" class="copy-input" id="copy-destino-id" placeholder="ex: bavaro, prinzen, restaurante2" autocomplete="off">
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px;">Use ID curto, minúsculas, sem espaços ou acentos.</div>
+        <select class="copy-input" id="copy-destino-id">
+          <option value="">— Selecione um restaurante —</option>
+        </select>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px;">Lista os restaurantes já cadastrados (exceto a origem).</div>
+        <div style="margin-top:10px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--muted);">
+            <input type="checkbox" id="copy-novo-rest" onchange="toggleNovoRestaurante()" style="width:16px;height:16px;">
+            <span>Ou criar um novo restaurante</span>
+          </label>
+          <input type="text" id="copy-novo-rest-id" placeholder="ID do novo (ex: bavaro2)" autocomplete="off" style="display:none;margin-top:8px;width:100%;padding:10px;border-radius:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:0.9rem;">
+        </div>
       </div>
       <div class="copy-section">
         <div class="label">O que copiar</div>

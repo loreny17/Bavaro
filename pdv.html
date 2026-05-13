@@ -285,6 +285,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .copy-check{display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;cursor:pointer;}
 .copy-check input[type=checkbox]{width:18px;height:18px;cursor:pointer;}
 .copy-log{font-size:0.82rem;color:var(--muted);background:var(--bg);padding:10px;border-radius:8px;max-height:120px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;line-height:1.5;}
+
+/* Força orientação portrait (retrato) */
+@media screen and (orientation: landscape) and (max-device-width: 932px){
+  html { transform: rotate(-90deg); transform-origin: left top; width: 100vh; height: 100vw; overflow-x: hidden; position: absolute; top: 100%; left: 0; }
+}
 </style>
 </head>
 <body>
@@ -854,6 +859,16 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsrsasign@10.9.0/lib/jsrsasign-all-min.js"></script>
 <script>
+
+// Trava rotação em portrait (quando o navegador permite)
+(function(){
+  try{
+    if(screen.orientation && screen.orientation.lock){
+      screen.orientation.lock('portrait').catch(function(e){ /* alguns navegadores só permitem em PWA fullscreen */ });
+    }
+  }catch(e){}
+})();
+
 // ═══ CONFIG ═══
 var firebaseConfig = {
   apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
@@ -5540,86 +5555,216 @@ function renderRelatorios(){
 
 // ===== EXCLUIR RESTAURANTE =====
 function abrirExcluirRestaurante(){
-  if(!_restauranteAtivo){ alert('Nenhum restaurante ativo'); return; }
-  var id = _restauranteAtivo.id;
-  var nome = _restauranteAtivo.nome;
+  // Lista todos restaurantes para o usuário escolher
+  var modal = document.getElementById('modal-excluir');
+  if(!modal){
+    // Cria modal dinamicamente
+    var html = '<div class="modal-back" id="modal-excluir" onclick="if(event.target===this)fecharExcluirRest()">' +
+      '<div class="modal-box">' +
+        '<div class="modal-box-head">' +
+          '<h3 style="color:#f87171;">🗑️ Excluir Restaurante</h3>' +
+          '<button onclick="fecharExcluirRest()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+        '</div>' +
+        '<div class="modal-box-body" id="modal-excluir-body">' +
+          '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById('modal-excluir');
+  }
+  modal.classList.add('aberto');
+  carregarListaExcluir();
+}
 
-  // Primeira confirmação
-  var msg1 = '⚠️ ATENÇÃO!\n\nVocê está prestes a EXCLUIR o restaurante:\n\n' + nome + ' (id: ' + id + ')\n\n' +
-    'Isso vai apagar PERMANENTEMENTE:\n' +
-    '• Todo o cardápio (itens, categorias, grupos)\n' +
-    '• Garçons cadastrados\n' +
-    '• Configurações de impressoras\n' +
-    '• Histórico de contas fechadas DESTE restaurante\n\n' +
-    'NÃO é possível desfazer.\n\nTem certeza?';
+function fecharExcluirRest(){
+  var modal = document.getElementById('modal-excluir');
+  if(modal) modal.classList.remove('aberto');
+}
+
+function carregarListaExcluir(){
+  var body = document.getElementById('modal-excluir-body');
+  body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando restaurantes...</div>';
+
+  fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
+    var lista = [];
+    snap.forEach(function(doc){
+      var d = doc.data() || {};
+      if(d.tenantId && d.tenantId === _tenantId){
+        lista.push({id:doc.id, nome:d.nome || doc.id, emoji:d.emoji || '🍽️'});
+      }
+    });
+    // Remove o default (não pode excluir)
+    lista = lista.filter(function(r){ return r.id !== 'default'; });
+    // Ordena alfabético
+    lista.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+
+    if(lista.length === 0){
+      body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+        '<div style="font-size:2.5rem;margin-bottom:10px;">📦</div>' +
+        '<div style="font-weight:600;margin-bottom:6px;">Nenhum restaurante extra</div>' +
+        '<div style="font-size:0.85rem;">Apenas o Bávaro (default) está cadastrado, e não pode ser excluído.</div>' +
+      '</div>';
+      return;
+    }
+
+    var html = '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:10px;padding:10px;margin-bottom:14px;font-size:0.82rem;color:#f87171;">' +
+      '⚠️ A exclusão é <strong>permanente</strong>. O Bávaro (default) não pode ser excluído.' +
+    '</div>';
+
+    lista.forEach(function(r){
+      var ehAtivo = (_restauranteAtivo && _restauranteAtivo.id === r.id);
+      var nomeEsc = r.nome.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+      html += '<div class="rest-card" style="cursor:pointer;border-color:rgba(248,113,113,0.3);" onclick="confirmarExclusao(&quot;'+r.id+'&quot;,&quot;'+nomeEsc+'&quot;)">' +
+        '<div class="emoji">'+r.emoji+'</div>' +
+        '<div class="info"><div class="nome">'+r.nome+'</div><div class="id-line">id: '+r.id+(ehAtivo?' · ATIVO':'')+'</div></div>' +
+        '<div style="color:#f87171;font-size:1.3rem;">🗑️</div>' +
+      '</div>';
+    });
+    body.innerHTML = html;
+  }).catch(function(e){
+    console.error('Erro carregar lista excluir:', e);
+    body.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + (e.message||e) + '</div>';
+  });
+}
+
+function confirmarExclusao(id, nome){
+  if(id === 'default'){
+    alert('❌ O Bávaro (default) não pode ser excluído.');
+    return;
+  }
+
+  var msg1 = '⚠️ ATENÇÃO!\n\nVocê vai EXCLUIR o restaurante:\n\n' + nome + '\n(id: ' + id + ')\n\n' +
+    'Isso apaga PERMANENTEMENTE todos os dados deste restaurante.\n\nTem certeza?';
   if(!confirm(msg1)) return;
 
-  // Segunda confirmação: digite o ID
-  var conf = prompt('Para confirmar, digite o ID do restaurante:\n\n' + id);
+  var conf = prompt('Para confirmar, digite o ID:\n\n' + id);
   if(conf !== id){
     if(conf !== null) alert('ID não confere. Exclusão cancelada.');
     return;
   }
 
-  if(id === 'default'){
-    alert('❌ Não é possível excluir o restaurante padrão (default). Use a opção Copiar Cardápio para migrar os dados antes.');
-    return;
-  }
-
+  fecharExcluirRest();
   executarExclusaoRestaurante(id, nome);
 }
 
 async function executarExclusaoRestaurante(id, nome){
-  try{
-    var ref = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(id);
+  // Modal de progresso
+  var prog = document.getElementById('modal-prog-excluir');
+  if(!prog){
+    var html = '<div class="modal-back" id="modal-prog-excluir">' +
+      '<div class="modal-box">' +
+        '<div class="modal-box-head"><h3>🗑️ Excluindo...</h3></div>' +
+        '<div class="modal-box-body">' +
+          '<div id="prog-excluir-log" class="copy-log" style="max-height:300px;">Iniciando...</div>' +
+        '</div>' +
+        '<div class="modal-box-foot">' +
+          '<button id="prog-excluir-fechar" onclick="document.getElementById(\'modal-prog-excluir\').classList.remove(\'aberto\')" style="flex:1;padding:12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);cursor:pointer;display:none;">Fechar</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    prog = document.getElementById('modal-prog-excluir');
+  }
+  prog.classList.add('aberto');
+  var log = document.getElementById('prog-excluir-log');
+  log.textContent = '=== EXCLUINDO ' + id + ' ===';
 
-    // Helper pra deletar coleção
-    async function deleteCol(colRef){
-      var snap = await colRef.get();
-      for(var i=0; i<snap.docs.length; i++){
-        await snap.docs[i].ref.delete();
-      }
-      return snap.size;
-    }
+  function plog(msg){
+    log.textContent += '\n' + msg;
+    log.scrollTop = log.scrollHeight;
+    console.log('[excluir]', msg);
+  }
 
-    // 1. cardapio/data/itens, categorias, grupos_opcoes
-    var n1 = await deleteCol(ref.collection('cardapio').doc('data').collection('itens'));
-    var n2 = await deleteCol(ref.collection('cardapio').doc('data').collection('categorias'));
-    var n3 = await deleteCol(ref.collection('cardapio').doc('data').collection('grupos_opcoes'));
-    try{ await ref.collection('cardapio').doc('data').delete(); }catch(e){}
+  var ref = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(id);
 
-    // 2. garcons
-    var n4 = await deleteCol(ref.collection('garcons'));
-
-    // 3. impressao
+  // Helper que captura erros individualmente
+  async function tryDelete(label, fn){
     try{
-      await deleteCol(ref.collection('impressao').doc('config').collection('impressoras'));
-      await deleteCol(ref.collection('impressao').doc('config').collection('regras'));
-      await ref.collection('impressao').doc('config').delete();
-      await ref.collection('impressao').doc('config_geral').delete();
-    }catch(e){}
-
-    // 4. Doc do restaurante
-    await ref.delete();
-
-    // 5. Remove do restaurantes_publicos
-    try{ await fbDb.collection('restaurantes_publicos').doc(id).delete(); }catch(e){}
-
-    // 6. Contas fechadas desse restaurante (opcional, mas faz parte)
-    var contasSnap = await fbDb.collection('contas_fechadas').where('restauranteId','==', id).get();
-    for(var i=0; i<contasSnap.docs.length; i++){
-      await contasSnap.docs[i].ref.delete();
+      var n = await fn();
+      plog('  ✓ ' + label + (n !== undefined ? ' (' + n + ')' : ''));
+      return n;
+    }catch(e){
+      plog('  ⚠ ' + label + ': ' + (e.message || e));
+      return 0;
     }
+  }
 
-    alert('✅ Restaurante "' + nome + '" excluído com sucesso!\n\nVoltando para o padrão...');
+  async function deleteCol(colRef){
+    var snap = await colRef.get();
+    var total = 0;
+    for(var i=0; i<snap.docs.length; i++){
+      try{
+        await snap.docs[i].ref.delete();
+        total++;
+      }catch(e){
+        plog('    erro doc ' + snap.docs[i].id + ': ' + (e.message||e));
+      }
+    }
+    return total;
+  }
 
-    // Volta pro default
-    var novoRest = {id:'default', nome:'Bávaro', emoji:'🍺'};
-    try{ localStorage.setItem('restauranteAtivo', JSON.stringify(novoRest)); }catch(e){}
-    window.location.reload();
+  try{
+    plog('');
+    plog('→ Cardápio:');
+    await tryDelete('itens', function(){ return deleteCol(ref.collection('cardapio').doc('data').collection('itens')); });
+    await tryDelete('categorias', function(){ return deleteCol(ref.collection('cardapio').doc('data').collection('categorias')); });
+    await tryDelete('grupos_opcoes', function(){ return deleteCol(ref.collection('cardapio').doc('data').collection('grupos_opcoes')); });
+    await tryDelete('cardapio/data doc', function(){ return ref.collection('cardapio').doc('data').delete(); });
+
+    plog('');
+    plog('→ Garçons:');
+    await tryDelete('garcons', function(){ return deleteCol(ref.collection('garcons')); });
+
+    plog('');
+    plog('→ Impressoras:');
+    await tryDelete('impressoras', function(){ return deleteCol(ref.collection('impressao').doc('config').collection('impressoras')); });
+    await tryDelete('regras', function(){ return deleteCol(ref.collection('impressao').doc('config').collection('regras')); });
+    await tryDelete('config doc', function(){ return ref.collection('impressao').doc('config').delete(); });
+    await tryDelete('config_geral', function(){ return ref.collection('impressao').doc('config_geral').delete(); });
+
+    plog('');
+    plog('→ Doc do restaurante:');
+    await tryDelete('restaurante doc', function(){ return ref.delete(); });
+
+    plog('');
+    plog('→ Lista pública:');
+    await tryDelete('restaurantes_publicos', function(){ return fbDb.collection('restaurantes_publicos').doc(id).delete(); });
+
+    plog('');
+    plog('→ Contas fechadas deste restaurante:');
+    try{
+      var contasSnap = await fbDb.collection('contas_fechadas').where('restauranteId','==', id).get();
+      var nc = 0;
+      for(var i=0; i<contasSnap.docs.length; i++){
+        try{ await contasSnap.docs[i].ref.delete(); nc++; }catch(e){}
+      }
+      plog('  ✓ contas fechadas (' + nc + ')');
+    }catch(e){ plog('  ⚠ contas: ' + (e.message||e)); }
+
+    plog('');
+    plog('✅ EXCLUSÃO CONCLUÍDA!');
+    document.getElementById('prog-excluir-fechar').style.display = '';
+
+    setTimeout(function(){
+      alert('✅ Restaurante "' + nome + '" excluído com sucesso!');
+      // Se era o ativo, volta pro default
+      if(_restauranteAtivo && _restauranteAtivo.id === id){
+        var novoRest = {id:'default', nome:'Bávaro', emoji:'🍺'};
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(novoRest)); }catch(e){}
+        window.location.reload();
+      } else {
+        document.getElementById('modal-prog-excluir').classList.remove('aberto');
+      }
+    }, 1500);
+
   }catch(e){
-    console.error(e);
-    alert('❌ Erro ao excluir: ' + (e.message || e));
+    console.error('ERRO FATAL excluir:', e);
+    plog('');
+    plog('❌ ERRO FATAL: ' + (e.message || e));
+    plog(e.stack || '');
+    document.getElementById('prog-excluir-fechar').style.display = '';
+    alert('❌ Erro ao excluir: ' + (e.message || e) + '\n\nVeja o log para detalhes.');
   }
 }
 

@@ -1580,6 +1580,8 @@ function showTab(tab) {
   if(painelG) painelG.style.display = 'none';
   if(painelGr) painelGr.style.display = 'none';
   if(painelI) painelI.style.display = 'none';
+  var _painelR = document.getElementById('painel-relatorios');
+  if(_painelR) _painelR.style.display = 'none';
   // Mostra a aba ativa
   if(tab === 'cardapio') {
     if(itensGrid) itensGrid.style.display = '';
@@ -1600,6 +1602,10 @@ function showTab(tab) {
   } else if(tab === 'impressao') {
     if(painelI) painelI.style.display = 'block';
     abrirAbaImpressao();
+  } else if(tab === 'relatorios') {
+    var painelR = document.getElementById('painel-relatorios');
+    if(painelR) painelR.style.display = 'block';
+    if(typeof carregarRelatorios === 'function') carregarRelatorios();
   }
 }
 
@@ -5404,6 +5410,219 @@ async function executarCopiaCardapio(){
   }
 }
 
+
+
+// ===== RELATÓRIOS =====
+var _periodoRel = 'hoje';
+var _contasRel = [];
+
+function setPeriodoRel(p){
+  _periodoRel = p;
+  // Atualiza pills
+  ['hoje','ontem','7d','30d','total'].forEach(function(k){
+    var b = document.getElementById('rel-pill-'+k);
+    if(b){ b.classList.toggle('rel-pill-ativo', k === p); }
+  });
+  renderRelatorios();
+}
+
+function carregarRelatorios(){
+  var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
+  document.getElementById('rel-sem-caixinha').textContent = 'Carregando...';
+  fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', restId)
+    .get().then(function(snap){
+      _contasRel = [];
+      snap.forEach(function(d){ _contasRel.push(Object.assign({id:d.id}, d.data())); });
+      renderRelatorios();
+    }).catch(function(e){
+      console.error('Erro relatórios:', e);
+      document.getElementById('rel-sem-caixinha').textContent = 'Erro';
+    });
+}
+
+function renderRelatorios(){
+  // Filtra pelo período
+  var agora = Date.now();
+  var inicio = 0, fim = agora;
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var hojeMs = hoje.getTime();
+  if(_periodoRel === 'hoje'){
+    inicio = hojeMs;
+  } else if(_periodoRel === 'ontem'){
+    inicio = hojeMs - 24*60*60*1000;
+    fim = hojeMs;
+  } else if(_periodoRel === '7d'){
+    inicio = agora - 7*24*60*60*1000;
+  } else if(_periodoRel === '30d'){
+    inicio = agora - 30*24*60*60*1000;
+  } else {
+    inicio = 0;
+  }
+
+  var contas = _contasRel.filter(function(c){
+    var t = c.fechadoEm || 0;
+    return t >= inicio && t < fim;
+  });
+
+  // Calcula totais
+  var semCaixinha = 0;
+  var totalItens = 0;
+  var itensMap = {}; // {nome: {qtd, valor}}
+  var garconsMap = {}; // {nome: {qtd_contas, valor}}
+
+  contas.forEach(function(c){
+    // subtotal = sem caixinha; total = com 10%
+    semCaixinha += (c.subtotal || 0);
+    var itens = c.itens || [];
+    itens.forEach(function(it){
+      var qtd = it.qtd || 1;
+      var preco = it.preco || 0;
+      totalItens += qtd;
+      var nome = it.nome || '—';
+      if(!itensMap[nome]) itensMap[nome] = {qtd:0, valor:0};
+      itensMap[nome].qtd += qtd;
+      itensMap[nome].valor += qtd * preco;
+    });
+    var g = c.garcom || '—';
+    if(!garconsMap[g]) garconsMap[g] = {contas:0, valor:0};
+    garconsMap[g].contas += 1;
+    garconsMap[g].valor += (c.subtotal || 0);
+  });
+
+  var caixinha = semCaixinha * 0.10;
+  var comCaixinha = semCaixinha + caixinha;
+  var ticketMedio = contas.length > 0 ? (semCaixinha / contas.length) : 0;
+
+  // Atualiza cards
+  function fmt(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+  document.getElementById('rel-sem-caixinha').textContent = fmt(semCaixinha);
+  document.getElementById('rel-com-caixinha').textContent = fmt(comCaixinha);
+  document.getElementById('rel-qtd-contas').textContent = contas.length;
+  document.getElementById('rel-qtd-itens').textContent = totalItens;
+  document.getElementById('rel-valor-caixinha').textContent = fmt(caixinha);
+  document.getElementById('rel-ticket-medio').textContent = fmt(ticketMedio);
+
+  // Top 5 itens
+  var topItens = Object.keys(itensMap).map(function(nome){
+    return {nome:nome, qtd:itensMap[nome].qtd, valor:itensMap[nome].valor};
+  }).sort(function(a,b){ return b.qtd - a.qtd; }).slice(0,5);
+
+  var topHtml = '';
+  if(topItens.length === 0){
+    topHtml = '<div style="text-align:center;color:var(--muted);padding:12px;font-size:0.85rem;">Sem vendas no período</div>';
+  } else {
+    topItens.forEach(function(it){
+      topHtml += '<div class="rel-item-row"><span class="qtd">'+it.qtd+'x</span><span class="nome">'+escapeHtml(it.nome)+'</span><span class="valor">'+fmt(it.valor)+'</span></div>';
+    });
+  }
+  document.getElementById('rel-top-itens').innerHTML = topHtml;
+
+  // Por garçom
+  var garcons = Object.keys(garconsMap).map(function(nome){
+    return {nome:nome, contas:garconsMap[nome].contas, valor:garconsMap[nome].valor};
+  }).sort(function(a,b){ return b.valor - a.valor; });
+
+  var gHtml = '';
+  if(garcons.length === 0){
+    gHtml = '<div style="text-align:center;color:var(--muted);padding:12px;font-size:0.85rem;">Sem vendas no período</div>';
+  } else {
+    garcons.forEach(function(g){
+      var comissao = g.valor * 0.10;
+      gHtml += '<div class="rel-item-row">'+
+        '<span class="nome">👤 '+escapeHtml(g.nome)+'<div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">'+g.contas+' conta(s) · comissão 10%: '+fmt(comissao)+'</div></span>'+
+        '<span class="valor">'+fmt(g.valor)+'</span>'+
+      '</div>';
+    });
+  }
+  document.getElementById('rel-por-garcom').innerHTML = gHtml;
+}
+
+// ===== EXCLUIR RESTAURANTE =====
+function abrirExcluirRestaurante(){
+  if(!_restauranteAtivo){ alert('Nenhum restaurante ativo'); return; }
+  var id = _restauranteAtivo.id;
+  var nome = _restauranteAtivo.nome;
+
+  // Primeira confirmação
+  var msg1 = '⚠️ ATENÇÃO!\n\nVocê está prestes a EXCLUIR o restaurante:\n\n' + nome + ' (id: ' + id + ')\n\n' +
+    'Isso vai apagar PERMANENTEMENTE:\n' +
+    '• Todo o cardápio (itens, categorias, grupos)\n' +
+    '• Garçons cadastrados\n' +
+    '• Configurações de impressoras\n' +
+    '• Histórico de contas fechadas DESTE restaurante\n\n' +
+    'NÃO é possível desfazer.\n\nTem certeza?';
+  if(!confirm(msg1)) return;
+
+  // Segunda confirmação: digite o ID
+  var conf = prompt('Para confirmar, digite o ID do restaurante:\n\n' + id);
+  if(conf !== id){
+    if(conf !== null) alert('ID não confere. Exclusão cancelada.');
+    return;
+  }
+
+  if(id === 'default'){
+    alert('❌ Não é possível excluir o restaurante padrão (default). Use a opção Copiar Cardápio para migrar os dados antes.');
+    return;
+  }
+
+  executarExclusaoRestaurante(id, nome);
+}
+
+async function executarExclusaoRestaurante(id, nome){
+  try{
+    var ref = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(id);
+
+    // Helper pra deletar coleção
+    async function deleteCol(colRef){
+      var snap = await colRef.get();
+      for(var i=0; i<snap.docs.length; i++){
+        await snap.docs[i].ref.delete();
+      }
+      return snap.size;
+    }
+
+    // 1. cardapio/data/itens, categorias, grupos_opcoes
+    var n1 = await deleteCol(ref.collection('cardapio').doc('data').collection('itens'));
+    var n2 = await deleteCol(ref.collection('cardapio').doc('data').collection('categorias'));
+    var n3 = await deleteCol(ref.collection('cardapio').doc('data').collection('grupos_opcoes'));
+    try{ await ref.collection('cardapio').doc('data').delete(); }catch(e){}
+
+    // 2. garcons
+    var n4 = await deleteCol(ref.collection('garcons'));
+
+    // 3. impressao
+    try{
+      await deleteCol(ref.collection('impressao').doc('config').collection('impressoras'));
+      await deleteCol(ref.collection('impressao').doc('config').collection('regras'));
+      await ref.collection('impressao').doc('config').delete();
+      await ref.collection('impressao').doc('config_geral').delete();
+    }catch(e){}
+
+    // 4. Doc do restaurante
+    await ref.delete();
+
+    // 5. Remove do restaurantes_publicos
+    try{ await fbDb.collection('restaurantes_publicos').doc(id).delete(); }catch(e){}
+
+    // 6. Contas fechadas desse restaurante (opcional, mas faz parte)
+    var contasSnap = await fbDb.collection('contas_fechadas').where('restauranteId','==', id).get();
+    for(var i=0; i<contasSnap.docs.length; i++){
+      await contasSnap.docs[i].ref.delete();
+    }
+
+    alert('✅ Restaurante "' + nome + '" excluído com sucesso!\n\nVoltando para o padrão...');
+
+    // Volta pro default
+    var novoRest = {id:'default', nome:'Bávaro', emoji:'🍺'};
+    try{ localStorage.setItem('restauranteAtivo', JSON.stringify(novoRest)); }catch(e){}
+    window.location.reload();
+  }catch(e){
+    console.error(e);
+    alert('❌ Erro ao excluir: ' + (e.message || e));
+  }
+}
+
 </script>
 
 <!-- Modal: Adicionar/Editar Impressora -->
@@ -5882,6 +6101,70 @@ async function executarCopiaCardapio(){
 </style>
 
 
+<div id="painel-relatorios" style="display:none;padding:14px;padding-bottom:120px;">
+  <div style="margin-bottom:14px;">
+    <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px;">📊 Relatórios</div>
+    <div style="font-size:0.8rem;color:var(--muted);">Vendas e comissões do restaurante</div>
+  </div>
+  <!-- Filtros de período -->
+  <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+    <button class="rel-pill rel-pill-ativo" id="rel-pill-hoje" onclick="setPeriodoRel('hoje')">Hoje</button>
+    <button class="rel-pill" id="rel-pill-ontem" onclick="setPeriodoRel('ontem')">Ontem</button>
+    <button class="rel-pill" id="rel-pill-7d" onclick="setPeriodoRel('7d')">7 dias</button>
+    <button class="rel-pill" id="rel-pill-30d" onclick="setPeriodoRel('30d')">30 dias</button>
+    <button class="rel-pill" id="rel-pill-total" onclick="setPeriodoRel('total')">Total</button>
+  </div>
+  <!-- Cards -->
+  <div id="rel-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+    <div style="background:linear-gradient(135deg,rgba(212,168,67,0.12),rgba(212,168,67,0.04));border:1px solid rgba(212,168,67,0.25);border-radius:14px;padding:14px;">
+      <div style="font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Sem Caixinha</div>
+      <div id="rel-sem-caixinha" style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);margin-top:4px;">R$ 0,00</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Apenas itens vendidos</div>
+    </div>
+    <div style="background:linear-gradient(135deg,rgba(74,222,128,0.12),rgba(74,222,128,0.04));border:1px solid rgba(74,222,128,0.25);border-radius:14px;padding:14px;">
+      <div style="font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Com Caixinha (10%)</div>
+      <div id="rel-com-caixinha" style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:#4ade80;margin-top:4px;">R$ 0,00</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Total + 10% serviço</div>
+    </div>
+  </div>
+  <!-- Detalhes -->
+  <div id="rel-detalhes" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;">
+    <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:8px;">Detalhamento</div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.88rem;">
+      <span style="color:var(--muted);">Contas fechadas</span><span id="rel-qtd-contas" style="font-weight:600;">0</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.88rem;">
+      <span style="color:var(--muted);">Total de itens</span><span id="rel-qtd-itens" style="font-weight:600;">0</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.88rem;">
+      <span style="color:var(--muted);">Caixinha (10%)</span><span id="rel-valor-caixinha" style="font-weight:600;color:#4ade80;">R$ 0,00</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:0.88rem;">
+      <span style="color:var(--muted);">Ticket médio</span><span id="rel-ticket-medio" style="font-weight:600;">R$ 0,00</span>
+    </div>
+  </div>
+  <!-- Top 5 itens -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;">
+    <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:8px;">Top 5 Itens Mais Vendidos</div>
+    <div id="rel-top-itens">—</div>
+  </div>
+  <!-- Por garçom -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;">
+    <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:8px;">Vendas por Garçom</div>
+    <div id="rel-por-garcom">—</div>
+  </div>
+</div>
+<style>
+.rel-pill{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;font-weight:600;transition:all 0.15s;}
+.rel-pill:hover{border-color:var(--accent);}
+.rel-pill-ativo{background:var(--accent);color:#000;border-color:var(--accent);}
+.rel-item-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:0.88rem;}
+.rel-item-row:last-child{border-bottom:none;}
+.rel-item-row .nome{flex:1;color:var(--text);}
+.rel-item-row .qtd{background:rgba(212,168,67,0.12);color:var(--accent);font-weight:700;font-size:0.78rem;padding:2px 8px;border-radius:8px;margin-right:8px;}
+.rel-item-row .valor{font-weight:600;color:var(--accent);}
+</style>
+
 <!-- Menu Lateral -->
 <div class="menu-overlay" id="menu-overlay" onclick="fecharMenuLateral()"></div>
 <aside class="menu-lateral" id="menu-lateral">
@@ -5897,11 +6180,12 @@ async function executarCopiaCardapio(){
     <button class="menu-item" onclick="menuIrPara('historico')"><span class="ico">📜</span><span class="lbl">Histórico</span></button>
     <button class="menu-item" onclick="menuIrPara('garcons')"><span class="ico">👥</span><span class="lbl">Garçons</span></button>
     <button class="menu-item" onclick="menuIrPara('impressao')"><span class="ico">🖨️</span><span class="lbl">Impressão</span></button>
-    <button class="menu-item" onclick="alert('Aba Relatórios em breve! 📊');fecharMenuLateral();"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
+    <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
     <div class="menu-divider"></div>
     <div class="menu-section-title">Restaurante</div>
     <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
     <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">📋</span><span class="lbl">Copiar Cardápio</span></button>
+    <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>
     <div class="menu-divider"></div>
     <button class="menu-item" onclick="window.location.href='index.html'"><span class="ico">🏠</span><span class="lbl">Voltar ao App</span></button>
   </div>

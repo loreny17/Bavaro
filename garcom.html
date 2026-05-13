@@ -4638,6 +4638,87 @@ function calcularTotaisConta(c){
   };
 }
 
+// FEATURE #4: Calcula valor restante de um item específico (descontando abatimentos)
+function valorRestanteItem(it){
+  if(it.status === 'pago' || it.status === 'cancelado') return 0;
+  var bruto = (it.tipoVenda === 'kg' && it.peso) ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+  if(it.divisao && it.divisao.total > 1){
+    var partesAbertas = it.divisao.total - (it.divisao.pagas||0);
+    var valorPorParte = it.divisao.valorPorParte || (bruto / it.divisao.total);
+    return Math.max(0, partesAbertas * valorPorParte);
+  }
+  var abatido = it.valorAbatido || 0;
+  return Math.max(0, bruto - abatido);
+}
+
+// BUG #2: Detecta inconsistência entre status dos itens/divisão e pagamentos[]
+function detectarInconsistenciaPagamento(c){
+  if(!c) return null;
+  var pagamentos = c.pagamentos || [];
+  var idsPagamentos = pagamentos.map(function(p){ return p.id; });
+  var problemas = [];
+  (c.itens||[]).forEach(function(it){
+    if(it.status === 'pago' && it.pagamentoId && idsPagamentos.indexOf(it.pagamentoId) === -1){
+      problemas.push({tipo:'item-pago-orfao', item: it});
+    }
+    if(it.divisao && it.divisao.total > 1 && (it.divisao.pagas||0) > 0){
+      var fragsPagosViaPgto = 0;
+      var totalFlag = false;
+      pagamentos.forEach(function(p){
+        if(p.fragmentosIds && p.fragmentosIds[it.itemKey]){
+          fragsPagosViaPgto += (p.fragmentosIds[it.itemKey]||[]).length;
+        }
+        if(p.itensIds && p.itensIds.indexOf(it.itemKey) >= 0){
+          totalFlag = true;
+        }
+      });
+      if(totalFlag) fragsPagosViaPgto = it.divisao.total;
+      if(it.divisao.pagas > fragsPagosViaPgto){
+        problemas.push({tipo:'divisao-orfa', item: it, partesOrfas: it.divisao.pagas - fragsPagosViaPgto});
+      }
+    }
+  });
+  return problemas.length ? problemas : null;
+}
+
+// Repara inconsistências
+function repararPagamentosOrfaos(){
+  if(!_fecharConta) return;
+  var problemas = detectarInconsistenciaPagamento(_fecharConta);
+  if(!problemas){ showToast('✓ Sem inconsistências','#4ade80'); return; }
+  if(!confirm('Encontradas ' + problemas.length + ' inconsistência(s) de pagamento.\n\nReparar? (itens marcados como pagos sem pagamento real voltam ativos)')) return;
+  var pagamentos = _fecharConta.pagamentos || [];
+  var idsPagamentos = pagamentos.map(function(p){ return p.id; });
+  var itensAtualizados = (_fecharConta.itens||[]).map(function(it){
+    var copia = Object.assign({}, it);
+    if(copia.status === 'pago' && copia.pagamentoId && idsPagamentos.indexOf(copia.pagamentoId) === -1){
+      copia.status = 'ativo';
+      copia.pagamentoId = null;
+    }
+    if(copia.divisao && copia.divisao.total > 1){
+      var fragsPagosViaPgto = 0;
+      var totalFlag = false;
+      pagamentos.forEach(function(p){
+        if(p.fragmentosIds && p.fragmentosIds[copia.itemKey]){
+          fragsPagosViaPgto += (p.fragmentosIds[copia.itemKey]||[]).length;
+        }
+        if(p.itensIds && p.itensIds.indexOf(copia.itemKey) >= 0){
+          totalFlag = true;
+        }
+      });
+      if(totalFlag) fragsPagosViaPgto = copia.divisao.total;
+      if((copia.divisao.pagas||0) > fragsPagosViaPgto){
+        copia.divisao = Object.assign({}, copia.divisao, { pagas: fragsPagosViaPgto });
+      }
+    }
+    return copia;
+  });
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+    itens: itensAtualizados, atualizadoEm: Date.now()
+  }).then(function(){ showToast('✓ Reparado','#4ade80'); })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
 function fecharSucesso(){
   document.getElementById('modal-sucesso').classList.remove('show');
   // Volta para o mapa de mesas (tela inicial)
@@ -5260,9 +5341,12 @@ function renderFecharConta(){
       var checkboxHtml = clickable
         ? '<div class="item-pgto-check '+(marcado?'checked':'')+'" style="margin-right:8px;">'+(marcado?'✓':'')+'</div>'
         : (pago ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>' : '<span style="width:30px;display:inline-block;"></span>');
-      // Botão "÷" só pra itens não pagos no modo "pagar por itens"
+      // Botões "÷" (dividir) e "$" (abater valor parcial) — só itens não pagos no modo "por itens"
       var btnDividir = (clickable && (it.preco||0) > 0)
         ? '<button onclick="event.stopPropagation();abrirModalDividirItem(\''+it.itemKey+'\')" title="Dividir item" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px;">÷</button>'
+        : '';
+      var btnAbater = (clickable && (it.preco||0) > 0 && !(it.divisao && it.divisao.total > 1))
+        ? '<button onclick="event.stopPropagation();abrirAbatimentoItem(\''+it.itemKey+'\')" title="Abater valor parcial" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">$</button>'
         : '';
       html += '<div class="item-pgto" style="'+(clickable?'cursor:pointer;':'')+'" '+(clickable?'onclick="toggleItemSelecao(\''+it.itemKey+'\')"':'')+'>'+
         checkboxHtml+
@@ -5272,6 +5356,7 @@ function renderFecharConta(){
         '</div>'+
         '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>'+
         btnDividir+
+        btnAbater+
       '</div>';
     });
     html += '</div>';
@@ -5838,13 +5923,150 @@ function confirmarPagamentoParcial(){
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
-function estornarPagamento(pagamentoId){
-  if(!confirm('Estornar este pagamento?\n\nOs itens vinculados voltam a ficar em aberto.')) return;
-  var pagamentos = (_fecharConta.pagamentos||[]).filter(function(p){ return p.id !== pagamentoId; });
-  var itensAtualizados = (_fecharConta.itens||[]).map(function(it){
-    if(it.pagamentoId === pagamentoId) return Object.assign({}, it, {status:'ativo', pagamentoId:null});
-    return it;
+// ════════════════════════════════════════
+// FEATURE #4: Pagamento parcial sobre ITEM
+// ════════════════════════════════════════
+function abrirAbatimentoItem(itemKey){
+  var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
+  if(!it){ showToast('Item não encontrado','#f87171'); return; }
+  var restante = valorRestanteItem(it);
+  if(restante <= 0.01){ showToast('Item já está pago','#f7a34f'); return; }
+
+  var nomeItem = (it.qtd > 1 ? it.qtd + 'x ' : '') + it.nome;
+  var ex = document.getElementById('modal-abater');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-abater';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:380px;border-radius:18px;">' +
+      '<div class="modal-header">' +
+        '<div class="modal-titulo">💰 ABATER VALOR</div>' +
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-abater\').remove()">×</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-bottom:14px;">' +
+          '<div style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Item</div>' +
+          '<div style="font-size:0.95rem;color:var(--text);margin-top:2px;font-weight:600;">' + esc(nomeItem) + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:0.04em;">Restante deste item</div>' +
+          '<div style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);">R$ ' + fmtPreco(restante) + '</div>' +
+        '</div>' +
+        '<label style="display:block;font-size:0.74rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Quanto pagar deste item? (R$)</label>' +
+        '<input type="number" id="abater-valor" step="0.01" min="0.01" max="' + restante.toFixed(2) + '" placeholder="0,00" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:14px;font-size:1.3rem;font-family:Bebas Neue,sans-serif;outline:none;text-align:center;">' +
+        '<div style="font-size:0.7rem;color:var(--muted);margin-top:8px;line-height:1.4;">💡 Esse valor sai do item. O restante poderá ser pago ou dividido por outras pessoas depois.</div>' +
+      '</div>' +
+      '<div class="modal-footer">' +
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-abater\').remove()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1;" onclick="confirmarAbatimento(\'' + itemKey + '\')">Confirmar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var i = document.getElementById('abater-valor'); if(i) i.focus(); }, 100);
+}
+
+function confirmarAbatimento(itemKey){
+  var input = document.getElementById('abater-valor');
+  var valor = parseFloat(input.value) || 0;
+  if(valor <= 0){ showToast('Valor inválido','#f7a34f'); return; }
+  var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
+  if(!it){ showToast('Item não encontrado','#f87171'); return; }
+  var restante = valorRestanteItem(it);
+  if(valor > restante + 0.01){ showToast('⚠️ Valor maior que o restante do item','#f7a34f'); return; }
+
+  var pagamentoId = 'p_' + Date.now() + '_' + Math.random().toString(36).substring(2,6);
+  var taxa = valor * 0.10;
+  var valorComTaxa = valor + taxa;
+
+  var itensAtualizados = (_fecharConta.itens||[]).map(function(x){
+    if(x.itemKey !== itemKey) return x;
+    var copia = Object.assign({}, x);
+    copia.valorAbatido = (copia.valorAbatido||0) + valor;
+    var bruto = (copia.tipoVenda === 'kg' && copia.peso) ? (copia.preco||0) : (copia.preco||0)*(copia.qtd||1);
+    if(copia.valorAbatido >= bruto - 0.01){
+      copia.status = 'pago';
+      copia.pagamentoId = pagamentoId;
+    }
+    return copia;
   });
+
+  var pagamento = {
+    id: pagamentoId,
+    valor: valorComTaxa,
+    valorSemTaxa: valor,
+    taxa: taxa,
+    metodo: 'dinheiro',
+    tipo: 'parcial_item',
+    itemKey: itemKey,
+    itemNome: it.nome,
+    pagoEm: Date.now(),
+    recebidoPor: _nomeGarcom
+  };
+
+  var pagamentos = (_fecharConta.pagamentos||[]).concat([pagamento]);
+  var novaTotais = calcularTotaisConta({itens: itensAtualizados, pagamentos: pagamentos});
+
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+    itens: itensAtualizados,
+    pagamentos: pagamentos,
+    pagoTotal: novaTotais.pagoTotal,
+    restante: novaTotais.restante,
+    atualizadoEm: Date.now()
+  }).then(function(){
+    var m = document.getElementById('modal-abater'); if(m) m.remove();
+    showToast('✓ R$ ' + fmtPreco(valorComTaxa) + ' abatido','#4ade80');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+function estornarPagamento(pagamentoId){
+  if(!confirm('Estornar este pagamento?\n\nOs itens (ou frações) vinculados voltam a ficar em aberto.')) return;
+  var pgtoAlvo = (_fecharConta.pagamentos||[]).find(function(p){ return p.id === pagamentoId; });
+  var pagamentos = (_fecharConta.pagamentos||[]).filter(function(p){ return p.id !== pagamentoId; });
+
+  var itensAtualizados = (_fecharConta.itens||[]).map(function(it){
+    var copia = Object.assign({}, it);
+
+    // Caso 1: Item INTEIRO pago neste pagamento
+    if(copia.pagamentoId === pagamentoId){
+      copia.status = 'ativo';
+      copia.pagamentoId = null;
+      // Se tinha divisao, recalcula fragmentos pagos com pagamentos restantes
+      if(copia.divisao && copia.divisao.total > 1){
+        var fragsRestantes = 0;
+        var algumPgtoTotal = false;
+        pagamentos.forEach(function(p){
+          if(p.fragmentosIds && p.fragmentosIds[copia.itemKey]){
+            fragsRestantes += (p.fragmentosIds[copia.itemKey]||[]).length;
+          }
+          if(p.itensIds && p.itensIds.indexOf(copia.itemKey) >= 0){
+            algumPgtoTotal = true;
+          }
+        });
+        if(algumPgtoTotal) fragsRestantes = copia.divisao.total;
+        copia.divisao = Object.assign({}, copia.divisao, { pagas: fragsRestantes });
+      }
+    }
+    // Caso 2: Fragmentos pagos neste pagamento (Bug #3 principal)
+    else if(pgtoAlvo && pgtoAlvo.fragmentosIds && pgtoAlvo.fragmentosIds[copia.itemKey]){
+      var qtdEstornar = (pgtoAlvo.fragmentosIds[copia.itemKey]||[]).length;
+      if(copia.divisao && copia.divisao.total > 1){
+        var novasPagas = Math.max(0, (copia.divisao.pagas||0) - qtdEstornar);
+        copia.divisao = Object.assign({}, copia.divisao, { pagas: novasPagas });
+      }
+    }
+    // Caso 3: Pagamento parcial vinculado a item (Feature #4)
+    else if(pgtoAlvo && pgtoAlvo.tipo === 'parcial_item' && pgtoAlvo.itemKey === copia.itemKey){
+      var valorOriginal = pgtoAlvo.valorSemTaxa !== undefined ? pgtoAlvo.valorSemTaxa : (pgtoAlvo.valor / 1.10);
+      copia.valorAbatido = Math.max(0, (copia.valorAbatido||0) - valorOriginal);
+      if(copia.valorAbatido <= 0.001) delete copia.valorAbatido;
+      // Se estava pago por causa do abatimento, volta a ativo
+      if(copia.status === 'pago' && copia.pagamentoId === pagamentoId){
+        copia.status = 'ativo';
+        copia.pagamentoId = null;
+      }
+    }
+    return copia;
+  });
+
   var novaTotais = calcularTotaisConta({itens:itensAtualizados, pagamentos:pagamentos});
   fbDb.collection('contas_mesa').doc(_fecharContaId).update({
     itens:itensAtualizados, pagamentos:pagamentos,

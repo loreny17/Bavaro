@@ -5415,13 +5415,24 @@ function renderFecharConta(){
       var btnAbater = (clickable && (it.preco||0) > 0 && !(it.divisao && it.divisao.total > 1))
         ? '<button onclick="event.stopPropagation();abrirAbatimentoItem(\''+it.itemKey+'\')" title="Abater valor parcial" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">$</button>'
         : '';
+      // Cálculo do valor RESTANTE do item (considera valorAbatido)
+      var temAbatimento = (it.valorAbatido||0) > 0.01 && it.status !== 'pago';
+      var valorRestante = temAbatimento ? Math.max(0, valorTotal - (it.valorAbatido||0)) : valorTotal;
+      // Mostra abatido só se tiver valorAbatido > 0 e item não estiver pago
+      var linhaAbatido = temAbatimento
+        ? '<div style="font-size:0.7rem;color:#4ade80;margin-top:2px;font-weight:600;">💰 R$ '+fmtPreco(it.valorAbatido)+' abatido · resta R$ '+fmtPreco(valorRestante)+'</div>'
+        : '';
       html += '<div class="item-pgto" style="'+(clickable?'cursor:pointer;':'')+'" '+(clickable?'onclick="toggleItemSelecao(\''+it.itemKey+'\')"':'')+'>'+
         checkboxHtml+
         '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
           esc((it.qtd||1)+'x '+it.nome)+
           (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
+          linhaAbatido+
         '</div>'+
-        '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>'+
+        (temAbatimento
+          ? '<div style="display:flex;flex-direction:column;align-items:flex-end;'+nomeStyle+'"><div style="font-size:0.7rem;color:var(--muted);text-decoration:line-through;">R$ '+fmtPreco(valorTotal)+'</div><div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1rem;">R$ '+fmtPreco(valorRestante)+'</div></div>'
+          : '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>'
+        )+
         btnDividir+
         btnAbater+
       '</div>';
@@ -5434,7 +5445,11 @@ function renderFecharConta(){
       '<div style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:8px;">Pagamentos</div>';
     c.pagamentos.forEach(function(p){
       var data = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-      var tipo = p.tipo === 'itens' ? '📋 Itens específicos' : (p.tipo === 'tudo' ? '✓ Tudo' : '💵 Crédito');
+      var tipo;
+      if(p.tipo === 'itens') tipo = '📋 Itens específicos';
+      else if(p.tipo === 'tudo') tipo = '✓ Tudo';
+      else if(p.tipo === 'parcial_item') tipo = '💰 Abatido: ' + esc(p.itemNome || 'item');
+      else tipo = '💵 Crédito';
       html += '<div class="fechar-pago" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);align-items:center;">'+
         '<div style="flex:1;">'+
           '<div style="font-size:0.78rem;color:var(--text);">'+tipo+'</div>'+

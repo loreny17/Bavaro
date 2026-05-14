@@ -1232,54 +1232,161 @@ function efetuarLogin(){
   if(!nome){ showToast('Digite seu nome para entrar'); return; }
   var btn = document.querySelector('.login-btn');
   btn.disabled = true; btn.textContent = 'Verificando...';
-  // Busca lista de garçons publicada pelo PDV
-  fbDb.collection('restaurantes_publicos').limit(10).get().then(function(snap){
-    var garconsAutorizados = [];
-    var primeiroDoc = null;
+
+  // Busca lista de garçons publicada PELOS RESTAURANTES (todos)
+  fbDb.collection('restaurantes_publicos').limit(20).get().then(function(snap){
+    var nomeLower = nome.toLowerCase();
+    var matches = []; // [{restauranteId, tenantId, nomeRest, emoji, nomeCanonico}]
+    var todosGarcons = []; // pra mensagem de erro
+
     snap.forEach(function(d){
-      if(!primeiroDoc) primeiroDoc = d;
-      var data = d.data();
-      if(data.garcons && data.garcons.length){
-        garconsAutorizados = garconsAutorizados.concat(data.garcons);
-      }
-    });
-    // Se há lista publicada, valida (case insensitive)
-    if(garconsAutorizados.length > 0){
-      var nomeLower = nome.toLowerCase();
-      var match = garconsAutorizados.find(function(g){
+      var data = d.data() || {};
+      var restId = d.id;
+      var tId = data.tenantId;
+      var nomeRest = data.nome || restId;
+      var emoji = data.emoji || '🍽️';
+      var garcons = data.garcons || [];
+
+      // Coleta todos pra fallback de erro
+      garcons.forEach(function(g){ todosGarcons.push(g); });
+
+      // Procura match neste restaurante
+      var match = garcons.find(function(g){
         return (g.nome||'').toLowerCase() === nomeLower
           || (g.apelido||'').toLowerCase() === nomeLower;
       });
-      if(!match){
-        btn.disabled = false; btn.textContent = 'Entrar →';
-        var disponiveis = garconsAutorizados.map(function(g){ return g.apelido || g.nome.split(' ')[0]; }).join(', ');
-        showToast('❌ Nome não cadastrado. Disponíveis: ' + disponiveis, '#f87171');
+      if(match){
+        matches.push({
+          restauranteId: restId,
+          tenantId: tId,
+          nomeRest: nomeRest,
+          emoji: emoji,
+          nomeCanonico: match.apelido || (match.nome||'').split(' ')[0] || nome
+        });
+      }
+    });
+
+    // CASO 1: Nenhum match
+    if(matches.length === 0){
+      btn.disabled = false; btn.textContent = 'Entrar →';
+      if(todosGarcons.length === 0){
+        // Nenhum garçom publicado em nenhum restaurante (modo offline / config errada)
+        // Permite entrar mesmo assim
+        _nomeGarcom = nome;
+        localStorage.setItem('garcom_nome', nome);
+        document.getElementById('login-screen').classList.add('hidden');
+        mostrarMesas();
         return;
       }
-      // Usa nome canônico
-      nome = match.apelido || match.nome.split(' ')[0];
+      var disponiveis = todosGarcons.map(function(g){ return g.apelido || (g.nome||'').split(' ')[0]; }).filter(function(v,i,a){ return v && a.indexOf(v) === i; }).join(', ');
+      showToast('❌ Nome não cadastrado. Disponíveis: ' + disponiveis, '#f87171', 5000);
+      return;
     }
-    // OK — entra
+
+    // CASO 2: Match único — entra direto
+    if(matches.length === 1){
+      aplicarLoginGarcom(matches[0], nome);
+      return;
+    }
+
+    // CASO 3: Múltiplos matches — usuário escolhe
+    btn.disabled = false; btn.textContent = 'Entrar →';
+    mostrarEscolhaRestaurante(matches, nome);
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = 'Entrar →';
+    console.warn('Erro validação:', e);
+    // Modo offline — entra mesmo assim com restaurante salvo
     _nomeGarcom = nome;
     localStorage.setItem('garcom_nome', nome);
+    document.getElementById('login-screen').classList.add('hidden');
+    mostrarMesas();
+  });
+}
+
+// Aplica o login num restaurante específico
+function aplicarLoginGarcom(match, nomeDigitado){
+  var nome = match.nomeCanonico || nomeDigitado;
+  // Limpa caches antigos antes de aplicar o novo (evita restaurante errado preso)
+  try{
+    localStorage.removeItem('garcom_restaurante_id');
+    localStorage.removeItem('gestao_tenant_id');
+  }catch(e){}
+
+  _nomeGarcom = nome;
+  _restauranteId = match.restauranteId;
+  _tenantId = match.tenantId || _tenantId;
+
+  // Salva tudo no localStorage
+  try{
+    localStorage.setItem('garcom_nome', nome);
+    localStorage.setItem('garcom_restaurante_id', match.restauranteId);
+    if(match.tenantId) localStorage.setItem('gestao_tenant_id', match.tenantId);
+
+    // Histórico de nomes recentes
     var raw = localStorage.getItem('garcom_nomes_salvos') || '[]';
     var nomes = [];
     try{ nomes = JSON.parse(raw); }catch(e){}
     if(!nomes.includes(nome)) nomes.unshift(nome);
     nomes = nomes.slice(0,10);
     localStorage.setItem('garcom_nomes_salvos', JSON.stringify(nomes));
-    btn.disabled = false; btn.textContent = 'Entrar →';
-    document.getElementById('login-screen').classList.add('hidden');
-    mostrarMesas();
-  }).catch(function(e){
-    btn.disabled = false; btn.textContent = 'Entrar →';
-    // Se não conseguir validar, deixa entrar mesmo assim (modo offline)
-    console.warn('Erro validação:', e);
-    _nomeGarcom = nome;
-    localStorage.setItem('garcom_nome', nome);
-    document.getElementById('login-screen').classList.add('hidden');
-    mostrarMesas();
+  }catch(e){}
+
+  showToast('✓ Olá, ' + nome + ' — ' + match.emoji + ' ' + match.nomeRest, '#4ade80', 3000);
+
+  var btn = document.querySelector('.login-btn');
+  if(btn){ btn.disabled = false; btn.textContent = 'Entrar →'; }
+
+  document.getElementById('login-screen').classList.add('hidden');
+  mostrarMesas();
+}
+
+// Modal: garçom cadastrado em mais de um restaurante, escolha qual usar agora
+function mostrarEscolhaRestaurante(matches, nome){
+  // Remove modal anterior se existir
+  var ex = document.getElementById('modal-escolha-rest');
+  if(ex) ex.remove();
+
+  var html = '<div class="modal modal-centro show" id="modal-escolha-rest">' +
+    '<div class="modal-box" style="max-width:380px;border-radius:18px;">' +
+      '<div class="modal-header">' +
+        '<div class="modal-titulo">👋 Olá, ' + esc(nome) + '!</div>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<div style="font-size:0.88rem;color:var(--muted);margin-bottom:14px;line-height:1.4;">' +
+          'Você está cadastrado em <strong>' + matches.length + ' restaurantes</strong>. Qual quer usar agora?' +
+        '</div>';
+
+  matches.forEach(function(m, idx){
+    html += '<button onclick="aplicarLoginGarcomPorIdx(' + idx + ')" style="' +
+      'display:flex;align-items:center;gap:12px;width:100%;padding:16px;' +
+      'background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);' +
+      'border-radius:12px;margin-bottom:10px;cursor:pointer;font-family:inherit;text-align:left;' +
+      'transition:all 0.15s;" ' +
+      'onmouseover="this.style.borderColor=\'var(--accent)\';" onmouseout="this.style.borderColor=\'var(--border2)\';">' +
+      '<div style="font-size:2rem;">' + m.emoji + '</div>' +
+      '<div style="flex:1;">' +
+        '<div style="font-size:0.95rem;font-weight:700;">' + esc(m.nomeRest) + '</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Entrar como ' + esc(m.nomeCanonico) + '</div>' +
+      '</div>' +
+      '<div style="font-size:1.4rem;color:var(--accent);">→</div>' +
+    '</button>';
   });
+
+  html += '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Guarda matches em variável global pra callback
+  window._loginMatches = matches;
+  window._loginNomeDigitado = nome;
+}
+
+function aplicarLoginGarcomPorIdx(idx){
+  var matches = window._loginMatches || [];
+  var m = matches[idx];
+  if(!m) return;
+  var modal = document.getElementById('modal-escolha-rest');
+  if(modal) modal.remove();
+  aplicarLoginGarcom(m, window._loginNomeDigitado);
 }
 
 document.addEventListener('DOMContentLoaded', function(){
@@ -1511,6 +1618,12 @@ function carregarTenantParaMesas(){
   if(tenantSalvo) _tenantId = tenantSalvo;
   if(restIdSalvo) _restauranteId = restIdSalvo;
 
+  // 🔧 MIGRAÇÃO: se está com 'bavaro' salvo, troca pra 'default' (onde os itens realmente estão)
+  if(_restauranteId === 'bavaro'){
+    _restauranteId = 'default';
+    try{ localStorage.setItem('garcom_restaurante_id', 'default'); }catch(e){}
+  }
+
   // Se tem ambos, escuta direto
   if(_tenantId && _restauranteId){
     escutarMesasOcupadas();
@@ -1533,14 +1646,14 @@ function carregarTenantParaMesas(){
         localStorage.setItem('garcom_restaurante_id', _restauranteId);
       }catch(e){}
     }
-    if(!_restauranteId) _restauranteId = 'bavaro'; // fallback
+    if(!_restauranteId) _restauranteId = 'default'; // fallback (mesmo id que o PDV usa)
     escutarMesasOcupadas();
     escutarConfigMesas();
     renderMesas();
     // Pré-carrega cardápio em paralelo
     iniciarListeners();
   }).catch(function(e){
-    if(!_restauranteId) _restauranteId = 'bavaro';
+    if(!_restauranteId) _restauranteId = 'default';
     console.warn('Erro ao buscar restaurantes publicos (mesas):', e);
     escutarMesasOcupadas();
     escutarConfigMesas();
@@ -2123,6 +2236,8 @@ function esc(s){
 function logoutGarcom(){
   if(!confirm('Sair da conta de '+_nomeGarcom+'?\n\nVocê voltará para a tela de seleção de garçom.')) return;
   localStorage.removeItem('garcom_nome');
+  // Limpa o restaurante também pra forçar nova escolha no próximo login
+  localStorage.removeItem('garcom_restaurante_id');
   location.reload();
 }
 
@@ -6216,24 +6331,77 @@ function executarEncerramento(){
     showToast('❌ ID da conta não encontrado','#f87171');
     return;
   }
-  // ═══ UI OTIMISTA ═══
-  // Fecha modal e volta pro mapa IMEDIATAMENTE.
-  // O Firebase faz a transação em background.
+
   var contaIdParaApagar = _fecharContaId;
+  var mesaNum = String(c.mesa||'');
   var registro = Object.assign({}, c, {status:'fechada', fechadoEm:Date.now(), fechadoPor:_nomeGarcom});
   delete registro.id;
+
+  console.log('[ENCERRAR] Iniciando — mesa:', c.mesa, 'contaId:', contaIdParaApagar);
+
+  // ═══ ATUALIZAÇÃO LOCAL OTIMISTA ═══
+  // Remove a mesa do dicionário ANTES do Firebase responder, pra UI ficar limpa imediatamente.
+  // Se Firebase falhar, o snapshot vai recolocar a mesa de volta.
+  if(mesaNum && _mesasOcupadas[mesaNum]){
+    delete _mesasOcupadas[mesaNum];
+  }
+  if(mesaNum && _contasMesaCache[mesaNum]){
+    delete _contasMesaCache[mesaNum];
+  }
 
   // Feedback imediato
   var m = document.getElementById('modal-encerrar'); if(m) m.remove();
   showToast('🏁 Mesa ' + c.mesa + ' encerrada','#4ade80');
   fecharModalFechar();
 
-  // Firebase em background
-  fbDb.collection('contas_fechadas').add(registro).then(function(){
+  // Re-renderiza imediatamente pra remover do mapa
+  if(typeof renderMesas === 'function') renderMesas();
+
+  // ═══ FIREBASE EM BACKGROUND ═══
+  // 1. Cria conta_fechada
+  fbDb.collection('contas_fechadas').add(registro).then(function(ref){
+    console.log('[ENCERRAR] conta_fechada criada:', ref.id);
+    // 2. Deleta conta_mesa
     return fbDb.collection('contas_mesa').doc(contaIdParaApagar).delete();
+  }).then(function(){
+    console.log('[ENCERRAR] conta_mesa deletada com sucesso:', contaIdParaApagar);
+
+    // ═══ LIMPEZA DE ÓRFÃS ═══
+    // Verifica se ainda existem OUTRAS contas_mesa abertas dessa mesa
+    // (caso de duplicatas criadas por migração bavaro→default ou bugs antigos)
+    var mesaInt = parseInt(c.mesa);
+    var mesaStr = String(c.mesa);
+    Promise.all([
+      fbDb.collection('contas_mesa')
+        .where('restauranteId','==', _restauranteId)
+        .where('mesa','==', mesaInt)
+        .where('status','==','aberta').get(),
+      fbDb.collection('contas_mesa')
+        .where('restauranteId','==', _restauranteId)
+        .where('mesa','==', mesaStr)
+        .where('status','==','aberta').get()
+    ]).then(function(results){
+      var orfas = [];
+      results[0].forEach(function(d){ if(d.id !== contaIdParaApagar) orfas.push(d); });
+      results[1].forEach(function(d){ if(d.id !== contaIdParaApagar && !orfas.some(function(o){ return o.id === d.id; })) orfas.push(d); });
+      if(orfas.length > 0){
+        console.log('[ENCERRAR] Encontradas ' + orfas.length + ' órfãs — deletando...');
+        var batch = fbDb.batch();
+        orfas.forEach(function(d){ batch.delete(d.ref); });
+        return batch.commit().then(function(){
+          console.log('[ENCERRAR] Órfãs deletadas:', orfas.length);
+          showToast('🧹 ' + orfas.length + ' conta(s) órfã(s) limpa(s) tb','#4ade80', 3500);
+        });
+      }
+    }).catch(function(e){ console.warn('[ENCERRAR] Erro limpando órfãs (não crítico):', e); });
+
+    // Limpa carrinho salvo
+    try{
+      localStorage.removeItem('cart_mesa_' + c.mesa);
+    }catch(e){}
   }).catch(function(e){
-    console.error('Erro ao encerrar mesa:', e);
-    showToast('❌ Falha ao encerrar — abra a mesa de novo pra tentar','#f87171');
+    console.error('[ENCERRAR] FALHA:', e);
+    showToast('❌ Falha ao encerrar: ' + (e.message||e) + '. A mesa pode voltar a aparecer.','#f87171', 5000);
   });
 }
 

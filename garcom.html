@@ -668,6 +668,13 @@ header{
           <div style="font-size:0.72rem;color:var(--muted);">Contas fechadas e restaurar mesas</div>
         </div>
       </button>
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirAvaliacao()">
+        <span style="font-size:1.4rem;">⭐</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Avaliação</div>
+          <div style="font-size:0.72rem;color:var(--muted);">QR Code para o cliente avaliar</div>
+        </div>
+      </button>
       <button class="menu-lateral-item" id="btn-toggle-compacto" onclick="alternarModoCompacto()">
         <span style="font-size:1.4rem;" id="ico-compacto">🖼️</span>
         <div style="flex:1;text-align:left;">
@@ -2239,6 +2246,62 @@ function logoutGarcom(){
   // Limpa o restaurante também pra forçar nova escolha no próximo login
   localStorage.removeItem('garcom_restaurante_id');
   location.reload();
+}
+
+// ════════════════════════════════════════
+//  AVALIAÇÃO (QR Code pro cliente)
+// ════════════════════════════════════════
+// IMAGEM DO QR — substitua o data:image abaixo pela base64 do seu QR
+var _QR_AVALIACAO_BASE64 = 'data:image/png;base64,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/PZ///hTivzqnRWO4/PHUH+j6/jtDlPcnFT/no/giVT/LfT+EI/y9+74SphxEgCCBQgWgGABCBYgWACCBSBYwMquNd5G13G74ftwF1+fVm8hfpALLOMU6+wKq/QHsPwzMnb4ENewea18JQQEC0CwAMECECwAwQIEC0CwAAQL9mG89nISTHEi9t4V/s0Iddcd06fYLr3C3vzDN313hQUgWIBgAQgWgGABggUgWACCBQgWQAKT7iXER6iHDyjXP8IK73H4vTWzn2musABfCQEECxAsAMECECxAsAAEC0Cwek+yLTDxCGtYZNJdU4LeTGB/XuTHV/AAhaPAzvez35DgKyHgKyGAYAGCBSBYAIIFCBaAYAEIFrCJCSbdd5iQjr/H4IR0wnxz/V3n4++i97kavyHBFRbswh1gggUgWIBgAQgWgGABggUgWACCBQgWQI7T8C7gCgtAsADBAhAsAMECBAtAsAAECxAsAMECECxAsAAEC0CwAMECECwAwQIEC0CwAAQLECwAwQIQLECwAAQLQLAAwQIQLECwAAQLQLAAwQIQLADBAgQLQLAABAsQLADBAhAsQLAABAtAsADBAhAsAAAAAAAAAIDf/ASHKtkcVPmXqAAAAABJRU5ErkJggg==';
+
+function abrirAvaliacao(){
+  var ex = document.getElementById('modal-avaliacao');
+  if(ex) ex.remove();
+
+  var temImagem = _QR_AVALIACAO_BASE64 && _QR_AVALIACAO_BASE64.indexOf('COLAR_AQUI') === -1;
+
+  var conteudoQR;
+  if(temImagem){
+    conteudoQR =
+      '<div style="background:#fff;border-radius:18px;padding:18px;display:inline-block;box-shadow:0 8px 24px rgba(0,0,0,0.25);position:relative;">' +
+        '<img src="' + _QR_AVALIACAO_BASE64 + '" alt="QR Code de Avaliação" style="display:block;width:260px;height:260px;image-rendering:pixelated;">' +
+      '</div>';
+  } else {
+    conteudoQR = '<div style="width:280px;height:280px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:20px;text-align:center;">' +
+      '<div style="font-size:3rem;">📱</div>' +
+      '<div style="font-size:0.85rem;color:var(--muted);">QR Code ainda não configurado</div>' +
+    '</div>';
+  }
+
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-avaliacao';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:380px;border-radius:20px;overflow:hidden;">' +
+      // Header com gradiente dourado
+      '<div style="background:linear-gradient(135deg,#d4a843 0%,#b8902f 100%);padding:20px 20px 24px;text-align:center;position:relative;">' +
+        '<button onclick="document.getElementById(\'modal-avaliacao\').remove()" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.2);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.2rem;display:flex;align-items:center;justify-content:center;font-family:inherit;">×</button>' +
+        '<div style="font-size:2.2rem;margin-bottom:4px;">⭐⭐⭐⭐⭐</div>' +
+        '<div style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:#000;letter-spacing:0.05em;">AVALIE O BÁVARO</div>' +
+        '<div style="font-size:0.78rem;color:rgba(0,0,0,0.7);margin-top:2px;font-weight:600;">Sua opinião nos ajuda muito 💛</div>' +
+      '</div>' +
+      // Body
+      '<div style="padding:22px 20px;text-align:center;background:var(--surface);">' +
+        '<div style="font-size:0.84rem;color:var(--muted);margin-bottom:16px;line-height:1.5;display:flex;align-items:center;justify-content:center;gap:6px;">' +
+          '<span style="font-size:1.1rem;">📱</span>' +
+          '<span>Aponte a câmera do celular</span>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:center;margin-bottom:18px;">' + conteudoQR + '</div>' +
+        '<div style="font-size:0.78rem;color:var(--accent);background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;line-height:1.4;font-weight:600;">' +
+          'Obrigado pela visita!  🍺' +
+        '</div>' +
+      '</div>' +
+      // Footer
+      '<div style="padding:0 20px 18px;background:var(--surface);">' +
+        '<button class="f-btn" style="width:100%;padding:13px;" onclick="document.getElementById(\'modal-avaliacao\').remove()">Fechar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
 }
 
 function abrirPedidoRapido(numMesa){

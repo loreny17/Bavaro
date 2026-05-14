@@ -317,6 +317,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       </div>
       <button class="auth-btn" onclick="authLogar()">Entrar</button>
       <button class="auth-btn secondary" onclick="window.location.href='index.html'">← Voltar para o App</button>
+      <button class="auth-btn secondary" onclick="limparCacheRecarregar()" style="font-size:0.78rem;margin-top:6px;">🧹 Limpar cache e recarregar</button>
       <div id="login-erro" class="auth-erro"></div>
     </div>
   </div>
@@ -932,17 +933,44 @@ function authLogar(){
   var senha = document.getElementById('login-senha').value;
   if(!email || !senha){ mostrarErroLogin('Preencha email e senha'); return; }
   mostrarErroLogin('');
+
+  // Validação: Firebase pronto?
+  if(!fbAuth){
+    mostrarErroLogin('⏳ Aguarde a conexão com o servidor... Recarregue a página se demorar.');
+    return;
+  }
+
+  // Mostra mensagem visual de processamento
+  mostrarErroLogin('⏳ Entrando...');
+
+  // Timeout de segurança: se em 15s não responder, avisa
+  var timeout = setTimeout(function(){
+    mostrarErroLogin('⚠️ Conexão demorando muito. Verifique sua internet e tente de novo.');
+  }, 15000);
+
+  console.log('[PDV] Tentando login com:', email);
   fbAuth.signInWithEmailAndPassword(email, senha)
+    .then(function(userCred){
+      clearTimeout(timeout);
+      console.log('[PDV] Login OK:', userCred.user.email, 'uid:', userCred.user.uid);
+      document.getElementById('login-senha').value = '';
+      // onAuthStateChanged cuida do resto
+    })
     .catch(function(e){
+      clearTimeout(timeout);
+      console.error('[PDV] Login ERRO:', e.code, e.message, e);
       var msgs = {
         'auth/invalid-email':'Email inválido',
         'auth/user-not-found':'Email não cadastrado',
         'auth/wrong-password':'Senha incorreta',
         'auth/invalid-credential':'Email ou senha incorretos',
         'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos.',
-        'auth/network-request-failed':'Sem conexão com a internet'
+        'auth/network-request-failed':'Sem conexão com a internet',
+        'auth/user-disabled':'Conta desabilitada',
+        'auth/operation-not-allowed':'Email/Password não habilitado no Firebase Console'
       };
-      mostrarErroLogin(msgs[e.code] || 'Erro: '+e.message);
+      var msg = msgs[e.code] || ('Erro: ' + e.message);
+      mostrarErroLogin(msg + ' (' + (e.code||'?') + ')');
     });
 }
 function mostrarErroLogin(msg){
@@ -950,6 +978,27 @@ function mostrarErroLogin(msg){
   if(!msg){ el.classList.remove('show'); return; }
   el.textContent = msg;
   el.classList.add('show');
+}
+
+// Limpa cache do PWA e recarrega — útil pra resolver problemas de versão antiga
+function limparCacheRecarregar(){
+  if(!confirm('Limpar cache local do PDV e recarregar?\n\nIsso desconecta da conta. Você precisará logar de novo.')) return;
+  Promise.all([
+    // Limpa caches do service worker
+    (typeof caches !== 'undefined' ? caches.keys().then(function(keys){
+      return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+    }) : Promise.resolve()),
+    // Desregistra service workers
+    (navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function(regs){
+      return Promise.all(regs.map(function(r){ return r.unregister(); }));
+    }) : Promise.resolve()),
+    // Desloga do Firebase (limpa token Auth)
+    (fbAuth ? fbAuth.signOut() : Promise.resolve())
+  ]).catch(function(e){ console.warn('limpar:', e); })
+    .finally(function(){
+      // Recarrega forçando bypass de cache
+      window.location.reload(true);
+    });
 }
 
 // ═══ TENANT ═══
@@ -5576,7 +5625,7 @@ function renderRelatorios(){
       itensMap[nome].qtd += qtd;
       itensMap[nome].valor += qtd * preco;
     });
-    var g = c.garcom || '—';
+    var g = c.garcomPrincipal || c.garcom || c.fechadoPor || '—';
     if(!garconsMap[g]) garconsMap[g] = {contas:0, valor:0};
     garconsMap[g].contas += 1;
     garconsMap[g].valor += (c.subtotal || 0);

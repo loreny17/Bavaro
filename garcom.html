@@ -4769,44 +4769,9 @@ function _numPedidoById(pedidoId){
 // Reseta todo dia às 02:00 da manhã. Usa transação atômica pra evitar números duplicados.
 // Retorna uma Promise com o número sequencial gerado.
 function gerarNumeroSequencial(){
-  if(!fbDb || !_restauranteId) return Promise.resolve(null);
-  var ref = fbDb.collection('restaurantes_publicos').doc(_restauranteId)
-    .collection('contadores').doc('pedidos');
-  // Calcula o "dia operacional" - resetando às 02h
-  // Se agora é < 02h, o "dia" ainda é o anterior. Se >= 02h, é o dia atual.
-  function calcularDiaOperacional(ts){
-    var d = new Date(ts);
-    if(d.getHours() < 2){
-      d.setDate(d.getDate() - 1);
-    }
-    // Formato YYYY-MM-DD
-    var ano = d.getFullYear();
-    var mes = String(d.getMonth()+1).padStart(2,'0');
-    var dia = String(d.getDate()).padStart(2,'0');
-    return ano + '-' + mes + '-' + dia;
-  }
-  var diaAtual = calcularDiaOperacional(Date.now());
-  return fbDb.runTransaction(function(t){
-    return t.get(ref).then(function(doc){
-      var dados = doc.exists ? doc.data() : {};
-      var novoNumero;
-      if(dados.dia !== diaAtual){
-        // Dia diferente — reseta
-        novoNumero = 1;
-      } else {
-        novoNumero = (dados.numero || 0) + 1;
-      }
-      t.set(ref, {
-        dia: diaAtual,
-        numero: novoNumero,
-        atualizadoEm: Date.now()
-      });
-      return novoNumero;
-    });
-  }).catch(function(e){
-    console.warn('Erro ao gerar número sequencial:', e);
-    return null;
-  });
+  // DESATIVADO: a numeração sequencial não estava em uso e causava erros de permissão
+  // que travavam o envio de pedidos. Retorna null direto (sem ir no Firestore).
+  return Promise.resolve(null);
 }
 
 function enviarPedido(){
@@ -4889,10 +4854,13 @@ function enviarPedido(){
     total: totalPedido
   };
   // 1. Gera número sequencial e cria pedido
+  console.log('[ENVIAR-PEDIDO] Iniciando — mesa:', mesaInt, 'contaId:', contaId, 'itens:', itensPedido.length);
   gerarNumeroSequencial().then(function(numero){
+    console.log('[ENVIAR-PEDIDO] número sequencial:', numero);
     if(numero) pedido.numeroSequencial = numero;
     return fbDb.collection('pedidos').add(pedido);
   }).then(function(ref){
+    console.log('[ENVIAR-PEDIDO] ✓ pedido criado:', ref.id);
     var pedidoId = ref.id;
     // 2. Adiciona itens na conta da mesa (com status: aberto)
     var itensConta = itensPedido.map(function(it){
@@ -4947,6 +4915,7 @@ function enviarPedido(){
       showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
     }
   }).catch(function(e){
+    console.error('[ENVIAR-PEDIDO] ❌ FALHOU:', e);
     // Falhou no Firebase — restaura carrinho e avisa
     _carrinho = carrinhoBackup;
     atualizarCarrinhoBadge();

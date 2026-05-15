@@ -5628,78 +5628,68 @@ function confirmarTransferencia(numDestino){
       contaDestinoIdResolvido = contaDestino.id;
     }
 
-    // Atualiza pedidos: muda contaId e mesa nos pedidos que contém os itens transferidos
-    // Estratégia: pega TODOS os pedidos da conta de origem, filtra os que tem itens com itemKey em keysSelec
-    console.log('[TRANSFERIR] Buscando pedidos da conta origem:', conta.id);
+    // Atualiza pedidos: estratégia SIMPLES
+    // Cria UM pedido novo na mesa destino com TODOS os itens transferidos
+    // (não tenta dividir pedidos antigos por itemKey porque o array .itens do pedido
+    // pode não ter itemKey — só a conta_mesa tem essa info confiável)
+    console.log('[TRANSFERIR] Criando pedido novo na mesa destino');
     console.log('[TRANSFERIR] contaDestinoIdResolvido:', contaDestinoIdResolvido);
-    console.log('[TRANSFERIR] numDestino:', numDestino, '| itemKeys selecionados:', keysSelec);
+    console.log('[TRANSFERIR] numDestino:', numDestino, '| itens transferidos:', itensSelecionados.length);
+
+    // Pega o pedido mais antigo da origem pra herdar dados (garcom, etc)
     return fbDb.collection('pedidos')
       .where('contaId','==', conta.id)
+      .limit(5)
       .get().then(function(snap){
-        console.log('[TRANSFERIR] Pedidos encontrados na origem:', snap.size);
-        var batch = fbDb.batch();
-        var pedidosAfetados = 0;
-        snap.forEach(function(d){
-          var pedido = d.data();
-          var itensPedido = pedido.itens || [];
-          console.log('[TRANSFERIR]   Pedido', d.id.substring(0,8), '| itens:', itensPedido.length, '| primeiras itemKeys:', itensPedido.slice(0,3).map(function(it){return (it.itemKey||'(SEM-KEY)').substring(0,8);}));
-          // Itens DESTE pedido que vão na transferência
-          var itensTransferidos = itensPedido.filter(function(it){
-            return keysSelec.indexOf(it.itemKey) >= 0;
-          });
-          var itensQueFicam = itensPedido.filter(function(it){
-            return keysSelec.indexOf(it.itemKey) < 0;
-          });
-          console.log('[TRANSFERIR]     transferidos:', itensTransferidos.length, '| ficam:', itensQueFicam.length);
-
-          if(itensTransferidos.length === 0){
-            console.log('[TRANSFERIR]     → pulando (não tem itens da seleção)');
-            return; // pedido não afetado
-          }
-
-          if(itensQueFicam.length === 0){
-            // Todos os itens do pedido foram transferidos — muda contaId/mesa do pedido inteiro
-            console.log('[TRANSFERIR]     → MUDA pedido inteiro pra contaDestino:', contaDestinoIdResolvido);
-            batch.update(d.ref, {
-              contaId: contaDestinoIdResolvido,
-              mesa: parseInt(numDestino) || numDestino,
-              transferidoDe: _transferirOrigemNum,
-              transferidoEm: Date.now(),
-              atualizadoEm: Date.now()
-            });
-          } else {
-            // Parte ficou, parte foi: divide o pedido
-            console.log('[TRANSFERIR]     → DIVIDE pedido');
-            batch.update(d.ref, {
-              itens: itensQueFicam,
-              atualizadoEm: Date.now()
-            });
-            var novoPedidoRef = fbDb.collection('pedidos').doc();
-            var novoPedido = Object.assign({}, pedido, {
-              itens: itensTransferidos,
-              contaId: contaDestinoIdResolvido,
-              mesa: parseInt(numDestino) || numDestino,
-              transferidoDe: _transferirOrigemNum,
-              transferidoEm: Date.now(),
-              criadoEm: pedido.criadoEm || Date.now(),
-              atualizadoEm: Date.now(),
-              originalPedidoId: d.id
-            });
-            batch.set(novoPedidoRef, novoPedido);
-          }
-          pedidosAfetados++;
-        });
-        console.log('[TRANSFERIR] Pedidos a atualizar:', pedidosAfetados);
-        if(pedidosAfetados > 0){
-          return batch.commit().then(function(){
-            console.log('[TRANSFERIR] ✓ Batch commit OK');
-          }).catch(function(e){
-            console.error('[TRANSFERIR] ❌ Batch commit FALHOU:', e);
-            throw e;
-          });
+        console.log('[TRANSFERIR] Pedidos da origem (pra herdar dados):', snap.size);
+        var pedidoHerdadoData = {};
+        if(!snap.empty){
+          pedidoHerdadoData = snap.docs[0].data();
         }
+
+        // Monta itens do novo pedido a partir dos itens selecionados
+        // (transformando do formato conta_mesa.itens pro formato pedido.itens)
+        var itensNovo = itensSelecionados.map(function(it){
+          return {
+            id: it.id || '',
+            nome: it.nome,
+            preco: it.preco,
+            qtd: it.qtd || 1,
+            obs: it.obs || '',
+            selecoes: it.selecoes || [],
+            itemKey: it.itemKey,  // mantém o itemKey pra rastreio
+            precoBase: it.precoBase || it.preco,
+            extras: it.extras || 0
+          };
+        });
+
+        var totalNovo = itensNovo.reduce(function(a, it){
+          return a + (it.preco||0) * (it.qtd||1);
+        }, 0);
+
+        var novoPedido = {
+          mesa: parseInt(numDestino) || numDestino,
+          restauranteId: _restauranteId,
+          tenantId: _tenantId || null,
+          contaId: contaDestinoIdResolvido,
+          tipoConta: 'mesa',
+          status: pedidoHerdadoData.status || 'preparo',
+          criadoEm: Date.now(),
+          atualizadoEm: Date.now(),
+          itens: itensNovo,
+          total: totalNovo,
+          garcom: pedidoHerdadoData.garcom || _nomeGarcom,
+          transferidoDe: _transferirOrigemNum,
+          transferidoEm: Date.now(),
+          transferidoPor: _nomeGarcom,
+          impresso: true  // já foi impresso na origem
+        };
+
+        return fbDb.collection('pedidos').add(novoPedido).then(function(ref){
+          console.log('[TRANSFERIR] ✓ pedido novo criado:', ref.id);
+        });
       }).catch(function(e){
-        console.error('[TRANSFERIR] ❌ Erro atualizando pedidos:', e);
+        console.error('[TRANSFERIR] ❌ Erro criando pedido novo:', e);
       });
   }).then(function(){
     if(_transferirModo === 'mesa' || itensRestantes.length === 0 && (conta.pagamentos||[]).length === 0){

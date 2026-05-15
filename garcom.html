@@ -620,7 +620,7 @@ header{
       <div class="mesa-header-titulo">ESCOLHA A MESA</div>
       <div class="mesa-header-sub" id="mesa-header-sub">Selecione para iniciar o atendimento</div>
     </div>
-    <div class="mesa-header-garcom" id="garcom-badge" onclick="abrirMeuDia()" style="cursor:pointer;">—</div>
+    <div class="mesa-header-garcom" id="garcom-badge" onclick="tentarAbrirDebug();abrirMeuDia();" style="cursor:pointer;">—</div>
   </div>
   <!-- Banner de status de conexão (aparece só quando offline) -->
   <div id="banner-offline" style="display:none;background:linear-gradient(90deg,#f59e0b,#d97706);color:#000;padding:10px 14px;align-items:center;gap:10px;font-size:0.84rem;font-weight:600;border-bottom:1px solid rgba(0,0,0,0.2);">
@@ -2275,6 +2275,146 @@ function logoutGarcom(){
   // Limpa o restaurante também pra forçar nova escolha no próximo login
   localStorage.removeItem('garcom_restaurante_id');
   location.reload();
+}
+
+// ════════════════════════════════════════
+//  PAINEL DE DEBUG (oculto)
+//  Ativado por 5 toques rápidos no badge do garçom (em até 3s)
+// ════════════════════════════════════════
+var _debugClickCount = 0;
+var _debugClickTimer = null;
+var _debugLogs = [];
+
+// Intercepta console.log/error/warn pra capturar tudo
+(function(){
+  var origLog = console.log;
+  var origErr = console.error;
+  var origWarn = console.warn;
+  function add(tipo, args){
+    try{
+      var parts = [];
+      for(var i = 0; i < args.length; i++){
+        var a = args[i];
+        if(typeof a === 'object'){
+          try{ parts.push(JSON.stringify(a)); }catch(e){ parts.push(String(a)); }
+        } else {
+          parts.push(String(a));
+        }
+      }
+      _debugLogs.push({
+        tipo: tipo,
+        msg: parts.join(' '),
+        hora: new Date().toLocaleTimeString('pt-BR')
+      });
+      // Limita a 200 logs (memória)
+      if(_debugLogs.length > 200) _debugLogs.shift();
+    }catch(e){}
+  }
+  console.log = function(){ add('log', arguments); origLog.apply(console, arguments); };
+  console.error = function(){ add('err', arguments); origErr.apply(console, arguments); };
+  console.warn = function(){ add('warn', arguments); origWarn.apply(console, arguments); };
+})();
+
+function tentarAbrirDebug(){
+  _debugClickCount++;
+  clearTimeout(_debugClickTimer);
+  _debugClickTimer = setTimeout(function(){ _debugClickCount = 0; }, 3000);
+  if(_debugClickCount >= 5){
+    _debugClickCount = 0;
+    abrirPainelDebug();
+  }
+}
+
+function abrirPainelDebug(){
+  var ex = document.getElementById('modal-debug');
+  if(ex) ex.remove();
+
+  // Coleta info de estado atual
+  var info = {
+    nomeGarcom: _nomeGarcom,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId,
+    mesaAtiva: _mesaAtiva,
+    mesasOcupadas: Object.keys(_mesasOcupadas||{}),
+    contasMesaCache: Object.keys(_contasMesaCache||{}),
+    online: navigator.onLine,
+    userAgent: navigator.userAgent.substring(0, 80)
+  };
+
+  var logsHtml = _debugLogs.slice().reverse().map(function(l){
+    var cor = l.tipo === 'err' ? '#f87171' : (l.tipo === 'warn' ? '#f7a34f' : '#9ca3af');
+    return '<div style="border-bottom:1px solid rgba(255,255,255,0.05);padding:6px 0;font-family:monospace;font-size:0.72rem;line-height:1.4;">' +
+      '<span style="color:#666;">[' + l.hora + ']</span> ' +
+      '<span style="color:' + cor + ';">' + esc(l.msg) + '</span>' +
+    '</div>';
+  }).join('');
+  if(!logsHtml) logsHtml = '<div style="color:#666;text-align:center;padding:20px;">Sem logs ainda</div>';
+
+  var mod = document.createElement('div');
+  mod.className = 'modal show';
+  mod.id = 'modal-debug';
+  mod.style.cssText = 'background:rgba(0,0,0,0.85);';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:none;width:100%;height:100%;border-radius:0;display:flex;flex-direction:column;background:#0a0a0a;">' +
+      '<div class="modal-header" style="background:#1a1a1a;border-bottom:1px solid rgba(255,255,255,0.1);">' +
+        '<div class="modal-titulo" style="color:#4ade80;">🔧 DEBUG</div>' +
+        '<button class="modal-fechar" onclick="document.getElementById(\'modal-debug\').remove()">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' +
+        '<div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:8px;padding:10px;margin-bottom:14px;font-family:monospace;font-size:0.74rem;line-height:1.6;color:#9ca3af;">' +
+          '<div><strong style="color:#4ade80;">ESTADO ATUAL:</strong></div>' +
+          '<div>Garçom: <span style="color:#fff;">' + esc(info.nomeGarcom || '—') + '</span></div>' +
+          '<div>Restaurante: <span style="color:#fff;">' + esc(info.restauranteId || '—') + '</span></div>' +
+          '<div>Tenant: <span style="color:#fff;">' + esc((info.tenantId || '—').substring(0,30)) + '</span></div>' +
+          '<div>Mesa ativa: <span style="color:#fff;">' + esc(String(info.mesaAtiva || '—')) + '</span></div>' +
+          '<div>Mesas ocupadas: <span style="color:#fff;">' + info.mesasOcupadas.join(', ') + '</span></div>' +
+          '<div>Contas em cache: <span style="color:#fff;">' + info.contasMesaCache.join(', ') + '</span></div>' +
+          '<div>Online: <span style="color:#fff;">' + (info.online ? 'Sim' : 'NÃO ⚠️') + '</span></div>' +
+        '</div>' +
+        '<div style="font-size:0.78rem;color:#999;margin-bottom:8px;font-weight:700;">LOGS (' + _debugLogs.length + ', mais recentes primeiro)</div>' +
+        '<div style="background:#000;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;">' + logsHtml + '</div>' +
+      '</div>' +
+      '<div style="padding:12px;border-top:1px solid rgba(255,255,255,0.1);background:#1a1a1a;display:flex;gap:8px;">' +
+        '<button onclick="copiarLogsDebug()" style="flex:1;padding:10px;background:#4ade80;color:#000;border:none;border-radius:8px;font-family:inherit;font-weight:700;cursor:pointer;">📋 Copiar Tudo</button>' +
+        '<button onclick="_debugLogs=[];abrirPainelDebug();" style="flex:1;padding:10px;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">🗑️ Limpar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function copiarLogsDebug(){
+  var info = {
+    nomeGarcom: _nomeGarcom,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId,
+    mesaAtiva: _mesaAtiva,
+    mesasOcupadas: Object.keys(_mesasOcupadas||{}),
+    contasMesaCache: Object.keys(_contasMesaCache||{}),
+    online: navigator.onLine
+  };
+  var texto = '=== DEBUG BÁVARO ===\n';
+  texto += JSON.stringify(info, null, 2) + '\n\n';
+  texto += '=== LOGS ===\n';
+  _debugLogs.forEach(function(l){
+    texto += '[' + l.hora + '][' + l.tipo + '] ' + l.msg + '\n';
+  });
+
+  try{
+    navigator.clipboard.writeText(texto).then(function(){
+      showToast('✓ Logs copiados! Cole no chat','#4ade80', 3000);
+    }).catch(function(){
+      // Fallback: cria textarea, seleciona e copia
+      var ta = document.createElement('textarea');
+      ta.value = texto;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('✓ Logs copiados','#4ade80', 3000);
+    });
+  }catch(e){
+    alert(texto);
+  }
 }
 
 // ════════════════════════════════════════

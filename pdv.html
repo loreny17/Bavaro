@@ -5677,6 +5677,135 @@ function renderRelatorios(){
     });
   }
   document.getElementById('rel-por-garcom').innerHTML = gHtml;
+
+  // ═══ CARDÁPIO COMPLETO: todos os itens + qtd vendida no período ═══
+  renderCardapioCompleto(contas, itensMap);
+}
+
+// Estado da ordenação do cardápio completo
+var _ordemCardapioRel = 'qtd';
+function setOrdemCardapio(ordem){
+  _ordemCardapioRel = ordem;
+  ['qtd','menos','zero','az'].forEach(function(k){
+    var b = document.getElementById('rel-card-ord-'+k);
+    if(b){ b.classList.toggle('rel-pill-ativo', k === ordem); }
+  });
+  // Re-renderiza com a nova ordem (sem refazer cálculos)
+  if(_cardapioRelCache){
+    _renderCardapioOrdenado(_cardapioRelCache);
+  }
+}
+
+var _cardapioRelCache = null; // {todosItens: [{nome, qtd, valor, ativo}]}
+
+function renderCardapioCompleto(contas, itensMapVendas){
+  // Busca TODOS os itens do cardápio (Firestore)
+  var lista = document.getElementById('rel-cardapio-completo');
+  if(!lista) return;
+
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio').doc('data')
+    .collection('itens').get()
+    .then(function(snap){
+      var todosItens = [];
+      var nomesVendidos = Object.keys(itensMapVendas || {});
+
+      snap.forEach(function(doc){
+        var d = doc.data() || {};
+        var nome = d.nome || '—';
+        var venda = itensMapVendas[nome] || {qtd: 0, valor: 0};
+        todosItens.push({
+          nome: nome,
+          qtd: venda.qtd || 0,
+          valor: venda.valor || 0,
+          ativo: d.ativo !== false,
+          categoria: d.categoria || ''
+        });
+        // Marca como "achado" pra detectar itens vendidos mas que sumiram do cardápio
+        var idx = nomesVendidos.indexOf(nome);
+        if(idx >= 0) nomesVendidos.splice(idx, 1);
+      });
+
+      // Itens VENDIDOS no período mas que não estão mais no cardápio
+      nomesVendidos.forEach(function(nome){
+        var venda = itensMapVendas[nome] || {qtd:0, valor:0};
+        todosItens.push({
+          nome: nome,
+          qtd: venda.qtd,
+          valor: venda.valor,
+          ativo: false,
+          categoria: '(removido do cardápio)'
+        });
+      });
+
+      _cardapioRelCache = { todosItens: todosItens };
+      _renderCardapioOrdenado(_cardapioRelCache);
+    })
+    .catch(function(e){
+      console.error('Erro cardápio completo:', e);
+      lista.innerHTML = '<div style="text-align:center;color:#f87171;padding:12px;font-size:0.85rem;">Erro ao carregar cardápio: ' + (e.message||e) + '</div>';
+    });
+}
+
+function _renderCardapioOrdenado(cache){
+  var lista = document.getElementById('rel-cardapio-completo');
+  if(!lista || !cache) return;
+  function fmt(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+
+  var itens = cache.todosItens.slice();
+
+  // Aplica ordem/filtro
+  if(_ordemCardapioRel === 'qtd'){
+    itens.sort(function(a,b){ return b.qtd - a.qtd; });
+  } else if(_ordemCardapioRel === 'menos'){
+    // Menos vendidos = qtd > 0, ordem crescente
+    itens = itens.filter(function(it){ return it.qtd > 0; });
+    itens.sort(function(a,b){ return a.qtd - b.qtd; });
+  } else if(_ordemCardapioRel === 'zero'){
+    itens = itens.filter(function(it){ return it.qtd === 0; });
+    itens.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+  } else if(_ordemCardapioRel === 'az'){
+    itens.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+  }
+
+  if(itens.length === 0){
+    var mensagens = {
+      'qtd': 'Sem dados',
+      'menos': 'Nenhum item vendido no período',
+      'zero': '🎉 Todos os itens venderam pelo menos uma vez!',
+      'az': 'Cardápio vazio'
+    };
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:16px;font-size:0.85rem;">' + (mensagens[_ordemCardapioRel] || 'Sem dados') + '</div>';
+    return;
+  }
+
+  // Contadores no topo
+  var total = cache.todosItens.length;
+  var vendidos = cache.todosItens.filter(function(it){ return it.qtd > 0; }).length;
+  var naoVendidos = total - vendidos;
+  var resumoHtml = '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;font-size:0.74rem;">' +
+    '<span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;">Total: <strong>'+total+'</strong></span>' +
+    '<span style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);color:#4ade80;border-radius:8px;padding:4px 10px;">Vendidos: <strong>'+vendidos+'</strong></span>' +
+    '<span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);color:#f87171;border-radius:8px;padding:4px 10px;">Não vendidos: <strong>'+naoVendidos+'</strong></span>' +
+    '</div>';
+
+  var html = resumoHtml;
+  itens.forEach(function(it){
+    var cor = it.qtd === 0 ? '#f87171' : (it.qtd <= 2 ? '#f7a34f' : 'var(--accent)');
+    var bg = it.qtd === 0 ? 'rgba(248,113,113,0.06)' : 'transparent';
+    var qtdBadge = it.qtd === 0
+      ? '<span style="background:rgba(248,113,113,0.15);color:#f87171;font-weight:700;font-size:0.74rem;padding:2px 8px;border-radius:8px;margin-right:8px;">0</span>'
+      : '<span style="background:rgba(212,168,67,0.12);color:'+cor+';font-weight:700;font-size:0.78rem;padding:2px 8px;border-radius:8px;margin-right:8px;">'+it.qtd+'x</span>';
+    var cat = it.categoria ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+escapeHtml(it.categoria)+'</div>' : '';
+    var valor = it.qtd > 0 ? '<span class="valor" style="color:'+cor+';">'+fmt(it.valor)+'</span>' : '<span style="color:var(--muted);font-size:0.78rem;">—</span>';
+    html += '<div class="rel-item-row" style="background:'+bg+';padding-left:6px;padding-right:6px;border-radius:6px;">' +
+      qtdBadge +
+      '<span class="nome" style="opacity:'+(it.ativo?'1':'0.6')+';">' + escapeHtml(it.nome) + cat + '</span>' +
+      valor +
+    '</div>';
+  });
+  lista.innerHTML = html;
 }
 
 // ===== EXCLUIR RESTAURANTE =====
@@ -6423,6 +6552,22 @@ async function executarExclusaoRestaurante(id, nome){
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;">
     <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:8px;">Vendas por Garçom</div>
     <div id="rel-por-garcom">—</div>
+  </div>
+  <!-- Cardápio Completo: todos os itens com qtd vendida (inclusive zero) -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-top:14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+      <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">📋 Cardápio Completo</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button class="rel-pill rel-pill-ativo" id="rel-card-ord-qtd" onclick="setOrdemCardapio('qtd')" style="padding:4px 10px;font-size:0.72rem;">Mais vendidos</button>
+        <button class="rel-pill" id="rel-card-ord-menos" onclick="setOrdemCardapio('menos')" style="padding:4px 10px;font-size:0.72rem;">Menos vendidos</button>
+        <button class="rel-pill" id="rel-card-ord-zero" onclick="setOrdemCardapio('zero')" style="padding:4px 10px;font-size:0.72rem;">Não vendidos</button>
+        <button class="rel-pill" id="rel-card-ord-az" onclick="setOrdemCardapio('az')" style="padding:4px 10px;font-size:0.72rem;">A–Z</button>
+      </div>
+    </div>
+    <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;line-height:1.4;">
+      💡 Use a aba <strong>Não vendidos</strong> para identificar itens que podem sair do cardápio.
+    </div>
+    <div id="rel-cardapio-completo">—</div>
   </div>
 </div>
 <style>

@@ -5517,7 +5517,76 @@ function confirmarTransferencia(numDestino){
   var keysSelec = itensSelecionados.map(function(i){ return i.itemKey; });
   var itensRestantes = (conta.itens||[]).filter(function(i){ return keysSelec.indexOf(i.itemKey) < 0; });
 
-  promiseDestino.then(function(){
+  // Pega o ID da conta destino (existente ou nova) pra atualizar pedidos
+  var contaDestinoIdResolvido = null;
+
+  promiseDestino.then(function(refOrId){
+    // Se foi um .add() nova, refOrId é DocumentReference; se foi .update(), é undefined
+    if(refOrId && refOrId.id){
+      contaDestinoIdResolvido = refOrId.id;
+    } else if(contaDestino){
+      contaDestinoIdResolvido = contaDestino.id;
+    }
+
+    // Atualiza pedidos: muda contaId e mesa nos pedidos que contém os itens transferidos
+    // Estratégia: pega TODOS os pedidos da conta de origem, filtra os que tem itens com itemKey em keysSelec
+    return fbDb.collection('pedidos')
+      .where('contaId','==', conta.id)
+      .get().then(function(snap){
+        var batch = fbDb.batch();
+        var pedidosAfetados = 0;
+        snap.forEach(function(d){
+          var pedido = d.data();
+          var itensPedido = pedido.itens || [];
+          // Itens DESTE pedido que vão na transferência
+          var itensTransferidos = itensPedido.filter(function(it){
+            return keysSelec.indexOf(it.itemKey) >= 0;
+          });
+          var itensQueFicam = itensPedido.filter(function(it){
+            return keysSelec.indexOf(it.itemKey) < 0;
+          });
+
+          if(itensTransferidos.length === 0) return; // pedido não afetado
+
+          if(itensQueFicam.length === 0){
+            // Todos os itens do pedido foram transferidos — muda contaId/mesa do pedido inteiro
+            batch.update(d.ref, {
+              contaId: contaDestinoIdResolvido,
+              mesa: parseInt(numDestino) || numDestino,
+              transferidoDe: _transferirOrigemNum,
+              transferidoEm: Date.now(),
+              atualizadoEm: Date.now()
+            });
+          } else {
+            // Parte ficou, parte foi: divide o pedido
+            // 1. Atualiza o original mantendo só os que ficam
+            batch.update(d.ref, {
+              itens: itensQueFicam,
+              atualizadoEm: Date.now()
+            });
+            // 2. Cria novo pedido na conta destino com os itens transferidos
+            var novoPedidoRef = fbDb.collection('pedidos').doc();
+            var novoPedido = Object.assign({}, pedido, {
+              itens: itensTransferidos,
+              contaId: contaDestinoIdResolvido,
+              mesa: parseInt(numDestino) || numDestino,
+              transferidoDe: _transferirOrigemNum,
+              transferidoEm: Date.now(),
+              criadoEm: pedido.criadoEm || Date.now(),
+              atualizadoEm: Date.now(),
+              originalPedidoId: d.id
+            });
+            batch.set(novoPedidoRef, novoPedido);
+          }
+          pedidosAfetados++;
+        });
+        if(pedidosAfetados > 0){
+          return batch.commit();
+        }
+      }).catch(function(e){
+        console.warn('Erro atualizando pedidos transferidos (não crítico):', e);
+      });
+  }).then(function(){
     if(_transferirModo === 'mesa' || itensRestantes.length === 0 && (conta.pagamentos||[]).length === 0){
       // Esvazia/encerra origem
       // Se não sobrou nada, deleta conta de origem

@@ -1185,20 +1185,20 @@ function revalidarConexaoFirestore(){
 
 // ════════════════════════════════════════
 //  PROTEÇÃO CONTRA TOQUES ENFILEIRADOS
-//  (quando o celular volta do bloqueio)
+//  (quando o celular volta do bloqueio LONGO)
 // ════════════════════════════════════════
 var _wakeBloqueado = false;
 var _wakeAteQuando = 0;
+var _ultimoEscondidoEm = 0; // quando ficou escondido pela última vez
 
 function ativarWakeBloqueio(motivo){
   _wakeBloqueado = true;
-  _wakeAteQuando = Date.now() + 1500; // 1.5 segundos bloqueado
+  _wakeAteQuando = Date.now() + 800; // 800ms é suficiente
   mostrarOverlayWake();
-  // Limpa toques pendentes
   setTimeout(function(){
     _wakeBloqueado = false;
     esconderOverlayWake();
-  }, 1500);
+  }, 800);
 }
 
 function isWakeBloqueado(){
@@ -1238,7 +1238,7 @@ document.addEventListener('click', function(e){
     e.stopImmediatePropagation();
     return false;
   }
-}, true); // capture=true: pega antes dos handlers normais
+}, true);
 
 document.addEventListener('touchend', function(e){
   if(isWakeBloqueado()){
@@ -1249,22 +1249,22 @@ document.addEventListener('touchend', function(e){
 }, true);
 
 document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'visible'){
-    // App voltou a ficar visível — bloqueia toques por 1.5s e revalida conexões
-    ativarWakeBloqueio('visible');
+  if(document.visibilityState === 'hidden'){
+    // App ficou escondido — marca o momento
+    _ultimoEscondidoEm = Date.now();
+  } else if(document.visibilityState === 'visible'){
+    // App voltou — só bloqueia se ficou MAIS de 5 segundos escondido
+    var tempoEscondido = _ultimoEscondidoEm ? (Date.now() - _ultimoEscondidoEm) : 0;
+    if(tempoEscondido > 5000){
+      ativarWakeBloqueio('visible-longo');
+    }
     revalidarConexaoFirestore();
   }
 });
-// Também revalida no foco (alguns browsers não disparam visibilitychange consistente)
-window.addEventListener('focus', function(){
-  ativarWakeBloqueio('focus');
-  revalidarConexaoFirestore();
-});
-// E quando voltar a ter conexão de rede
-window.addEventListener('online', function(){
-  ativarWakeBloqueio('online');
-  revalidarConexaoFirestore();
-});
+// REMOVIDO bloqueio no focus (era muito agressivo, disparava em toques normais)
+window.addEventListener('focus', function(){ revalidarConexaoFirestore(); });
+// Online apenas revalida, não bloqueia
+window.addEventListener('online', function(){ revalidarConexaoFirestore(); });
 
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;

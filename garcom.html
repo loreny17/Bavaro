@@ -6663,29 +6663,62 @@ function abrirVerPedidosMesa(num){
   document.body.appendChild(mod);
   pushHistory('ver-pedidos:'+num);
 
-  // Escuta pedidos da mesa em tempo real, FILTRANDO pela conta atual aberta
-  // Sem isso, pegaríamos pedidos de contas antigas que já foram fechadas
-  // (mesa 50 abriu/fechou várias vezes — cada uma tem contaId diferente).
+  // Escuta pedidos da mesa em tempo real.
+  // Estratégia: filtra por MESA + janela de tempo (desde abertura da conta atual)
+  // Mais robusto que filtrar por contaId, especialmente após transferências.
   var contaAtual = _contasMesaCache[String(num)] || _contasMesaCache[num];
   var contaIdAtual = contaAtual ? contaAtual.id : null;
+  var abertaEm = (contaAtual && contaAtual.abertaEm) ? contaAtual.abertaEm : 0;
   if(_verPedidosUnsub) _verPedidosUnsub();
-  if(!contaIdAtual){
+  if(!contaAtual){
     // Sem conta aberta — não tem pedidos válidos pra mostrar
     var body0 = document.getElementById('ver-pedidos-body');
     if(body0) body0.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-titulo">Sem pedidos</div><div class="empty-sub">Esta mesa não tem conta aberta no momento.</div></div>';
     return;
   }
+  var mesaInt = parseInt(num);
+  var mesaStr = String(num);
+  // Query principal: filtra por mesa e restaurante (sem contaId, mais flexível)
   _verPedidosUnsub = fbDb.collection('pedidos')
     .where('restauranteId','==',_restauranteId)
-    .where('contaId','==', contaIdAtual)
+    .where('mesa','==', mesaInt)
     .onSnapshot(function(snap){
       var lista = [];
-      snap.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
+      snap.forEach(function(d){
+        var data = d.data();
+        // Filtra por janela de tempo (desde abertura da conta atual)
+        // OU se o contaId bate com a conta atual
+        // OU se foi transferido pra essa mesa (transferidoEm preenchido)
+        var pertence = (data.contaId === contaIdAtual)
+          || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
+          || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
+        if(pertence){
+          lista.push(Object.assign({id:d.id}, data));
+        }
+      });
       lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
       renderVerPedidosMesa(lista);
-    }, function(){
-      var body = document.getElementById('ver-pedidos-body');
-      if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro ao carregar</div></div>';
+    }, function(err){
+      console.error('Erro pedidos mesa:', err);
+      // Fallback: tenta com mesa como string (mesas antigas)
+      _verPedidosUnsub = fbDb.collection('pedidos')
+        .where('restauranteId','==',_restauranteId)
+        .where('mesa','==', mesaStr)
+        .onSnapshot(function(snap){
+          var lista = [];
+          snap.forEach(function(d){
+            var data = d.data();
+            var pertence = (data.contaId === contaIdAtual)
+              || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
+              || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
+            if(pertence){ lista.push(Object.assign({id:d.id}, data)); }
+          });
+          lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+          renderVerPedidosMesa(lista);
+        }, function(){
+          var body = document.getElementById('ver-pedidos-body');
+          if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro ao carregar</div></div>';
+        });
     });
 }
 

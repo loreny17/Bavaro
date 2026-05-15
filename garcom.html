@@ -1024,6 +1024,7 @@ var firebaseConfig = {
 // ════════════════════════════════════════
 var fbDb = null;
 var _nomeGarcom = null;    // nome salvo
+var _ehAdmin = false;       // se o garçom é admin (definido no login)
 var _mesaAtiva = null;     // número da mesa (ex: "3")
 var _tenantId = null;
 var _restauranteId = null;
@@ -1224,6 +1225,7 @@ window.addEventListener('online', function(){ revalidarConexaoFirestore(); });
 
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;
+  _ehAdmin = localStorage.getItem('garcom_admin') === '1';
   if(_nomeGarcom){
     document.getElementById('login-screen').classList.add('hidden');
     mostrarMesas();
@@ -1297,7 +1299,8 @@ function efetuarLogin(){
           tenantId: tId,
           nomeRest: nomeRest,
           emoji: emoji,
-          nomeCanonico: match.apelido || (match.nome||'').split(' ')[0] || nome
+          nomeCanonico: match.apelido || (match.nome||'').split(' ')[0] || nome,
+          admin: match.admin === true
         });
       }
     });
@@ -1351,12 +1354,14 @@ function aplicarLoginGarcom(match, nomeDigitado){
   _nomeGarcom = nome;
   _restauranteId = match.restauranteId;
   _tenantId = match.tenantId || _tenantId;
+  _ehAdmin = match.admin === true;
 
   // Salva tudo no localStorage
   try{
     localStorage.setItem('garcom_nome', nome);
     localStorage.setItem('garcom_restaurante_id', match.restauranteId);
     if(match.tenantId) localStorage.setItem('gestao_tenant_id', match.tenantId);
+    localStorage.setItem('garcom_admin', _ehAdmin ? '1' : '0');
 
     // Histórico de nomes recentes
     var raw = localStorage.getItem('garcom_nomes_salvos') || '[]';
@@ -2272,6 +2277,7 @@ function esc(s){
 function logoutGarcom(){
   if(!confirm('Sair da conta de '+_nomeGarcom+'?\n\nVocê voltará para a tela de seleção de garçom.')) return;
   localStorage.removeItem('garcom_nome');
+  localStorage.removeItem('garcom_admin');
   // Limpa o restaurante também pra forçar nova escolha no próximo login
   localStorage.removeItem('garcom_restaurante_id');
   location.reload();
@@ -2301,18 +2307,52 @@ var _debugLogs = [];
           parts.push(String(a));
         }
       }
+      var msg = parts.join(' ');
       _debugLogs.push({
         tipo: tipo,
-        msg: parts.join(' '),
+        msg: msg,
         hora: new Date().toLocaleTimeString('pt-BR')
       });
       // Limita a 200 logs (memória)
       if(_debugLogs.length > 200) _debugLogs.shift();
+
+      // Envia erros pro Firebase (pra admin ver no PDV)
+      // Filtra ruído: ignora avisos do firebase que não são erros reais
+      if(tipo === 'err'){
+        if(msg.indexOf('@firebase/firestore') >= 0 && msg.indexOf('BloomFilter') >= 0) return;
+        enviarLogErro('erro', msg.substring(0, 500), {});
+      }
     }catch(e){}
   }
   console.log = function(){ add('log', arguments); origLog.apply(console, arguments); };
   console.error = function(){ add('err', arguments); origErr.apply(console, arguments); };
   console.warn = function(){ add('warn', arguments); origWarn.apply(console, arguments); };
+
+  // Captura erros JS não tratados
+  window.addEventListener('error', function(e){
+    try{
+      var msg = (e.message || 'Erro desconhecido') + ' @ ' + (e.filename||'?') + ':' + (e.lineno||0);
+      _debugLogs.push({ tipo:'err', msg: '[uncaught] '+msg, hora: new Date().toLocaleTimeString('pt-BR') });
+      if(_debugLogs.length > 200) _debugLogs.shift();
+      enviarLogErro('erro', '[uncaught] ' + msg, {
+        stack: (e.error && e.error.stack ? String(e.error.stack).substring(0,500) : ''),
+        filename: e.filename,
+        lineno: e.lineno
+      });
+    }catch(_){}
+  });
+
+  // Captura rejeições de Promise não tratadas
+  window.addEventListener('unhandledrejection', function(e){
+    try{
+      var msg = '[promise] ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
+      _debugLogs.push({ tipo:'err', msg: msg, hora: new Date().toLocaleTimeString('pt-BR') });
+      if(_debugLogs.length > 200) _debugLogs.shift();
+      enviarLogErro('erro', msg, {
+        stack: (e.reason && e.reason.stack ? String(e.reason.stack).substring(0,500) : '')
+      });
+    }catch(_){}
+  });
 })();
 
 function tentarAbrirDebug(){
@@ -2323,6 +2363,32 @@ function tentarAbrirDebug(){
     _debugClickCount = 0;
     abrirPainelDebug();
   }
+}
+
+// ════════════════════════════════════════
+//  ENVIAR LOG DE ERRO PRO FIREBASE
+//  (visível no painel admin do PDV)
+// ════════════════════════════════════════
+function enviarLogErro(tipo, mensagem, contexto){
+  // tipo: 'erro' | 'aviso' | 'info'
+  if(!fbDb || !_tenantId) return;
+  try{
+    var dados = {
+      tipo: tipo || 'erro',
+      mensagem: String(mensagem || ''),
+      contexto: contexto || {},
+      garcom: _nomeGarcom || '(desconhecido)',
+      restauranteId: _restauranteId || '',
+      mesa: _mesaAtiva || null,
+      quando: Date.now(),
+      userAgent: navigator.userAgent.substring(0, 100),
+      online: navigator.onLine
+    };
+    // TTL: 7 dias (timestamp da expiração)
+    dados.expiraEm = Date.now() + (7 * 24 * 60 * 60 * 1000);
+    fbDb.collection('tenants').doc(_tenantId).collection('admin_logs').add(dados)
+      .catch(function(e){ /* silencioso */ });
+  }catch(e){ /* silencioso, log não pode quebrar app */ }
 }
 
 function abrirPainelDebug(){

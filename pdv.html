@@ -2666,7 +2666,7 @@ function renderGarconsPDV(){
     card.innerHTML =
       '<div class="garcom-avatar">'+inicial+'</div>'+
       '<div class="garcom-info">'+
-        '<div class="garcom-nome">'+escapeHtml(g.nome||'—')+'</div>'+
+        '<div class="garcom-nome">'+escapeHtml(g.nome||'—')+(g.admin?' <span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.62rem;font-weight:700;padding:1px 6px;border-radius:5px;letter-spacing:0.04em;vertical-align:middle;">👑 ADMIN</span>':'')+'</div>'+
         '<div class="garcom-meta">'+(g.apelido?'Apelido: '+escapeHtml(g.apelido):'Sem apelido')+'</div>'+
       '</div>'+
       '<span class="garcom-status-tag '+status+'">'+(status==='ativo'?'Ativo':'Inativo')+'</span>';
@@ -2681,6 +2681,7 @@ function abrirNovoGarcom(){
   document.getElementById('garcom-pdv-nome').value = '';
   document.getElementById('garcom-pdv-apelido').value = '';
   document.querySelector('input[name="garcom-status"][value="ativo"]').checked = true;
+  document.getElementById('garcom-pdv-admin').checked = false;
   document.getElementById('btn-excluir-garcom').style.display = 'none';
   document.getElementById('modal-garcom-pdv').classList.add('show');
   setTimeout(function(){ document.getElementById('garcom-pdv-nome').focus(); }, 100);
@@ -2693,6 +2694,7 @@ function abrirEditarGarcom(g){
   document.getElementById('garcom-pdv-apelido').value = g.apelido||'';
   var st = g.status || 'ativo';
   document.querySelector('input[name="garcom-status"][value="'+st+'"]').checked = true;
+  document.getElementById('garcom-pdv-admin').checked = (g.admin === true);
   document.getElementById('btn-excluir-garcom').style.display = 'inline-flex';
   document.getElementById('modal-garcom-pdv').classList.add('show');
 }
@@ -2703,8 +2705,9 @@ function salvarGarcom(){
   var apelido = document.getElementById('garcom-pdv-apelido').value.trim();
   var statusEl = document.querySelector('input[name="garcom-status"]:checked');
   var status = statusEl ? statusEl.value : 'ativo';
+  var admin = document.getElementById('garcom-pdv-admin').checked === true;
   var dados = {
-    nome: nome, apelido: apelido, status: status,
+    nome: nome, apelido: apelido, status: status, admin: admin,
     atualizadoEm: Date.now()
   };
   var promessa;
@@ -2735,7 +2738,7 @@ function excluirGarcom(){
 function publicarListaGarcons(){
   if(!_restauranteAtivo) return;
   var ativos = _garconsCache.filter(function(g){ return (g.status||'ativo')==='ativo'; })
-    .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||''}; });
+    .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||'', admin: g.admin === true}; });
   fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
     garcons: ativos,
     garconsAtualizadoEm: Date.now()
@@ -6417,6 +6420,16 @@ async function executarExclusaoRestaurante(id, nome){
             <input type="radio" name="garcom-status" value="inativo"> <span style="font-size:0.85rem;">Inativo</span>
           </label>
         </div>
+      </div>
+      <div class="f-grupo">
+        <label class="f-label">Permissões</label>
+        <label style="display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,rgba(212,168,67,0.08),rgba(212,168,67,0.02));border:1px solid rgba(212,168,67,0.25);border-radius:10px;padding:12px;cursor:pointer;">
+          <input type="checkbox" id="garcom-pdv-admin" style="width:18px;height:18px;cursor:pointer;">
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:0.88rem;color:var(--accent);">👑 É administrador</div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Acesso ao painel de admin (logs, diagnóstico, manutenção)</div>
+          </div>
+        </label>
       </div>
     </div>
     <div class="modal-footer">

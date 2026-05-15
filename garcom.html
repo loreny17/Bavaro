@@ -6845,10 +6845,8 @@ function abrirVerPedidosMesa(num){
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==', mesaInt)
     .onSnapshot(function(snap){
+      console.log('[VER-PEDIDOS] query mesa-int (mesa=' + mesaInt + '):', snap.size, 'pedidos');
       snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
-      // Remove pedidos que não aparecem mais (foram deletados ou transferidos pra outra mesa)
-      var idsAtuais = {};
-      snap.forEach(function(d){ idsAtuais[d.id] = true; });
       filtrarERender();
     }, function(err){
       console.error('[VER-PEDIDOS] Erro query mesa-int:', err);
@@ -6858,14 +6856,39 @@ function abrirVerPedidosMesa(num){
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==', mesaStr)
     .onSnapshot(function(snap){
+      console.log('[VER-PEDIDOS] query mesa-str (mesa="' + mesaStr + '"):', snap.size, 'pedidos');
       snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
       filtrarERender();
     }, function(err){
       console.error('[VER-PEDIDOS] Erro query mesa-str:', err);
     });
 
-  // Wrapper que cancela ambos
-  _verPedidosUnsub = function(){ unsub1(); unsub2(); };
+  // QUERY EXTRA: busca por contaId direto (pega pedidos transferidos que mantiveram contaId mas perderam mesa)
+  var unsub3 = null;
+  if(contaIdAtual){
+    unsub3 = fbDb.collection('pedidos')
+      .where('restauranteId','==',_restauranteId)
+      .where('contaId','==', contaIdAtual)
+      .onSnapshot(function(snap){
+        console.log('[VER-PEDIDOS] query contaId (' + contaIdAtual.substring(0,8) + '...):', snap.size, 'pedidos');
+        snap.forEach(function(d){
+          // Log de cada pedido pra entender o que tem
+          var data = d.data();
+          console.log('[VER-PEDIDOS]   pedido', d.id.substring(0,8), '| mesa:', data.mesa, '(tipo ' + typeof data.mesa + ') | contaId:', (data.contaId||'').substring(0,8), '| criadoEm:', data.criadoEm, '| transferidoEm:', data.transferidoEm);
+          pedidosCache[d.id] = data;
+        });
+        filtrarERender();
+      }, function(err){
+        console.error('[VER-PEDIDOS] Erro query contaId:', err);
+      });
+  }
+
+  // Wrapper que cancela todos
+  _verPedidosUnsub = function(){
+    unsub1();
+    unsub2();
+    if(unsub3) unsub3();
+  };
 }
 
 function fecharVerPedidosMesa(){

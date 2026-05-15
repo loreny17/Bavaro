@@ -5138,40 +5138,85 @@ function acaoMesa(acao){
 // ════════════════════════════════════════
 function abrirContaMesa(num){
   var mesaInt = parseInt(num) || num;
-  // PRIMEIRO: verifica se já existe conta_mesa aberta pra essa mesa (cache)
-  var cached = _contasMesaCache[String(num)];
-  if(cached && cached.id){
-    // Já existe — só entra na mesa, NÃO cria nova
-    showToast('✓ Mesa ' + num + ' (continuando conta existente)','#4ade80');
+
+  // Helper: conta é "vazia" se não tem itens nem pagamentos
+  function contaEhVazia(c){
+    if(!c) return true;
+    var temItens = (c.itens||[]).some(function(it){ return it.status !== 'cancelado'; });
+    var temPagamentos = (c.pagamentos||[]).length > 0;
+    return !temItens && !temPagamentos;
+  }
+
+  // Helper: entra na mesa (com ou sem conta nova)
+  function entrarNaMesa(msg, cor){
+    if(msg) showToast(msg, cor || '#4ade80');
     _mesaAtiva = num;
     _carrinho = [];
     _catAtiva = null;
     carregarCarrinho();
     document.getElementById('mesa-screen').classList.add('hidden');
     iniciarApp();
+  }
+
+  // PRIMEIRO: verifica cache
+  var cached = _contasMesaCache[String(num)];
+  if(cached && cached.id){
+    if(contaEhVazia(cached)){
+      // Conta vazia — reusa silenciosamente, sem mensagem confusa
+      entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
+    } else {
+      // Conta com itens reais — informa o garçom
+      entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
+    }
     return;
   }
-  // SEGUNDO: busca direto no Firestore (caso o cache ainda não chegou)
+
+  // SEGUNDO: busca direto no Firestore
   fbDb.collection('contas_mesa')
     .where('restauranteId','==', _restauranteId)
     .where('mesa','==', mesaInt)
     .where('status','==','aberta')
     .get().then(function(snap){
       if(!snap.empty){
-        // Já existe conta aberta no servidor — usa ela
-        if(snap.size > 1){
-          showToast('⚠️ ' + snap.size + ' contas órfãs detectadas — use "Liberar mesa" pra limpar','#f7a34f', 4000);
+        // Achou conta(s) aberta(s) — escolhe a melhor pra usar
+        var contas = [];
+        snap.forEach(function(d){
+          contas.push(Object.assign({id:d.id}, d.data()));
+        });
+
+        // Separa por: tem conteúdo vs vazia
+        var comConteudo = contas.filter(function(c){ return !contaEhVazia(c); });
+        var vazias = contas.filter(function(c){ return contaEhVazia(c); });
+
+        if(comConteudo.length > 0){
+          // Existe conta com itens — usa ela
+          if(snap.size > 1){
+            showToast('⚠️ ' + snap.size + ' contas detectadas — use "Liberar mesa" pra limpar','#f7a34f', 4000);
+          }
+          entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
+          // Limpa contas vazias órfãs em background
+          if(vazias.length > 0){
+            console.log('[ABRIR-CONTA] Limpando ' + vazias.length + ' conta(s) vazia(s) órfã(s)');
+            vazias.forEach(function(c){
+              fbDb.collection('contas_mesa').doc(c.id).delete().catch(function(){});
+            });
+          }
+          return;
         }
-        showToast('✓ Mesa ' + num + ' (conta existente recuperada)','#4ade80');
-        _mesaAtiva = num;
-        _carrinho = [];
-        _catAtiva = null;
-        carregarCarrinho();
-        document.getElementById('mesa-screen').classList.add('hidden');
-        iniciarApp();
+
+        // Só tem vazias — pega a mais antiga, deleta as outras
+        if(vazias.length > 1){
+          vazias.sort(function(a,b){ return (a.abertaEm||0) - (b.abertaEm||0); });
+          // Mantém só a primeira, deleta as outras em background
+          for(var i = 1; i < vazias.length; i++){
+            fbDb.collection('contas_mesa').doc(vazias[i].id).delete().catch(function(){});
+          }
+        }
+        entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
         return;
       }
-      // TERCEIRO: cria nova (não existe nenhuma aberta)
+
+      // TERCEIRO: cria nova
       var conta = {
         restauranteId: _restauranteId,
         tenantId: _tenantId || null,
@@ -5185,30 +5230,20 @@ function abrirContaMesa(num){
         abertaEm: Date.now(),
         abertaPor: _nomeGarcom
       };
-      showToast('✓ Conta da Mesa ' + num + ' aberta','#4ade80');
-      _mesaAtiva = num;
-      _carrinho = [];
-      _catAtiva = null;
-      carregarCarrinho();
-      document.getElementById('mesa-screen').classList.add('hidden');
-      iniciarApp();
+      entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
       fbDb.collection('contas_mesa').add(conta).catch(function(e){
         console.error('Erro ao criar conta:', e);
         showToast('❌ Falha ao criar conta — verifique conexão','#f87171');
       });
     }).catch(function(e){
       console.error('Erro buscar conta existente:', e);
-      // Fallback: tenta criar mesmo assim
       var conta = {
         restauranteId: _restauranteId, tenantId: _tenantId || null,
         mesa: mesaInt, status: 'aberta', itens: [], pagamentos: [],
         subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
         garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom
       };
-      _mesaAtiva = num; _carrinho = []; _catAtiva = null;
-      carregarCarrinho();
-      document.getElementById('mesa-screen').classList.add('hidden');
-      iniciarApp();
+      entrarNaMesa(null);
       fbDb.collection('contas_mesa').add(conta).catch(function(e){
         showToast('❌ '+e.message,'#f87171');
       });
@@ -6620,62 +6655,77 @@ function abrirVerPedidosMesa(num){
   pushHistory('ver-pedidos:'+num);
 
   // Escuta pedidos da mesa em tempo real.
-  // Estratégia: filtra por MESA + janela de tempo (desde abertura da conta atual)
-  // Mais robusto que filtrar por contaId, especialmente após transferências.
+  // Estratégia robusta: busca TODOS pedidos da mesa (int e string)
+  // E filtra no cliente por janela de tempo OU contaId.
   var contaAtual = _contasMesaCache[String(num)] || _contasMesaCache[num];
   var contaIdAtual = contaAtual ? contaAtual.id : null;
   var abertaEm = (contaAtual && contaAtual.abertaEm) ? contaAtual.abertaEm : 0;
   if(_verPedidosUnsub) _verPedidosUnsub();
-  if(!contaAtual){
-    // Sem conta aberta — não tem pedidos válidos pra mostrar
-    var body0 = document.getElementById('ver-pedidos-body');
-    if(body0) body0.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-titulo">Sem pedidos</div><div class="empty-sub">Esta mesa não tem conta aberta no momento.</div></div>';
-    return;
-  }
+
+  var body0 = document.getElementById('ver-pedidos-body');
+  if(body0) body0.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando pedidos...</div></div>';
+
   var mesaInt = parseInt(num);
   var mesaStr = String(num);
-  // Query principal: filtra por mesa e restaurante (sem contaId, mais flexível)
-  _verPedidosUnsub = fbDb.collection('pedidos')
+
+  // BUSCA DUPLA: pega pedidos com mesa como int E como string
+  // Isso resolve problemas de tipo (alguns pedidos antigos podem ter mesa como string)
+  console.log('[VER-PEDIDOS] Mesa:', num, '| contaIdAtual:', contaIdAtual, '| abertaEm:', abertaEm);
+
+  var pedidosCache = {}; // {id: pedidoData} pra deduplica
+
+  function filtrarERender(){
+    var lista = [];
+    Object.keys(pedidosCache).forEach(function(id){
+      var data = pedidosCache[id];
+      // ESTRATÉGIA SIMPLIFICADA E ROBUSTA:
+      // Mostra pedido se:
+      //   - contaId bate com a conta atual, OU
+      //   - foi criado/transferido recentemente (depois da abertura da conta), OU
+      //   - mesa atual não tem conta (mostra todos os pedidos da mesa)
+      var pertence;
+      if(!contaIdAtual){
+        // Sem conta no cache — mostra tudo da mesa pra não deixar usuário no escuro
+        pertence = true;
+      } else {
+        pertence = (data.contaId === contaIdAtual)
+          || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
+          || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
+      }
+      if(pertence){
+        lista.push(Object.assign({id:id}, data));
+      }
+    });
+    lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+    console.log('[VER-PEDIDOS] Pedidos encontrados:', Object.keys(pedidosCache).length, '| Após filtro:', lista.length);
+    renderVerPedidosMesa(lista);
+  }
+
+  var unsub1 = fbDb.collection('pedidos')
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==', mesaInt)
     .onSnapshot(function(snap){
-      var lista = [];
-      snap.forEach(function(d){
-        var data = d.data();
-        // Filtra por janela de tempo (desde abertura da conta atual)
-        // OU se o contaId bate com a conta atual
-        // OU se foi transferido pra essa mesa (transferidoEm preenchido)
-        var pertence = (data.contaId === contaIdAtual)
-          || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
-          || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
-        if(pertence){
-          lista.push(Object.assign({id:d.id}, data));
-        }
-      });
-      lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
-      renderVerPedidosMesa(lista);
+      snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
+      // Remove pedidos que não aparecem mais (foram deletados ou transferidos pra outra mesa)
+      var idsAtuais = {};
+      snap.forEach(function(d){ idsAtuais[d.id] = true; });
+      filtrarERender();
     }, function(err){
-      console.error('Erro pedidos mesa:', err);
-      // Fallback: tenta com mesa como string (mesas antigas)
-      _verPedidosUnsub = fbDb.collection('pedidos')
-        .where('restauranteId','==',_restauranteId)
-        .where('mesa','==', mesaStr)
-        .onSnapshot(function(snap){
-          var lista = [];
-          snap.forEach(function(d){
-            var data = d.data();
-            var pertence = (data.contaId === contaIdAtual)
-              || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
-              || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
-            if(pertence){ lista.push(Object.assign({id:d.id}, data)); }
-          });
-          lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
-          renderVerPedidosMesa(lista);
-        }, function(){
-          var body = document.getElementById('ver-pedidos-body');
-          if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro ao carregar</div></div>';
-        });
+      console.error('[VER-PEDIDOS] Erro query mesa-int:', err);
     });
+
+  var unsub2 = fbDb.collection('pedidos')
+    .where('restauranteId','==',_restauranteId)
+    .where('mesa','==', mesaStr)
+    .onSnapshot(function(snap){
+      snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
+      filtrarERender();
+    }, function(err){
+      console.error('[VER-PEDIDOS] Erro query mesa-str:', err);
+    });
+
+  // Wrapper que cancela ambos
+  _verPedidosUnsub = function(){ unsub1(); unsub2(); };
 }
 
 function fecharVerPedidosMesa(){

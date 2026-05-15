@@ -1185,69 +1185,25 @@ function revalidarConexaoFirestore(){
 
 // ════════════════════════════════════════
 //  PROTEÇÃO CONTRA TOQUES ENFILEIRADOS
-//  (quando o celular volta do bloqueio LONGO)
+//  DESATIVADA — estava bloqueando toques normais
 // ════════════════════════════════════════
 var _wakeBloqueado = false;
 var _wakeAteQuando = 0;
 var _ultimoEscondidoEm = 0; // quando ficou escondido pela última vez
 
 function ativarWakeBloqueio(motivo){
-  _wakeBloqueado = true;
-  _wakeAteQuando = Date.now() + 800; // 800ms é suficiente
-  mostrarOverlayWake();
-  setTimeout(function(){
-    _wakeBloqueado = false;
-    esconderOverlayWake();
-  }, 800);
+  // Apenas re-conecta Firebase, NÃO bloqueia toques
+  revalidarConexaoFirestore();
 }
 
 function isWakeBloqueado(){
-  if(!_wakeBloqueado) return false;
-  if(Date.now() > _wakeAteQuando){
-    _wakeBloqueado = false;
-    esconderOverlayWake();
-    return false;
-  }
-  return true;
+  return false; // sempre false — não bloqueia mais
 }
 
-function mostrarOverlayWake(){
-  var ex = document.getElementById('wake-overlay');
-  if(ex) return;
-  var div = document.createElement('div');
-  div.id = 'wake-overlay';
-  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
-  div.innerHTML = '<div style="background:rgba(20,20,20,0.95);border:1px solid rgba(212,168,67,0.3);border-radius:14px;padding:16px 22px;display:flex;align-items:center;gap:12px;color:#fff;font-size:0.9rem;">' +
-    '<div style="width:18px;height:18px;border:2.5px solid rgba(212,168,67,0.3);border-top-color:#d4a843;border-radius:50%;animation:wake-spin 0.7s linear infinite;"></div>' +
-    '<span>Reconectando...</span>' +
-  '</div>' +
-  '<style>@keyframes wake-spin{to{transform:rotate(360deg);}}</style>';
-  document.body.appendChild(div);
-}
+function mostrarOverlayWake(){ /* desativado */ }
+function esconderOverlayWake(){ /* desativado */ }
 
-function esconderOverlayWake(){
-  var ex = document.getElementById('wake-overlay');
-  if(ex) ex.remove();
-}
-
-// Listener global de cliques pra bloquear se estiver em modo wake
-document.addEventListener('click', function(e){
-  if(isWakeBloqueado()){
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    return false;
-  }
-}, true);
-
-document.addEventListener('touchend', function(e){
-  if(isWakeBloqueado()){
-    e.preventDefault();
-    e.stopPropagation();
-    return false;
-  }
-}, true);
-
+// Removidos os listeners de click/touchend que bloqueavam
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'hidden'){
     // App ficou escondido — marca o momento

@@ -5684,6 +5684,7 @@ function renderRelatorios(){
 
 // Estado da ordenação do cardápio completo
 var _ordemCardapioRel = 'qtd';
+var _categoriaCardapioRel = ''; // '' = todas
 function setOrdemCardapio(ordem){
   _ordemCardapioRel = ordem;
   ['qtd','menos','zero','az'].forEach(function(k){
@@ -5691,6 +5692,12 @@ function setOrdemCardapio(ordem){
     if(b){ b.classList.toggle('rel-pill-ativo', k === ordem); }
   });
   // Re-renderiza com a nova ordem (sem refazer cálculos)
+  if(_cardapioRelCache){
+    _renderCardapioOrdenado(_cardapioRelCache);
+  }
+}
+function setCategoriaCardapio(cat){
+  _categoriaCardapioRel = cat || '';
   if(_cardapioRelCache){
     _renderCardapioOrdenado(_cardapioRelCache);
   }
@@ -5740,6 +5747,24 @@ function renderCardapioCompleto(contas, itensMapVendas){
       });
 
       _cardapioRelCache = { todosItens: todosItens };
+
+      // Popula dropdown de categorias
+      var categorias = {};
+      todosItens.forEach(function(it){
+        if(it.categoria) categorias[it.categoria] = true;
+      });
+      var listaCats = Object.keys(categorias).sort();
+      var sel = document.getElementById('rel-card-cat-filtro');
+      if(sel){
+        var valorAtual = _categoriaCardapioRel || '';
+        var optsHtml = '<option value="">Todas as categorias (' + todosItens.length + ')</option>';
+        listaCats.forEach(function(c){
+          var qtdNaCat = todosItens.filter(function(it){ return it.categoria === c; }).length;
+          optsHtml += '<option value="'+escapeHtml(c)+'"' + (c === valorAtual ? ' selected' : '') + '>' + escapeHtml(c) + ' (' + qtdNaCat + ')</option>';
+        });
+        sel.innerHTML = optsHtml;
+      }
+
       _renderCardapioOrdenado(_cardapioRelCache);
     })
     .catch(function(e){
@@ -5754,6 +5779,11 @@ function _renderCardapioOrdenado(cache){
   function fmt(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
 
   var itens = cache.todosItens.slice();
+
+  // FILTRA por categoria (se selecionada)
+  if(_categoriaCardapioRel){
+    itens = itens.filter(function(it){ return it.categoria === _categoriaCardapioRel; });
+  }
 
   // Aplica ordem/filtro
   if(_ordemCardapioRel === 'qtd'){
@@ -5780,12 +5810,16 @@ function _renderCardapioOrdenado(cache){
     return;
   }
 
-  // Contadores no topo
-  var total = cache.todosItens.length;
-  var vendidos = cache.todosItens.filter(function(it){ return it.qtd > 0; }).length;
+  // Contadores no topo (considerando filtro de categoria atual)
+  var baseFiltrada = _categoriaCardapioRel
+    ? cache.todosItens.filter(function(it){ return it.categoria === _categoriaCardapioRel; })
+    : cache.todosItens;
+  var total = baseFiltrada.length;
+  var vendidos = baseFiltrada.filter(function(it){ return it.qtd > 0; }).length;
   var naoVendidos = total - vendidos;
+  var labelCat = _categoriaCardapioRel ? ' em "' + escapeHtml(_categoriaCardapioRel) + '"' : '';
   var resumoHtml = '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;font-size:0.74rem;">' +
-    '<span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;">Total: <strong>'+total+'</strong></span>' +
+    '<span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;">Total'+labelCat+': <strong>'+total+'</strong></span>' +
     '<span style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);color:#4ade80;border-radius:8px;padding:4px 10px;">Vendidos: <strong>'+vendidos+'</strong></span>' +
     '<span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);color:#f87171;border-radius:8px;padding:4px 10px;">Não vendidos: <strong>'+naoVendidos+'</strong></span>' +
     '</div>';
@@ -5797,11 +5831,10 @@ function _renderCardapioOrdenado(cache){
     var qtdBadge = it.qtd === 0
       ? '<span style="background:rgba(248,113,113,0.15);color:#f87171;font-weight:700;font-size:0.74rem;padding:2px 8px;border-radius:8px;margin-right:8px;">0</span>'
       : '<span style="background:rgba(212,168,67,0.12);color:'+cor+';font-weight:700;font-size:0.78rem;padding:2px 8px;border-radius:8px;margin-right:8px;">'+it.qtd+'x</span>';
-    var cat = it.categoria ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+escapeHtml(it.categoria)+'</div>' : '';
     var valor = it.qtd > 0 ? '<span class="valor" style="color:'+cor+';">'+fmt(it.valor)+'</span>' : '<span style="color:var(--muted);font-size:0.78rem;">—</span>';
     html += '<div class="rel-item-row" style="background:'+bg+';padding-left:6px;padding-right:6px;border-radius:6px;">' +
       qtdBadge +
-      '<span class="nome" style="opacity:'+(it.ativo?'1':'0.6')+';">' + escapeHtml(it.nome) + cat + '</span>' +
+      '<span class="nome" style="opacity:'+(it.ativo?'1':'0.6')+';">' + escapeHtml(it.nome) + '</span>' +
       valor +
     '</div>';
   });
@@ -6566,6 +6599,11 @@ async function executarExclusaoRestaurante(id, nome){
     </div>
     <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;line-height:1.4;">
       💡 Use a aba <strong>Não vendidos</strong> para identificar itens que podem sair do cardápio.
+    </div>
+    <div style="margin-bottom:12px;">
+      <select id="rel-card-cat-filtro" onchange="setCategoriaCardapio(this.value)" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:10px;font-size:0.85rem;font-family:inherit;cursor:pointer;">
+        <option value="">Todas as categorias</option>
+      </select>
     </div>
     <div id="rel-cardapio-completo">—</div>
   </div>

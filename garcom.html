@@ -656,11 +656,18 @@ header{
       <div class="menu-lateral-avatar">👤</div>
       <div style="flex:1;cursor:pointer;" onclick="tentarAbrirDebug()">
         <div style="font-weight:700;font-size:0.95rem;" id="menu-lateral-nome">—</div>
-        <div style="font-size:0.72rem;color:var(--muted);">Garçom</div>
+        <div style="font-size:0.72rem;color:var(--muted);" id="menu-lateral-sub">Garçom</div>
       </div>
       <button class="modal-fechar" onclick="fecharMenuLateral()">×</button>
     </div>
     <div class="menu-lateral-body">
+      <button class="menu-lateral-item" id="menu-item-admin-garcom" onclick="fecharMenuLateral();abrirPainelAdminGarcom()" style="display:none;background:linear-gradient(135deg,rgba(212,168,67,0.10),rgba(212,168,67,0.02));border-left:3px solid var(--accent);">
+        <span style="font-size:1.4rem;">🛡️</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;color:var(--accent);">Painel Admin</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Logs, diagnóstico e ferramentas</div>
+        </div>
+      </button>
       <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirHistorico()">
         <span style="font-size:1.4rem;">📜</span>
         <div style="flex:1;text-align:left;">
@@ -1478,10 +1485,26 @@ function trocarAba(aba){
 function mostrarMesas(){
   document.getElementById('mesa-screen').classList.remove('hidden');
   document.getElementById('app').style.display = 'none';
-  document.getElementById('garcom-badge').textContent = '👤 ' + _nomeGarcom;
+  // Badge no header: nome + crown se admin
+  var badgeHtml = '👤 ' + escapeHtml(_nomeGarcom);
+  if(_ehAdmin) badgeHtml = '👑 ' + escapeHtml(_nomeGarcom);
+  document.getElementById('garcom-badge').innerHTML = badgeHtml;
   document.getElementById('mesa-header-sub').textContent = 'Olá, ' + _nomeGarcom + '! Escolha uma mesa.';
+  // Nome no menu lateral: com badge ADMIN se admin
   var nomeEl = document.getElementById('menu-lateral-nome');
-  if(nomeEl) nomeEl.textContent = _nomeGarcom || '—';
+  if(nomeEl){
+    if(_ehAdmin){
+      nomeEl.innerHTML = escapeHtml(_nomeGarcom) + ' <span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.55rem;font-weight:700;padding:1px 6px;border-radius:5px;letter-spacing:0.04em;vertical-align:middle;">👑 ADMIN</span>';
+    } else {
+      nomeEl.textContent = _nomeGarcom || '—';
+    }
+  }
+  // Subtítulo no menu lateral: "Administrador" se admin, senão "Garçom"
+  var subEl = document.getElementById('menu-lateral-sub');
+  if(subEl) subEl.textContent = _ehAdmin ? 'Administrador' : 'Garçom';
+  // Mostra/esconde item Admin no menu
+  var admItem = document.getElementById('menu-item-admin-garcom');
+  if(admItem) admItem.style.display = _ehAdmin ? '' : 'none';
   carregarTenantParaMesas();
 }
 
@@ -2488,6 +2511,193 @@ function copiarLogsDebug(){
 // ════════════════════════════════════════
 // IMAGEM DO QR — substitua o data:image abaixo pela base64 do seu QR
 var _QR_AVALIACAO_BASE64 = 'data:image/png;base64,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/PZ///hTivzqnRWO4/PHUH+j6/jtDlPcnFT/no/giVT/LfT+EI/y9+74SphxEgCCBQgWgGABCBYgWACCBSBYwMquNd5G13G74ftwF1+fVm8hfpALLOMU6+wKq/QHsPwzMnb4ENewea18JQQEC0CwAMECECwAwQIEC0CwAAQL9mG89nISTHEi9t4V/s0Iddcd06fYLr3C3vzDN313hQUgWIBgAQgWgGABggUgWACCBQgWQAKT7iXER6iHDyjXP8IK73H4vTWzn2musABfCQEECxAsAMECECxAsAAEC0Cwek+yLTDxCGtYZNJdU4LeTGB/XuTHV/AAhaPAzvez35DgKyHgKyGAYAGCBSBYAIIFCBaAYAEIFrCJCSbdd5iQjr/H4IR0wnxz/V3n4++i97kavyHBFRbswh1gggUgWIBgAQgWgGABggUgWACCBQgWQI7T8C7gCgtAsADBAhAsAMECBAtAsAAECxAsAMECECxAsAAEC0CwAMECECwAwQIEC0CwAAQLECwAwQIQLECwAAQLQLAAwQIQLECwAAQLQLAAwQIQLADBAgQLQLAABAsQLADBAhAsQLAABAtAsADBAhAsAAAAAAAAAIDf/ASHKtkcVPmXqAAAAABJRU5ErkJggg==';
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN no APP GARÇOM (mobile)
+//  Espelha logs do Firebase, mesma fonte do PDV
+// ════════════════════════════════════════
+var _adminGarcomLogsCache = [];
+var _adminGarcomUnsub = null;
+var _adminGarcomFiltro = 'todos'; // todos | erros | avisos
+
+function abrirPainelAdminGarcom(){
+  if(!_ehAdmin){
+    showToast('Apenas administradores','#f87171');
+    return;
+  }
+  var ex = document.getElementById('modal-admin-garcom');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.className = 'modal show';
+  mod.id = 'modal-admin-garcom';
+  mod.style.cssText = 'background:rgba(0,0,0,0.9);';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:none;width:100%;height:100%;border-radius:0;display:flex;flex-direction:column;background:var(--surface);">' +
+      // Header
+      '<div class="modal-header" style="background:linear-gradient(135deg,rgba(212,168,67,0.12),rgba(212,168,67,0.03));border-bottom:1px solid var(--border2);">' +
+        '<div class="modal-titulo" style="display:flex;align-items:center;gap:8px;">' +
+          '🛡️ Painel Admin ' +
+          '<span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:5px;letter-spacing:0.04em;">ADMIN</span>' +
+        '</div>' +
+        '<button class="modal-fechar" onclick="fecharPainelAdminGarcom()">×</button>' +
+      '</div>' +
+      // Sub-abas
+      '<div style="display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg);overflow-x:auto;flex-wrap:nowrap;">' +
+        '<button class="adm-g-pill adm-g-pill-ativo" id="adm-g-pill-logs" onclick="setAbaAdminGarcom(\'logs\')">📋 Logs</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-diag" onclick="setAbaAdminGarcom(\'diag\')">🔍 Diagnóstico</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-manut" onclick="setAbaAdminGarcom(\'manut\')">🔧 Manutenção</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-users" onclick="setAbaAdminGarcom(\'users\')">👥 Usuários</button>' +
+      '</div>' +
+      // Conteúdo
+      '<div style="flex:1;overflow-y:auto;padding:14px;" id="adm-g-conteudo">' +
+        '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>' +
+      '</div>' +
+    '</div>' +
+    '<style>' +
+      '.adm-g-pill{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:7px 14px;border-radius:20px;font-size:0.78rem;cursor:pointer;font-weight:600;white-space:nowrap;flex-shrink:0;}' +
+      '.adm-g-pill-ativo{background:var(--accent);color:#000;border-color:var(--accent);}' +
+      '.adm-g-card{background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;margin-bottom:8px;}' +
+      '.adm-g-card.erro{border-left:3px solid #f87171;}' +
+      '.adm-g-card.aviso{border-left:3px solid #f7a34f;}' +
+      '.adm-g-card.info{border-left:3px solid #4ade80;}' +
+    '</style>';
+  document.body.appendChild(mod);
+  setAbaAdminGarcom('logs');
+}
+
+function fecharPainelAdminGarcom(){
+  var m = document.getElementById('modal-admin-garcom');
+  if(m) m.remove();
+  if(_adminGarcomUnsub){ _adminGarcomUnsub(); _adminGarcomUnsub = null; }
+}
+
+function setAbaAdminGarcom(aba){
+  ['logs','diag','manut','users'].forEach(function(k){
+    var pill = document.getElementById('adm-g-pill-'+k);
+    if(pill) pill.classList.toggle('adm-g-pill-ativo', k === aba);
+  });
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  if(aba === 'logs'){
+    carregarLogsAdminGarcom();
+  } else if(aba === 'diag'){
+    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">🔍</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Diagnóstico</div>' +
+      '<div style="font-size:0.85rem;">Em breve (Bloco 3): mesas com problemas, status do sistema</div>' +
+    '</div>';
+  } else if(aba === 'manut'){
+    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">🔧</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Manutenção</div>' +
+      '<div style="font-size:0.85rem;">Em breve (Bloco 4): limpar órfãs, reimprimir</div>' +
+    '</div>';
+  } else if(aba === 'users'){
+    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">👥</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Usuários</div>' +
+      '<div style="font-size:0.85rem;">Em breve (Bloco 5): gerenciar admins</div>' +
+    '</div>';
+  }
+}
+
+function carregarLogsAdminGarcom(){
+  if(!_tenantId){
+    document.getElementById('adm-g-conteudo').innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Tenant não carregado</div>';
+    return;
+  }
+  if(_adminGarcomUnsub) _adminGarcomUnsub();
+  var conteudo = document.getElementById('adm-g-conteudo');
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando logs...</div>';
+
+  _adminGarcomUnsub = fbDb.collection('tenants').doc(_tenantId).collection('admin_logs')
+    .orderBy('quando', 'desc')
+    .limit(100)
+    .onSnapshot(function(snap){
+      _adminGarcomLogsCache = [];
+      snap.forEach(function(d){ _adminGarcomLogsCache.push(Object.assign({id:d.id}, d.data())); });
+      renderLogsAdminGarcom();
+    }, function(err){
+      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(err.message||'') + '</div>';
+    });
+}
+
+function setFiltroAdminGarcom(f){
+  _adminGarcomFiltro = f;
+  renderLogsAdminGarcom();
+}
+
+function renderLogsAdminGarcom(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  var logs = _adminGarcomLogsCache.slice();
+  if(_adminGarcomFiltro === 'erros'){
+    logs = logs.filter(function(l){ return l.tipo === 'erro'; });
+  } else if(_adminGarcomFiltro === 'avisos'){
+    logs = logs.filter(function(l){ return l.tipo === 'aviso'; });
+  }
+
+  var cntErros = _adminGarcomLogsCache.filter(function(l){ return l.tipo === 'erro'; }).length;
+  var cntAvisos = _adminGarcomLogsCache.filter(function(l){ return l.tipo === 'aviso'; }).length;
+
+  var html = '';
+  // Filtros
+  html += '<div style="display:flex;gap:6px;margin-bottom:12px;">' +
+    '<button class="adm-g-pill ' + (_adminGarcomFiltro==='todos'?'adm-g-pill-ativo':'') + '" onclick="setFiltroAdminGarcom(\'todos\')">Todos (' + _adminGarcomLogsCache.length + ')</button>' +
+    '<button class="adm-g-pill ' + (_adminGarcomFiltro==='erros'?'adm-g-pill-ativo':'') + '" onclick="setFiltroAdminGarcom(\'erros\')">❌ Erros (' + cntErros + ')</button>' +
+    '<button class="adm-g-pill ' + (_adminGarcomFiltro==='avisos'?'adm-g-pill-ativo':'') + '" onclick="setFiltroAdminGarcom(\'avisos\')">⚠️ ' + cntAvisos + '</button>' +
+  '</div>';
+  // Ações
+  html += '<div style="display:flex;gap:6px;margin-bottom:14px;">' +
+    '<button onclick="carregarLogsAdminGarcom()" style="flex:1;padding:8px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:9px;font-size:0.78rem;cursor:pointer;">🔄 Recarregar</button>' +
+    '<button onclick="limparLogsAdminGarcom()" style="flex:1;padding:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:9px;font-size:0.78rem;cursor:pointer;">🗑️ Limpar</button>' +
+  '</div>';
+
+  if(logs.length === 0){
+    html += '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">✨</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Nenhum log</div>' +
+      '<div style="font-size:0.82rem;">' + (_adminGarcomLogsCache.length === 0 ? 'Sistema rodando sem erros' : 'Filtro sem resultados') + '</div>' +
+    '</div>';
+  } else {
+    logs.forEach(function(l){
+      var data = l.quando ? new Date(l.quando) : null;
+      var horaStr = data ? data.toLocaleString('pt-BR') : '—';
+      var tipoClasse = l.tipo === 'erro' ? 'erro' : (l.tipo === 'aviso' ? 'aviso' : 'info');
+      var tipoIcone = l.tipo === 'erro' ? '❌' : (l.tipo === 'aviso' ? '⚠️' : 'ℹ️');
+      var meta = [];
+      if(l.garcom) meta.push('👤 ' + esc(l.garcom));
+      if(l.mesa) meta.push('🪑 ' + l.mesa);
+      if(l.online === false) meta.push('📡 offline');
+
+      html += '<div class="adm-g-card ' + tipoClasse + '">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:0.7rem;color:var(--muted);">' +
+          '<span style="font-weight:700;color:' + (l.tipo==='erro'?'#f87171':l.tipo==='aviso'?'#f7a34f':'#4ade80') + ';">' + tipoIcone + ' ' + (l.tipo||'log').toUpperCase() + '</span>' +
+          '<span>' + horaStr + '</span>' +
+        '</div>' +
+        '<div style="font-size:0.82rem;word-break:break-word;line-height:1.4;font-family:monospace;">' + esc(l.mensagem||'') + '</div>' +
+        (meta.length ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">' + meta.join(' • ') + '</div>' : '') +
+      '</div>';
+    });
+  }
+  conteudo.innerHTML = html;
+}
+
+function limparLogsAdminGarcom(){
+  if(!confirm('Apagar TODOS os ' + _adminGarcomLogsCache.length + ' logs?\\n\\nNão pode ser desfeito.')) return;
+  if(!_tenantId) return;
+  showToast('🗑️ Apagando...','#f7a34f');
+  var batch = fbDb.batch();
+  _adminGarcomLogsCache.forEach(function(l){
+    batch.delete(fbDb.collection('tenants').doc(_tenantId).collection('admin_logs').doc(l.id));
+  });
+  batch.commit().then(function(){
+    showToast('✓ ' + _adminGarcomLogsCache.length + ' logs apagados','#4ade80');
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171');
+  });
+}
 
 function abrirAvaliacao(){
   var ex = document.getElementById('modal-avaliacao');

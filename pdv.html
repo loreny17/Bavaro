@@ -885,6 +885,9 @@ var _user = null;       // {uid, email}
 var _tenantId = null;   // tenant id do usuário logado
 var _restauranteAtivo = null; // {id, nome, emoji}
 var _itens = [];        // cardápio em memória
+var _ehAdminPDV = false;  // se o usuário logado é admin (definido após carregar garcons)
+var _adminLogsCache = []; // logs de admin do Firestore
+var _adminLogsUnsub = null; // listener de logs
 var _categorias = [];   // categorias em memória
 var _catAtiva = null; // null = mostra grade de categorias; 'todas' ou id = mostra itens
 var _modoReordenar = false; // reordenar categorias
@@ -1646,6 +1649,8 @@ function showTab(tab) {
   if(painelI) painelI.style.display = 'none';
   var _painelR = document.getElementById('painel-relatorios');
   if(_painelR) _painelR.style.display = 'none';
+  var _painelA = document.getElementById('painel-admin');
+  if(_painelA) _painelA.style.display = 'none';
   // Mostra a aba ativa
   if(tab === 'cardapio') {
     if(itensGrid) itensGrid.style.display = '';
@@ -1670,6 +1675,10 @@ function showTab(tab) {
     var painelR = document.getElementById('painel-relatorios');
     if(painelR) painelR.style.display = 'block';
     if(typeof carregarRelatorios === 'function') carregarRelatorios();
+  } else if(tab === 'admin') {
+    var painelA = document.getElementById('painel-admin');
+    if(painelA) painelA.style.display = 'block';
+    if(typeof abrirAbaAdmin === 'function') abrirAbaAdmin();
   }
 }
 
@@ -2645,6 +2654,7 @@ function carregarGarconsPDV(){
       return (a.nome||'').localeCompare(b.nome||'');
     });
     renderGarconsPDV();
+    checkAdminPDV();
     publicarListaGarcons();
   }).catch(function(e){
     lista.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
@@ -2732,6 +2742,37 @@ function excluirGarcom(){
     document.getElementById('modal-garcom-pdv').classList.remove('show');
     carregarGarconsPDV();
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
+// ════════════════════════════════════════
+//  VERIFICA SE USUÁRIO LOGADO É ADMIN
+//  Roda após carregar lista de garçons
+// ════════════════════════════════════════
+function checkAdminPDV(){
+  if(!_user || !_user.email){
+    _ehAdminPDV = false;
+    atualizarVisibilidadeAdmin();
+    return;
+  }
+  // Considera admin se EXISTE algum garçom com email/apelido/nome batendo
+  // OU se o email logado tem um garçom com admin=true
+  // Estratégia: usuário logado tem email único, mas o garçom é por nome.
+  // Como solução simples: marca admin se _user.email aparecer em qualquer apelido
+  // ou se o tenant tiver apenas 1 garçom admin (que é o owner).
+  // Por enquanto: considera admin se há QUALQUER garçom com admin=true E
+  // o nome desse garçom contiver alguma parte do email do _user.
+  // SIMPLIFICAÇÃO: por enquanto, qualquer admin no cadastro habilita aba pra o user que tem email.
+  // (usuário PDV é sempre o owner do tenant)
+  var temAdmin = (_garconsCache||[]).some(function(g){ return g.admin === true; });
+  _ehAdminPDV = temAdmin;
+  atualizarVisibilidadeAdmin();
+}
+
+function atualizarVisibilidadeAdmin(){
+  var btn = document.getElementById('menu-item-admin');
+  if(btn){
+    btn.style.display = _ehAdminPDV ? '' : 'none';
+  }
 }
 
 // Publica lista de garçons ativos numa coleção pública pra o app garçom validar login
@@ -6068,6 +6109,172 @@ async function executarExclusaoRestaurante(id, nome){
   }
 }
 
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN - LOGS
+// ════════════════════════════════════════
+var _adminAbaAtiva = 'logs';
+var _adminLogFiltroTipo = 'todos';  // todos | erros | avisos
+var _adminLogFiltroGarcom = '';
+
+function abrirAbaAdmin(){
+  // Quando entra na aba admin pela primeira vez ou retorno
+  setAbaAdmin(_adminAbaAtiva || 'logs');
+  if(_adminAbaAtiva === 'logs' || !_adminAbaAtiva){
+    carregarLogsAdmin();
+  }
+}
+
+function setAbaAdmin(aba){
+  _adminAbaAtiva = aba;
+  ['logs','diag','manut','users'].forEach(function(k){
+    var pill = document.getElementById('adm-pill-'+k);
+    var sub = document.getElementById('adm-sub-'+k);
+    if(pill) pill.classList.toggle('admin-pill-ativo', k === aba);
+    if(sub) sub.style.display = (k === aba) ? '' : 'none';
+  });
+  if(aba === 'logs') carregarLogsAdmin();
+}
+
+function setFiltroLogs(tipo){
+  _adminLogFiltroTipo = tipo;
+  ['todos','erros','avisos'].forEach(function(k){
+    var b = document.getElementById('adm-log-filtro-'+k);
+    if(b) b.classList.toggle('rel-pill-ativo', k === tipo);
+  });
+  renderLogsAdmin();
+}
+
+function setFiltroLogsGarcom(g){
+  _adminLogFiltroGarcom = g || '';
+  renderLogsAdmin();
+}
+
+function carregarLogsAdmin(){
+  if(!_tenantId){
+    document.getElementById('adm-logs-lista').innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Tenant não carregado</div>';
+    return;
+  }
+  // Cancela listener anterior se existir
+  if(_adminLogsUnsub) _adminLogsUnsub();
+
+  document.getElementById('adm-logs-lista').innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando logs...</div>';
+
+  // Escuta em tempo real (últimos 100 logs)
+  _adminLogsUnsub = fbDb.collection('tenants').doc(_tenantId).collection('admin_logs')
+    .orderBy('quando', 'desc')
+    .limit(100)
+    .onSnapshot(function(snap){
+      _adminLogsCache = [];
+      snap.forEach(function(d){
+        _adminLogsCache.push(Object.assign({id:d.id}, d.data()));
+      });
+      atualizarFiltroGarcomLogs();
+      renderLogsAdmin();
+    }, function(err){
+      console.error('Erro carregar logs admin:', err);
+      document.getElementById('adm-logs-lista').innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + escapeHtml(err.message||'') + '</div>';
+    });
+}
+
+function recarregarLogsAdmin(){
+  carregarLogsAdmin();
+  showToast('🔄 Recarregando logs...', '#4ade80');
+}
+
+function atualizarFiltroGarcomLogs(){
+  var sel = document.getElementById('adm-log-garcom-filtro');
+  if(!sel) return;
+  var garcons = {};
+  _adminLogsCache.forEach(function(l){
+    if(l.garcom) garcons[l.garcom] = (garcons[l.garcom]||0) + 1;
+  });
+  var atual = _adminLogFiltroGarcom;
+  var html = '<option value="">Todos garçons (' + _adminLogsCache.length + ')</option>';
+  Object.keys(garcons).sort().forEach(function(g){
+    html += '<option value="' + escapeHtml(g) + '"' + (g === atual ? ' selected' : '') + '>' + escapeHtml(g) + ' (' + garcons[g] + ')</option>';
+  });
+  sel.innerHTML = html;
+}
+
+function renderLogsAdmin(){
+  var lista = document.getElementById('adm-logs-lista');
+  if(!lista) return;
+
+  // Aplica filtros
+  var logs = _adminLogsCache.slice();
+  if(_adminLogFiltroTipo === 'erros'){
+    logs = logs.filter(function(l){ return l.tipo === 'erro'; });
+  } else if(_adminLogFiltroTipo === 'avisos'){
+    logs = logs.filter(function(l){ return l.tipo === 'aviso'; });
+  }
+  if(_adminLogFiltroGarcom){
+    logs = logs.filter(function(l){ return l.garcom === _adminLogFiltroGarcom; });
+  }
+
+  // Atualiza contadores
+  var cntErros = _adminLogsCache.filter(function(l){ return l.tipo === 'erro'; }).length;
+  var cntAvisos = _adminLogsCache.filter(function(l){ return l.tipo === 'aviso'; }).length;
+  document.getElementById('adm-log-cnt-todos').textContent = _adminLogsCache.length;
+  document.getElementById('adm-log-cnt-erros').textContent = cntErros;
+  document.getElementById('adm-log-cnt-avisos').textContent = cntAvisos;
+
+  if(logs.length === 0){
+    var msg = _adminLogsCache.length === 0
+      ? '<div style="text-align:center;color:var(--muted);padding:30px;"><div style="font-size:2.5rem;margin-bottom:10px;">✨</div><div style="font-weight:600;margin-bottom:6px;">Nenhum log registrado</div><div style="font-size:0.85rem;">Sistema rodando sem erros recentes</div></div>'
+      : '<div style="text-align:center;color:var(--muted);padding:20px;">Nenhum log com os filtros aplicados</div>';
+    lista.innerHTML = msg;
+    return;
+  }
+
+  var html = '';
+  logs.forEach(function(l){
+    var data = l.quando ? new Date(l.quando) : null;
+    var horaStr = data ? data.toLocaleString('pt-BR') : '—';
+    var tipoClasse = l.tipo === 'erro' ? 'erro' : (l.tipo === 'aviso' ? 'aviso' : 'info');
+    var tipoIcone = l.tipo === 'erro' ? '❌' : (l.tipo === 'aviso' ? '⚠️' : 'ℹ️');
+
+    var meta = [];
+    if(l.garcom) meta.push('👤 ' + escapeHtml(l.garcom));
+    if(l.mesa) meta.push('🪑 Mesa ' + l.mesa);
+    if(l.restauranteId) meta.push('🏪 ' + escapeHtml(l.restauranteId));
+    if(l.online === false) meta.push('📡 Offline');
+
+    var contextoStr = '';
+    if(l.contexto && Object.keys(l.contexto).length){
+      try{
+        contextoStr = '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:0.72rem;color:var(--muted);">Ver contexto</summary><pre style="font-size:0.7rem;background:var(--bg);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(l.contexto, null, 2)) + '</pre></details>';
+      }catch(e){}
+    }
+
+    html += '<div class="adm-log-card ' + tipoClasse + '">' +
+      '<div class="adm-log-head">' +
+        '<span class="adm-log-tipo ' + tipoClasse + '">' + tipoIcone + ' ' + (l.tipo||'log').toUpperCase() + '</span>' +
+        '<span>' + horaStr + '</span>' +
+      '</div>' +
+      '<div class="adm-log-msg">' + escapeHtml(l.mensagem||'') + '</div>' +
+      (meta.length ? '<div class="adm-log-meta">' + meta.join(' • ') + '</div>' : '') +
+      contextoStr +
+    '</div>';
+  });
+  lista.innerHTML = html;
+}
+
+function limparLogsAdmin(){
+  if(!confirm('Apagar TODOS os logs?\n\nIsso vai deletar permanentemente os ' + _adminLogsCache.length + ' logs salvos.\n\nNão pode ser desfeito.')) return;
+  if(!_tenantId) return;
+  showToast('🗑️ Apagando logs...', '#f7a34f');
+  var batch = fbDb.batch();
+  _adminLogsCache.forEach(function(l){
+    batch.delete(fbDb.collection('tenants').doc(_tenantId).collection('admin_logs').doc(l.id));
+  });
+  batch.commit().then(function(){
+    showToast('✓ ' + _adminLogsCache.length + ' logs apagados', '#4ade80');
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
+}
+
 </script>
 
 <!-- Modal: Adicionar/Editar Impressora -->
@@ -6641,6 +6848,88 @@ async function executarExclusaoRestaurante(id, nome){
 .rel-item-row .valor{font-weight:600;color:var(--accent);}
 </style>
 
+<div id="painel-admin" style="display:none;padding:14px;padding-bottom:120px;">
+  <div style="margin-bottom:14px;">
+    <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+      🛡️ Painel Administrativo
+      <span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:5px;letter-spacing:0.04em;">ADMIN</span>
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted);">Diagnóstico, logs e ferramentas de manutenção</div>
+  </div>
+  <!-- Sub-abas -->
+  <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:10px;">
+    <button class="admin-pill admin-pill-ativo" id="adm-pill-logs" onclick="setAbaAdmin('logs')">📋 Logs</button>
+    <button class="admin-pill" id="adm-pill-diag" onclick="setAbaAdmin('diag')">🔍 Diagnóstico</button>
+    <button class="admin-pill" id="adm-pill-manut" onclick="setAbaAdmin('manut')">🔧 Manutenção</button>
+    <button class="admin-pill" id="adm-pill-users" onclick="setAbaAdmin('users')">👥 Usuários</button>
+  </div>
+  <!-- Sub-aba Logs -->
+  <div id="adm-sub-logs">
+    <!-- Filtros -->
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+      <button class="rel-pill rel-pill-ativo" id="adm-log-filtro-todos" onclick="setFiltroLogs('todos')">Todos</button>
+      <button class="rel-pill" id="adm-log-filtro-erros" onclick="setFiltroLogs('erros')">❌ Erros</button>
+      <button class="rel-pill" id="adm-log-filtro-avisos" onclick="setFiltroLogs('avisos')">⚠️ Avisos</button>
+      <select id="adm-log-garcom-filtro" onchange="setFiltroLogsGarcom(this.value)" style="margin-left:auto;padding:6px 10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:0.78rem;">
+        <option value="">Todos garçons</option>
+      </select>
+    </div>
+    <!-- Resumo -->
+    <div id="adm-log-resumo" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;font-size:0.74rem;">
+      <span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;">Total: <strong id="adm-log-cnt-todos">0</strong></span>
+      <span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);color:#f87171;border-radius:8px;padding:4px 10px;">Erros: <strong id="adm-log-cnt-erros">0</strong></span>
+      <span style="background:rgba(247,163,79,0.08);border:1px solid rgba(247,163,79,0.2);color:#f7a34f;border-radius:8px;padding:4px 10px;">Avisos: <strong id="adm-log-cnt-avisos">0</strong></span>
+    </div>
+    <!-- Ações -->
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button onclick="recarregarLogsAdmin()" style="flex:1;padding:9px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:9px;cursor:pointer;font-size:0.82rem;">🔄 Recarregar</button>
+      <button onclick="limparLogsAdmin()" style="flex:1;padding:9px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:9px;cursor:pointer;font-size:0.82rem;">🗑️ Limpar Todos</button>
+    </div>
+    <!-- Lista de logs -->
+    <div id="adm-logs-lista">—</div>
+  </div>
+  <!-- Sub-aba Diagnóstico (placeholder) -->
+  <div id="adm-sub-diag" style="display:none;">
+    <div style="text-align:center;color:var(--muted);padding:30px;">
+      <div style="font-size:2.5rem;margin-bottom:10px;">🔍</div>
+      <div style="font-weight:600;margin-bottom:6px;">Diagnóstico</div>
+      <div style="font-size:0.85rem;">Em breve (Bloco 3): mesas com problemas, status do sistema</div>
+    </div>
+  </div>
+  <!-- Sub-aba Manutenção (placeholder) -->
+  <div id="adm-sub-manut" style="display:none;">
+    <div style="text-align:center;color:var(--muted);padding:30px;">
+      <div style="font-size:2.5rem;margin-bottom:10px;">🔧</div>
+      <div style="font-weight:600;margin-bottom:6px;">Manutenção</div>
+      <div style="font-size:0.85rem;">Em breve (Bloco 4): limpar órfãos, reimprimir pedidos</div>
+    </div>
+  </div>
+  <!-- Sub-aba Usuários (placeholder) -->
+  <div id="adm-sub-users" style="display:none;">
+    <div style="text-align:center;color:var(--muted);padding:30px;">
+      <div style="font-size:2.5rem;margin-bottom:10px;">👥</div>
+      <div style="font-weight:600;margin-bottom:6px;">Usuários</div>
+      <div style="font-size:0.85rem;">Em breve (Bloco 5): admins, usuários online</div>
+    </div>
+  </div>
+</div>
+<style>
+.admin-pill{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;font-weight:600;transition:all 0.15s;}
+.admin-pill:hover{border-color:var(--accent);}
+.admin-pill-ativo{background:var(--accent);color:#000;border-color:var(--accent);}
+.adm-log-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;}
+.adm-log-card.erro{border-left:3px solid #f87171;}
+.adm-log-card.aviso{border-left:3px solid #f7a34f;}
+.adm-log-card.info{border-left:3px solid #4ade80;}
+.adm-log-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:0.74rem;color:var(--muted);}
+.adm-log-msg{font-size:0.85rem;color:var(--text);word-break:break-word;line-height:1.4;font-family:monospace;}
+.adm-log-meta{font-size:0.72rem;color:var(--muted);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;}
+.adm-log-tipo{font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:0.04em;}
+.adm-log-tipo.erro{background:rgba(248,113,113,0.15);color:#f87171;}
+.adm-log-tipo.aviso{background:rgba(247,163,79,0.15);color:#f7a34f;}
+.adm-log-tipo.info{background:rgba(74,222,128,0.15);color:#4ade80;}
+</style>
+
 <!-- Menu Lateral -->
 <div class="menu-overlay" id="menu-overlay" onclick="fecharMenuLateral()"></div>
 <aside class="menu-lateral" id="menu-lateral">
@@ -6657,6 +6946,7 @@ async function executarExclusaoRestaurante(id, nome){
     <button class="menu-item" onclick="menuIrPara('garcons')"><span class="ico">👥</span><span class="lbl">Garçons</span></button>
     <button class="menu-item" onclick="menuIrPara('impressao')"><span class="ico">🖨️</span><span class="lbl">Impressão</span></button>
     <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
+    <button class="menu-item" id="menu-item-admin" onclick="menuIrPara('admin')" style="display:none;"><span class="ico">🛡️</span><span class="lbl">Admin</span></button>
     <div class="menu-divider"></div>
     <div class="menu-section-title">Restaurante</div>
     <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>

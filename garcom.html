@@ -1386,6 +1386,9 @@ function aplicarLoginGarcom(match, nomeDigitado){
 
   document.getElementById('login-screen').classList.add('hidden');
   mostrarMesas();
+
+  // Inicia escuta de avisos AGORA (depois do login)
+  try{ escutarAvisosGarcom(); }catch(e){ console.warn('Falhou ao iniciar avisos:', e); }
 }
 
 // Modal: garçom cadastrado em mais de um restaurante, escolha qual usar agora
@@ -2879,33 +2882,50 @@ function salvarAvisosVistos(){
 }
 
 function escutarAvisosGarcom(){
-  if(!_tenantId || !_restauranteId || !_nomeGarcom) return;
+  console.log('[AVISOS] escutarAvisosGarcom chamado. tenant:', _tenantId, 'rest:', _restauranteId, 'garcom:', _nomeGarcom);
+  if(!_tenantId || !_restauranteId || !_nomeGarcom){
+    console.warn('[AVISOS] Faltam dados — não vou escutar');
+    return;
+  }
   if(_avisosUnsubGarcom){ _avisosUnsubGarcom(); _avisosUnsubGarcom = null; }
 
-  // Escuta avisos das últimas 24h
-  var limite = Date.now() - (24 * 60 * 60 * 1000);
-
+  // Query SIMPLES — só filtra por restauranteId, resto é em memória
+  // (não precisa de índice composto)
   _avisosUnsubGarcom = fbDb.collection('tenants').doc(_tenantId)
     .collection('avisos')
     .where('restauranteId','==', _restauranteId)
-    .where('criadoEm','>=', limite)
     .onSnapshot(function(snap){
+      console.log('[AVISOS] snapshot recebido, docs:', snap.size, 'changes:', snap.docChanges().length);
+      var limite = Date.now() - (24 * 60 * 60 * 1000); // só últimas 24h
       snap.docChanges().forEach(function(change){
         if(change.type === 'added' || change.type === 'modified'){
           var av = Object.assign({id: change.doc.id}, change.doc.data());
-          // Filtra: pra mim ou pra todos
-          if(av.destino === 'todos' || av.destino === _nomeGarcom){
-            if(!_avisosVistos[av.id]){
-              _avisosVistos[av.id] = true;
-              salvarAvisosVistos();
-              mostrarNotifAviso(av);
-            }
+          console.log('[AVISOS] aviso detectado:', av.id, 'destino:', av.destino, 'msg:', (av.mensagem||'').substring(0,30));
+          // Filtra: data recente
+          if((av.criadoEm||0) < limite){
+            console.log('[AVISOS] aviso antigo, ignorando');
+            return;
           }
+          // Filtra: pra mim ou pra todos
+          var ehParaMim = av.destino === 'todos' || av.destino === _nomeGarcom;
+          if(!ehParaMim){
+            console.log('[AVISOS] não é pra mim ('+_nomeGarcom+'), destino é:', av.destino);
+            return;
+          }
+          if(_avisosVistos[av.id]){
+            console.log('[AVISOS] já vi este aviso, ignorando');
+            return;
+          }
+          _avisosVistos[av.id] = true;
+          salvarAvisosVistos();
+          console.log('[AVISOS] ✓ MOSTRANDO notificação!');
+          mostrarNotifAviso(av);
         }
       });
     }, function(err){
-      console.warn('Erro escutar avisos:', err);
+      console.error('[AVISOS] Erro no listener:', err.code, err.message);
     });
+  console.log('[AVISOS] listener instalado com sucesso');
 }
 
 function mostrarNotifAviso(av){
@@ -3504,8 +3524,12 @@ function _renderAvisosConteudo(){
   var html = '';
 
   // Form de envio
+  var statusAviso = _avisosUnsubGarcom ? '🟢 Escutando avisos' : '⚠️ Não está escutando';
   html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px;">' +
-    '<div style="font-weight:700;margin-bottom:10px;font-size:0.86rem;">📨 Enviar Aviso</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;font-size:0.86rem;flex:1;">📨 Enviar Aviso</div>' +
+      '<div style="font-size:0.66rem;color:var(--muted);">' + statusAviso + '</div>' +
+    '</div>' +
     '<select id="aviso-destino" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.85rem;margin-bottom:8px;font-family:inherit;">' +
       '<option value="todos">📢 Todos os garçons</option>';
   _adminGarconsLista.forEach(function(g){

@@ -3006,34 +3006,55 @@ function renderCaixaDoDia(){
   var inicioOntem = inicioDia - (24 * 60 * 60 * 1000);
   var fimOntem = inicioDia;
 
-  // Listener em contas fechadas + abertas + ontem
-  Promise.all([
-    // Contas fechadas hoje
-    fbDb.collection('contas_fechadas')
+  // Função pra buscar contas fechadas num período (com fallback)
+  function buscarFechadasPeriodo(de, ate){
+    return fbDb.collection('contas_fechadas')
       .where('restauranteId','==', _restauranteId)
-      .where('fechadaEm','>=', inicioDia)
-      .where('fechadaEm','<', fimDia)
-      .get(),
+      .where('fechadaEm','>=', de)
+      .where('fechadaEm','<', ate)
+      .get()
+      .then(function(snap){
+        var arr = [];
+        snap.forEach(function(d){ arr.push(Object.assign({id:d.id}, d.data())); });
+        return arr;
+      })
+      .catch(function(e){
+        // Fallback: busca só por restauranteId e filtra em memória
+        console.warn('[Caixa] fallback de busca:', e.message);
+        return fbDb.collection('contas_fechadas')
+          .where('restauranteId','==', _restauranteId)
+          .limit(200)
+          .get()
+          .then(function(snap){
+            var arr = [];
+            snap.forEach(function(d){
+              var data = d.data() || {};
+              if(data.fechadaEm >= de && data.fechadaEm < ate){
+                arr.push(Object.assign({id:d.id}, data));
+              }
+            });
+            return arr;
+          })
+          .catch(function(){ return []; });
+      });
+  }
+
+  Promise.all([
+    buscarFechadasPeriodo(inicioDia, fimDia),
     // Contas abertas (em andamento) hoje
     fbDb.collection('contas_mesa')
       .where('restauranteId','==', _restauranteId)
       .where('status','==','aberta')
-      .get(),
-    // Contas fechadas ontem (mesmo período)
-    fbDb.collection('contas_fechadas')
-      .where('restauranteId','==', _restauranteId)
-      .where('fechadaEm','>=', inicioOntem)
-      .where('fechadaEm','<', fimOntem)
       .get()
+      .then(function(snap){
+        var arr = [];
+        snap.forEach(function(d){ arr.push(Object.assign({id:d.id}, d.data())); });
+        return arr;
+      })
+      .catch(function(){ return []; }),
+    buscarFechadasPeriodo(inicioOntem, fimOntem)
   ]).then(function(results){
-    var fechadasHoje = [];
-    results[0].forEach(function(d){ fechadasHoje.push(Object.assign({id:d.id}, d.data())); });
-    var abertas = [];
-    results[1].forEach(function(d){ abertas.push(Object.assign({id:d.id}, d.data())); });
-    var fechadasOntem = [];
-    results[2].forEach(function(d){ fechadasOntem.push(Object.assign({id:d.id}, d.data())); });
-
-    _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem);
+    _renderCaixaConteudo(results[0], results[1], results[2]);
   }).catch(function(e){
     conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
   });
@@ -3425,18 +3446,19 @@ function renderAvisos(){
 
   conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>';
 
-  // Busca garçons + listener nos avisos
-  fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteId)
-    .collection('garcons').get()
-    .then(function(snap){
+  // Busca garçons via restaurantes_publicos (lista pública, sempre acessível)
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get()
+    .then(function(doc){
       _adminGarconsLista = [];
-      snap.forEach(function(d){
-        var data = d.data() || {};
-        if((data.status||'ativo') === 'ativo'){
-          _adminGarconsLista.push({ id: d.id, nome: data.nome || '?' });
-        }
-      });
+      if(doc.exists){
+        var dados = doc.data() || {};
+        var lista = dados.garcons || [];
+        lista.forEach(function(g){
+          if(g && g.nome && (g.status||'ativo') === 'ativo'){
+            _adminGarconsLista.push({ id: g.id || g.nome, nome: g.nome });
+          }
+        });
+      }
 
       // Listener nos avisos enviados (últimos 30)
       if(_adminAvisosUnsub){ _adminAvisosUnsub(); }
@@ -3450,7 +3472,7 @@ function renderAvisos(){
           snap2.forEach(function(d){ _adminAvisosCache.push(Object.assign({id:d.id}, d.data())); });
           _renderAvisosConteudo();
         }, function(err){
-          // Fallback se não tem o índice ainda
+          // Fallback se não tem o índice ainda — busca sem orderBy
           fbDb.collection('tenants').doc(_tenantId)
             .collection('avisos')
             .where('restauranteId','==', _restauranteId)
@@ -3467,7 +3489,11 @@ function renderAvisos(){
             });
         });
     }).catch(function(e){
-      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro ao carregar garçons: ' + esc(e.message||'') + '</div>';
+      // Se nem o restaurante público dá pra ler, mostra mesmo assim sem lista de garçons
+      _adminGarconsLista = [];
+      _adminAvisosCache = [];
+      _renderAvisosConteudo();
+      console.warn('Não foi possível carregar lista de garçons:', e);
     });
 }
 

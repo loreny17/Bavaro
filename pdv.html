@@ -1007,14 +1007,25 @@ function limparCacheRecarregar(){
 // ═══ TENANT ═══
 function carregarTenantECarrapio(){
   console.log('[CARREGAR-TENANT] Buscando users/' + _user.uid);
-  // Lê o doc do usuário pra pegar tenantId
-  fbDb.collection('users').doc(_user.uid).get().then(function(doc){
+
+  // Garante que o token de auth está fresh antes de fazer queries
+  // (resolve race condition quando o PDV é aberto direto do app principal)
+  var userAtual = fbAuth.currentUser;
+  if(!userAtual){
+    console.error('[CARREGAR-TENANT] currentUser é null! Aguardando...');
+    setTimeout(carregarTenantECarrapio, 500);
+    return;
+  }
+
+  userAtual.getIdToken(true).then(function(token){
+    console.log('[CARREGAR-TENANT] token renovado, fazendo query');
+    return fbDb.collection('users').doc(_user.uid).get();
+  }).then(function(doc){
     console.log('[CARREGAR-TENANT] doc users exists:', doc.exists);
     if(doc.exists){
       console.log('[CARREGAR-TENANT] doc users data:', JSON.stringify(doc.data()));
     }
     if(!doc.exists || !doc.data().tenantId){
-      // FALLBACK: busca em /tenants/ algum que tenha esse user como owner/membro
       console.log('[CARREGAR-TENANT] doc users vazio — tentando fallback');
       return tentarFallbackTenant();
     }
@@ -1023,10 +1034,18 @@ function carregarTenantECarrapio(){
     prosseguirComTenant();
   }).catch(function(e){
     console.error('[CARREGAR-TENANT] erro buscar users:', e);
+    // Retry uma vez com delay maior (race condition do Auth)
+    if(!_carregarTenantRetried && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
+      _carregarTenantRetried = true;
+      console.log('[CARREGAR-TENANT] retry após 1.5s (permission-denied — provável race condition)');
+      setTimeout(carregarTenantECarrapio, 1500);
+      return;
+    }
     // Tenta fallback antes de desistir
     tentarFallbackTenant();
   });
 }
+var _carregarTenantRetried = false;
 
 // Fallback: busca em /tenants/ qual tem o usuário como owner
 function tentarFallbackTenant(){

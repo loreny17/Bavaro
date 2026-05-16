@@ -2555,7 +2555,7 @@ function abrirPainelAdminGarcom(){
         '<button class="adm-g-pill adm-g-pill-ativo" id="adm-g-pill-logs" onclick="setAbaAdminGarcom(\'logs\')">📋 Logs</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-diag" onclick="setAbaAdminGarcom(\'diag\')">🔍 Diagnóstico</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-manut" onclick="setAbaAdminGarcom(\'manut\')">🔧 Manutenção</button>' +
-        '<button class="adm-g-pill" id="adm-g-pill-users" onclick="setAbaAdminGarcom(\'users\')">👥 Usuários</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-pedidos" onclick="setAbaAdminGarcom(\'pedidos\')">🧾 Pedidos</button>' +
       '</div>' +
       // Conteúdo
       '<div style="flex:1;overflow-y:auto;padding:14px;" id="adm-g-conteudo">' +
@@ -2578,10 +2578,11 @@ function fecharPainelAdminGarcom(){
   var m = document.getElementById('modal-admin-garcom');
   if(m) m.remove();
   if(_adminGarcomUnsub){ _adminGarcomUnsub(); _adminGarcomUnsub = null; }
+  if(_adminPedidosUnsub){ _adminPedidosUnsub(); _adminPedidosUnsub = null; }
 }
 
 function setAbaAdminGarcom(aba){
-  ['logs','diag','manut','users'].forEach(function(k){
+  ['logs','diag','manut','pedidos'].forEach(function(k){
     var pill = document.getElementById('adm-g-pill-'+k);
     if(pill) pill.classList.toggle('adm-g-pill-ativo', k === aba);
   });
@@ -2593,8 +2594,8 @@ function setAbaAdminGarcom(aba){
     renderDiagnosticoGarcom();
   } else if(aba === 'manut'){
     renderManutencaoGarcom();
-  } else if(aba === 'users'){
-    renderUsuariosGarcom();
+  } else if(aba === 'pedidos'){
+    renderPedidosAdminGarcom();
   }
 }
 
@@ -2840,110 +2841,135 @@ async function manutGarcomLimparLogs(){
 }
 
 // ════════════════════════════════════════
-//  PAINEL ADMIN — USUÁRIOS (mobile)
+//  PAINEL ADMIN — PEDIDOS (mobile)
+//  Espelha a tela de pedidos do PDV
 // ════════════════════════════════════════
-function renderUsuariosGarcom(){
+var _adminPedidosCache = [];
+var _adminPedidosUnsub = null;
+var _adminPedidosFiltro = 'todos'; // todos | aguardando | preparo | pronto | entregue
+
+function renderPedidosAdminGarcom(){
   var conteudo = document.getElementById('adm-g-conteudo');
   if(!conteudo) return;
-  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando garçons...</div>';
 
-  // Busca garcons direto do restaurante
-  if(!_restauranteId || !_tenantId){
+  if(!_restauranteId){
     conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado</div>';
     return;
   }
-  fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteId)
-    .collection('garcons').get()
-    .then(function(snap){
-      var garcons = [];
-      snap.forEach(function(d){ garcons.push(Object.assign({id:d.id}, d.data())); });
 
-      // Online: garçom que enviou log nas últimas 2h
-      var limiteOnline = Date.now() - (2 * 60 * 60 * 1000);
-      var onlineMap = {};
-      (_adminGarcomLogsCache||[]).forEach(function(l){
-        if(l.quando >= limiteOnline && l.garcom){
-          onlineMap[l.garcom] = Math.max(onlineMap[l.garcom]||0, l.quando);
-        }
-      });
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando pedidos...</div>';
 
-      // Ordena: admin primeiro
-      garcons.sort(function(a,b){
-        if((a.admin===true) !== (b.admin===true)) return (a.admin===true) ? -1 : 1;
-        return (a.nome||'').localeCompare(b.nome||'');
-      });
+  // Cancela listener anterior
+  if(_adminPedidosUnsub){ _adminPedidosUnsub(); _adminPedidosUnsub = null; }
 
-      var total = garcons.length;
-      var admins = garcons.filter(function(g){ return g.admin === true; }).length;
-      var online = Object.keys(onlineMap).length;
-
-      var html = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;font-size:0.74rem;">' +
-        '<span style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:4px 10px;">Total: <strong>' + total + '</strong></span>' +
-        '<span style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:8px;padding:4px 10px;">👑 Admins: <strong>' + admins + '</strong></span>' +
-        '<span style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);color:#4ade80;border-radius:8px;padding:4px 10px;">🟢 Online: <strong>' + online + '</strong></span>' +
-      '</div>';
-
-      if(garcons.length === 0){
-        html += '<div style="text-align:center;color:var(--muted);padding:20px;">Nenhum garçom cadastrado</div>';
-        conteudo.innerHTML = html;
-        return;
-      }
-
-      garcons.forEach(function(g){
-        var ehAdmin = g.admin === true;
-        var ehAtivo = (g.status||'ativo') === 'ativo';
-        var ehOnline = !!onlineMap[g.nome];
-        var ultimoLogStr = '';
-        if(ehOnline){
-          var min = Math.round((Date.now() - onlineMap[g.nome]) / 60000);
-          ultimoLogStr = min === 0 ? 'agora' : (min + 'min');
-        }
-        var inicial = (g.nome||'?').trim().charAt(0).toUpperCase();
-
-        html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px;margin-bottom:8px;display:flex;align-items:center;gap:10px;' + (ehAtivo?'':'opacity:0.55;') + '">' +
-          '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#a17a30);display:flex;align-items:center;justify-content:center;color:#000;font-family:Bebas Neue,sans-serif;font-size:1.2rem;flex-shrink:0;position:relative;">' +
-            inicial +
-            (ehOnline ? '<span style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;background:#4ade80;border:2px solid var(--surface);border-radius:50%;"></span>' : '') +
-          '</div>' +
-          '<div style="flex:1;min-width:0;">' +
-            '<div style="font-weight:700;font-size:0.86rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-              esc(g.nome||'—') +
-              (ehAdmin ? '<span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.58rem;font-weight:700;padding:1px 5px;border-radius:4px;letter-spacing:0.04em;">👑 ADMIN</span>' : '') +
-            '</div>' +
-            '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">' +
-              (ehAtivo ? 'Ativo' : 'Inativo') +
-              (ehOnline ? ' • <span style="color:#4ade80;">🟢 ' + ultimoLogStr + '</span>' : '') +
-            '</div>' +
-          '</div>' +
-          '<button onclick="toggleAdminGarcomMobile(\'' + g.id + '\', ' + (ehAdmin?'false':'true') + ')" style="' +
-            (ehAdmin
-              ? 'background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;'
-              : 'background:rgba(212,168,67,0.12);border:1px solid rgba(212,168,67,0.3);color:var(--accent);') +
-            'padding:6px 10px;border-radius:7px;font-weight:600;font-size:0.74rem;cursor:pointer;flex-shrink:0;font-family:inherit;">' +
-            (ehAdmin ? 'Remover' : '👑 Admin') +
-          '</button>' +
-        '</div>';
-      });
-      conteudo.innerHTML = html;
-    }).catch(function(e){
-      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
+  // Escuta em tempo real (últimos 50 pedidos)
+  _adminPedidosUnsub = fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .orderBy('criadoEm', 'desc')
+    .limit(50)
+    .onSnapshot(function(snap){
+      _adminPedidosCache = [];
+      snap.forEach(function(d){ _adminPedidosCache.push(Object.assign({id:d.id}, d.data())); });
+      _renderPedidosAdminGarcomLista();
+    }, function(err){
+      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(err.message||'') + '</div>';
     });
 }
 
-function toggleAdminGarcomMobile(garcomId, novoValor){
-  if(!_restauranteId || !_tenantId) return;
-  var msg = novoValor ? 'Tornar este garçom administrador?' : 'Remover admin deste garçom?';
-  if(!confirm(msg)) return;
-  fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteId)
-    .collection('garcons').doc(garcomId)
-    .update({ admin: novoValor, atualizadoEm: Date.now() })
-    .then(function(){
-      showToast('✓ Atualizado','#4ade80');
-      renderUsuariosGarcom();
-    })
-    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+function setFiltroPedidosAdminGarcom(status){
+  _adminPedidosFiltro = status;
+  _renderPedidosAdminGarcomLista();
+}
+
+function _renderPedidosAdminGarcomLista(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  var pedidos = _adminPedidosCache.slice();
+  if(_adminPedidosFiltro !== 'todos'){
+    pedidos = pedidos.filter(function(p){ return (p.status||'aguardando') === _adminPedidosFiltro; });
+  }
+
+  // Contadores por status
+  var cnt = { todos: _adminPedidosCache.length, aguardando: 0, preparo: 0, pronto: 0, entregue: 0 };
+  _adminPedidosCache.forEach(function(p){
+    var s = p.status || 'aguardando';
+    if(cnt[s] !== undefined) cnt[s]++;
+  });
+
+  var statusMap = { aguardando:'⏳ Aguardando', preparo:'👨‍🍳 Preparo', pronto:'✅ Pronto', entregue:'🚀 Entregue' };
+  var statusCor = { aguardando:'#f7a34f', preparo:'#60a5fa', pronto:'#4ade80', entregue:'#9ca3af' };
+
+  var html = '';
+  // Filtros
+  html += '<div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px;">' +
+    '<button class="adm-g-pill ' + (_adminPedidosFiltro==='todos'?'adm-g-pill-ativo':'') + '" onclick="setFiltroPedidosAdminGarcom(\'todos\')">Todos (' + cnt.todos + ')</button>' +
+    '<button class="adm-g-pill ' + (_adminPedidosFiltro==='aguardando'?'adm-g-pill-ativo':'') + '" onclick="setFiltroPedidosAdminGarcom(\'aguardando\')">⏳ ' + cnt.aguardando + '</button>' +
+    '<button class="adm-g-pill ' + (_adminPedidosFiltro==='preparo'?'adm-g-pill-ativo':'') + '" onclick="setFiltroPedidosAdminGarcom(\'preparo\')">👨‍🍳 ' + cnt.preparo + '</button>' +
+    '<button class="adm-g-pill ' + (_adminPedidosFiltro==='pronto'?'adm-g-pill-ativo':'') + '" onclick="setFiltroPedidosAdminGarcom(\'pronto\')">✅ ' + cnt.pronto + '</button>' +
+    '<button class="adm-g-pill ' + (_adminPedidosFiltro==='entregue'?'adm-g-pill-ativo':'') + '" onclick="setFiltroPedidosAdminGarcom(\'entregue\')">🚀 ' + cnt.entregue + '</button>' +
+  '</div>';
+
+  if(pedidos.length === 0){
+    html += '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">🧾</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Nenhum pedido</div>' +
+      '<div style="font-size:0.82rem;">' + (_adminPedidosFiltro === 'todos' ? 'Sem pedidos ainda' : 'Nenhum pedido neste status') + '</div>' +
+    '</div>';
+    conteudo.innerHTML = html;
+    return;
+  }
+
+  pedidos.forEach(function(p){
+    var hora = p.criadoEm ? new Date(p.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+    var dataStr = p.criadoEm ? new Date(p.criadoEm).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) : '';
+    var st = p.status || 'aguardando';
+    var itensVisiveis = (p.itens||[]).filter(function(it){
+      return it.status !== 'cancelado' && !it.transferidoPara;
+    });
+    var total = itensVisiveis.reduce(function(acc,i){
+      if(i.tipoVenda === 'kg' && i.peso) return acc + (i.preco||0);
+      return acc + (i.preco||0)*(i.qtd||1);
+    }, 0);
+
+    var itensHtml = itensVisiveis.map(function(it){
+      var ehKg = it.tipoVenda === 'kg' && it.peso;
+      var qtdEl = ehKg ? '1x' : ((it.qtd||1) + 'x');
+      return '<div style="display:flex;align-items:flex-start;gap:6px;padding:3px 0;font-size:0.78rem;">' +
+        '<span style="color:var(--accent);font-weight:700;flex-shrink:0;">' + qtdEl + '</span>' +
+        '<span style="flex:1;">' + esc(it.nome||'') + '</span>' +
+        '<span style="color:var(--muted);font-size:0.74rem;">R$ ' + ((it.preco||0)*(ehKg?1:(it.qtd||1))).toFixed(2).replace('.',',') + '</span>' +
+      '</div>';
+    }).join('');
+
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:8px;border-left:3px solid ' + statusCor[st] + ';">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">' +
+        '<span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:5px;">#' + (p.id||'').slice(-4).toUpperCase() + '</span>' +
+        '<span style="background:var(--bg);border:1px solid var(--border);font-size:0.74rem;padding:2px 8px;border-radius:5px;font-weight:600;">Mesa ' + (p.mesa||'—') + '</span>' +
+        '<span style="font-size:0.74rem;color:' + statusCor[st] + ';font-weight:700;">' + (statusMap[st]||st) + '</span>' +
+        '<span style="flex:1;"></span>' +
+        '<span style="font-size:0.7rem;color:var(--muted);">' + dataStr + ' ' + hora + '</span>' +
+      '</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:6px;">👤 ' + esc(p.garcom||'—') + (p.transferidoDe ? ' • ↪️ Da Mesa ' + p.transferidoDe : '') + '</div>' +
+      (itensHtml ? '<div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:6px;">' + itensHtml + '</div>' : '') +
+      '<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;padding-top:4px;">' +
+        '<span style="color:var(--muted);font-size:0.74rem;">Total</span>' +
+        '<span style="color:var(--accent);">R$ ' + total.toFixed(2).replace('.',',') + '</span>' +
+      '</div>' +
+    '</div>';
+  });
+
+  conteudo.innerHTML = html;
+}
+
+// Função antiga renderUsuariosGarcom (mantida pra compatibilidade, mas não usada)
+function renderUsuariosGarcom(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+    '<div style="font-size:2.5rem;margin-bottom:10px;">👥</div>' +
+    '<div style="font-weight:600;margin-bottom:6px;">Aba descontinuada</div>' +
+    '<div style="font-size:0.85rem;">Use o PDV para gerenciar admins</div>' +
+  '</div>';
 }
 
 function carregarLogsAdminGarcom(){
@@ -2966,14 +2992,16 @@ function carregarLogsAdminGarcom(){
       var msg = err.message || '';
       var helpHtml = '';
       if(msg.indexOf('permission') >= 0 || msg.indexOf('insufficient') >= 0){
-        helpHtml = '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-top:14px;font-size:0.78rem;color:var(--muted);line-height:1.5;text-align:left;">' +
-          '<div style="font-weight:700;color:var(--accent);margin-bottom:6px;">📜 Liberar regras</div>' +
-          '<div>Acesse o painel admin pelo PDV pra ver as instruções de regras do Firestore.</div>' +
+        helpHtml = '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:14px;margin-top:14px;font-size:0.78rem;color:var(--muted);line-height:1.5;text-align:left;">' +
+          '<div style="font-weight:700;color:var(--accent);margin-bottom:8px;">📜 Regras do Firestore</div>' +
+          '<div style="margin-bottom:10px;">As regras precisam permitir leitura de <code style="color:var(--accent);background:#000;padding:2px 5px;border-radius:3px;font-size:0.72rem;">tenants/{id}/admin_logs</code>.</div>' +
+          '<div style="background:#000;padding:8px;border-radius:6px;font-size:0.68rem;font-family:monospace;color:#9ca3af;overflow-x:auto;white-space:pre;">match /tenants/{tid}/{document=**} {\n  allow read, write: if request.auth != null;\n}</div>' +
+          '<div style="margin-top:8px;font-size:0.72rem;">Acesse no PDV pra ver instruções completas.</div>' +
         '</div>';
       }
       conteudo.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">' +
         '<div style="font-size:2rem;margin-bottom:8px;">🔒</div>' +
-        '<div style="font-size:0.85rem;">Erro: ' + esc(msg) + '</div>' +
+        '<div style="font-size:0.85rem;">' + esc(msg) + '</div>' +
         helpHtml +
       '</div>';
     });

@@ -1006,36 +1006,95 @@ function limparCacheRecarregar(){
 
 // ═══ TENANT ═══
 function carregarTenantECarrapio(){
+  console.log('[CARREGAR-TENANT] Buscando users/' + _user.uid);
   // Lê o doc do usuário pra pegar tenantId
   fbDb.collection('users').doc(_user.uid).get().then(function(doc){
+    console.log('[CARREGAR-TENANT] doc users exists:', doc.exists);
+    if(doc.exists){
+      console.log('[CARREGAR-TENANT] doc users data:', JSON.stringify(doc.data()));
+    }
     if(!doc.exists || !doc.data().tenantId){
-      // Usuário sem tenant: não tem como continuar
-      mostrarErroSemTenant();
-      return;
+      // FALLBACK: busca em /tenants/ algum que tenha esse user como owner/membro
+      console.log('[CARREGAR-TENANT] doc users vazio — tentando fallback');
+      return tentarFallbackTenant();
     }
     _tenantId = doc.data().tenantId;
-    // Carrega restaurante ativo (do localStorage ou força default=Bávaro)
-    var restSalvo = null;
-    try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
-    if(restSalvo){
-      try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){}
-    }
-    if(!_restauranteAtivo){
-      // Default: Bávaro (id='default' onde estão os itens)
-      _restauranteAtivo = {id:'default', nome:'Bávaro', emoji:'🍺'};
-      try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-    }
-    // Se o id é 'default' e nome ainda for "Meu Restaurante", renomeia pra Bávaro
-    if(_restauranteAtivo.id === 'default' && _restauranteAtivo.nome === 'Meu Restaurante'){
-      _restauranteAtivo.nome = 'Bávaro';
-      _restauranteAtivo.emoji = '🍺';
-      try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
-    }
-    iniciarApp();
+    console.log('[CARREGAR-TENANT] tenantId encontrado:', _tenantId);
+    prosseguirComTenant();
   }).catch(function(e){
-    console.error('Erro ao carregar tenant:', e);
-    mostrarErroSemTenant();
+    console.error('[CARREGAR-TENANT] erro buscar users:', e);
+    // Tenta fallback antes de desistir
+    tentarFallbackTenant();
   });
+}
+
+// Fallback: busca em /tenants/ qual tem o usuário como owner
+function tentarFallbackTenant(){
+  console.log('[FALLBACK] Buscando tenants com ownerUid =', _user.uid);
+  return fbDb.collection('tenants')
+    .where('ownerUid','==', _user.uid)
+    .limit(1)
+    .get()
+    .then(function(snap){
+      if(!snap.empty){
+        _tenantId = snap.docs[0].id;
+        console.log('[FALLBACK] ✓ achou por ownerUid:', _tenantId);
+        prosseguirComTenant();
+        return;
+      }
+      // Tenta por ownerEmail
+      console.log('[FALLBACK] Tentando por ownerEmail:', _user.email);
+      return fbDb.collection('tenants')
+        .where('ownerEmail','==', _user.email)
+        .limit(1)
+        .get()
+        .then(function(snap2){
+          if(!snap2.empty){
+            _tenantId = snap2.docs[0].id;
+            console.log('[FALLBACK] ✓ achou por ownerEmail:', _tenantId);
+            prosseguirComTenant();
+            return;
+          }
+          // Última tentativa: localStorage
+          var tenantSalvo = null;
+          try{ tenantSalvo = localStorage.getItem('gestao_tenant_id'); }catch(e){}
+          if(tenantSalvo){
+            _tenantId = tenantSalvo;
+            console.log('[FALLBACK] ✓ usando tenant do localStorage:', _tenantId);
+            prosseguirComTenant();
+            return;
+          }
+          console.log('[FALLBACK] ❌ Nenhum tenant encontrado');
+          mostrarErroSemTenant();
+        });
+    })
+    .catch(function(e){
+      console.error('[FALLBACK] erro:', e);
+      mostrarErroSemTenant();
+    });
+}
+
+function prosseguirComTenant(){
+  // Salva tenantId no localStorage pra próximas vezes
+  try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
+  // Carrega restaurante ativo (do localStorage ou força default=Bávaro)
+  var restSalvo = null;
+  try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
+  if(restSalvo){
+    try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){}
+  }
+  if(!_restauranteAtivo){
+    // Default: Bávaro (id='default' onde estão os itens)
+    _restauranteAtivo = {id:'default', nome:'Bávaro', emoji:'🍺'};
+    try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+  }
+  // Se o id é 'default' e nome ainda for "Meu Restaurante", renomeia pra Bávaro
+  if(_restauranteAtivo.id === 'default' && _restauranteAtivo.nome === 'Meu Restaurante'){
+    _restauranteAtivo.nome = 'Bávaro';
+    _restauranteAtivo.emoji = '🍺';
+    try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+  }
+  iniciarApp();
 }
 
 function mostrarErroSemTenant(){

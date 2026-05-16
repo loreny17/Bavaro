@@ -1693,6 +1693,7 @@ function carregarTenantParaMesas(){
   if(_tenantId && _restauranteId){
     escutarMesasOcupadas();
     escutarConfigMesas();
+    escutarAvisosGarcom();
     renderMesas();
     // Pré-carrega o cardápio em paralelo pra não ter delay quando entrar na mesa
     iniciarListeners();
@@ -1714,6 +1715,7 @@ function carregarTenantParaMesas(){
     if(!_restauranteId) _restauranteId = 'default'; // fallback (mesmo id que o PDV usa)
     escutarMesasOcupadas();
     escutarConfigMesas();
+    escutarAvisosGarcom();
     renderMesas();
     // Pré-carrega cardápio em paralelo
     iniciarListeners();
@@ -2300,6 +2302,7 @@ function esc(s){
 
 function logoutGarcom(){
   if(!confirm('Sair da conta de '+_nomeGarcom+'?\n\nVocê voltará para a tela de seleção de garçom.')) return;
+  if(_avisosUnsubGarcom){ _avisosUnsubGarcom(); _avisosUnsubGarcom = null; }
   localStorage.removeItem('garcom_nome');
   localStorage.removeItem('garcom_admin');
   // Limpa o restaurante também pra forçar nova escolha no próximo login
@@ -2552,9 +2555,9 @@ function abrirPainelAdminGarcom(){
       '</div>' +
       // Sub-abas
       '<div style="display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg);overflow-x:auto;flex-wrap:nowrap;">' +
-        '<button class="adm-g-pill adm-g-pill-ativo" id="adm-g-pill-logs" onclick="setAbaAdminGarcom(\'logs\')">📋 Logs</button>' +
-        '<button class="adm-g-pill" id="adm-g-pill-diag" onclick="setAbaAdminGarcom(\'diag\')">🔍 Diagnóstico</button>' +
-        '<button class="adm-g-pill" id="adm-g-pill-manut" onclick="setAbaAdminGarcom(\'manut\')">🔧 Manutenção</button>' +
+        '<button class="adm-g-pill adm-g-pill-ativo" id="adm-g-pill-caixa" onclick="setAbaAdminGarcom(\'caixa\')">💰 Caixa do Dia</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-mesas" onclick="setAbaAdminGarcom(\'mesas\')">🪑 Mesas Abertas</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-aviso" onclick="setAbaAdminGarcom(\'aviso\')">📨 Avisos</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-pedidos" onclick="setAbaAdminGarcom(\'pedidos\')">🧾 Pedidos</button>' +
       '</div>' +
       // Conteúdo
@@ -2579,21 +2582,30 @@ function fecharPainelAdminGarcom(){
   if(m) m.remove();
   if(_adminGarcomUnsub){ _adminGarcomUnsub(); _adminGarcomUnsub = null; }
   if(_adminPedidosUnsub){ _adminPedidosUnsub(); _adminPedidosUnsub = null; }
+  if(_adminMesasUnsub){ _adminMesasUnsub(); _adminMesasUnsub = null; }
+  if(_adminCaixaUnsub){ _adminCaixaUnsub(); _adminCaixaUnsub = null; }
+  if(_adminAvisosUnsub){ _adminAvisosUnsub(); _adminAvisosUnsub = null; }
 }
 
 function setAbaAdminGarcom(aba){
-  ['logs','diag','manut','pedidos'].forEach(function(k){
+  ['caixa','mesas','aviso','pedidos'].forEach(function(k){
     var pill = document.getElementById('adm-g-pill-'+k);
     if(pill) pill.classList.toggle('adm-g-pill-ativo', k === aba);
   });
+  // Para listeners de outras abas
+  if(aba !== 'pedidos' && _adminPedidosUnsub){ _adminPedidosUnsub(); _adminPedidosUnsub = null; }
+  if(aba !== 'mesas' && _adminMesasUnsub){ _adminMesasUnsub(); _adminMesasUnsub = null; }
+  if(aba !== 'caixa' && _adminCaixaUnsub){ _adminCaixaUnsub(); _adminCaixaUnsub = null; }
+  if(aba !== 'aviso' && _adminAvisosUnsub){ _adminAvisosUnsub(); _adminAvisosUnsub = null; }
+
   var conteudo = document.getElementById('adm-g-conteudo');
   if(!conteudo) return;
-  if(aba === 'logs'){
-    carregarLogsAdminGarcom();
-  } else if(aba === 'diag'){
-    renderDiagnosticoGarcom();
-  } else if(aba === 'manut'){
-    renderManutencaoGarcom();
+  if(aba === 'caixa'){
+    renderCaixaDoDia();
+  } else if(aba === 'mesas'){
+    renderMesasAbertas();
+  } else if(aba === 'aviso'){
+    renderAvisos();
   } else if(aba === 'pedidos'){
     renderPedidosAdminGarcom();
   }
@@ -2847,6 +2859,717 @@ async function manutGarcomLimparLogs(){
 var _adminPedidosCache = [];
 var _adminPedidosUnsub = null;
 var _adminPedidosFiltro = 'todos'; // todos | aguardando | preparo | pronto | entregue
+
+// ════════════════════════════════════════
+//  GARÇOM — ESCUTAR AVISOS DO ADMIN
+//  Mostra notificação quando recebe aviso
+// ════════════════════════════════════════
+var _avisosUnsubGarcom = null;
+var _avisosVistos = {}; // ids já vistos pra evitar mostrar 2x
+
+(function(){
+  try{
+    var sal = localStorage.getItem('avisos_vistos');
+    if(sal) _avisosVistos = JSON.parse(sal);
+  }catch(e){}
+})();
+
+function salvarAvisosVistos(){
+  try{ localStorage.setItem('avisos_vistos', JSON.stringify(_avisosVistos)); }catch(e){}
+}
+
+function escutarAvisosGarcom(){
+  if(!_tenantId || !_restauranteId || !_nomeGarcom) return;
+  if(_avisosUnsubGarcom){ _avisosUnsubGarcom(); _avisosUnsubGarcom = null; }
+
+  // Escuta avisos das últimas 24h
+  var limite = Date.now() - (24 * 60 * 60 * 1000);
+
+  _avisosUnsubGarcom = fbDb.collection('tenants').doc(_tenantId)
+    .collection('avisos')
+    .where('restauranteId','==', _restauranteId)
+    .where('criadoEm','>=', limite)
+    .onSnapshot(function(snap){
+      snap.docChanges().forEach(function(change){
+        if(change.type === 'added' || change.type === 'modified'){
+          var av = Object.assign({id: change.doc.id}, change.doc.data());
+          // Filtra: pra mim ou pra todos
+          if(av.destino === 'todos' || av.destino === _nomeGarcom){
+            if(!_avisosVistos[av.id]){
+              _avisosVistos[av.id] = true;
+              salvarAvisosVistos();
+              mostrarNotifAviso(av);
+            }
+          }
+        }
+      });
+    }, function(err){
+      console.warn('Erro escutar avisos:', err);
+    });
+}
+
+function mostrarNotifAviso(av){
+  // Remove notif anterior se houver
+  var ex = document.getElementById('modal-aviso-novo');
+  if(ex) ex.remove();
+
+  var dt = av.criadoEm ? new Date(av.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-aviso-novo';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:16px;max-width:380px;width:100%;overflow:hidden;animation:avisoPop 0.3s ease;">' +
+      '<div style="background:linear-gradient(135deg,var(--accent),#a17a30);color:#000;padding:14px;text-align:center;">' +
+        '<div style="font-size:2rem;margin-bottom:4px;">📢</div>' +
+        '<div style="font-weight:700;font-size:1.05rem;letter-spacing:0.05em;">NOVO AVISO</div>' +
+        '<div style="font-size:0.74rem;opacity:0.7;margin-top:2px;">de ' + esc(av.enviadoPor||'Admin') + ' • ' + dt + '</div>' +
+      '</div>' +
+      '<div style="padding:18px;">' +
+        '<div style="font-size:0.95rem;line-height:1.5;color:var(--text);margin-bottom:14px;">' + esc(av.mensagem||'') + '</div>' +
+        '<textarea id="aviso-resposta-texto" placeholder="Digite sua resposta (opcional)..." rows="2" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.86rem;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:10px;"></textarea>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button onclick="responderAviso(\'' + av.id + '\')" style="flex:1;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:0.88rem;cursor:pointer;font-family:inherit;">💬 Responder</button>' +
+          '<button onclick="document.getElementById(\'modal-aviso-novo\').remove()" style="padding:11px 16px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.88rem;cursor:pointer;font-family:inherit;">OK</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+
+  // Adiciona animação se não existir
+  if(!document.getElementById('aviso-anim-style')){
+    var style = document.createElement('style');
+    style.id = 'aviso-anim-style';
+    style.textContent = '@keyframes avisoPop { from{transform:scale(0.7);opacity:0;} to{transform:scale(1);opacity:1;} }';
+    document.head.appendChild(style);
+  }
+
+  // Vibra se suportado
+  try{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }catch(e){}
+}
+
+function responderAviso(avisoId){
+  var txt = document.getElementById('aviso-resposta-texto').value.trim();
+  if(!txt){
+    showToast('Digite uma resposta','#f7a34f');
+    return;
+  }
+  if(!_tenantId || !_nomeGarcom){
+    showToast('Erro: sessão inválida','#f87171');
+    return;
+  }
+
+  var resposta = {
+    garcom: _nomeGarcom,
+    texto: txt,
+    quando: Date.now()
+  };
+
+  fbDb.collection('tenants').doc(_tenantId).collection('avisos').doc(avisoId)
+    .update({
+      respostas: firebase.firestore.FieldValue.arrayUnion(resposta)
+    })
+    .then(function(){
+      var m = document.getElementById('modal-aviso-novo');
+      if(m) m.remove();
+      showToast('✓ Resposta enviada','#4ade80');
+    })
+    .catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — CAIXA DO DIA
+//  Total vendido + top itens + resumo
+// ════════════════════════════════════════
+var _adminCaixaUnsub = null;
+
+function renderCaixaDoDia(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  if(!_restauranteId){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado</div>';
+    return;
+  }
+
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando caixa do dia...</div>';
+
+  // Define range do dia (00:00 até 23:59)
+  var hoje = new Date();
+  hoje.setHours(0,0,0,0);
+  var inicioDia = hoje.getTime();
+  var fimDia = inicioDia + (24 * 60 * 60 * 1000);
+
+  // Define range de ontem pra comparação
+  var inicioOntem = inicioDia - (24 * 60 * 60 * 1000);
+  var fimOntem = inicioDia;
+
+  // Listener em contas fechadas + abertas + ontem
+  Promise.all([
+    // Contas fechadas hoje
+    fbDb.collection('contas_fechadas')
+      .where('restauranteId','==', _restauranteId)
+      .where('fechadaEm','>=', inicioDia)
+      .where('fechadaEm','<', fimDia)
+      .get(),
+    // Contas abertas (em andamento) hoje
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==', _restauranteId)
+      .where('status','==','aberta')
+      .get(),
+    // Contas fechadas ontem (mesmo período)
+    fbDb.collection('contas_fechadas')
+      .where('restauranteId','==', _restauranteId)
+      .where('fechadaEm','>=', inicioOntem)
+      .where('fechadaEm','<', fimOntem)
+      .get()
+  ]).then(function(results){
+    var fechadasHoje = [];
+    results[0].forEach(function(d){ fechadasHoje.push(Object.assign({id:d.id}, d.data())); });
+    var abertas = [];
+    results[1].forEach(function(d){ abertas.push(Object.assign({id:d.id}, d.data())); });
+    var fechadasOntem = [];
+    results[2].forEach(function(d){ fechadasOntem.push(Object.assign({id:d.id}, d.data())); });
+
+    _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem);
+  }).catch(function(e){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
+  });
+}
+
+function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  // Calcula totais
+  function totalConta(c){
+    var t = 0;
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      if(it.tipoVenda === 'kg' && it.peso) t += (it.preco||0);
+      else t += (it.preco||0) * (it.qtd||1);
+    });
+    return t;
+  }
+
+  var totalHoje = 0;
+  var totalComCaixinha = 0;
+  fechadasHoje.forEach(function(c){
+    var t = totalConta(c);
+    totalHoje += t;
+    totalComCaixinha += t * 1.10;
+  });
+
+  var totalAbertas = 0;
+  abertas.forEach(function(c){
+    totalAbertas += totalConta(c);
+  });
+
+  var totalOntem = 0;
+  fechadasOntem.forEach(function(c){
+    totalOntem += totalConta(c);
+  });
+
+  // Variação vs ontem
+  var variacao = 0;
+  var variacaoStr = '—';
+  var variacaoCor = 'var(--muted)';
+  if(totalOntem > 0){
+    variacao = ((totalHoje - totalOntem) / totalOntem) * 100;
+    if(variacao > 0){
+      variacaoStr = '📈 +' + variacao.toFixed(1) + '%';
+      variacaoCor = '#4ade80';
+    } else if(variacao < 0){
+      variacaoStr = '📉 ' + variacao.toFixed(1) + '%';
+      variacaoCor = '#f87171';
+    } else {
+      variacaoStr = '➡️ 0%';
+    }
+  }
+
+  // Top itens vendidos
+  var itensMap = {};
+  fechadasHoje.forEach(function(c){
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      var nome = it.nome || '?';
+      var qtd = (it.tipoVenda === 'kg' && it.peso) ? 1 : (it.qtd||1);
+      var valor = (it.tipoVenda === 'kg' && it.peso) ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+      if(!itensMap[nome]) itensMap[nome] = { qtd: 0, total: 0 };
+      itensMap[nome].qtd += qtd;
+      itensMap[nome].total += valor;
+    });
+  });
+  var topItens = Object.keys(itensMap).map(function(n){
+    return { nome: n, qtd: itensMap[n].qtd, total: itensMap[n].total };
+  }).sort(function(a,b){ return b.qtd - a.qtd; }).slice(0, 5);
+
+  // Por garçom
+  var garcomMap = {};
+  fechadasHoje.forEach(function(c){
+    var g = c.garcomPrincipal || c.garcom || c.fechadoPor || '—';
+    if(!garcomMap[g]) garcomMap[g] = { vendas: 0, total: 0 };
+    garcomMap[g].vendas++;
+    garcomMap[g].total += totalConta(c);
+  });
+  var topGarcons = Object.keys(garcomMap).map(function(n){
+    return { nome: n, vendas: garcomMap[n].vendas, total: garcomMap[n].total };
+  }).sort(function(a,b){ return b.total - a.total; });
+
+  var ticketMedio = fechadasHoje.length > 0 ? totalHoje / fechadasHoje.length : 0;
+
+  function fmt(v){ return v.toFixed(2).replace('.',','); }
+
+  var html = '';
+
+  // Card principal — Total do dia
+  html += '<div style="background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.03));border:1px solid rgba(212,168,67,0.3);border-radius:14px;padding:16px;margin-bottom:10px;">' +
+    '<div style="font-size:0.74rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:4px;">💰 Total Vendido Hoje</div>' +
+    '<div style="font-size:1.8rem;font-weight:700;color:var(--text);font-family:Bebas Neue,sans-serif;">R$ ' + fmt(totalHoje) + '</div>' +
+    '<div style="font-size:0.78rem;color:' + variacaoCor + ';margin-top:4px;font-weight:600;">' + variacaoStr + ' vs ontem (R$ ' + fmt(totalOntem) + ')</div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;font-size:0.74rem;color:var(--muted);">' +
+      '<div style="flex:1;background:var(--bg);border-radius:8px;padding:6px 8px;">Com 10%: <strong style="color:var(--text);">R$ ' + fmt(totalComCaixinha) + '</strong></div>' +
+      '<div style="flex:1;background:var(--bg);border-radius:8px;padding:6px 8px;">Em aberto: <strong style="color:#f7a34f;">R$ ' + fmt(totalAbertas) + '</strong></div>' +
+    '</div>' +
+  '</div>';
+
+  // Resumo
+  html += '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
+    '<div style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">' +
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Mesas Atendidas</div>' +
+      '<div style="font-size:1.4rem;font-weight:700;color:var(--text);font-family:Bebas Neue,sans-serif;margin-top:2px;">' + fechadasHoje.length + '</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">' +
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Ticket Médio</div>' +
+      '<div style="font-size:1.4rem;font-weight:700;color:var(--text);font-family:Bebas Neue,sans-serif;margin-top:2px;">R$ ' + fmt(ticketMedio) + '</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">' +
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Abertas Agora</div>' +
+      '<div style="font-size:1.4rem;font-weight:700;color:#f7a34f;font-family:Bebas Neue,sans-serif;margin-top:2px;">' + abertas.length + '</div>' +
+    '</div>' +
+  '</div>';
+
+  // Top 5 itens
+  html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+    '<div style="font-weight:700;margin-bottom:10px;font-size:0.86rem;">🏆 Top Itens Vendidos Hoje</div>';
+  if(topItens.length === 0){
+    html += '<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:10px;">Nenhuma venda registrada hoje</div>';
+  } else {
+    topItens.forEach(function(it, idx){
+      var medalha = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : '  '));
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:' + (idx < topItens.length-1 ? '1px solid var(--border2)' : 'none') + ';">' +
+        '<div style="font-size:1rem;flex-shrink:0;width:24px;">' + medalha + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:0.82rem;font-weight:600;">' + esc(it.nome) + '</div>' +
+          '<div style="font-size:0.7rem;color:var(--muted);">' + it.qtd + ' unidades</div>' +
+        '</div>' +
+        '<div style="font-size:0.82rem;font-weight:700;color:var(--accent);flex-shrink:0;">R$ ' + fmt(it.total) + '</div>' +
+      '</div>';
+    });
+  }
+  html += '</div>';
+
+  // Por garçom
+  if(topGarcons.length > 0){
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;margin-bottom:10px;font-size:0.86rem;">👥 Vendas por Garçom</div>';
+    topGarcons.forEach(function(g, idx){
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:' + (idx < topGarcons.length-1 ? '1px solid var(--border2)' : 'none') + ';">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:0.82rem;font-weight:600;">' + esc(g.nome) + '</div>' +
+          '<div style="font-size:0.7rem;color:var(--muted);">' + g.vendas + ' mesa' + (g.vendas !== 1 ? 's' : '') + '</div>' +
+        '</div>' +
+        '<div style="font-size:0.82rem;font-weight:700;color:var(--accent);flex-shrink:0;">R$ ' + fmt(g.total) + '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<button onclick="renderCaixaDoDia()" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:9px;font-size:0.82rem;cursor:pointer;margin-top:8px;">🔄 Atualizar</button>';
+
+  conteudo.innerHTML = html;
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — MESAS ABERTAS
+//  Lista mesas com detalhes completos
+// ════════════════════════════════════════
+var _adminMesasUnsub = null;
+var _adminMesasCache = [];
+
+function renderMesasAbertas(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  if(!_restauranteId){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado</div>';
+    return;
+  }
+
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando mesas...</div>';
+
+  if(_adminMesasUnsub){ _adminMesasUnsub(); }
+
+  _adminMesasUnsub = fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('status','==','aberta')
+    .onSnapshot(function(snap){
+      _adminMesasCache = [];
+      snap.forEach(function(d){ _adminMesasCache.push(Object.assign({id:d.id}, d.data())); });
+      _renderMesasAbertasLista();
+    }, function(err){
+      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(err.message||'') + '</div>';
+    });
+}
+
+function _renderMesasAbertasLista(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  // Filtra mesas com itens (ignora vazias)
+  var mesas = _adminMesasCache.filter(function(c){
+    return (c.itens||[]).some(function(it){ return it.status !== 'cancelado'; });
+  });
+
+  // Ordena por nº de mesa
+  mesas.sort(function(a,b){
+    return (parseInt(a.mesa)||0) - (parseInt(b.mesa)||0);
+  });
+
+  function totalConta(c){
+    var t = 0;
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      if(it.tipoVenda === 'kg' && it.peso) t += (it.preco||0);
+      else t += (it.preco||0) * (it.qtd||1);
+    });
+    return t;
+  }
+
+  function fmt(v){ return v.toFixed(2).replace('.',','); }
+
+  var totalGeral = 0;
+  mesas.forEach(function(m){ totalGeral += totalConta(m); });
+
+  var html = '';
+
+  // Resumo no topo
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+    '<div style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">' +
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Mesas Abertas</div>' +
+      '<div style="font-size:1.4rem;font-weight:700;color:#f7a34f;font-family:Bebas Neue,sans-serif;margin-top:2px;">' + mesas.length + '</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">' +
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Total em Aberto</div>' +
+      '<div style="font-size:1.4rem;font-weight:700;color:var(--accent);font-family:Bebas Neue,sans-serif;margin-top:2px;">R$ ' + fmt(totalGeral) + '</div>' +
+    '</div>' +
+  '</div>';
+
+  if(mesas.length === 0){
+    html += '<div style="text-align:center;color:var(--muted);padding:30px;">' +
+      '<div style="font-size:2.5rem;margin-bottom:10px;">🪑</div>' +
+      '<div style="font-weight:600;margin-bottom:6px;">Nenhuma mesa aberta</div>' +
+      '<div style="font-size:0.82rem;">Todas as mesas estão livres</div>' +
+    '</div>';
+    conteudo.innerHTML = html;
+    return;
+  }
+
+  // Lista de mesas
+  mesas.forEach(function(m){
+    var total = totalConta(m);
+    var itensAtivos = (m.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var qtdItens = itensAtivos.reduce(function(s,it){
+      return s + ((it.tipoVenda === 'kg' && it.peso) ? 1 : (it.qtd||1));
+    }, 0);
+    var aberta = m.abertaEm ? new Date(m.abertaEm) : null;
+    var minAberta = aberta ? Math.round((Date.now() - aberta.getTime()) / 60000) : 0;
+    var tempoStr = minAberta < 60 ? minAberta + 'min' : Math.floor(minAberta/60) + 'h' + (minAberta%60) + 'min';
+    var corTempo = minAberta > 180 ? '#f87171' : (minAberta > 120 ? '#f7a34f' : 'var(--muted)');
+
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;" onclick="abrirDetalhesMesa(\'' + m.id + '\')">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="background:linear-gradient(135deg,var(--accent),#a17a30);color:#000;width:46px;height:46px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:Bebas Neue,sans-serif;font-size:1.3rem;font-weight:700;flex-shrink:0;">' +
+          (m.mesa || '?') +
+        '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:700;font-size:0.92rem;">Mesa ' + (m.mesa || '—') + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' +
+            '👤 ' + esc(m.garcomPrincipal || m.garcom || '—') +
+            ' • ' + qtdItens + ' iten' + (qtdItens !== 1 ? 's' : '') +
+            ' • <span style="color:' + corTempo + ';">⏱ ' + tempoStr + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="text-align:right;flex-shrink:0;">' +
+          '<div style="font-size:1.05rem;font-weight:700;color:var(--accent);font-family:Bebas Neue,sans-serif;">R$ ' + fmt(total) + '</div>' +
+          '<div style="font-size:0.68rem;color:var(--muted);">Ver detalhes →</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  });
+
+  conteudo.innerHTML = html;
+}
+
+function abrirDetalhesMesa(contaId){
+  var conta = _adminMesasCache.find(function(c){ return c.id === contaId; });
+  if(!conta) return;
+
+  function fmt(v){ return v.toFixed(2).replace('.',','); }
+  function totalConta(c){
+    var t = 0;
+    (c.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      if(it.tipoVenda === 'kg' && it.peso) t += (it.preco||0);
+      else t += (it.preco||0) * (it.qtd||1);
+    });
+    return t;
+  }
+
+  var total = totalConta(conta);
+  var pagoTotal = conta.pagoTotal || 0;
+  var restante = total - pagoTotal;
+  var itensAtivos = (conta.itens||[]).filter(function(it){
+    return it.status !== 'cancelado' && !it.transferidoPara;
+  });
+
+  var ex = document.getElementById('modal-detalhes-mesa');
+  if(ex) ex.remove();
+
+  // Agrupa itens por garçom
+  var porGarcom = {};
+  itensAtivos.forEach(function(it){
+    var g = it.garcom || conta.garcomPrincipal || '—';
+    if(!porGarcom[g]) porGarcom[g] = [];
+    porGarcom[g].push(it);
+  });
+
+  var itensHtml = '';
+  Object.keys(porGarcom).forEach(function(g){
+    itensHtml += '<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:10px;margin-bottom:4px;">👤 ' + esc(g) + '</div>';
+    porGarcom[g].forEach(function(it){
+      var ehKg = it.tipoVenda === 'kg' && it.peso;
+      var qtdEl = ehKg ? '1x' : ((it.qtd||1) + 'x');
+      var precoTotal = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+      itensHtml += '<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;font-size:0.78rem;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        '<span style="color:var(--accent);font-weight:700;flex-shrink:0;">' + qtdEl + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div>' + esc(it.nome||'') + '</div>';
+      if(it.selecoes && it.selecoes.length){
+        it.selecoes.forEach(function(s){
+          itensHtml += '<div style="font-size:0.7rem;color:var(--muted);padding-left:6px;">• ' + esc(s.opcao||'') + '</div>';
+        });
+      }
+      if(it.obs){
+        itensHtml += '<div style="font-size:0.7rem;color:var(--muted);padding-left:6px;font-style:italic;">📝 ' + esc(it.obs) + '</div>';
+      }
+      itensHtml += '</div>' +
+        '<span style="color:var(--muted);font-size:0.74rem;flex-shrink:0;">R$ ' + fmt(precoTotal) + '</span>' +
+      '</div>';
+    });
+  });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-detalhes-mesa';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100000;display:flex;align-items:flex-end;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);width:100%;max-height:90vh;border-top-left-radius:20px;border-top-right-radius:20px;overflow:hidden;display:flex;flex-direction:column;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="background:linear-gradient(135deg,var(--accent),#a17a30);color:#000;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:Bebas Neue,sans-serif;font-size:1.2rem;font-weight:700;">' +
+          (conta.mesa || '?') +
+        '</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1rem;">Mesa ' + (conta.mesa || '—') + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);">Garçom: ' + esc(conta.garcomPrincipal || conta.garcom || '—') + '</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'modal-detalhes-mesa\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' +
+        itensHtml +
+        '<div style="margin-top:16px;padding-top:12px;border-top:2px solid var(--border2);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:var(--muted);margin-bottom:4px;">' +
+            '<span>Subtotal</span><span>R$ ' + fmt(total) + '</span>' +
+          '</div>' +
+          (pagoTotal > 0 ? '<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;color:#4ade80;margin-bottom:4px;">' +
+            '<span>Já pago</span><span>R$ ' + fmt(pagoTotal) + '</span>' +
+          '</div>' : '') +
+          '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.1rem;font-weight:700;margin-top:6px;">' +
+            '<span>Restante</span>' +
+            '<span style="color:var(--accent);font-family:Bebas Neue,sans-serif;font-size:1.4rem;">R$ ' + fmt(restante) + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — AVISOS (broadcast pros garçons)
+//  Admin envia → garçons recebem notificação
+//  Garçom pode responder
+// ════════════════════════════════════════
+var _adminAvisosUnsub = null;
+var _adminAvisosCache = [];
+var _adminGarconsLista = [];
+
+function renderAvisos(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  if(!_restauranteId || !_tenantId){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado</div>';
+    return;
+  }
+
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>';
+
+  // Busca garçons + listener nos avisos
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('garcons').get()
+    .then(function(snap){
+      _adminGarconsLista = [];
+      snap.forEach(function(d){
+        var data = d.data() || {};
+        if((data.status||'ativo') === 'ativo'){
+          _adminGarconsLista.push({ id: d.id, nome: data.nome || '?' });
+        }
+      });
+
+      // Listener nos avisos enviados (últimos 30)
+      if(_adminAvisosUnsub){ _adminAvisosUnsub(); }
+      _adminAvisosUnsub = fbDb.collection('tenants').doc(_tenantId)
+        .collection('avisos')
+        .where('restauranteId','==', _restauranteId)
+        .orderBy('criadoEm','desc')
+        .limit(30)
+        .onSnapshot(function(snap2){
+          _adminAvisosCache = [];
+          snap2.forEach(function(d){ _adminAvisosCache.push(Object.assign({id:d.id}, d.data())); });
+          _renderAvisosConteudo();
+        }, function(err){
+          // Fallback se não tem o índice ainda
+          fbDb.collection('tenants').doc(_tenantId)
+            .collection('avisos')
+            .where('restauranteId','==', _restauranteId)
+            .limit(30)
+            .get()
+            .then(function(snap2){
+              _adminAvisosCache = [];
+              snap2.forEach(function(d){ _adminAvisosCache.push(Object.assign({id:d.id}, d.data())); });
+              _adminAvisosCache.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+              _renderAvisosConteudo();
+            }).catch(function(){
+              _adminAvisosCache = [];
+              _renderAvisosConteudo();
+            });
+        });
+    }).catch(function(e){
+      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro ao carregar garçons: ' + esc(e.message||'') + '</div>';
+    });
+}
+
+function _renderAvisosConteudo(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  var html = '';
+
+  // Form de envio
+  html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px;">' +
+    '<div style="font-weight:700;margin-bottom:10px;font-size:0.86rem;">📨 Enviar Aviso</div>' +
+    '<select id="aviso-destino" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.85rem;margin-bottom:8px;font-family:inherit;">' +
+      '<option value="todos">📢 Todos os garçons</option>';
+  _adminGarconsLista.forEach(function(g){
+    html += '<option value="' + esc(g.nome) + '">👤 ' + esc(g.nome) + '</option>';
+  });
+  html += '</select>' +
+    '<textarea id="aviso-msg" placeholder="Digite a mensagem..." rows="3" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.86rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>' +
+    '<button onclick="enviarAvisoAdmin()" style="width:100%;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:0.9rem;cursor:pointer;margin-top:8px;font-family:inherit;">📤 Enviar</button>' +
+  '</div>';
+
+  // Lista de avisos enviados
+  html += '<div style="font-size:0.74rem;color:var(--muted);font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">📜 Histórico de avisos</div>';
+
+  if(_adminAvisosCache.length === 0){
+    html += '<div style="text-align:center;color:var(--muted);padding:20px;font-size:0.82rem;">Nenhum aviso enviado ainda</div>';
+  } else {
+    _adminAvisosCache.forEach(function(av){
+      var dt = av.criadoEm ? new Date(av.criadoEm) : null;
+      var dataStr = dt ? dt.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+      var destinoStr = av.destino === 'todos' ? '📢 Todos' : ('👤 ' + (av.destino||'?'));
+      var respostas = av.respostas || [];
+
+      html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;margin-bottom:8px;">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:0.74rem;">' +
+          '<span style="background:rgba(212,168,67,0.15);color:var(--accent);padding:2px 8px;border-radius:5px;font-weight:600;">' + destinoStr + '</span>' +
+          '<span style="flex:1;"></span>' +
+          '<span style="color:var(--muted);">' + dataStr + '</span>' +
+        '</div>' +
+        '<div style="font-size:0.86rem;line-height:1.4;margin-bottom:6px;">' + esc(av.mensagem||'') + '</div>';
+
+      // Respostas
+      if(respostas.length > 0){
+        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border2);">';
+        html += '<div style="font-size:0.7rem;color:var(--muted);font-weight:600;margin-bottom:6px;">💬 ' + respostas.length + ' resposta' + (respostas.length !== 1 ? 's' : '') + ':</div>';
+        respostas.forEach(function(r){
+          var rDt = r.quando ? new Date(r.quando).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+          html += '<div style="background:var(--bg);border-radius:8px;padding:8px;margin-bottom:4px;font-size:0.78rem;">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
+              '<span style="color:#4ade80;font-weight:700;font-size:0.74rem;">👤 ' + esc(r.garcom||'?') + '</span>' +
+              '<span style="flex:1;"></span>' +
+              '<span style="color:var(--muted);font-size:0.7rem;">' + rDt + '</span>' +
+            '</div>' +
+            '<div style="line-height:1.4;">' + esc(r.texto||'') + '</div>' +
+          '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="font-size:0.7rem;color:var(--muted);font-style:italic;">Nenhuma resposta ainda</div>';
+      }
+
+      html += '<button onclick="excluirAvisoAdmin(\'' + av.id + '\')" style="background:none;border:none;color:#f87171;font-size:0.7rem;cursor:pointer;margin-top:6px;padding:0;font-family:inherit;">🗑 Excluir</button>' +
+      '</div>';
+    });
+  }
+
+  conteudo.innerHTML = html;
+}
+
+function enviarAvisoAdmin(){
+  var destino = document.getElementById('aviso-destino').value;
+  var msg = document.getElementById('aviso-msg').value.trim();
+  if(!msg){ alert('Digite uma mensagem!'); return; }
+  if(!_tenantId || !_restauranteId){ alert('Restaurante não carregado'); return; }
+
+  var aviso = {
+    restauranteId: _restauranteId,
+    destino: destino,
+    mensagem: msg,
+    enviadoPor: _nomeGarcom || 'Admin',
+    criadoEm: Date.now(),
+    respostas: [],
+    lidoPor: []
+  };
+
+  fbDb.collection('tenants').doc(_tenantId).collection('avisos').add(aviso)
+    .then(function(){
+      document.getElementById('aviso-msg').value = '';
+      showToast('✓ Aviso enviado','#4ade80');
+    })
+    .catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+}
+
+function excluirAvisoAdmin(avisoId){
+  if(!confirm('Excluir este aviso?')) return;
+  fbDb.collection('tenants').doc(_tenantId).collection('avisos').doc(avisoId).delete()
+    .then(function(){ showToast('✓ Excluído','#4ade80'); })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
 
 function renderPedidosAdminGarcom(){
   var conteudo = document.getElementById('adm-g-conteudo');

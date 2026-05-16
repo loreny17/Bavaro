@@ -2393,8 +2393,10 @@ function tentarAbrirDebug(){
 //  ENVIAR LOG DE ERRO PRO FIREBASE
 //  (visível no painel admin do PDV)
 // ════════════════════════════════════════
+var _logErroDesativado = false; // se deu permission-denied uma vez, pára de tentar
 function enviarLogErro(tipo, mensagem, contexto){
   // tipo: 'erro' | 'aviso' | 'info'
+  if(_logErroDesativado) return;
   if(!fbDb || !_tenantId) return;
   try{
     var dados = {
@@ -2411,7 +2413,12 @@ function enviarLogErro(tipo, mensagem, contexto){
     // TTL: 7 dias (timestamp da expiração)
     dados.expiraEm = Date.now() + (7 * 24 * 60 * 60 * 1000);
     fbDb.collection('tenants').doc(_tenantId).collection('admin_logs').add(dados)
-      .catch(function(e){ /* silencioso */ });
+      .catch(function(e){
+        // Se for erro de permissão, desativa o envio (regra do Firestore não liberada)
+        if(e && (e.code === 'permission-denied' || (e.message||'').indexOf('permission') >= 0)){
+          _logErroDesativado = true;
+        }
+      });
   }catch(e){ /* silencioso, log não pode quebrar app */ }
 }
 
@@ -2583,24 +2590,360 @@ function setAbaAdminGarcom(aba){
   if(aba === 'logs'){
     carregarLogsAdminGarcom();
   } else if(aba === 'diag'){
-    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
-      '<div style="font-size:2.5rem;margin-bottom:10px;">🔍</div>' +
-      '<div style="font-weight:600;margin-bottom:6px;">Diagnóstico</div>' +
-      '<div style="font-size:0.85rem;">Em breve (Bloco 3): mesas com problemas, status do sistema</div>' +
-    '</div>';
+    renderDiagnosticoGarcom();
   } else if(aba === 'manut'){
-    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
-      '<div style="font-size:2.5rem;margin-bottom:10px;">🔧</div>' +
-      '<div style="font-weight:600;margin-bottom:6px;">Manutenção</div>' +
-      '<div style="font-size:0.85rem;">Em breve (Bloco 4): limpar órfãs, reimprimir</div>' +
-    '</div>';
+    renderManutencaoGarcom();
   } else if(aba === 'users'){
-    conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">' +
-      '<div style="font-size:2.5rem;margin-bottom:10px;">👥</div>' +
-      '<div style="font-weight:600;margin-bottom:6px;">Usuários</div>' +
-      '<div style="font-size:0.85rem;">Em breve (Bloco 5): gerenciar admins</div>' +
-    '</div>';
+    renderUsuariosGarcom();
   }
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — DIAGNÓSTICO (mobile)
+// ════════════════════════════════════════
+function renderDiagnosticoGarcom(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Coletando dados...</div>';
+
+  // Coleta info em paralelo
+  Promise.all([
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==', _restauranteId)
+      .where('status','==','aberta')
+      .get(),
+    fbDb.collection('pedidos')
+      .where('restauranteId','==', _restauranteId)
+      .limit(200)
+      .get()
+  ]).then(function(results){
+    var contas = [];
+    results[0].forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
+    var pedidos = [];
+    results[1].forEach(function(d){ pedidos.push(Object.assign({id:d.id}, d.data())); });
+
+    // Análise
+    var contasVazias = contas.filter(function(c){
+      var temItens = (c.itens||[]).some(function(it){ return it.status !== 'cancelado'; });
+      var temPgto = (c.pagamentos||[]).length > 0;
+      return !temItens && !temPgto;
+    });
+
+    // Mesas com múltiplas contas abertas (duplicatas)
+    var mesasComCounts = {};
+    contas.forEach(function(c){
+      var m = String(c.mesa||'');
+      mesasComCounts[m] = (mesasComCounts[m]||0) + 1;
+    });
+    var mesasDuplicadas = Object.keys(mesasComCounts).filter(function(m){ return mesasComCounts[m] > 1; });
+
+    // Pedidos sem contaId
+    var pedidosSemConta = pedidos.filter(function(p){ return !p.contaId; });
+
+    // Pedidos pendentes de impressão
+    var pedidosNaoImpressos = pedidos.filter(function(p){ return p.impresso === false || p.impresso == null; });
+
+    var html = '';
+
+    // Card: Status geral
+    html += '<div style="background:linear-gradient(135deg,rgba(74,222,128,0.08),rgba(74,222,128,0.02));border:1px solid rgba(74,222,128,0.25);border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;color:#4ade80;margin-bottom:8px;">🟢 Status do Sistema</div>' +
+      '<div style="font-size:0.82rem;line-height:1.6;color:var(--muted);">' +
+        'Firebase: <span style="color:var(--text);">' + (navigator.onLine ? '✅ Conectado' : '❌ Offline') + '</span><br>' +
+        'Restaurante: <span style="color:var(--text);">' + esc(_restauranteId||'—') + '</span><br>' +
+        'Tenant: <span style="color:var(--text);font-size:0.7rem;">' + esc((_tenantId||'').substring(0,30)) + '</span>' +
+      '</div>' +
+    '</div>';
+
+    // Card: Mesas abertas
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;margin-bottom:8px;">🪑 Mesas Abertas</div>' +
+      '<div style="font-size:0.82rem;line-height:1.6;color:var(--muted);">' +
+        'Total de contas: <span style="color:var(--text);font-weight:600;">' + contas.length + '</span><br>' +
+        'Contas vazias (lixo): <span style="' + (contasVazias.length>0?'color:#f7a34f;':'color:var(--text);') + 'font-weight:600;">' + contasVazias.length + '</span>' + (contasVazias.length>0?' ⚠️':'') + '<br>' +
+        'Mesas duplicadas: <span style="' + (mesasDuplicadas.length>0?'color:#f87171;':'color:var(--text);') + 'font-weight:600;">' + mesasDuplicadas.length + '</span>' + (mesasDuplicadas.length>0?' ⚠️ Mesas: ' + mesasDuplicadas.join(', '):'') +
+      '</div>' +
+    '</div>';
+
+    // Card: Pedidos
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;margin-bottom:8px;">📋 Pedidos</div>' +
+      '<div style="font-size:0.82rem;line-height:1.6;color:var(--muted);">' +
+        'Total carregado: <span style="color:var(--text);font-weight:600;">' + pedidos.length + '</span> (últimos 200)<br>' +
+        'Sem contaId (órfãos): <span style="' + (pedidosSemConta.length>0?'color:#f7a34f;':'color:var(--text);') + 'font-weight:600;">' + pedidosSemConta.length + '</span><br>' +
+        'Não impressos: <span style="color:var(--text);font-weight:600;">' + pedidosNaoImpressos.length + '</span>' +
+      '</div>' +
+    '</div>';
+
+    // Card: Sessão local
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      '<div style="font-weight:700;margin-bottom:8px;">📱 Esta Sessão</div>' +
+      '<div style="font-size:0.82rem;line-height:1.6;color:var(--muted);">' +
+        'Garçom logado: <span style="color:var(--text);">' + esc(_nomeGarcom||'—') + '</span><br>' +
+        'Mesas no cache: <span style="color:var(--text);">' + Object.keys(_contasMesaCache||{}).length + '</span><br>' +
+        'Mesas ocupadas: <span style="color:var(--text);">' + Object.keys(_mesasOcupadas||{}).length + '</span>' +
+      '</div>' +
+    '</div>';
+
+    if(contasVazias.length > 0 || mesasDuplicadas.length > 0 || pedidosSemConta.length > 0){
+      html += '<div style="background:rgba(247,163,79,0.08);border:1px solid rgba(247,163,79,0.25);border-radius:10px;padding:12px;margin-top:14px;font-size:0.78rem;color:var(--muted);line-height:1.5;">' +
+        '💡 <strong style="color:#f7a34f;">Encontrei problemas.</strong> Use a aba <strong>🔧 Manutenção</strong> para limpar.' +
+      '</div>';
+    }
+
+    // Ação de refresh
+    html += '<div style="margin-top:14px;">' +
+      '<button onclick="renderDiagnosticoGarcom()" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:9px;font-size:0.82rem;cursor:pointer;">🔄 Atualizar diagnóstico</button>' +
+    '</div>';
+
+    conteudo.innerHTML = html;
+  }).catch(function(e){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
+  });
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — MANUTENÇÃO (mobile)
+// ════════════════════════════════════════
+var _manutOperacoesGarcom = [
+  {
+    id: 'limpar-contas-vazias',
+    icone: '🧹',
+    titulo: 'Limpar contas vazias',
+    desc: 'Apaga conta_mesa abertas sem itens nem pagamentos',
+    confirma: 'Apagar TODAS as contas vazias abertas?\n\nMesas com itens NÃO são afetadas.',
+    fn: 'manutGarcomLimparVazias'
+  },
+  {
+    id: 'limpar-pedidos-orfaos',
+    icone: '📋',
+    titulo: 'Limpar pedidos órfãos',
+    desc: 'Apaga pedidos cuja contaId não existe mais',
+    confirma: 'Apagar pedidos órfãos?',
+    fn: 'manutGarcomLimparPedidosOrfaos'
+  },
+  {
+    id: 'limpar-logs-antigos',
+    icone: '🗑️',
+    titulo: 'Limpar logs antigos',
+    desc: 'Apaga logs com mais de 7 dias',
+    confirma: 'Apagar logs antigos (>7 dias)?',
+    fn: 'manutGarcomLimparLogs'
+  }
+];
+
+function renderManutencaoGarcom(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  var html = '<div style="font-size:0.82rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">' +
+    'Ferramentas de limpeza. <strong style="color:#f7a34f;">Use com cuidado</strong> — não podem ser desfeitas.' +
+  '</div>';
+  _manutOperacoesGarcom.forEach(function(op){
+    html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:8px;">' +
+      '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+        '<div style="font-size:1.6rem;flex-shrink:0;">' + op.icone + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:700;margin-bottom:2px;font-size:0.9rem;">' + esc(op.titulo) + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);line-height:1.4;margin-bottom:8px;">' + esc(op.desc) + '</div>' +
+          '<button onclick="executarManutGarcom(\'' + op.id + '\')" style="background:rgba(212,168,67,0.12);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:6px 12px;border-radius:7px;font-weight:600;font-size:0.78rem;cursor:pointer;">Executar</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '<div id="adm-g-manut-log" style="display:none;margin-top:14px;background:#000;border:1px solid var(--border2);border-radius:10px;padding:10px;font-family:monospace;font-size:0.72rem;line-height:1.5;color:#9ca3af;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>';
+  conteudo.innerHTML = html;
+}
+
+function executarManutGarcom(id){
+  var op = _manutOperacoesGarcom.find(function(o){ return o.id === id; });
+  if(!op) return;
+  if(!confirm(op.confirma)) return;
+  var log = document.getElementById('adm-g-manut-log');
+  log.style.display = '';
+  log.textContent = '⚙️ ' + op.titulo + '...';
+  window[op.fn]().then(function(resumo){
+    log.textContent += '\n\n✅ ' + resumo;
+  }).catch(function(e){
+    log.textContent += '\n\n❌ ERRO: ' + (e.message || e);
+  });
+}
+
+function logManutG(msg){
+  var log = document.getElementById('adm-g-manut-log');
+  if(log){ log.textContent += '\n' + msg; log.scrollTop = log.scrollHeight; }
+}
+
+async function manutGarcomLimparVazias(){
+  if(!_restauranteId) throw new Error('Restaurante não carregado');
+  logManutG('Buscando contas abertas...');
+  var snap = await fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('status','==','aberta')
+    .get();
+  logManutG('Encontradas: ' + snap.size);
+  var vazias = [];
+  snap.forEach(function(d){
+    var data = d.data() || {};
+    var temItens = (data.itens||[]).some(function(it){ return it.status !== 'cancelado'; });
+    var temPgto = (data.pagamentos||[]).length > 0;
+    if(!temItens && !temPgto) vazias.push(d);
+  });
+  logManutG('Vazias: ' + vazias.length);
+  if(vazias.length === 0) return 'Nenhuma conta vazia.';
+  var batch = fbDb.batch();
+  vazias.forEach(function(d){ batch.delete(d.ref); });
+  await batch.commit();
+  return vazias.length + ' contas vazias apagadas.';
+}
+
+async function manutGarcomLimparPedidosOrfaos(){
+  if(!_restauranteId) throw new Error('Restaurante não carregado');
+  logManutG('Buscando pedidos...');
+  var snapPed = await fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .limit(500)
+    .get();
+  logManutG('Pedidos: ' + snapPed.size);
+  logManutG('Buscando contas existentes...');
+  var contasAbertas = await fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId).get();
+  var contasFechadas = await fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', _restauranteId).get();
+  var ids = {};
+  contasAbertas.forEach(function(d){ ids[d.id] = true; });
+  contasFechadas.forEach(function(d){ ids[d.id] = true; });
+  var orfaos = [];
+  snapPed.forEach(function(d){
+    var data = d.data();
+    if(!data.contaId || !ids[data.contaId]) orfaos.push(d);
+  });
+  logManutG('Órfãos: ' + orfaos.length);
+  if(orfaos.length === 0) return 'Nenhum órfão.';
+  var batch = fbDb.batch();
+  orfaos.forEach(function(d){ batch.delete(d.ref); });
+  await batch.commit();
+  return orfaos.length + ' pedidos órfãos apagados.';
+}
+
+async function manutGarcomLimparLogs(){
+  if(!_tenantId) throw new Error('Tenant não carregado');
+  var limite = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  logManutG('Buscando logs antigos...');
+  var snap = await fbDb.collection('tenants').doc(_tenantId).collection('admin_logs')
+    .where('quando','<', limite).limit(500).get();
+  logManutG('Encontrados: ' + snap.size);
+  if(snap.size === 0) return 'Nenhum log antigo.';
+  var batch = fbDb.batch();
+  snap.forEach(function(d){ batch.delete(d.ref); });
+  await batch.commit();
+  return snap.size + ' logs apagados.';
+}
+
+// ════════════════════════════════════════
+//  PAINEL ADMIN — USUÁRIOS (mobile)
+// ════════════════════════════════════════
+function renderUsuariosGarcom(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+  conteudo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando garçons...</div>';
+
+  // Busca garcons direto do restaurante
+  if(!_restauranteId || !_tenantId){
+    conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado</div>';
+    return;
+  }
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('garcons').get()
+    .then(function(snap){
+      var garcons = [];
+      snap.forEach(function(d){ garcons.push(Object.assign({id:d.id}, d.data())); });
+
+      // Online: garçom que enviou log nas últimas 2h
+      var limiteOnline = Date.now() - (2 * 60 * 60 * 1000);
+      var onlineMap = {};
+      (_adminGarcomLogsCache||[]).forEach(function(l){
+        if(l.quando >= limiteOnline && l.garcom){
+          onlineMap[l.garcom] = Math.max(onlineMap[l.garcom]||0, l.quando);
+        }
+      });
+
+      // Ordena: admin primeiro
+      garcons.sort(function(a,b){
+        if((a.admin===true) !== (b.admin===true)) return (a.admin===true) ? -1 : 1;
+        return (a.nome||'').localeCompare(b.nome||'');
+      });
+
+      var total = garcons.length;
+      var admins = garcons.filter(function(g){ return g.admin === true; }).length;
+      var online = Object.keys(onlineMap).length;
+
+      var html = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;font-size:0.74rem;">' +
+        '<span style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:4px 10px;">Total: <strong>' + total + '</strong></span>' +
+        '<span style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:8px;padding:4px 10px;">👑 Admins: <strong>' + admins + '</strong></span>' +
+        '<span style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);color:#4ade80;border-radius:8px;padding:4px 10px;">🟢 Online: <strong>' + online + '</strong></span>' +
+      '</div>';
+
+      if(garcons.length === 0){
+        html += '<div style="text-align:center;color:var(--muted);padding:20px;">Nenhum garçom cadastrado</div>';
+        conteudo.innerHTML = html;
+        return;
+      }
+
+      garcons.forEach(function(g){
+        var ehAdmin = g.admin === true;
+        var ehAtivo = (g.status||'ativo') === 'ativo';
+        var ehOnline = !!onlineMap[g.nome];
+        var ultimoLogStr = '';
+        if(ehOnline){
+          var min = Math.round((Date.now() - onlineMap[g.nome]) / 60000);
+          ultimoLogStr = min === 0 ? 'agora' : (min + 'min');
+        }
+        var inicial = (g.nome||'?').trim().charAt(0).toUpperCase();
+
+        html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px;margin-bottom:8px;display:flex;align-items:center;gap:10px;' + (ehAtivo?'':'opacity:0.55;') + '">' +
+          '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#a17a30);display:flex;align-items:center;justify-content:center;color:#000;font-family:Bebas Neue,sans-serif;font-size:1.2rem;flex-shrink:0;position:relative;">' +
+            inicial +
+            (ehOnline ? '<span style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;background:#4ade80;border:2px solid var(--surface);border-radius:50%;"></span>' : '') +
+          '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-weight:700;font-size:0.86rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+              esc(g.nome||'—') +
+              (ehAdmin ? '<span style="background:rgba(212,168,67,0.15);color:var(--accent);font-size:0.58rem;font-weight:700;padding:1px 5px;border-radius:4px;letter-spacing:0.04em;">👑 ADMIN</span>' : '') +
+            '</div>' +
+            '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">' +
+              (ehAtivo ? 'Ativo' : 'Inativo') +
+              (ehOnline ? ' • <span style="color:#4ade80;">🟢 ' + ultimoLogStr + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<button onclick="toggleAdminGarcomMobile(\'' + g.id + '\', ' + (ehAdmin?'false':'true') + ')" style="' +
+            (ehAdmin
+              ? 'background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;'
+              : 'background:rgba(212,168,67,0.12);border:1px solid rgba(212,168,67,0.3);color:var(--accent);') +
+            'padding:6px 10px;border-radius:7px;font-weight:600;font-size:0.74rem;cursor:pointer;flex-shrink:0;font-family:inherit;">' +
+            (ehAdmin ? 'Remover' : '👑 Admin') +
+          '</button>' +
+        '</div>';
+      });
+      conteudo.innerHTML = html;
+    }).catch(function(e){
+      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
+    });
+}
+
+function toggleAdminGarcomMobile(garcomId, novoValor){
+  if(!_restauranteId || !_tenantId) return;
+  var msg = novoValor ? 'Tornar este garçom administrador?' : 'Remover admin deste garçom?';
+  if(!confirm(msg)) return;
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('garcons').doc(garcomId)
+    .update({ admin: novoValor, atualizadoEm: Date.now() })
+    .then(function(){
+      showToast('✓ Atualizado','#4ade80');
+      renderUsuariosGarcom();
+    })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 
 function carregarLogsAdminGarcom(){
@@ -2620,7 +2963,19 @@ function carregarLogsAdminGarcom(){
       snap.forEach(function(d){ _adminGarcomLogsCache.push(Object.assign({id:d.id}, d.data())); });
       renderLogsAdminGarcom();
     }, function(err){
-      conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(err.message||'') + '</div>';
+      var msg = err.message || '';
+      var helpHtml = '';
+      if(msg.indexOf('permission') >= 0 || msg.indexOf('insufficient') >= 0){
+        helpHtml = '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-top:14px;font-size:0.78rem;color:var(--muted);line-height:1.5;text-align:left;">' +
+          '<div style="font-weight:700;color:var(--accent);margin-bottom:6px;">📜 Liberar regras</div>' +
+          '<div>Acesse o painel admin pelo PDV pra ver as instruções de regras do Firestore.</div>' +
+        '</div>';
+      }
+      conteudo.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">' +
+        '<div style="font-size:2rem;margin-bottom:8px;">🔒</div>' +
+        '<div style="font-size:0.85rem;">Erro: ' + esc(msg) + '</div>' +
+        helpHtml +
+      '</div>';
     });
 }
 
@@ -5964,6 +6319,41 @@ function confirmarTransferencia(numDestino){
 
         return fbDb.collection('pedidos').add(novoPedido).then(function(ref){
           console.log('[TRANSFERIR] ✓ pedido novo criado:', ref.id);
+          // Marca os itens transferidos nos pedidos da ORIGEM
+          // pra que "Ver pedidos" da origem não mostre eles mais
+          var keysTransferidas = itensSelecionados.map(function(it){ return it.itemKey; }).filter(function(k){ return !!k; });
+          if(keysTransferidas.length === 0) return;
+
+          console.log('[TRANSFERIR] Marcando itens transferidos nos pedidos origem:', keysTransferidas);
+          var batch = fbDb.batch();
+          var pedidosTocados = 0;
+          snap.forEach(function(d){
+            var pedido = d.data();
+            var itensPedido = pedido.itens || [];
+            // Marca cada item que estiver na lista de keys transferidas
+            var mudou = false;
+            var itensAtualizados = itensPedido.map(function(it){
+              if(it.itemKey && keysTransferidas.indexOf(it.itemKey) >= 0){
+                mudou = true;
+                return Object.assign({}, it, {
+                  transferidoPara: parseInt(numDestino) || numDestino,
+                  transferidoEm: Date.now()
+                });
+              }
+              return it;
+            });
+            if(mudou){
+              batch.update(d.ref, { itens: itensAtualizados, atualizadoEm: Date.now() });
+              pedidosTocados++;
+            }
+          });
+          if(pedidosTocados > 0){
+            return batch.commit().then(function(){
+              console.log('[TRANSFERIR] ✓ ' + pedidosTocados + ' pedido(s) da origem marcado(s)');
+            });
+          } else {
+            console.log('[TRANSFERIR] Nenhum pedido origem precisou marcar (itens sem itemKey)');
+          }
         });
       }).catch(function(e){
         console.error('[TRANSFERIR] ❌ Erro criando pedido novo:', e);
@@ -7159,9 +7549,11 @@ function fazerNovoPedidoMesa(num){
 function renderVerPedidosMesa(pedidos){
   var body = document.getElementById('ver-pedidos-body');
   if(!body) return;
-  // Filtra só pedidos com itens não-cancelados
+  // Filtra só pedidos com itens não-cancelados E não-transferidos
   var validos = pedidos.filter(function(p){
-    var visiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var visiveis = (p.itens||[]).filter(function(it){
+      return it.status !== 'cancelado' && !it.transferidoPara;
+    });
     return visiveis.length > 0;
   });
   if(!validos.length){
@@ -7179,7 +7571,10 @@ function renderVerPedidosMesa(pedidos){
     if(p.criadoEm){ var d = new Date(p.criadoEm); hora = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
     var st = p.status || 'aguardando';
     var podeEditar = (st === 'aguardando' || st === 'preparo');
-    var itensVisiveis = (p.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    // Filtra itens visíveis: não-cancelados E não-transferidos
+    var itensVisiveis = (p.itens||[]).filter(function(it){
+      return it.status !== 'cancelado' && !it.transferidoPara;
+    });
     var total = itensVisiveis.reduce(function(acc,i){ return acc+(i.preco||0)*(i.qtd||1); },0);
     
     var itensHtml = itensVisiveis.map(function(it){

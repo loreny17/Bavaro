@@ -2886,7 +2886,7 @@ function salvarAvisosVistos(){
 }
 
 function escutarAvisosGarcom(){
-  console.log('[AVISOS] escutarAvisosGarcom chamado. tenant:', _tenantId, 'rest:', _restauranteId, 'garcom:', _nomeGarcom);
+  console.log('[AVISOS] escutarAvisosGarcom chamado. tenant:', _tenantId, 'rest:', _restauranteId, 'garcom:', _nomeGarcom, 'admin:', _ehAdmin);
   if(!_tenantId || !_restauranteId || !_nomeGarcom){
     console.warn('[AVISOS] Faltam dados — não vou escutar');
     return;
@@ -2901,27 +2901,66 @@ function escutarAvisosGarcom(){
       console.log('[AVISOS] snapshot recebido, docs:', snap.size);
       var limite = Date.now() - (24 * 60 * 60 * 1000); // só últimas 24h
       _avisosNaoLidos = [];
+      var respostasNovas = []; // pra admin: respostas que apareceram
+
       snap.forEach(function(d){
         var av = Object.assign({id: d.id}, d.data());
         // Filtra: data recente
         if((av.criadoEm||0) < limite) return;
-        // Filtra: pra mim ou pra todos
+
+        // ─── Caminho 1: AVISOS recebidos (pra mim ou pra todos) ───
         var ehParaMim = av.destino === 'todos' || av.destino === _nomeGarcom;
-        if(!ehParaMim) return;
-        // Não mostra os já lidos
-        if(_avisosVistos[av.id]) return;
-        // Não mostra os que eu mesmo respondi
-        var jaRespondi = (av.respostas||[]).some(function(r){ return r.garcom === _nomeGarcom; });
-        if(jaRespondi){
-          _avisosVistos[av.id] = true;
-          salvarAvisosVistos();
-          return;
+        if(ehParaMim && !_avisosVistos[av.id]){
+          // Não mostra os que eu mesmo respondi (= leu)
+          var jaRespondi = (av.respostas||[]).some(function(r){ return r.garcom === _nomeGarcom; });
+          if(jaRespondi){
+            _avisosVistos[av.id] = true;
+            salvarAvisosVistos();
+          } else {
+            _avisosNaoLidos.push(av);
+          }
         }
-        _avisosNaoLidos.push(av);
+
+        // ─── Caminho 2 (ADMIN): detecta respostas novas ───
+        if(_ehAdmin && av.enviadoPor === _nomeGarcom){
+          // Esse aviso foi enviado por mim — vê se tem respostas novas
+          var qtdAtual = (av.respostas||[]).length;
+          var qtdAntes = _adminRespCountTracker[av.id];
+          if(qtdAntes === undefined){
+            // Primeira vez vendo este aviso — salva quantidade sem alertar
+            _adminRespCountTracker[av.id] = qtdAtual;
+          } else if(qtdAtual > qtdAntes){
+            // Tem resposta nova!
+            for(var i = qtdAntes; i < qtdAtual; i++){
+              var r = av.respostas[i];
+              if(r && !_respostasVistas[av.id + '_' + i]){
+                respostasNovas.push({
+                  avisoId: av.id,
+                  idx: i,
+                  garcom: r.garcom,
+                  texto: r.texto,
+                  quando: r.quando,
+                  avisoTexto: av.mensagem
+                });
+              }
+            }
+            _adminRespCountTracker[av.id] = qtdAtual;
+          }
+        }
       });
+
       // Ordena mais recente primeiro
       _avisosNaoLidos.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
-      console.log('[AVISOS] avisos não lidos:', _avisosNaoLidos.length);
+      console.log('[AVISOS] avisos não lidos:', _avisosNaoLidos.length, 'respostas novas:', respostasNovas.length);
+
+      // Adiciona respostas novas na lista de não lidos do admin
+      if(_ehAdmin && respostasNovas.length > 0){
+        respostasNovas.forEach(function(r){
+          _respostasNaoLidas.push(r);
+        });
+        salvarRespostasNaoLidas();
+      }
+
       atualizarBannerAvisos();
     }, function(err){
       console.error('[AVISOS] Erro no listener:', err.code, err.message);
@@ -2930,68 +2969,225 @@ function escutarAvisosGarcom(){
 }
 
 var _avisosNaoLidos = [];
+var _adminRespCountTracker = {}; // pra detectar mudança de contagem entre snapshots
+var _respostasNaoLidas = []; // respostas que o admin ainda não viu
+
+(function(){
+  try{
+    var sal = localStorage.getItem('respostas_nao_lidas');
+    if(sal) _respostasNaoLidas = JSON.parse(sal);
+  }catch(e){}
+})();
+
+function salvarRespostasNaoLidas(){
+  try{ localStorage.setItem('respostas_nao_lidas', JSON.stringify(_respostasNaoLidas)); }catch(e){}
+}
 
 // ─────────────────────────────────────
 // Banner amarelo no topo do mapa de mesas
 // ─────────────────────────────────────
 function atualizarBannerAvisos(){
-  var existente = document.getElementById('banner-avisos');
-  if(existente) existente.remove();
+  // Remove banners antigos
+  var ex1 = document.getElementById('banner-avisos');
+  if(ex1) ex1.remove();
+  var ex2 = document.getElementById('banner-respostas');
+  if(ex2) ex2.remove();
 
-  if(_avisosNaoLidos.length === 0) return;
-
-  // Só mostra se está no mapa de mesas (mesa-screen visível)
+  // Só mostra se está no mapa de mesas
   var telaMesas = document.getElementById('mesa-screen');
   if(!telaMesas || telaMesas.classList.contains('hidden')) return;
 
-  var ultimo = _avisosNaoLidos[0];
-  var qtd = _avisosNaoLidos.length;
-  var preview = (ultimo.mensagem||'').substring(0, 50);
-  if((ultimo.mensagem||'').length > 50) preview += '...';
+  var anchorRef = null; // pra inserir o segundo banner depois do primeiro
+  var headerEl = telaMesas.querySelector('.mesa-header, header, h1, h2');
 
-  var banner = document.createElement('div');
-  banner.id = 'banner-avisos';
-  banner.style.cssText =
-    'position:relative;background:linear-gradient(135deg,#f7a34f,#f59e0b);' +
-    'color:#1a1a1a;padding:10px 14px;margin:8px 12px 0;border-radius:12px;' +
-    'box-shadow:0 4px 14px rgba(245,158,11,0.35);cursor:pointer;' +
-    'display:flex;align-items:center;gap:10px;' +
-    'animation:bannerSlideDown 0.4s ease;font-family:inherit;';
-  banner.onclick = abrirListaAvisos;
-  banner.innerHTML =
-    '<div style="font-size:1.5rem;flex-shrink:0;">📩</div>' +
-    '<div style="flex:1;min-width:0;">' +
-      '<div style="font-weight:700;font-size:0.82rem;display:flex;align-items:center;gap:6px;">' +
-        (qtd > 1 ? qtd + ' avisos não lidos' : 'Novo aviso') +
-        (qtd > 1 ? '<span style="background:rgba(0,0,0,0.15);font-size:0.66rem;padding:2px 7px;border-radius:99px;font-weight:800;">' + qtd + '</span>' : '') +
-      '</div>' +
-      '<div style="font-size:0.74rem;opacity:0.85;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
-        esc(ultimo.enviadoPor || 'Admin') + ': ' + esc(preview) +
-      '</div>' +
-    '</div>' +
-    '<div style="font-size:0.7rem;font-weight:700;opacity:0.7;flex-shrink:0;">TOQUE →</div>';
+  // ─── BANNER 1: Avisos não lidos (amarelo) ───
+  if(_avisosNaoLidos.length > 0){
+    var ultimo = _avisosNaoLidos[0];
+    var qtd = _avisosNaoLidos.length;
+    var preview = (ultimo.mensagem||'').substring(0, 50);
+    if((ultimo.mensagem||'').length > 50) preview += '...';
 
-  // Insere logo após o header do mapa de mesas
-  var header = telaMesas.querySelector('.mesa-header, header, h1, h2');
-  if(header && header.nextSibling){
-    telaMesas.insertBefore(banner, header.nextSibling);
-  } else {
-    telaMesas.insertBefore(banner, telaMesas.firstChild);
+    var banner = document.createElement('div');
+    banner.id = 'banner-avisos';
+    banner.style.cssText =
+      'position:relative;background:linear-gradient(135deg,#f7a34f,#f59e0b);' +
+      'color:#1a1a1a;padding:10px 14px;margin:8px 12px 0;border-radius:12px;' +
+      'box-shadow:0 4px 14px rgba(245,158,11,0.35);cursor:pointer;' +
+      'display:flex;align-items:center;gap:10px;' +
+      'animation:bannerSlideDown 0.4s ease;font-family:inherit;';
+    banner.onclick = abrirListaAvisos;
+    banner.innerHTML =
+      '<div style="font-size:1.5rem;flex-shrink:0;">📩</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-weight:700;font-size:0.82rem;display:flex;align-items:center;gap:6px;">' +
+          (qtd > 1 ? qtd + ' avisos não lidos' : 'Novo aviso') +
+          (qtd > 1 ? '<span style="background:rgba(0,0,0,0.15);font-size:0.66rem;padding:2px 7px;border-radius:99px;font-weight:800;">' + qtd + '</span>' : '') +
+        '</div>' +
+        '<div style="font-size:0.74rem;opacity:0.85;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+          esc(ultimo.enviadoPor || 'Admin') + ': ' + esc(preview) +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:0.7rem;font-weight:700;opacity:0.7;flex-shrink:0;">TOQUE →</div>';
+
+    if(headerEl && headerEl.nextSibling){
+      telaMesas.insertBefore(banner, headerEl.nextSibling);
+    } else {
+      telaMesas.insertBefore(banner, telaMesas.firstChild);
+    }
+    anchorRef = banner;
+
+    if(!_bannerJaVibrou[ultimo.id]){
+      _bannerJaVibrou[ultimo.id] = true;
+      try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(e){}
+    }
   }
 
-  // Animação CSS
+  // ─── BANNER 2: Respostas não lidas (verde) — só pra admin ───
+  if(_ehAdmin && _respostasNaoLidas.length > 0){
+    var ultR = _respostasNaoLidas[_respostasNaoLidas.length - 1];
+    var qtdR = _respostasNaoLidas.length;
+    var previewR = (ultR.texto||'').substring(0, 45);
+    if((ultR.texto||'').length > 45) previewR += '...';
+
+    var bannerR = document.createElement('div');
+    bannerR.id = 'banner-respostas';
+    bannerR.style.cssText =
+      'position:relative;background:linear-gradient(135deg,#4ade80,#22c55e);' +
+      'color:#0a3a1a;padding:10px 14px;margin:8px 12px 0;border-radius:12px;' +
+      'box-shadow:0 4px 14px rgba(34,197,94,0.35);cursor:pointer;' +
+      'display:flex;align-items:center;gap:10px;' +
+      'animation:bannerSlideDown 0.4s ease;font-family:inherit;';
+    bannerR.onclick = abrirListaRespostas;
+    bannerR.innerHTML =
+      '<div style="font-size:1.5rem;flex-shrink:0;">💬</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-weight:700;font-size:0.82rem;display:flex;align-items:center;gap:6px;">' +
+          (qtdR > 1 ? qtdR + ' respostas novas' : 'Nova resposta') +
+          (qtdR > 1 ? '<span style="background:rgba(0,0,0,0.15);font-size:0.66rem;padding:2px 7px;border-radius:99px;font-weight:800;">' + qtdR + '</span>' : '') +
+        '</div>' +
+        '<div style="font-size:0.74rem;opacity:0.85;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+          esc(ultR.garcom || 'Garçom') + ': ' + esc(previewR) +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:0.7rem;font-weight:700;opacity:0.7;flex-shrink:0;">TOQUE →</div>';
+
+    // Insere depois do banner amarelo (se houver) ou depois do header
+    var insertAfter = anchorRef || headerEl;
+    if(insertAfter && insertAfter.nextSibling){
+      telaMesas.insertBefore(bannerR, insertAfter.nextSibling);
+    } else if(insertAfter){
+      telaMesas.appendChild(bannerR);
+    } else {
+      telaMesas.insertBefore(bannerR, telaMesas.firstChild);
+    }
+
+    // Vibra ao chegar nova resposta (uma vez por id de resposta)
+    var keyVibR = 'resp_' + ultR.avisoId + '_' + ultR.idx;
+    if(!_bannerJaVibrou[keyVibR]){
+      _bannerJaVibrou[keyVibR] = true;
+      try{ if(navigator.vibrate) navigator.vibrate([80,40,80]); }catch(e){}
+    }
+  }
+
+  // Animação CSS (uma vez)
   if(!document.getElementById('banner-aviso-anim')){
     var st = document.createElement('style');
     st.id = 'banner-aviso-anim';
     st.textContent = '@keyframes bannerSlideDown { from{transform:translateY(-20px);opacity:0;} to{transform:translateY(0);opacity:1;} }';
     document.head.appendChild(st);
   }
+}
 
-  // Vibra só na primeira vez
-  if(!_bannerJaVibrou[ultimo.id]){
-    _bannerJaVibrou[ultimo.id] = true;
-    try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(e){}
+// Lista compacta de respostas não lidas (admin)
+function abrirListaRespostas(){
+  var ex = document.getElementById('modal-lista-respostas');
+  if(ex) ex.remove();
+
+  // Agrupa por avisoId (mais legível)
+  var grupos = {};
+  _respostasNaoLidas.forEach(function(r){
+    if(!grupos[r.avisoId]){
+      grupos[r.avisoId] = { avisoTexto: r.avisoTexto, respostas: [] };
+    }
+    grupos[r.avisoId].respostas.push(r);
+  });
+
+  var listaHtml = '';
+  Object.keys(grupos).forEach(function(avId){
+    var g = grupos[avId];
+    listaHtml +=
+      '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:8px;">' +
+        '<div style="font-size:0.7rem;color:var(--muted);margin-bottom:6px;">' +
+          '📨 Seu aviso: <em>"' + esc((g.avisoTexto||'').substring(0, 60)) + '"</em>' +
+        '</div>';
+    g.respostas.forEach(function(r){
+      var dt = r.quando ? new Date(r.quando).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+      listaHtml +=
+        '<div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start;">' +
+          '<div style="background:linear-gradient(135deg,#4ade80,#22c55e);color:#0a3a1a;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.84rem;flex-shrink:0;">' +
+            esc((r.garcom||'?').charAt(0).toUpperCase()) +
+          '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">' +
+              '<span style="font-weight:700;font-size:0.84rem;">' + esc(r.garcom || '?') + '</span>' +
+              '<span style="font-size:0.68rem;color:var(--muted);">' + dt + '</span>' +
+            '</div>' +
+            '<div style="font-size:0.88rem;line-height:1.4;background:var(--surface);border:1px solid var(--border2);padding:8px 10px;border-radius:8px;">' +
+              esc(r.texto||'') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    });
+    listaHtml += '</div>';
+  });
+
+  if(!listaHtml){
+    listaHtml = '<div style="text-align:center;color:var(--muted);padding:30px;">Nenhuma resposta nova</div>';
   }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-lista-respostas';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px 20px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.4rem;">💬</div>' +
+        '<div style="flex:1;font-weight:700;font-size:1rem;">Respostas (' + _respostasNaoLidas.length + ')</div>' +
+        '<button onclick="document.getElementById(\'modal-lista-respostas\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:12px;">' +
+        listaHtml +
+      '</div>' +
+      '<div style="padding:12px;border-top:1px solid var(--border2);">' +
+        '<button onclick="marcarRespostasLidas()" style="width:100%;padding:11px;background:#4ade80;color:#0a3a1a;border:none;border-radius:8px;font-weight:700;font-size:0.9rem;cursor:pointer;font-family:inherit;">✓ Marcar todas como lidas</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function marcarRespostasLidas(){
+  // Marca todas as respostas como vistas
+  _respostasNaoLidas.forEach(function(r){
+    _respostasVistas[r.avisoId + '_' + r.idx] = true;
+  });
+  _respostasNaoLidas = [];
+  salvarRespostasNaoLidas();
+  salvarRespostasVistas();
+  atualizarBannerAvisos();
+  var m = document.getElementById('modal-lista-respostas');
+  if(m) m.remove();
+  showToast('✓ Respostas marcadas como lidas', '#4ade80');
+}
+
+var _respostasVistas = {};
+(function(){
+  try{
+    var sal = localStorage.getItem('respostas_vistas');
+    if(sal) _respostasVistas = JSON.parse(sal);
+  }catch(e){}
+})();
+function salvarRespostasVistas(){
+  try{ localStorage.setItem('respostas_vistas', JSON.stringify(_respostasVistas)); }catch(e){}
 }
 
 var _bannerJaVibrou = {};

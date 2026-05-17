@@ -5366,9 +5366,10 @@ function renderItens(){
       abrirModalItem(item);
     }; })(it);
     grid.appendChild(card);
-    // Anexa swipe pra itens SEM opções obrigatórias e SEM ser kg
-    if(!ehKg && !itemTemObrigatorio(it)){
+    // Anexa swipe pra todos itens unidade (não kg)
+    if(!ehKg){
       anexarSwipeItemCardapio(card, it);
+      anexarLongPressItem(card, it);
     }
   });
 }
@@ -5492,7 +5493,12 @@ function anexarSwipeItemCardapio(el, item){
         _swipeItemDisparou = true;
         setTimeout(function(){ _swipeItemDisparou = false; }, 300);
         if(dirFinal > 0){
-          quickAddItem(item, +1);
+          // Se item tem opção obrigatória, abre o modal pra escolher
+          if(itemTemObrigatorio(item)){
+            abrirModalItem(item);
+          } else {
+            quickAddItem(item, +1);
+          }
         } else {
           quickAddItem(item, -1);
         }
@@ -5508,6 +5514,176 @@ function anexarSwipeItemCardapio(el, item){
   el.addEventListener('mousemove', function(e){ if(e.buttons === 1) mover(e); });
   el.addEventListener('mouseup', finalizar);
   el.addEventListener('mouseleave', finalizar);
+}
+
+// ═══ LONG PRESS no item do CARDÁPIO ═══
+// Abre popup compacto com campo de observação rápida + botão pros adicionais
+var _longPressItemTimer = null;
+var _longPressItemDisparou = false;
+var _longPressItemX = 0;
+var _longPressItemY = 0;
+var _longPressItemDuracao = 500;
+
+function anexarLongPressItem(el, item){
+  function iniciar(e){
+    _longPressItemDisparou = false;
+    var ponto = e.touches ? e.touches[0] : e;
+    _longPressItemX = ponto.clientX || 0;
+    _longPressItemY = ponto.clientY || 0;
+    if(_longPressItemTimer) clearTimeout(_longPressItemTimer);
+    _longPressItemTimer = setTimeout(function(){
+      _longPressItemDisparou = true;
+      _swipeItemDisparou = true; // bloqueia click subsequente
+      setTimeout(function(){ _swipeItemDisparou = false; }, 400);
+      if(navigator.vibrate) navigator.vibrate(50);
+      abrirPopupObsRapida(item);
+    }, _longPressItemDuracao);
+  }
+  function mover(e){
+    if(!_longPressItemTimer) return;
+    var ponto = e.touches ? e.touches[0] : e;
+    var dx = Math.abs((ponto.clientX||0) - _longPressItemX);
+    var dy = Math.abs((ponto.clientY||0) - _longPressItemY);
+    if(dx > 10 || dy > 10){
+      clearTimeout(_longPressItemTimer);
+      _longPressItemTimer = null;
+    }
+  }
+  function cancelar(){
+    if(_longPressItemTimer){
+      clearTimeout(_longPressItemTimer);
+      _longPressItemTimer = null;
+    }
+  }
+  el.addEventListener('touchstart', iniciar, {passive:true});
+  el.addEventListener('touchmove', mover, {passive:true});
+  el.addEventListener('touchend', cancelar);
+  el.addEventListener('touchcancel', cancelar);
+  el.addEventListener('mousedown', iniciar);
+  el.addEventListener('mousemove', mover);
+  el.addEventListener('mouseup', cancelar);
+  el.addEventListener('mouseleave', cancelar);
+}
+
+// Popup compacto: observação rápida + botão de adicionais
+function abrirPopupObsRapida(item){
+  var ex = document.getElementById('modal-obs-rapida');
+  if(ex) ex.remove();
+
+  var temAdicionais = (item.gruposIds || []).length > 0;
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-obs-rapida';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;max-width:380px;width:100%;overflow:hidden;animation:fabPop 0.25s ease;">' +
+      '<div style="padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">' + (item.emoji || '🍽️') + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:700;font-size:0.96rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(item.nome||'') + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--accent);font-weight:600;">R$ ' + fmtPreco(item.preco||0) + '</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'modal-obs-rapida\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.2rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px;">' +
+        '<div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:6px;">📝 Observação</div>' +
+        '<textarea id="obs-rapida-texto" placeholder="Ex: sem cebola, bem passada..." rows="3" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.92rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' +
+          '<button onclick="obsRapidaSugestao(\'sem cebola\')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:99px;font-size:0.72rem;cursor:pointer;font-family:inherit;">sem cebola</button>' +
+          '<button onclick="obsRapidaSugestao(\'bem passada\')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:99px;font-size:0.72rem;cursor:pointer;font-family:inherit;">bem passada</button>' +
+          '<button onclick="obsRapidaSugestao(\'sem sal\')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:99px;font-size:0.72rem;cursor:pointer;font-family:inherit;">sem sal</button>' +
+          '<button onclick="obsRapidaSugestao(\'pra viagem\')" style="background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:99px;font-size:0.72rem;cursor:pointer;font-family:inherit;">pra viagem</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 14px;border-top:1px solid var(--border2);background:var(--surface2);display:flex;gap:8px;">' +
+        (temAdicionais
+          ? '<button onclick="obsRapidaAbrirAdicionais()" style="flex:1;padding:11px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.82rem;cursor:pointer;font-family:inherit;">+ Adicionais</button>'
+          : '') +
+        '<button onclick="obsRapidaConfirmar()" style="flex:2;padding:11px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:0.92rem;cursor:pointer;font-family:inherit;">➕ Adicionar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  // Salva o item atual em variável global pra outros handlers
+  _itemObsRapida = item;
+  // Foca no campo
+  setTimeout(function(){
+    var ta = document.getElementById('obs-rapida-texto');
+    if(ta) ta.focus();
+  }, 250);
+}
+var _itemObsRapida = null;
+
+function obsRapidaSugestao(txt){
+  var ta = document.getElementById('obs-rapida-texto');
+  if(!ta) return;
+  var atual = (ta.value||'').trim();
+  if(atual){
+    // Verifica se já tá lá
+    if(atual.toLowerCase().includes(txt.toLowerCase())) return;
+    ta.value = atual + ', ' + txt;
+  } else {
+    ta.value = txt;
+  }
+  ta.focus();
+}
+
+function obsRapidaConfirmar(){
+  if(!_itemObsRapida) return;
+  var ta = document.getElementById('obs-rapida-texto');
+  var obs = (ta && ta.value || '').trim();
+  // Procura no carrinho item com mesma id + mesma obs + sem seleções
+  var idx = -1;
+  for(var i = 0; i < _carrinho.length; i++){
+    var c = _carrinho[i];
+    if(c.id === _itemObsRapida.id &&
+       (!c.selecoes || c.selecoes.length === 0) &&
+       (c.obs||'') === obs){
+      idx = i; break;
+    }
+  }
+  if(idx >= 0){
+    _carrinho[idx].qtd = (_carrinho[idx].qtd||1) + 1;
+  } else {
+    _carrinho.push({
+      id: _itemObsRapida.id,
+      nome: _itemObsRapida.nome,
+      preco: _itemObsRapida.preco,
+      emoji: _itemObsRapida.emoji,
+      categoriaId: _itemObsRapida.categoriaId,
+      qtd: 1,
+      obs: obs,
+      selecoes: []
+    });
+  }
+  salvarCarrinho();
+  var m = document.getElementById('modal-obs-rapida');
+  if(m) m.remove();
+  var msg = obs ? ('+1 ' + _itemObsRapida.nome + ' (' + obs.substring(0,20) + ')') : ('+1 ' + _itemObsRapida.nome);
+  showToast(msg, '#22c55e', 1500);
+  _itemObsRapida = null;
+  renderItens();
+  renderCarrinho();
+  atualizarFabEnviar();
+}
+
+function obsRapidaAbrirAdicionais(){
+  if(!_itemObsRapida) return;
+  var item = _itemObsRapida;
+  var obsAtual = '';
+  var ta = document.getElementById('obs-rapida-texto');
+  if(ta) obsAtual = (ta.value||'').trim();
+  var m = document.getElementById('modal-obs-rapida');
+  if(m) m.remove();
+  _itemObsRapida = null;
+  // Abre modal completo
+  abrirModalItem(item);
+  // Pré-preenche observação se houver
+  setTimeout(function(){
+    if(obsAtual){
+      var obsInput = document.getElementById('item-obs') || document.querySelector('textarea[placeholder*="obs" i]');
+      if(obsInput) obsInput.value = obsAtual;
+    }
+  }, 100);
 }
 
 // Adiciona/remove qtd do item direto no carrinho (usado pelo swipe)

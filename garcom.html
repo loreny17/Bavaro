@@ -1854,7 +1854,13 @@ function anexarLongPress(el, numMesa){
       _longPressDisparou = true;
       // Vibração leve confirmando que disparou
       if(navigator.vibrate) navigator.vibrate(50);
-      abrirPedidoRapido(numMesa);
+      // Long-press → entra direto no cardápio pra fazer pedido
+      if(typeof selecionarMesa === 'function'){
+        selecionarMesa(numMesa);
+        if(typeof pushHistory === 'function'){
+          try{ pushHistory('cardapio:null'); }catch(e){}
+        }
+      }
     }, _longPressDuracao);
   }
   function mover(e){
@@ -1922,16 +1928,16 @@ function anexarSwipe(el, numMesa){
         '<span style="font-size:0.74rem;letter-spacing:0.04em;">FECHAR</span>' +
         '<span style="font-size:1.4rem;">💰</span>';
     } else {
-      // DIREITA: fazer pedido (verde, ícone à esquerda)
+      // DIREITA: pedido rápido (azul, ícone à esquerda)
       bgEl.style.cssText =
         'position:absolute;top:0;left:0;bottom:0;width:100%;' +
-        'background:linear-gradient(90deg,#16a34a 0%,#22c55e 40%,transparent 100%);' +
+        'background:linear-gradient(90deg,#2563eb 0%,#3b82f6 40%,transparent 100%);' +
         'display:flex;align-items:center;justify-content:flex-start;' +
         'padding-left:14px;gap:6px;color:#fff;font-weight:700;' +
         'pointer-events:none;z-index:0;font-family:inherit;';
       bgEl.innerHTML =
-        '<span style="font-size:1.4rem;">📝</span>' +
-        '<span style="font-size:0.74rem;letter-spacing:0.04em;">PEDIR</span>';
+        '<span style="font-size:1.4rem;">⚡</span>' +
+        '<span style="font-size:0.74rem;letter-spacing:0.04em;">REPETIR</span>';
     }
     bgEl.setAttribute('data-swipe-bg','1');
     el.insertBefore(bgEl, el.firstChild);
@@ -1991,7 +1997,7 @@ function anexarSwipe(el, numMesa){
         if(direcao < 0){
           bgEl.style.background = 'linear-gradient(90deg,#dc2626 0%,#b91c1c 100%)';
         } else {
-          bgEl.style.background = 'linear-gradient(90deg,#16a34a 0%,#22c55e 100%)';
+          bgEl.style.background = 'linear-gradient(90deg,#2563eb 0%,#3b82f6 100%)';
         }
       }
     } else if(ativou && Math.abs(dx) < THRESHOLD){
@@ -2000,7 +2006,7 @@ function anexarSwipe(el, numMesa){
         if(direcao < 0){
           bgEl.style.background = 'linear-gradient(90deg,transparent 0%,#dc2626 60%,#b91c1c 100%)';
         } else {
-          bgEl.style.background = 'linear-gradient(90deg,#16a34a 0%,#22c55e 40%,transparent 100%)';
+          bgEl.style.background = 'linear-gradient(90deg,#2563eb 0%,#3b82f6 40%,transparent 100%)';
         }
       }
     }
@@ -2047,12 +2053,9 @@ function anexarSwipe(el, numMesa){
             abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
           }
         } else {
-          // DIREITA: vai direto pro cardápio (fazer pedido)
-          if(typeof selecionarMesa === 'function'){
-            selecionarMesa(numMesa);
-            if(typeof pushHistory === 'function'){
-              try{ pushHistory('cardapio:null'); }catch(e){}
-            }
+          // DIREITA: abre popup de pedido rápido (itens já consumidos)
+          if(typeof abrirPedidoRapido === 'function'){
+            abrirPedidoRapido(numMesa);
           }
         }
       }

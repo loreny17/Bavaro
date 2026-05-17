@@ -3392,56 +3392,80 @@ function renderCaixaDoDia(){
   var inicioOntem = inicioDia - (24 * 60 * 60 * 1000);
   var fimOntem = inicioDia;
 
-  // Função pra buscar contas fechadas num período (com fallback)
-  function buscarFechadasPeriodo(de, ate){
-    return fbDb.collection('contas_fechadas')
+  console.log('[CAIXA] buscando contas. Hoje:', new Date(inicioDia).toLocaleString('pt-BR'), 'até', new Date(fimDia).toLocaleString('pt-BR'));
+
+  // Busca TODAS as contas fechadas do restaurante (até 500) — filtra em memória
+  // Isso evita problema de índice e funciona sempre
+  Promise.all([
+    fbDb.collection('contas_fechadas')
       .where('restauranteId','==', _restauranteId)
-      .where('fechadaEm','>=', de)
-      .where('fechadaEm','<', ate)
+      .limit(500)
       .get()
       .then(function(snap){
+        console.log('[CAIXA] total contas_fechadas:', snap.size);
         var arr = [];
-        snap.forEach(function(d){ arr.push(Object.assign({id:d.id}, d.data())); });
+        snap.forEach(function(d){
+          var data = d.data() || {};
+          arr.push(Object.assign({id:d.id}, data));
+        });
+        // Log dos campos de data pra debug
+        if(arr.length > 0){
+          var sample = arr[0];
+          console.log('[CAIXA] exemplo conta:', JSON.stringify({
+            id: sample.id,
+            fechadaEm: sample.fechadaEm,
+            criadaEm: sample.criadaEm,
+            criadoEm: sample.criadoEm,
+            dataFechamento: sample.dataFechamento,
+            mesa: sample.mesa,
+            status: sample.status
+          }));
+        }
         return arr;
       })
       .catch(function(e){
-        // Fallback: busca só por restauranteId e filtra em memória
-        console.warn('[Caixa] fallback de busca:', e.message);
-        return fbDb.collection('contas_fechadas')
-          .where('restauranteId','==', _restauranteId)
-          .limit(200)
-          .get()
-          .then(function(snap){
-            var arr = [];
-            snap.forEach(function(d){
-              var data = d.data() || {};
-              if(data.fechadaEm >= de && data.fechadaEm < ate){
-                arr.push(Object.assign({id:d.id}, data));
-              }
-            });
-            return arr;
-          })
-          .catch(function(){ return []; });
-      });
-  }
-
-  Promise.all([
-    buscarFechadasPeriodo(inicioDia, fimDia),
-    // Contas abertas (em andamento) hoje
+        console.error('[CAIXA] erro buscar contas_fechadas:', e.code, e.message);
+        return [];
+      }),
+    // Contas abertas (em andamento)
     fbDb.collection('contas_mesa')
       .where('restauranteId','==', _restauranteId)
       .where('status','==','aberta')
       .get()
       .then(function(snap){
+        console.log('[CAIXA] contas_mesa abertas:', snap.size);
         var arr = [];
         snap.forEach(function(d){ arr.push(Object.assign({id:d.id}, d.data())); });
         return arr;
       })
-      .catch(function(){ return []; }),
-    buscarFechadasPeriodo(inicioOntem, fimOntem)
+      .catch(function(e){
+        console.error('[CAIXA] erro buscar contas_mesa:', e.code, e.message);
+        return [];
+      })
   ]).then(function(results){
-    _renderCaixaConteudo(results[0], results[1], results[2]);
+    var todasFechadas = results[0];
+    var abertas = results[1];
+
+    // Filtra em memória — tenta vários nomes de campo de data
+    function dataFechamento(c){
+      // Tenta vários nomes de campo
+      return c.fechadaEm || c.dataFechamento || c.fechadoEm || c.criadoEm || c.criadaEm || 0;
+    }
+
+    var fechadasHoje = todasFechadas.filter(function(c){
+      var dt = dataFechamento(c);
+      return dt >= inicioDia && dt < fimDia;
+    });
+    var fechadasOntem = todasFechadas.filter(function(c){
+      var dt = dataFechamento(c);
+      return dt >= inicioOntem && dt < fimOntem;
+    });
+
+    console.log('[CAIXA] fechadas hoje:', fechadasHoje.length, 'ontem:', fechadasOntem.length, 'abertas agora:', abertas.length);
+
+    _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem);
   }).catch(function(e){
+    console.error('[CAIXA] erro final:', e);
     conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
   });
 }

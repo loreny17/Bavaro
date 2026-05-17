@@ -1510,6 +1510,10 @@ function mostrarMesas(){
   var admItem = document.getElementById('menu-item-admin-garcom');
   if(admItem) admItem.style.display = _ehAdmin ? '' : 'none';
   carregarTenantParaMesas();
+  // Reaparece banner de avisos não lidos (se houver)
+  setTimeout(function(){
+    try{ atualizarBannerAvisos(); }catch(e){}
+  }, 200);
 }
 
 // ════════════════════════════════════════
@@ -2890,85 +2894,230 @@ function escutarAvisosGarcom(){
   if(_avisosUnsubGarcom){ _avisosUnsubGarcom(); _avisosUnsubGarcom = null; }
 
   // Query SIMPLES — só filtra por restauranteId, resto é em memória
-  // (não precisa de índice composto)
   _avisosUnsubGarcom = fbDb.collection('tenants').doc(_tenantId)
     .collection('avisos')
     .where('restauranteId','==', _restauranteId)
     .onSnapshot(function(snap){
-      console.log('[AVISOS] snapshot recebido, docs:', snap.size, 'changes:', snap.docChanges().length);
+      console.log('[AVISOS] snapshot recebido, docs:', snap.size);
       var limite = Date.now() - (24 * 60 * 60 * 1000); // só últimas 24h
-      snap.docChanges().forEach(function(change){
-        if(change.type === 'added' || change.type === 'modified'){
-          var av = Object.assign({id: change.doc.id}, change.doc.data());
-          console.log('[AVISOS] aviso detectado:', av.id, 'destino:', av.destino, 'msg:', (av.mensagem||'').substring(0,30));
-          // Filtra: data recente
-          if((av.criadoEm||0) < limite){
-            console.log('[AVISOS] aviso antigo, ignorando');
-            return;
-          }
-          // Filtra: pra mim ou pra todos
-          var ehParaMim = av.destino === 'todos' || av.destino === _nomeGarcom;
-          if(!ehParaMim){
-            console.log('[AVISOS] não é pra mim ('+_nomeGarcom+'), destino é:', av.destino);
-            return;
-          }
-          if(_avisosVistos[av.id]){
-            console.log('[AVISOS] já vi este aviso, ignorando');
-            return;
-          }
+      _avisosNaoLidos = [];
+      snap.forEach(function(d){
+        var av = Object.assign({id: d.id}, d.data());
+        // Filtra: data recente
+        if((av.criadoEm||0) < limite) return;
+        // Filtra: pra mim ou pra todos
+        var ehParaMim = av.destino === 'todos' || av.destino === _nomeGarcom;
+        if(!ehParaMim) return;
+        // Não mostra os já lidos
+        if(_avisosVistos[av.id]) return;
+        // Não mostra os que eu mesmo respondi
+        var jaRespondi = (av.respostas||[]).some(function(r){ return r.garcom === _nomeGarcom; });
+        if(jaRespondi){
           _avisosVistos[av.id] = true;
           salvarAvisosVistos();
-          console.log('[AVISOS] ✓ MOSTRANDO notificação!');
-          mostrarNotifAviso(av);
+          return;
         }
+        _avisosNaoLidos.push(av);
       });
+      // Ordena mais recente primeiro
+      _avisosNaoLidos.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+      console.log('[AVISOS] avisos não lidos:', _avisosNaoLidos.length);
+      atualizarBannerAvisos();
     }, function(err){
       console.error('[AVISOS] Erro no listener:', err.code, err.message);
     });
-  console.log('[AVISOS] listener instalado com sucesso');
+  console.log('[AVISOS] listener instalado');
 }
 
-function mostrarNotifAviso(av){
-  // Remove notif anterior se houver
-  var ex = document.getElementById('modal-aviso-novo');
+var _avisosNaoLidos = [];
+
+// ─────────────────────────────────────
+// Banner amarelo no topo do mapa de mesas
+// ─────────────────────────────────────
+function atualizarBannerAvisos(){
+  var existente = document.getElementById('banner-avisos');
+  if(existente) existente.remove();
+
+  if(_avisosNaoLidos.length === 0) return;
+
+  // Só mostra se está no mapa de mesas (mesa-screen visível)
+  var telaMesas = document.getElementById('mesa-screen');
+  if(!telaMesas || telaMesas.classList.contains('hidden')) return;
+
+  var ultimo = _avisosNaoLidos[0];
+  var qtd = _avisosNaoLidos.length;
+  var preview = (ultimo.mensagem||'').substring(0, 50);
+  if((ultimo.mensagem||'').length > 50) preview += '...';
+
+  var banner = document.createElement('div');
+  banner.id = 'banner-avisos';
+  banner.style.cssText =
+    'position:relative;background:linear-gradient(135deg,#f7a34f,#f59e0b);' +
+    'color:#1a1a1a;padding:10px 14px;margin:8px 12px 0;border-radius:12px;' +
+    'box-shadow:0 4px 14px rgba(245,158,11,0.35);cursor:pointer;' +
+    'display:flex;align-items:center;gap:10px;' +
+    'animation:bannerSlideDown 0.4s ease;font-family:inherit;';
+  banner.onclick = abrirListaAvisos;
+  banner.innerHTML =
+    '<div style="font-size:1.5rem;flex-shrink:0;">📩</div>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="font-weight:700;font-size:0.82rem;display:flex;align-items:center;gap:6px;">' +
+        (qtd > 1 ? qtd + ' avisos não lidos' : 'Novo aviso') +
+        (qtd > 1 ? '<span style="background:rgba(0,0,0,0.15);font-size:0.66rem;padding:2px 7px;border-radius:99px;font-weight:800;">' + qtd + '</span>' : '') +
+      '</div>' +
+      '<div style="font-size:0.74rem;opacity:0.85;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+        esc(ultimo.enviadoPor || 'Admin') + ': ' + esc(preview) +
+      '</div>' +
+    '</div>' +
+    '<div style="font-size:0.7rem;font-weight:700;opacity:0.7;flex-shrink:0;">TOQUE →</div>';
+
+  // Insere logo após o header do mapa de mesas
+  var header = telaMesas.querySelector('.mesa-header, header, h1, h2');
+  if(header && header.nextSibling){
+    telaMesas.insertBefore(banner, header.nextSibling);
+  } else {
+    telaMesas.insertBefore(banner, telaMesas.firstChild);
+  }
+
+  // Animação CSS
+  if(!document.getElementById('banner-aviso-anim')){
+    var st = document.createElement('style');
+    st.id = 'banner-aviso-anim';
+    st.textContent = '@keyframes bannerSlideDown { from{transform:translateY(-20px);opacity:0;} to{transform:translateY(0);opacity:1;} }';
+    document.head.appendChild(st);
+  }
+
+  // Vibra só na primeira vez
+  if(!_bannerJaVibrou[ultimo.id]){
+    _bannerJaVibrou[ultimo.id] = true;
+    try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(e){}
+  }
+}
+
+var _bannerJaVibrou = {};
+
+// Lista compacta de avisos não lidos
+function abrirListaAvisos(){
+  var ex = document.getElementById('modal-lista-avisos');
   if(ex) ex.remove();
 
-  var dt = av.criadoEm ? new Date(av.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+  var listaHtml = '';
+  _avisosNaoLidos.forEach(function(av){
+    var dt = av.criadoEm ? new Date(av.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    var data = av.criadoEm ? new Date(av.criadoEm) : null;
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    var dataStr = '';
+    if(data && data.getTime() < hoje.getTime()){
+      dataStr = data.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) + ' ';
+    }
+    var destinoTag = av.destino === 'todos' ? '📢 Geral' : '👤 Pra você';
+    listaHtml +=
+      '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:8px;">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:0.7rem;">' +
+          '<span style="background:rgba(212,168,67,0.15);color:var(--accent);padding:2px 7px;border-radius:5px;font-weight:700;">' + destinoTag + '</span>' +
+          '<span style="color:var(--muted);">de ' + esc(av.enviadoPor || 'Admin') + '</span>' +
+          '<span style="flex:1;"></span>' +
+          '<span style="color:var(--muted);">' + dataStr + dt + '</span>' +
+        '</div>' +
+        '<div style="font-size:0.92rem;line-height:1.45;margin-bottom:10px;">' + esc(av.mensagem||'') + '</div>' +
+        '<div style="display:flex;gap:6px;">' +
+          '<button onclick="abrirResponderAviso(\'' + av.id + '\')" style="flex:1;padding:9px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:0.82rem;cursor:pointer;font-family:inherit;">💬 Responder</button>' +
+          '<button onclick="marcarAvisoLido(\'' + av.id + '\')" style="padding:9px 14px;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.82rem;cursor:pointer;font-family:inherit;">✓ Li</button>' +
+        '</div>' +
+      '</div>';
+  });
+
+  if(!listaHtml){
+    listaHtml = '<div style="text-align:center;color:var(--muted);padding:30px;">Nenhum aviso não lido</div>';
+  }
 
   var mod = document.createElement('div');
-  mod.id = 'modal-aviso-novo';
-  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.id = 'modal-lista-avisos';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px 20px;';
   mod.innerHTML =
-    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:16px;max-width:380px;width:100%;overflow:hidden;animation:avisoPop 0.3s ease;">' +
-      '<div style="background:linear-gradient(135deg,var(--accent),#a17a30);color:#000;padding:14px;text-align:center;">' +
-        '<div style="font-size:2rem;margin-bottom:4px;">📢</div>' +
-        '<div style="font-weight:700;font-size:1.05rem;letter-spacing:0.05em;">NOVO AVISO</div>' +
-        '<div style="font-size:0.74rem;opacity:0.7;margin-top:2px;">de ' + esc(av.enviadoPor||'Admin') + ' • ' + dt + '</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.4rem;">📩</div>' +
+        '<div style="flex:1;font-weight:700;font-size:1rem;">Avisos (' + _avisosNaoLidos.length + ')</div>' +
+        '<button onclick="document.getElementById(\'modal-lista-avisos\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
       '</div>' +
-      '<div style="padding:18px;">' +
-        '<div style="font-size:0.95rem;line-height:1.5;color:var(--text);margin-bottom:14px;">' + esc(av.mensagem||'') + '</div>' +
-        '<textarea id="aviso-resposta-texto" placeholder="Digite sua resposta (opcional)..." rows="2" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.86rem;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:10px;"></textarea>' +
-        '<div style="display:flex;gap:8px;">' +
-          '<button onclick="responderAviso(\'' + av.id + '\')" style="flex:1;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:0.88rem;cursor:pointer;font-family:inherit;">💬 Responder</button>' +
-          '<button onclick="document.getElementById(\'modal-aviso-novo\').remove()" style="padding:11px 16px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.88rem;cursor:pointer;font-family:inherit;">OK</button>' +
+      '<div style="flex:1;overflow-y:auto;padding:12px;">' +
+        listaHtml +
+        (_avisosNaoLidos.length > 1 ? '<button onclick="marcarTodosLidos()" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:8px;font-size:0.78rem;cursor:pointer;font-family:inherit;margin-top:6px;">✓ Marcar todos como lidos</button>' : '') +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+// Mini modal de resposta (ao tocar em "Responder")
+function abrirResponderAviso(avisoId){
+  var av = _avisosNaoLidos.find(function(a){ return a.id === avisoId; });
+  if(!av) return;
+
+  var ex = document.getElementById('modal-resp-aviso');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-resp-aviso';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;max-width:380px;width:100%;overflow:hidden;animation:bannerSlideDown 0.25s ease;">' +
+      '<div style="padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:8px;">' +
+        '<div style="font-size:1.1rem;">💬</div>' +
+        '<div style="flex:1;font-weight:700;font-size:0.92rem;">Responder ' + esc(av.enviadoPor || 'Admin') + '</div>' +
+        '<button onclick="document.getElementById(\'modal-resp-aviso\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:1.1rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px;">' +
+        '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:10px;font-size:0.84rem;line-height:1.4;margin-bottom:12px;color:var(--muted);">' +
+          esc(av.mensagem||'') +
         '</div>' +
+        '<textarea id="aviso-resposta-texto" placeholder="Digite sua resposta..." rows="3" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-size:0.88rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>' +
+        '<button onclick="responderAviso(\'' + av.id + '\')" style="width:100%;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:0.9rem;cursor:pointer;margin-top:10px;font-family:inherit;">📤 Enviar resposta</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
 
-  // Adiciona animação se não existir
-  if(!document.getElementById('aviso-anim-style')){
-    var style = document.createElement('style');
-    style.id = 'aviso-anim-style';
-    style.textContent = '@keyframes avisoPop { from{transform:scale(0.7);opacity:0;} to{transform:scale(1);opacity:1;} }';
-    document.head.appendChild(style);
-  }
+  // Foca no campo após abrir
+  setTimeout(function(){
+    var ta = document.getElementById('aviso-resposta-texto');
+    if(ta) ta.focus();
+  }, 200);
+}
 
-  // Vibra se suportado
-  try{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }catch(e){}
+function marcarAvisoLido(avisoId){
+  _avisosVistos[avisoId] = true;
+  salvarAvisosVistos();
+  _avisosNaoLidos = _avisosNaoLidos.filter(function(a){ return a.id !== avisoId; });
+  atualizarBannerAvisos();
+  // Atualiza modal aberto se houver
+  if(document.getElementById('modal-lista-avisos')){
+    if(_avisosNaoLidos.length === 0){
+      document.getElementById('modal-lista-avisos').remove();
+    } else {
+      abrirListaAvisos();
+    }
+  }
+}
+
+function marcarTodosLidos(){
+  _avisosNaoLidos.forEach(function(a){ _avisosVistos[a.id] = true; });
+  salvarAvisosVistos();
+  _avisosNaoLidos = [];
+  atualizarBannerAvisos();
+  var m = document.getElementById('modal-lista-avisos');
+  if(m) m.remove();
+  showToast('✓ Tudo marcado como lido', '#4ade80');
+}
+
+// MANTÉM função antiga só pra compatibilidade (não usa mais)
+function mostrarNotifAviso(av){
+  // Função descontinuada — agora usa banner
+  _avisosNaoLidos.push(av);
+  atualizarBannerAvisos();
 }
 
 function responderAviso(avisoId){
+  console.log('[RESPONDER-AVISO] iniciando, avisoId:', avisoId);
   var txt = document.getElementById('aviso-resposta-texto').value.trim();
   if(!txt){
     showToast('Digite uma resposta','#f7a34f');
@@ -2976,6 +3125,7 @@ function responderAviso(avisoId){
   }
   if(!_tenantId || !_nomeGarcom){
     showToast('Erro: sessão inválida','#f87171');
+    console.error('[RESPONDER-AVISO] sessão inválida — tenant:', _tenantId, 'garcom:', _nomeGarcom);
     return;
   }
 
@@ -2984,17 +3134,37 @@ function responderAviso(avisoId){
     texto: txt,
     quando: Date.now()
   };
+  console.log('[RESPONDER-AVISO] enviando:', resposta);
 
   fbDb.collection('tenants').doc(_tenantId).collection('avisos').doc(avisoId)
     .update({
       respostas: firebase.firestore.FieldValue.arrayUnion(resposta)
     })
     .then(function(){
-      var m = document.getElementById('modal-aviso-novo');
-      if(m) m.remove();
+      console.log('[RESPONDER-AVISO] ✓ resposta salva no Firestore');
+      // Fecha modais
+      var m1 = document.getElementById('modal-resp-aviso');
+      if(m1) m1.remove();
+      var m2 = document.getElementById('modal-aviso-novo');
+      if(m2) m2.remove();
+      // Marca como lido (responder = leu)
+      _avisosVistos[avisoId] = true;
+      salvarAvisosVistos();
+      _avisosNaoLidos = _avisosNaoLidos.filter(function(a){ return a.id !== avisoId; });
+      atualizarBannerAvisos();
+      // Atualiza modal lista se tiver aberto
+      var mLista = document.getElementById('modal-lista-avisos');
+      if(mLista){
+        if(_avisosNaoLidos.length === 0){
+          mLista.remove();
+        } else {
+          abrirListaAvisos();
+        }
+      }
       showToast('✓ Resposta enviada','#4ade80');
     })
     .catch(function(e){
+      console.error('[RESPONDER-AVISO] ERRO:', e.code, e.message);
       showToast('❌ ' + e.message, '#f87171');
     });
 }
@@ -3480,33 +3650,49 @@ function renderAvisos(){
         });
       }
 
-      // Listener nos avisos enviados (últimos 30)
+      // Listener REAL-TIME nos avisos (ordena em memória pra não precisar índice)
       if(_adminAvisosUnsub){ _adminAvisosUnsub(); }
+      console.log('[ADMIN-AVISOS] instalando listener tempo real');
+      var _adminAvisosRespCount = {}; // id -> count de respostas (pra detectar nova resposta)
       _adminAvisosUnsub = fbDb.collection('tenants').doc(_tenantId)
         .collection('avisos')
         .where('restauranteId','==', _restauranteId)
-        .orderBy('criadoEm','desc')
         .limit(30)
         .onSnapshot(function(snap2){
+          console.log('[ADMIN-AVISOS] snapshot:', snap2.size, 'docs');
           _adminAvisosCache = [];
-          snap2.forEach(function(d){ _adminAvisosCache.push(Object.assign({id:d.id}, d.data())); });
+          var temNovaResposta = false;
+          var novasInfo = [];
+          snap2.forEach(function(d){
+            var av = Object.assign({id:d.id}, d.data());
+            _adminAvisosCache.push(av);
+            // Detecta nova resposta
+            var qtdAtual = (av.respostas||[]).length;
+            var qtdAntes = _adminAvisosRespCount[av.id];
+            if(qtdAntes !== undefined && qtdAtual > qtdAntes){
+              temNovaResposta = true;
+              var ultima = av.respostas[qtdAtual-1];
+              if(ultima){ novasInfo.push(ultima.garcom + ': ' + ultima.texto); }
+            }
+            _adminAvisosRespCount[av.id] = qtdAtual;
+          });
+          _adminAvisosCache.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+          var totalResp = 0;
+          _adminAvisosCache.forEach(function(av){ totalResp += (av.respostas||[]).length; });
+          console.log('[ADMIN-AVISOS] avisos:', _adminAvisosCache.length, 'respostas totais:', totalResp);
           _renderAvisosConteudo();
-        }, function(err){
-          // Fallback se não tem o índice ainda — busca sem orderBy
-          fbDb.collection('tenants').doc(_tenantId)
-            .collection('avisos')
-            .where('restauranteId','==', _restauranteId)
-            .limit(30)
-            .get()
-            .then(function(snap2){
-              _adminAvisosCache = [];
-              snap2.forEach(function(d){ _adminAvisosCache.push(Object.assign({id:d.id}, d.data())); });
-              _adminAvisosCache.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
-              _renderAvisosConteudo();
-            }).catch(function(){
-              _adminAvisosCache = [];
-              _renderAvisosConteudo();
+          // Mostra notificação se houver nova resposta
+          if(temNovaResposta){
+            console.log('[ADMIN-AVISOS] 🔔 NOVA RESPOSTA detectada!', novasInfo);
+            novasInfo.forEach(function(info){
+              showToast('💬 ' + info.substring(0, 60), '#4ade80', 4000);
             });
+            try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(e){}
+          }
+        }, function(err){
+          console.error('[ADMIN-AVISOS] erro listener:', err.code, err.message);
+          _adminAvisosCache = [];
+          _renderAvisosConteudo();
         });
     }).catch(function(e){
       // Se nem o restaurante público dá pra ler, mostra mesmo assim sem lista de garçons

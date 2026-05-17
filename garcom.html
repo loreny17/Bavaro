@@ -1828,6 +1828,8 @@ function renderMesas(){
     // Long press apenas pra mesas ocupadas (mesas livres não tem o que reaproveitar)
     if(eOcupada){
       anexarLongPress(el, num);
+      // Swipe pra esquerda → fechar mesa (só admin)
+      anexarSwipe(el, num);
     }
     grid.appendChild(el);
   }
@@ -1884,6 +1886,157 @@ function anexarLongPress(el, numMesa){
   // Bloqueia o menu de contexto (Android/iOS popup de "copiar"/"selecionar")
   // que aparece no long press de texto e atrapalha nosso long press customizado
   el.addEventListener('contextmenu', function(e){ e.preventDefault(); return false; });
+}
+
+// ═══ SWIPE GESTURE — Só pra ADMIN nas mesas ocupadas ═══
+// Arrasta a mesa pra esquerda → abre direto o modal "Fechar Mesa"
+// Threshold: 80px. Mostra ícone vermelho aparecendo do lado direito durante arrasto.
+function anexarSwipe(el, numMesa){
+  if(!_ehAdmin) return; // só admin tem swipe
+
+  var startX = 0, startY = 0, currentX = 0;
+  var swiping = false;
+  var bgEl = null;
+  var ativou = false;
+  var THRESHOLD = 80; // px pra ativar
+  var MAX_TRANSLATE = 110; // limite visual de arrasto
+
+  // Garante posição relativa pra background absoluto funcionar
+  if(getComputedStyle(el).position === 'static'){
+    el.style.position = 'relative';
+  }
+  el.style.overflow = 'hidden';
+
+  function criarBg(){
+    if(bgEl) return;
+    bgEl = document.createElement('div');
+    bgEl.style.cssText =
+      'position:absolute;top:0;right:0;bottom:0;width:100%;' +
+      'background:linear-gradient(90deg,transparent 0%,#dc2626 60%,#b91c1c 100%);' +
+      'display:flex;align-items:center;justify-content:flex-end;' +
+      'padding-right:14px;gap:6px;color:#fff;font-weight:700;' +
+      'pointer-events:none;z-index:0;font-family:inherit;';
+    bgEl.innerHTML =
+      '<span style="font-size:0.74rem;letter-spacing:0.04em;">FECHAR</span>' +
+      '<span style="font-size:1.4rem;">💰</span>';
+    el.insertBefore(bgEl, el.firstChild);
+  }
+
+  function removerBg(){
+    if(bgEl){ bgEl.remove(); bgEl = null; }
+  }
+
+  function iniciar(e){
+    if(!_ehAdmin) return;
+    var ponto = e.touches ? e.touches[0] : e;
+    startX = ponto.clientX;
+    startY = ponto.clientY;
+    currentX = 0;
+    swiping = false;
+    ativou = false;
+  }
+
+  function mover(e){
+    if(!_ehAdmin) return;
+    var ponto = e.touches ? e.touches[0] : e;
+    var dx = ponto.clientX - startX;
+    var dy = ponto.clientY - startY;
+
+    // Decide se é swipe horizontal (só ativa se for claramente horizontal)
+    if(!swiping){
+      if(Math.abs(dx) < 12) return; // muito pouco — ignora
+      if(Math.abs(dy) > Math.abs(dx)) return; // scroll vertical
+      if(dx > 0) return; // só esquerda
+      swiping = true;
+      criarBg();
+      // Cancela long-press se estiver rolando
+      if(_longPressTimer){ clearTimeout(_longPressTimer); _longPressTimer = null; }
+    }
+
+    // Restringe a esquerda
+    if(dx > 0) dx = 0;
+    if(dx < -MAX_TRANSLATE) dx = -MAX_TRANSLATE;
+    currentX = dx;
+
+    // Move o conteúdo (não o bg)
+    var conteudo = el.querySelectorAll(':scope > *:not([data-swipe-bg])');
+    // Aplica translate no elemento todo via transform da firstChild (mesa-num + status)
+    var children = el.children;
+    for(var i = 0; i < children.length; i++){
+      var c = children[i];
+      if(c === bgEl) continue;
+      c.style.transform = 'translateX(' + dx + 'px)';
+      c.style.transition = 'none';
+    }
+
+    // Marca background com data-attr pra não mover
+    if(bgEl) bgEl.setAttribute('data-swipe-bg','1');
+
+    // Feedback de threshold atingido (vibra UMA vez)
+    if(!ativou && Math.abs(dx) >= THRESHOLD){
+      ativou = true;
+      try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+      if(bgEl){
+        bgEl.style.background = 'linear-gradient(90deg,#dc2626 0%,#b91c1c 100%)';
+      }
+    } else if(ativou && Math.abs(dx) < THRESHOLD){
+      ativou = false;
+      if(bgEl){
+        bgEl.style.background = 'linear-gradient(90deg,transparent 0%,#dc2626 60%,#b91c1c 100%)';
+      }
+    }
+  }
+
+  function finalizar(e){
+    if(!swiping){
+      removerBg();
+      return;
+    }
+    swiping = false;
+
+    var children = el.children;
+    // Anima o reset
+    for(var i = 0; i < children.length; i++){
+      var c = children[i];
+      if(c === bgEl) continue;
+      c.style.transition = 'transform 0.18s ease';
+      c.style.transform = 'translateX(0)';
+    }
+
+    var ativar = Math.abs(currentX) >= THRESHOLD;
+
+    setTimeout(function(){
+      removerBg();
+      // Limpa styles
+      for(var i = 0; i < children.length; i++){
+        var c = children[i];
+        c.style.transition = '';
+        c.style.transform = '';
+      }
+      // Se passou do threshold, dispara ação
+      if(ativar){
+        // Impede o click subsequente de disparar
+        _longPressDisparou = true;
+        setTimeout(function(){ _longPressDisparou = false; }, 300);
+        // Abre direto o modal de fechamento de conta
+        if(typeof abrirFecharConta === 'function'){
+          abrirFecharConta(numMesa);
+        } else if(typeof abrirMenuMesa === 'function'){
+          // Fallback: abre menu da mesa se não tem função direta
+          abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
+        }
+      }
+    }, 180);
+  }
+
+  el.addEventListener('touchstart', iniciar, {passive:true});
+  el.addEventListener('touchmove', mover, {passive:true});
+  el.addEventListener('touchend', finalizar);
+  el.addEventListener('touchcancel', finalizar);
+  el.addEventListener('mousedown', iniciar);
+  el.addEventListener('mousemove', function(e){ if(e.buttons === 1) mover(e); });
+  el.addEventListener('mouseup', finalizar);
+  el.addEventListener('mouseleave', finalizar);
 }
 
 // Estado das quantidades no popup de pedido rápido

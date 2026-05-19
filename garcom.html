@@ -1117,6 +1117,13 @@ var _modoCompacto = (function(){ try{ return localStorage.getItem('garcom_modo_c
 var _meusPedidos = [];     // pedidos do garçom nessa mesa
 var _tabAtual = 'cardapio';
 var _unsubItens = null, _unsubCats = null, _unsubPedidos = null, _unsubGrupos = null;
+// Sistema de Cozinha (sininho)
+var _unsubModelosCozinha = null;
+var _unsubImpressorasCozinha = null;
+var _unsubPedidosCozinha = null;
+var _modelosCozinha = [];
+var _impressorasCozinha = [];
+var _pedidosCozinha = [];
 var _unsubMesas = null; // listener das mesas ocupadas
 var _listenersRestId = null; // Guarda qual restaurante está sendo escutado, evita reload
 var _grupos = [];
@@ -1509,6 +1516,373 @@ function trocarAba(aba){
   if(aba==='comandas') renderComandas();
 }
 
+// ═══════════════════════════════════════════════
+// 🔔 SISTEMA DE COZINHA (sininho)
+// ═══════════════════════════════════════════════
+
+// Verifica se a impressora é da cozinha
+function _impEhCozinha(imp){
+  if(!imp) return false;
+  var nome = (imp.nome||'').toLowerCase();
+  var tipo = (imp.tipo||'').toLowerCase();
+  // Considera cozinha se:
+  // - tipo == 'cozinha' explicitamente
+  // - nome contém "cozinha"
+  return tipo === 'cozinha' || nome.indexOf('cozinha') >= 0;
+}
+
+// Filtra itens que vão pra cozinha (usando lógica do PDV)
+function filtrarItensCozinha(itens){
+  if(!itens || !itens.length) return [];
+
+  // Pega IDs de impressoras da cozinha
+  var impsCozinhaIds = _impressorasCozinha
+    .filter(_impEhCozinha)
+    .map(function(i){ return i.id; });
+
+  if(!impsCozinhaIds.length){
+    // Se não tem impressora marcada como cozinha,
+    // assume que TODAS as impressoras configuradas são da cozinha
+    // (caso o cliente só tenha 1 impressora — a da cozinha)
+    impsCozinhaIds = _impressorasCozinha.map(function(i){ return i.id; });
+  }
+
+  // Pega modelos que apontam pra impressoras de cozinha
+  var modelosCoz = _modelosCozinha.filter(function(m){
+    return impsCozinhaIds.indexOf(m.impressoraId) >= 0;
+  });
+
+  if(!modelosCoz.length) return [];
+
+  // Filtra itens que se encaixam em algum desses modelos
+  var resultado = [];
+  itens.forEach(function(it, idx){
+    if(it.status === 'cancelado') return;
+    var passa = modelosCoz.some(function(m){
+      if(m.filtro === 'item'){
+        return (m.itens||[]).indexOf(it.id) >= 0;
+      } else {
+        // filtro == 'categoria'
+        var itemDef = _itens.find(function(i){ return i.id === it.id; });
+        var catId = itemDef ? itemDef.categoriaId : '';
+        return (m.categorias||[]).indexOf(catId) >= 0;
+      }
+    });
+    if(passa) resultado.push(Object.assign({_idx: idx}, it));
+  });
+  return resultado;
+}
+
+// Conta itens pendentes da cozinha numa mesa específica
+function contarItensCozinhaMesa(numMesa){
+  if(!_pedidosCozinha || !_pedidosCozinha.length) return 0;
+  var total = 0;
+  _pedidosCozinha.forEach(function(p){
+    // Aceita mesa como número ou string
+    if(String(p.mesa) !== String(numMesa)) return;
+    if(p.status === 'cancelado') return;
+    var itensCoz = filtrarItensCozinha(p.itens || []);
+    itensCoz.forEach(function(it){
+      if(!it.descido){
+        total += (it.qtd || 1);
+      }
+    });
+  });
+  return total;
+}
+
+// Pega TODOS os itens da cozinha de uma mesa (incluindo descidos pra histórico)
+function getItensCozinhaMesa(numMesa){
+  if(!_pedidosCozinha || !_pedidosCozinha.length) return { pendentes: [], descidos: [] };
+  var pendentes = [];
+  var descidos = [];
+  _pedidosCozinha.forEach(function(p){
+    if(String(p.mesa) !== String(numMesa)) return;
+    if(p.status === 'cancelado') return;
+    var itensCoz = filtrarItensCozinha(p.itens || []);
+    itensCoz.forEach(function(it){
+      var entry = {
+        pedidoId: p.id,
+        idx: it._idx,
+        nome: it.nome || '',
+        qtd: it.qtd || 1,
+        obs: it.obs || '',
+        selecoes: it.selecoes || [],
+        criadoEm: p.criadoEm || 0,
+        descido: it.descido || false,
+        descidoEm: it.descidoEm || 0,
+        descidoPor: it.descidoPor || ''
+      };
+      if(entry.descido){
+        descidos.push(entry);
+      } else {
+        pendentes.push(entry);
+      }
+    });
+  });
+  // Ordena: mais antigo primeiro (pra ver o mais urgente)
+  pendentes.sort(function(a,b){ return (a.criadoEm||0) - (b.criadoEm||0); });
+  descidos.sort(function(a,b){ return (b.descidoEm||0) - (a.descidoEm||0); });
+  return { pendentes: pendentes, descidos: descidos };
+}
+
+// Calcula tempo decorrido em minutos
+function _tempoDecorrido(ts){
+  if(!ts) return 0;
+  return Math.floor((Date.now() - ts) / 60000);
+}
+
+// Cor do tempo: verde < 10, amarelo 10-15, laranja 15-20, vermelho ≥ 20
+function _corTempo(min){
+  if(min < 10) return { bg: 'rgba(34,197,94,0.15)', border: '#22c55e', text: '#22c55e', emoji: '🟢' };
+  if(min < 15) return { bg: 'rgba(234,179,8,0.15)', border: '#eab308', text: '#eab308', emoji: '🟡' };
+  if(min < 20) return { bg: 'rgba(249,115,22,0.18)', border: '#f97316', text: '#f97316', emoji: '🟠' };
+  return { bg: 'rgba(220,38,38,0.18)', border: '#dc2626', text: '#dc2626', emoji: '🔴' };
+}
+
+// Atualiza os badges de cozinha em todas as mesas visíveis
+function atualizarBadgesCozinha(){
+  var grid = document.getElementById('mesas-grid');
+  if(!grid) return;
+  var cards = grid.querySelectorAll('.mesa-card.ocupada, .mesa-card.minha');
+  cards.forEach(function(card){
+    var num = parseInt(card.getAttribute('data-mesa-num') || '0');
+    if(!num) return;
+    var qtd = contarItensCozinhaMesa(num);
+    var badge = card.querySelector('.cozinha-badge');
+    if(qtd > 0){
+      if(!badge){
+        badge = document.createElement('div');
+        badge.className = 'cozinha-badge';
+        badge.style.cssText =
+          'position:absolute;top:6px;left:6px;z-index:5;' +
+          'background:linear-gradient(135deg,#f59e0b,#dc2626);color:#fff;' +
+          'border-radius:99px;min-width:24px;height:24px;padding:0 6px;' +
+          'display:flex;align-items:center;justify-content:center;gap:3px;' +
+          'font-size:0.7rem;font-weight:800;cursor:pointer;' +
+          'box-shadow:0 2px 6px rgba(0,0,0,0.3);font-family:inherit;' +
+          'border:2px solid var(--bg);animation:pulseBell 2s ease-in-out infinite;';
+        badge.onclick = (function(n){ return function(ev){
+          ev.stopPropagation();
+          abrirModalCozinha(n);
+        }; })(num);
+        card.appendChild(badge);
+
+        // Anima css
+        if(!document.getElementById('bell-anim-style')){
+          var st = document.createElement('style');
+          st.id = 'bell-anim-style';
+          st.textContent = '@keyframes pulseBell { 0%,100% { transform:scale(1); } 50% { transform:scale(1.1); } }';
+          document.head.appendChild(st);
+        }
+      }
+      badge.innerHTML = '🔔 <span>' + qtd + '</span>';
+    } else {
+      if(badge) badge.remove();
+    }
+  });
+}
+
+// Modal de cozinha — lista itens pendentes + histórico
+var _modalCozinhaTimer = null;
+var _modalCozinhaMesa = null;
+
+function abrirModalCozinha(numMesa){
+  _modalCozinhaMesa = numMesa;
+  var ex = document.getElementById('modal-cozinha');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-cozinha';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:40px 12px 20px;';
+  mod.innerHTML = '<div id="modal-cozinha-inner" style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;"></div>';
+  document.body.appendChild(mod);
+
+  renderModalCozinha();
+
+  // Atualiza tempo a cada 30s
+  if(_modalCozinhaTimer) clearInterval(_modalCozinhaTimer);
+  _modalCozinhaTimer = setInterval(function(){
+    if(!document.getElementById('modal-cozinha')){
+      clearInterval(_modalCozinhaTimer);
+      _modalCozinhaTimer = null;
+      return;
+    }
+    renderModalCozinha();
+  }, 30000);
+}
+
+function fecharModalCozinha(){
+  var m = document.getElementById('modal-cozinha');
+  if(m) m.remove();
+  if(_modalCozinhaTimer){
+    clearInterval(_modalCozinhaTimer);
+    _modalCozinhaTimer = null;
+  }
+  _modalCozinhaMesa = null;
+}
+
+function renderModalCozinha(){
+  if(_modalCozinhaMesa === null) return;
+  var inner = document.getElementById('modal-cozinha-inner');
+  if(!inner) return;
+
+  var dados = getItensCozinhaMesa(_modalCozinhaMesa);
+  var pendentes = dados.pendentes;
+  var descidos = dados.descidos;
+
+  // Aba ativa (pendentes ou histórico)
+  var aba = window._cozinhaAba || 'pendentes';
+
+  var html =
+    '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+      '<div style="font-size:1.6rem;">🔔</div>' +
+      '<div style="flex:1;">' +
+        '<div style="font-weight:700;font-size:1.05rem;">Cozinha — Mesa ' + esc(String(_modalCozinhaMesa)) + '</div>' +
+        '<div style="font-size:0.72rem;color:var(--muted);">' + pendentes.length + ' pendente' + (pendentes.length !== 1 ? 's' : '') + ' • ' + descidos.length + ' no histórico</div>' +
+      '</div>' +
+      '<button onclick="fecharModalCozinha()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+    '</div>' +
+    // Abas
+    '<div style="display:flex;gap:0;border-bottom:1px solid var(--border2);background:var(--surface2);">' +
+      '<button onclick="setCozinhaAba(\'pendentes\')" style="flex:1;padding:11px;background:' + (aba==='pendentes'?'var(--surface)':'transparent') + ';border:none;border-bottom:2px solid ' + (aba==='pendentes'?'var(--accent)':'transparent') + ';color:' + (aba==='pendentes'?'var(--accent)':'var(--muted)') + ';font-weight:700;font-size:0.84rem;cursor:pointer;font-family:inherit;">⏳ Pendentes (' + pendentes.length + ')</button>' +
+      '<button onclick="setCozinhaAba(\'historico\')" style="flex:1;padding:11px;background:' + (aba==='historico'?'var(--surface)':'transparent') + ';border:none;border-bottom:2px solid ' + (aba==='historico'?'var(--accent)':'transparent') + ';color:' + (aba==='historico'?'var(--accent)':'var(--muted)') + ';font-weight:700;font-size:0.84rem;cursor:pointer;font-family:inherit;">📜 Histórico (' + descidos.length + ')</button>' +
+    '</div>' +
+    '<div style="flex:1;overflow-y:auto;padding:12px;">';
+
+  if(aba === 'pendentes'){
+    if(pendentes.length === 0){
+      html += '<div style="text-align:center;color:var(--muted);padding:40px 20px;">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">✨</div>' +
+        '<div style="font-weight:700;font-size:1rem;">Nenhum item pendente</div>' +
+        '<div style="font-size:0.82rem;margin-top:4px;">Tudo já desceu pra mesa</div>' +
+        '</div>';
+    } else {
+      pendentes.forEach(function(it){
+        var min = _tempoDecorrido(it.criadoEm);
+        var cor = _corTempo(min);
+        var hora = it.criadoEm ? new Date(it.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+        var selecoes = '';
+        if(it.selecoes && it.selecoes.length){
+          selecoes = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;line-height:1.4;">';
+          it.selecoes.forEach(function(s){
+            var q = s.qtd > 1 ? s.qtd + 'x ' : '';
+            selecoes += '• ' + esc(q + (s.opcao||'')) + '<br>';
+          });
+          selecoes += '</div>';
+        }
+        html +=
+          '<div style="background:' + cor.bg + ';border:1px solid ' + cor.border + ';border-radius:12px;padding:12px;margin-bottom:8px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+              '<div style="font-size:1.4rem;font-weight:800;color:' + cor.text + ';font-family:Bebas Neue,sans-serif;min-width:30px;">' + it.qtd + 'x</div>' +
+              '<div style="flex:1;min-width:0;">' +
+                '<div style="font-weight:700;font-size:0.94rem;">' + esc(it.nome) + '</div>' +
+                (it.obs ? '<div style="font-size:0.72rem;color:var(--accent);margin-top:2px;">📝 ' + esc(it.obs) + '</div>' : '') +
+                selecoes +
+              '</div>' +
+              '<div style="text-align:right;flex-shrink:0;">' +
+                '<div style="font-size:0.7rem;color:var(--muted);">' + hora + '</div>' +
+                '<div style="font-weight:800;font-size:0.96rem;color:' + cor.text + ';font-family:Bebas Neue,sans-serif;">' + cor.emoji + ' ' + min + 'min</div>' +
+              '</div>' +
+            '</div>' +
+            '<button onclick="marcarDescido(\'' + it.pedidoId + '\',' + it.idx + ')" style="width:100%;padding:10px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:0.86rem;cursor:pointer;font-family:inherit;margin-top:4px;">✅ Desceu</button>' +
+          '</div>';
+      });
+    }
+  } else {
+    // Histórico
+    if(descidos.length === 0){
+      html += '<div style="text-align:center;color:var(--muted);padding:40px 20px;">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">📜</div>' +
+        '<div style="font-weight:700;font-size:1rem;">Nada no histórico</div>' +
+        '</div>';
+    } else {
+      descidos.forEach(function(it){
+        var horaPed = it.criadoEm ? new Date(it.criadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+        var horaDesc = it.descidoEm ? new Date(it.descidoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+        var demorou = (it.descidoEm && it.criadoEm) ? Math.floor((it.descidoEm - it.criadoEm)/60000) : 0;
+        html +=
+          '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:11px;margin-bottom:8px;opacity:0.85;">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+              '<div style="font-size:1.2rem;font-weight:800;font-family:Bebas Neue,sans-serif;min-width:28px;">' + it.qtd + 'x</div>' +
+              '<div style="flex:1;min-width:0;">' +
+                '<div style="font-weight:600;font-size:0.88rem;text-decoration:line-through;color:var(--muted);">' + esc(it.nome) + '</div>' +
+                (it.obs ? '<div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">📝 ' + esc(it.obs) + '</div>' : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="font-size:0.7rem;color:var(--muted);margin-bottom:8px;line-height:1.5;">' +
+              '⏱ Pedido ' + horaPed + ' • Desceu ' + horaDesc + (demorou ? ' (em ' + demorou + 'min)' : '') + '<br>' +
+              '✅ Por ' + esc(it.descidoPor || '?') +
+            '</div>' +
+            '<button onclick="reverterDescido(\'' + it.pedidoId + '\',' + it.idx + ')" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.78rem;cursor:pointer;font-family:inherit;">↩️ Reverter (não desceu)</button>' +
+          '</div>';
+      });
+    }
+  }
+
+  html += '</div>';
+  inner.innerHTML = html;
+}
+
+function setCozinhaAba(aba){
+  window._cozinhaAba = aba;
+  renderModalCozinha();
+}
+
+// Marca item como descido (sincroniza pra todos os garçons)
+function marcarDescido(pedidoId, idx){
+  if(!pedidoId) return;
+  fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
+    if(!doc.exists){
+      showToast('Pedido não encontrado', '#f87171');
+      return;
+    }
+    var data = doc.data() || {};
+    var itens = data.itens || [];
+    if(!itens[idx]){
+      showToast('Item não encontrado', '#f87171');
+      return;
+    }
+    itens[idx].descido = true;
+    itens[idx].descidoEm = Date.now();
+    itens[idx].descidoPor = _nomeGarcom || 'Garçom';
+    return fbDb.collection('pedidos').doc(pedidoId).update({ itens: itens });
+  }).then(function(){
+    showToast('✅ Item marcado como entregue', '#22c55e', 1500);
+    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+  }).catch(function(e){
+    console.error('[COZINHA] erro marcar descido:', e);
+    showToast('❌ ' + (e.message||'erro'), '#f87171');
+  });
+}
+
+// Reverte item descido (volta pra pendente)
+function reverterDescido(pedidoId, idx){
+  if(!pedidoId) return;
+  fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
+    if(!doc.exists){
+      showToast('Pedido não encontrado', '#f87171');
+      return;
+    }
+    var data = doc.data() || {};
+    var itens = data.itens || [];
+    if(!itens[idx]){
+      showToast('Item não encontrado', '#f87171');
+      return;
+    }
+    itens[idx].descido = false;
+    delete itens[idx].descidoEm;
+    delete itens[idx].descidoPor;
+    return fbDb.collection('pedidos').doc(pedidoId).update({ itens: itens });
+  }).then(function(){
+    showToast('↩️ Item revertido', '#f7a34f', 1500);
+    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+  }).catch(function(e){
+    console.error('[COZINHA] erro reverter:', e);
+    showToast('❌ ' + (e.message||'erro'), '#f87171');
+  });
+}
+
 function mostrarMesas(){
   document.getElementById('mesa-screen').classList.remove('hidden');
   document.getElementById('app').style.display = 'none';
@@ -1838,6 +2212,7 @@ function renderMesas(){
     var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;
+    el.setAttribute('data-mesa-num', num);
     el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
       '<div class="mesa-status">' + status + '</div>';
     el.onclick = (function(n, ocupada){ return function(){
@@ -1860,6 +2235,10 @@ function renderMesas(){
     }
     grid.appendChild(el);
   }
+  // Atualiza badges de cozinha (sininho) após renderizar
+  setTimeout(function(){
+    try{ atualizarBadgesCozinha(); }catch(e){}
+  }, 50);
 }
 
 // ═══ LONG PRESS — Pedido rápido ═══
@@ -5209,6 +5588,74 @@ function iniciarListeners(){
     });
   }, function(){});
 
+  // ─── COZINHA: listener pra modelos de impressão (saber o que vai pra cozinha) ───
+  if(_unsubModelosCozinha) _unsubModelosCozinha();
+  _unsubModelosCozinha = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('impressao').doc('config').collection('modelos')
+    .onSnapshot(function(snap){
+      _modelosCozinha = [];
+      snap.forEach(function(d){
+        var v = d.data() || {};
+        _modelosCozinha.push({
+          id: d.id,
+          nome: v.nome || '',
+          impressoraId: v.impressoraId || '',
+          filtro: v.filtro || 'categoria',
+          categorias: v.categorias || [],
+          itens: v.itens || []
+        });
+      });
+      // Também busca a configuração de impressoras pra saber qual é a da cozinha
+      console.log('[COZINHA] modelos carregados:', _modelosCozinha.length);
+      // Atualiza mapa de mesas se já renderizado
+      try{ if(typeof atualizarBadgesCozinha === 'function') atualizarBadgesCozinha(); }catch(e){}
+    }, function(e){ console.warn('[COZINHA] erro modelos:', e.code); });
+
+  // Listener pra impressoras (pra identificar quais são da cozinha)
+  if(_unsubImpressorasCozinha) _unsubImpressorasCozinha();
+  _unsubImpressorasCozinha = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('impressao').doc('config').collection('impressoras')
+    .onSnapshot(function(snap){
+      _impressorasCozinha = [];
+      snap.forEach(function(d){
+        var v = d.data() || {};
+        _impressorasCozinha.push({
+          id: d.id,
+          nome: v.nome || '',
+          tipo: v.tipo || 'cozinha' // cozinha, bar, caixa, etc
+        });
+      });
+      console.log('[COZINHA] impressoras carregadas:', _impressorasCozinha.length);
+    }, function(e){ console.warn('[COZINHA] erro impressoras:', e.code); });
+
+  // Listener pra TODOS os pedidos abertos do restaurante (pra sininho de cozinha)
+  if(_unsubPedidosCozinha) _unsubPedidosCozinha();
+  _unsubPedidosCozinha = fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .where('status','in', ['aguardando','preparando','pronto','entregue'])
+    .limit(200)
+    .onSnapshot(function(snap){
+      _pedidosCozinha = [];
+      snap.forEach(function(d){
+        _pedidosCozinha.push(Object.assign({id: d.id}, d.data()));
+      });
+      console.log('[COZINHA] pedidos abertos:', _pedidosCozinha.length);
+      try{ atualizarBadgesCozinha(); }catch(e){}
+    }, function(e){
+      console.warn('[COZINHA] erro pedidos:', e.code);
+      // Fallback sem filtro de status
+      _unsubPedidosCozinha = fbDb.collection('pedidos')
+        .where('restauranteId','==', _restauranteId)
+        .limit(200)
+        .onSnapshot(function(snap){
+          _pedidosCozinha = [];
+          snap.forEach(function(d){ _pedidosCozinha.push(Object.assign({id: d.id}, d.data())); });
+          try{ atualizarBadgesCozinha(); }catch(e){}
+        });
+    });
+
   // Só escuta pedidos se já entrou em alguma mesa (no pré-load não há mesa)
   if(_mesaAtiva !== null && _mesaAtiva !== undefined){
     escutarMeusPedidos();
@@ -5536,7 +5983,8 @@ function anexarLongPressItem(el, item){
       _swipeItemDisparou = true; // bloqueia click subsequente
       setTimeout(function(){ _swipeItemDisparou = false; }, 400);
       if(navigator.vibrate) navigator.vibrate(50);
-      abrirPopupObsRapida(item);
+      // Abre o modal completo do item (grupos/adicionais + observação)
+      abrirModalItem(item);
     }, _longPressItemDuracao);
   }
   function mover(e){

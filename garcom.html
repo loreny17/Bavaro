@@ -616,6 +616,11 @@ header{
     <button class="mesa-header-menu-btn" onclick="abrirMenuLateral()" aria-label="Menu">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
+    <button id="btn-sininho-cozinha" onclick="abrirModalCozinhaGeral()" aria-label="Cozinha"
+      style="display:none;background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:36px;height:36px;border-radius:10px;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:all 0.15s;position:relative;margin-left:6px;">
+      <span style="font-size:1.15rem;">🔔</span>
+      <span id="sininho-cozinha-badge" style="position:absolute;top:-4px;right:-4px;background:linear-gradient(135deg,#f59e0b,#dc2626);color:#fff;font-size:0.66rem;font-weight:800;min-width:18px;height:18px;border-radius:99px;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--bg);">0</span>
+    </button>
     <div class="mesa-header-info">
       <div class="mesa-header-titulo">ESCOLHA A MESA</div>
       <div class="mesa-header-sub" id="mesa-header-sub">Selecione para iniciar o atendimento</div>
@@ -1640,8 +1645,35 @@ function _corTempo(min){
   return { bg: 'rgba(220,38,38,0.18)', border: '#dc2626', text: '#dc2626', emoji: '🔴' };
 }
 
-// Atualiza os badges de cozinha em todas as mesas visíveis
+// Atualiza os badges de cozinha em todas as mesas visíveis E o sininho geral do header
 function atualizarBadgesCozinha(){
+  // 1. Sininho geral no header
+  var totalGeral = 0;
+  var mesasComItens = {};
+  if(_pedidosCozinha && _pedidosCozinha.length){
+    _pedidosCozinha.forEach(function(p){
+      if(p.status === 'cancelado') return;
+      var itensCoz = filtrarItensCozinha(p.itens || []);
+      itensCoz.forEach(function(it){
+        if(!it.descido){
+          totalGeral += (it.qtd || 1);
+          mesasComItens[p.mesa] = true;
+        }
+      });
+    });
+  }
+  var btnGeral = document.getElementById('btn-sininho-cozinha');
+  var badgeGeral = document.getElementById('sininho-cozinha-badge');
+  if(btnGeral){
+    if(totalGeral > 0){
+      btnGeral.style.display = 'flex';
+      if(badgeGeral) badgeGeral.textContent = totalGeral > 99 ? '99+' : totalGeral;
+    } else {
+      btnGeral.style.display = 'none';
+    }
+  }
+
+  // 2. Sininhos individuais nos cards das mesas
   var grid = document.getElementById('mesas-grid');
   if(!grid) return;
   var cards = grid.querySelectorAll('.mesa-card.ocupada, .mesa-card.minha');
@@ -1681,6 +1713,98 @@ function atualizarBadgesCozinha(){
       if(badge) badge.remove();
     }
   });
+}
+
+// Modal de cozinha GERAL — lista TODAS as mesas com itens pendentes
+function abrirModalCozinhaGeral(){
+  var ex = document.getElementById('modal-cozinha-geral');
+  if(ex) ex.remove();
+
+  // Pega todas as mesas com itens da cozinha pendentes
+  var mesasMap = {};
+  if(_pedidosCozinha && _pedidosCozinha.length){
+    _pedidosCozinha.forEach(function(p){
+      if(p.status === 'cancelado') return;
+      var itensCoz = filtrarItensCozinha(p.itens || []);
+      itensCoz.forEach(function(it){
+        if(!it.descido){
+          if(!mesasMap[p.mesa]){
+            mesasMap[p.mesa] = {
+              mesa: p.mesa,
+              qtdItens: 0,
+              maisAntigo: p.criadoEm || Date.now()
+            };
+          }
+          mesasMap[p.mesa].qtdItens += (it.qtd || 1);
+          if(p.criadoEm && p.criadoEm < mesasMap[p.mesa].maisAntigo){
+            mesasMap[p.mesa].maisAntigo = p.criadoEm;
+          }
+        }
+      });
+    });
+  }
+
+  var listaMesas = Object.values(mesasMap);
+  // Ordena pelo mais antigo (mais urgente primeiro)
+  listaMesas.sort(function(a,b){ return a.maisAntigo - b.maisAntigo; });
+
+  var listaHtml = '';
+  if(listaMesas.length === 0){
+    listaHtml = '<div style="text-align:center;color:var(--muted);padding:40px 20px;">' +
+      '<div style="font-size:3rem;margin-bottom:10px;">✨</div>' +
+      '<div style="font-weight:700;font-size:1rem;">Nada pendente na cozinha</div>' +
+      '<div style="font-size:0.82rem;margin-top:4px;">Tudo já desceu pras mesas</div>' +
+      '</div>';
+  } else {
+    listaMesas.forEach(function(m){
+      var min = _tempoDecorrido(m.maisAntigo);
+      var cor = _corTempo(min);
+      var hora = m.maisAntigo ? new Date(m.maisAntigo).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+      listaHtml +=
+        '<div onclick="fecharModalCozinhaGeral(); abrirModalCozinha(' + JSON.stringify(m.mesa) + ');" ' +
+          'style="background:' + cor.bg + ';border:1px solid ' + cor.border + ';border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:12px;font-family:inherit;">' +
+          '<div style="font-family:Bebas Neue,sans-serif;font-size:2rem;font-weight:800;color:' + cor.text + ';line-height:1;min-width:50px;text-align:center;">' +
+            esc(String(m.mesa)) +
+          '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-weight:700;font-size:0.96rem;color:var(--text);">Mesa ' + esc(String(m.mesa)) + '</div>' +
+            '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' +
+              m.qtdItens + ' iten' + (m.qtdItens !== 1 ? 's' : '') + ' pendente' + (m.qtdItens !== 1 ? 's' : '') + ' • desde ' + hora +
+            '</div>' +
+          '</div>' +
+          '<div style="text-align:right;flex-shrink:0;">' +
+            '<div style="font-weight:800;font-size:1.1rem;color:' + cor.text + ';font-family:Bebas Neue,sans-serif;">' + cor.emoji + ' ' + min + 'min</div>' +
+            '<div style="font-size:0.7rem;color:var(--muted);">toque →</div>' +
+          '</div>' +
+        '</div>';
+    });
+  }
+
+  var totalItens = listaMesas.reduce(function(s,m){ return s + m.qtdItens; }, 0);
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-cozinha-geral';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:40px 12px 20px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">🔔</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1.05rem;">Cozinha</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">' + listaMesas.length + ' mesa' + (listaMesas.length !== 1 ? 's' : '') + ' • ' + totalItens + ' iten' + (totalItens !== 1 ? 's' : '') + ' pendente' + (totalItens !== 1 ? 's' : '') + '</div>' +
+        '</div>' +
+        '<button onclick="fecharModalCozinhaGeral()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:12px;">' +
+        listaHtml +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function fecharModalCozinhaGeral(){
+  var m = document.getElementById('modal-cozinha-geral');
+  if(m) m.remove();
 }
 
 // Modal de cozinha — lista itens pendentes + histórico

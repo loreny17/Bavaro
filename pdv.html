@@ -286,13 +286,42 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .copy-check input[type=checkbox]{width:18px;height:18px;cursor:pointer;}
 .copy-log{font-size:0.82rem;color:var(--muted);background:var(--bg);padding:10px;border-radius:8px;max-height:120px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;line-height:1.5;}
 
-/* Força orientação portrait (retrato) */
+/* Força orientação portrait — bloqueia uso em landscape */
+#rotacao-bloqueio{
+  display:none;
+  position:fixed;inset:0;z-index:999999;
+  background:var(--bg,#0d0d0d);
+  flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:30px;
+}
+#rotacao-bloqueio .rb-icone{
+  font-size:4rem;margin-bottom:16px;
+  animation:rbGira 2s ease-in-out infinite;
+}
+@keyframes rbGira{
+  0%,40%{ transform:rotate(0deg); }
+  60%,100%{ transform:rotate(-90deg); }
+}
+#rotacao-bloqueio .rb-titulo{
+  font-family:'Bebas Neue',sans-serif;font-size:1.6rem;
+  color:var(--accent,#d4a843);letter-spacing:0.06em;margin-bottom:8px;
+}
+#rotacao-bloqueio .rb-texto{
+  font-size:0.9rem;color:var(--muted,#888);max-width:280px;line-height:1.5;
+}
 @media screen and (orientation: landscape) and (max-device-width: 932px){
-  html { transform: rotate(-90deg); transform-origin: left top; width: 100vh; height: 100vw; overflow-x: hidden; position: absolute; top: 100%; left: 0; }
+  #rotacao-bloqueio{ display:flex; }
 }
 </style>
 </head>
 <body>
+
+<!-- Bloqueio de rotação — só funciona em portrait -->
+<div id="rotacao-bloqueio">
+  <div class="rb-icone">📱</div>
+  <div class="rb-titulo">GIRE O CELULAR</div>
+  <div class="rb-texto">O PDV Bávaro funciona apenas na vertical. Gire seu aparelho para continuar.</div>
+</div>
 
 <!-- Loading -->
 <div id="loading"><div class="ld-icon">⚙️</div><p style="font-size:0.84rem;color:var(--muted);">Carregando PDV...</p></div>
@@ -863,10 +892,22 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
 // Trava rotação em portrait (quando o navegador permite)
 (function(){
+  function travarPortrait(){
+    try{
+      if(screen.orientation && screen.orientation.lock){
+        screen.orientation.lock('portrait').catch(function(e){
+          /* alguns navegadores só permitem em PWA fullscreen instalado */
+        });
+      }
+    }catch(e){}
+  }
+  travarPortrait();
+  // Tenta travar de novo se a orientação mudar (alguns navegadores destravam)
   try{
-    if(screen.orientation && screen.orientation.lock){
-      screen.orientation.lock('portrait').catch(function(e){ /* alguns navegadores só permitem em PWA fullscreen */ });
+    if(screen.orientation){
+      screen.orientation.addEventListener('change', travarPortrait);
     }
+    window.addEventListener('orientationchange', travarPortrait);
   }catch(e){}
 })();
 
@@ -3463,6 +3504,8 @@ function abrirNovoModelo(){
   document.querySelector('input[name="mod-filtro"][value="categoria"]').checked = true;
   document.getElementById('mod-mostrar-precos').checked = true;
   document.getElementById('mod-negrito').checked = false;
+  var chkSin = document.getElementById('mod-aparece-sininho');
+  if(chkSin) chkSin.checked = false;
   document.getElementById('btn-excluir-mod').style.display = 'none';
   atualizarTipoModelo();
   atualizarFiltroModelo();
@@ -3486,6 +3529,8 @@ function abrirEditarModelo(m){
   document.querySelector('input[name="mod-filtro"][value="'+(m.filtro||'categoria')+'"]').checked = true;
   document.getElementById('mod-mostrar-precos').checked = m.mostrarPrecos !== false;
   document.getElementById('mod-negrito').checked = !!m.negrito;
+  var chkSinEd = document.getElementById('mod-aparece-sininho');
+  if(chkSinEd) chkSinEd.checked = !!m.apareceSininho;
   document.getElementById('btn-excluir-mod').style.display = 'inline-flex';
   atualizarTipoModelo();
   atualizarFiltroModelo();
@@ -3782,6 +3827,7 @@ function salvarModelo(){
     filtro: filtro,
     mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
     negrito: document.getElementById('mod-negrito').checked,
+    apareceSininho: (function(){ var c = document.getElementById('mod-aparece-sininho'); return c ? c.checked : false; })(),
     estiloCabecalho: estilos.estiloCabecalho,
     estiloItens: estilos.estiloItens,
     estiloAdicionais: estilos.estiloAdicionais,
@@ -7053,6 +7099,13 @@ function toggleAdminUsuario(garcomId, novoValor){
           <span>Imprimir tudo em <strong>negrito</strong></span>
         </label>
         <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Deixa o cupom mais visível mas usa um pouco mais de tinta</div>
+      </div>
+      <div class="f-grupo">
+        <label class="cfg-toggle">
+          <input type="checkbox" id="mod-aparece-sininho">
+          <span>🔔 Aparece no <strong>sininho da cozinha</strong></span>
+        </label>
+        <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Os itens deste modelo vão aparecer no sininho de cozinha do app dos garçons, pra eles saberem o que está pronto pra descer.</div>
       </div>
       <!-- ─── PRÉ-VISUALIZAÇÃO ─── -->
       <div class="f-grupo">

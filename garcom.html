@@ -740,6 +740,14 @@ header{
         </div>
       </div>
 
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirPersonalizarGestos()">
+        <span style="font-size:1.4rem;">✋</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Personalizar Gestos</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Toque longo, swipes na mesa</div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" onclick="fecharMenuLateral();sair()" style="margin-top:18px;">
         <span style="font-size:1.4rem;">🚪</span>
         <div style="flex:1;text-align:left;">
@@ -1270,6 +1278,7 @@ function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;
   _ehAdmin = localStorage.getItem('garcom_admin') === '1';
   if(_nomeGarcom){
+    try{ _carregarGestosAcoes(); }catch(e){}
     document.getElementById('login-screen').classList.add('hidden');
     mostrarMesas();
   } else {
@@ -1425,6 +1434,7 @@ function aplicarLoginGarcom(match, nomeDigitado){
 
   // Inicia escuta de avisos AGORA (depois do login)
   try{ escutarAvisosGarcom(); }catch(e){ console.warn('Falhou ao iniciar avisos:', e); }
+  try{ _carregarGestosAcoes(); }catch(e){}
 }
 
 // Modal: garçom cadastrado em mais de um restaurante, escolha qual usar agora
@@ -2438,6 +2448,182 @@ var _longPressX = 0;
 var _longPressY = 0;
 // Duração configurável (padrão: 600ms). Salva em localStorage.
 var _longPressDuracao = parseInt(localStorage.getItem('garcom_longpress_ms') || '600');
+
+// ═══════════════════════════════════════════════
+// ✋ GESTOS PERSONALIZÁVEIS (cada garçom escolhe o seu)
+// ═══════════════════════════════════════════════
+// Salva no localStorage por garçom. Padrão: comportamento atual.
+var _gestosAcoes = {
+  longPress: 'cardapio',      // padrão: entra direto no cardápio
+  swipeDir: 'pedidoRapido',   // padrão: pedido rápido (repetir)
+  swipeEsq: 'fecharConta'     // padrão: fechar conta
+};
+
+// Catálogo de ações disponíveis
+var _gestoAcoesDisponiveis = {
+  'menu':          { icone: '📋', nome: 'Abrir menu da mesa',  desc: 'Mostra opções (Pedir/Ver/Fechar)' },
+  'cardapio':      { icone: '🍽️', nome: 'Ir direto pro cardápio', desc: 'Abre o cardápio pra adicionar itens' },
+  'pedidoRapido':  { icone: '⚡', nome: 'Pedido rápido', desc: 'Repete itens já consumidos' },
+  'fecharConta':   { icone: '💰', nome: 'Fechar conta', desc: 'Abre tela de fechamento' },
+  'verPedidos':    { icone: '👁', nome: 'Ver pedidos da mesa', desc: 'Lista tudo que foi pedido' },
+  'cozinhaMesa':   { icone: '🔔', nome: 'Ver cozinha da mesa', desc: 'Itens pendentes da cozinha' },
+  'nenhuma':       { icone: '🚫', nome: 'Nenhuma ação', desc: 'Desativa esse gesto' }
+};
+
+function _carregarGestosAcoes(){
+  try{
+    var raw = localStorage.getItem('garcom_gestos_acoes_' + (_nomeGarcom||'_'));
+    if(raw){
+      var obj = JSON.parse(raw);
+      if(obj.longPress) _gestosAcoes.longPress = obj.longPress;
+      if(obj.swipeDir)  _gestosAcoes.swipeDir  = obj.swipeDir;
+      if(obj.swipeEsq)  _gestosAcoes.swipeEsq  = obj.swipeEsq;
+    }
+  }catch(e){}
+}
+
+function _salvarGestosAcoes(){
+  try{
+    localStorage.setItem('garcom_gestos_acoes_' + (_nomeGarcom||'_'), JSON.stringify(_gestosAcoes));
+  }catch(e){}
+}
+
+// Executa uma ação (chamada por qualquer gesto configurado)
+function executarAcaoGesto(acao, numMesa){
+  switch(acao){
+    case 'menu':
+      if(typeof abrirMenuMesa === 'function'){
+        abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
+      }
+      break;
+    case 'cardapio':
+      if(typeof selecionarMesa === 'function'){
+        selecionarMesa(numMesa);
+        if(typeof pushHistory === 'function'){
+          try{ pushHistory('cardapio:null'); }catch(e){}
+        }
+      }
+      break;
+    case 'pedidoRapido':
+      if(typeof abrirPedidoRapido === 'function'){
+        abrirPedidoRapido(numMesa);
+      }
+      break;
+    case 'fecharConta':
+      if(typeof abrirFecharConta === 'function'){
+        abrirFecharConta(numMesa);
+      } else if(typeof abrirMenuMesa === 'function'){
+        abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
+      }
+      break;
+    case 'verPedidos':
+      if(typeof verPedidosMesa === 'function'){
+        verPedidosMesa(numMesa);
+      } else if(typeof abrirMenuMesa === 'function'){
+        abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
+      }
+      break;
+    case 'cozinhaMesa':
+      if(typeof abrirModalCozinha === 'function'){
+        abrirModalCozinha(numMesa);
+      }
+      break;
+    case 'nenhuma':
+      // não faz nada
+      break;
+  }
+}
+
+// Tela de personalização — usuário escolhe ação pra cada gesto
+function abrirPersonalizarGestos(){
+  _carregarGestosAcoes();
+  var ex = document.getElementById('modal-personalizar-gestos');
+  if(ex) ex.remove();
+
+  function montarOpcoes(gestoKey, atual){
+    var html = '';
+    Object.keys(_gestoAcoesDisponiveis).forEach(function(acaoKey){
+      var a = _gestoAcoesDisponiveis[acaoKey];
+      var ativo = atual === acaoKey;
+      html +=
+        '<button onclick="setGestoAcao(\'' + gestoKey + '\',\'' + acaoKey + '\')" ' +
+          'style="display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;background:' + (ativo?'rgba(212,168,67,0.12)':'var(--bg)') + ';border:1px solid ' + (ativo?'var(--accent)':'var(--border2)') + ';color:var(--text);border-radius:10px;font-family:inherit;cursor:pointer;margin-bottom:6px;text-align:left;">' +
+          '<span style="font-size:1.3rem;">' + a.icone + '</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-weight:' + (ativo?'700':'600') + ';font-size:0.86rem;color:' + (ativo?'var(--accent)':'var(--text)') + ';">' + esc(a.nome) + '</div>' +
+            '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">' + esc(a.desc) + '</div>' +
+          '</div>' +
+          (ativo ? '<span style="font-size:1.1rem;color:var(--accent);">✓</span>' : '') +
+        '</button>';
+    });
+    return html;
+  }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-personalizar-gestos';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:480px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">✋</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1.05rem;">Personalizar Gestos</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">Escolha o que cada gesto faz nas mesas</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'modal-personalizar-gestos\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div id="config-gestos-conteudo" style="flex:1;overflow-y:auto;padding:14px;">' +
+        // LONG PRESS
+        '<div style="margin-bottom:18px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+            '<span style="font-size:1.4rem;">👆</span>' +
+            '<div style="font-weight:700;font-size:0.96rem;">Toque longo (segurar)</div>' +
+          '</div>' +
+          montarOpcoes('longPress', _gestosAcoes.longPress) +
+        '</div>' +
+        // SWIPE DIREITA
+        '<div style="margin-bottom:18px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+            '<span style="font-size:1.4rem;">👉</span>' +
+            '<div style="font-weight:700;font-size:0.96rem;">Deslizar pra direita</div>' +
+          '</div>' +
+          montarOpcoes('swipeDir', _gestosAcoes.swipeDir) +
+        '</div>' +
+        // SWIPE ESQUERDA
+        '<div style="margin-bottom:18px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+            '<span style="font-size:1.4rem;">👈</span>' +
+            '<div style="font-weight:700;font-size:0.96rem;">Deslizar pra esquerda</div>' +
+          '</div>' +
+          montarOpcoes('swipeEsq', _gestosAcoes.swipeEsq) +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 14px;border-top:1px solid var(--border2);background:var(--surface2);">' +
+        '<button onclick="resetarGestos()" style="width:100%;padding:11px;background:var(--bg);border:1px solid var(--border2);color:var(--muted);border-radius:10px;font-weight:600;font-size:0.82rem;cursor:pointer;font-family:inherit;">↻ Restaurar padrão</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function setGestoAcao(gestoKey, acaoKey){
+  _gestosAcoes[gestoKey] = acaoKey;
+  _salvarGestosAcoes();
+  // Re-renderiza o modal pra atualizar a marcação
+  abrirPersonalizarGestos();
+  showToast('✓ Gesto atualizado', '#22c55e', 1000);
+}
+
+function resetarGestos(){
+  _gestosAcoes = {
+    longPress: 'cardapio',
+    swipeDir: 'pedidoRapido',
+    swipeEsq: 'fecharConta'
+  };
+  _salvarGestosAcoes();
+  abrirPersonalizarGestos();
+  showToast('✓ Gestos restaurados', '#22c55e', 1000);
+}
+
 function anexarLongPress(el, numMesa){
   function iniciar(e){
     _longPressDisparou = false;
@@ -2449,13 +2635,8 @@ function anexarLongPress(el, numMesa){
       _longPressDisparou = true;
       // Vibração leve confirmando que disparou
       if(navigator.vibrate) navigator.vibrate(50);
-      // Long-press → entra direto no cardápio pra fazer pedido
-      if(typeof selecionarMesa === 'function'){
-        selecionarMesa(numMesa);
-        if(typeof pushHistory === 'function'){
-          try{ pushHistory('cardapio:null'); }catch(e){}
-        }
-      }
+      // Executa a ação configurada pelo garçom
+      executarAcaoGesto(_gestosAcoes.longPress, numMesa);
     }, _longPressDuracao);
   }
   function mover(e){
@@ -2641,17 +2822,11 @@ function anexarSwipe(el, numMesa){
         setTimeout(function(){ _longPressDisparou = false; }, 300);
 
         if(dirFinal < 0){
-          // ESQUERDA: abre modal de fechar conta
-          if(typeof abrirFecharConta === 'function'){
-            abrirFecharConta(numMesa);
-          } else if(typeof abrirMenuMesa === 'function'){
-            abrirMenuMesa(numMesa, _mesasOcupadas[numMesa]);
-          }
+          // ESQUERDA: executa ação configurada
+          executarAcaoGesto(_gestosAcoes.swipeEsq, numMesa);
         } else {
-          // DIREITA: abre popup de pedido rápido (itens já consumidos)
-          if(typeof abrirPedidoRapido === 'function'){
-            abrirPedidoRapido(numMesa);
-          }
+          // DIREITA: executa ação configurada
+          executarAcaoGesto(_gestosAcoes.swipeDir, numMesa);
         }
       }
     }, 180);

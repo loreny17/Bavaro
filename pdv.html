@@ -309,8 +309,8 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 #rotacao-bloqueio .rb-texto{
   font-size:0.9rem;color:var(--muted,#888);max-width:280px;line-height:1.5;
 }
-@media screen and (orientation: landscape) and (max-device-width: 932px){
-  #rotacao-bloqueio{ display:flex; }
+@media screen and (orientation: landscape) and (max-height: 600px){
+  #rotacao-bloqueio{ display:flex !important; }
 }
 </style>
 </head>
@@ -902,13 +902,44 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
     }catch(e){}
   }
   travarPortrait();
+
+  // Detecção de landscape via JavaScript — mais confiável que o CSS.
+  // Mostra a tela "gire o celular" sempre que a largura > altura.
+  function checarOrientacao(){
+    var bloqueio = document.getElementById('rotacao-bloqueio');
+    if(!bloqueio) return;
+    // Considera landscape só em telas pequenas (celular/tablet), não desktop
+    var ehTelaPequena = Math.min(window.innerWidth, window.innerHeight) < 600;
+    var ehLandscape = window.innerWidth > window.innerHeight;
+    if(ehTelaPequena && ehLandscape){
+      bloqueio.style.display = 'flex';
+    } else {
+      bloqueio.style.display = 'none';
+    }
+  }
+
+  travarPortrait();
   // Tenta travar de novo se a orientação mudar (alguns navegadores destravam)
   try{
     if(screen.orientation){
-      screen.orientation.addEventListener('change', travarPortrait);
+      screen.orientation.addEventListener('change', function(){
+        travarPortrait();
+        setTimeout(checarOrientacao, 100);
+      });
     }
-    window.addEventListener('orientationchange', travarPortrait);
+    window.addEventListener('orientationchange', function(){
+      travarPortrait();
+      setTimeout(checarOrientacao, 100);
+    });
+    window.addEventListener('resize', checarOrientacao);
   }catch(e){}
+
+  // Checa assim que a página carrega
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', checarOrientacao);
+  } else {
+    checarOrientacao();
+  }
 })();
 
 // ═══ CONFIG ═══
@@ -1154,7 +1185,28 @@ function prosseguirComTenant(){
     _restauranteAtivo.emoji = '🍺';
     try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
   }
-  iniciarApp();
+  // IMPORTANTE: busca o nome REAL e ATUAL do restaurante no Firestore.
+  // Assim, se o nome for renomeado no app de gestão, o PDV reflete.
+  // (o localStorage pode estar com um nome desatualizado)
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id).get()
+    .then(function(doc){
+      if(doc.exists){
+        var d = doc.data() || {};
+        if(d.nome) _restauranteAtivo.nome = d.nome;
+        if(d.emoji) _restauranteAtivo.emoji = d.emoji;
+        console.log('[RESTAURANTE] nome atualizado do Firestore:', _restauranteAtivo.nome);
+        try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
+      } else {
+        console.log('[RESTAURANTE] doc não existe, mantendo nome local:', _restauranteAtivo.nome);
+      }
+    })
+    .catch(function(e){
+      console.warn('[RESTAURANTE] erro ao buscar nome:', e.code || e.message);
+    })
+    .then(function(){
+      iniciarApp();
+    });
 }
 
 function mostrarErroSemTenant(){

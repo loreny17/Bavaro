@@ -6910,9 +6910,22 @@ function executarCancelamentoPedidoInteiro(pedidoId){
       return fbDb.collection('contas_mesa').doc(ped.contaId).get().then(function(doc){
         if(!doc.exists) return;
         var conta = doc.data();
+        // Coleta os itemKeys e dados dos itens cancelados pra casar na conta.
+        // Match por itemKey (estável) com fallback por pedidoId (caso item antigo).
+        var keysCancelados = {};
+        ped.itens.forEach(function(it){
+          if(it.itemKey) keysCancelados[it.itemKey] = true;
+        });
         // Marca todos os itens correspondentes na conta como cancelados
         var itensConta = (conta.itens||[]).map(function(it){
-          if(it.pedidoId === pedidoId && it.status !== 'cancelado' && it.status !== 'pago'){
+          if(it.status === 'cancelado' || it.status === 'pago') return it;
+          var bate = false;
+          if(it.itemKey && keysCancelados[it.itemKey]){
+            bate = true; // match por itemKey — sobrevive a transferência
+          } else if(it.pedidoId === pedidoId){
+            bate = true; // fallback: mesmo pedidoId (itens antigos sem itemKey)
+          }
+          if(bate){
             return Object.assign({}, it, {
               status: 'cancelado',
               canceladoEm: agora,
@@ -7087,9 +7100,26 @@ function executarCancelamento(pedidoId, idx){
       return fbDb.collection('contas_mesa').doc(ped.contaId).get().then(function(doc){
         if(!doc.exists) return;
         var conta = doc.data();
-        // Marca o item correspondente na conta como cancelado também
+        // Marca o item correspondente na conta como cancelado também.
+        // IMPORTANTE: o match precisa funcionar mesmo após TRANSFERÊNCIA de mesa,
+        // quando o pedidoId do item na conta pode ser diferente do pedido atual.
+        // Por isso priorizamos o itemKey (identificador estável), com fallbacks.
+        var itemKeyAlvo = item.itemKey || null;
+        var jaCancelou = false;
         var itensConta = (conta.itens||[]).map(function(it){
-          if(it.pedidoId === pedidoId && it.id === item.id && it.status !== 'cancelado' && it.status !== 'pago'){
+          if(it.status === 'cancelado' || it.status === 'pago') return it;
+          var bate = false;
+          if(itemKeyAlvo && it.itemKey){
+            // 1ª opção: itemKey igual (estável, sobrevive a transferência)
+            bate = (it.itemKey === itemKeyAlvo);
+          }
+          if(!bate && !jaCancelou){
+            // 2ª opção: mesmo id de produto + mesmo nome + mesma qtd (1 item só)
+            bate = (it.id === item.id && it.nome === item.nome &&
+                    (it.qtd||1) === (item.qtd||1));
+          }
+          if(bate){
+            jaCancelou = true;
             return Object.assign({}, it, {
               status: 'cancelado',
               canceladoEm: agora,
@@ -9217,6 +9247,86 @@ function abrirFecharConta(num){
   renderFecharConta();
 }
 
+// Cancela um item diretamente na conta (tela de fechar conta).
+// Resolve casos de itens "presos" — ex: após transferência de mesa,
+// quando o cancelamento via "Ver Pedidos" não casou na conta_mesa.
+function cancelarItemNaConta(itemKey){
+  if(!_fecharConta || !itemKey) return;
+  var conta = _fecharConta;
+  var item = (conta.itens||[]).find(function(it){ return it.itemKey === itemKey; });
+  if(!item){
+    showToast('Item não encontrado', '#f87171');
+    return;
+  }
+  if(item.status === 'pago'){
+    showToast('Item já foi pago — não dá pra cancelar', '#f7a34f');
+    return;
+  }
+  var nomeItem = (item.qtd||1) + 'x ' + (item.nome||'item');
+  if(!confirm('Cancelar "' + nomeItem + '" desta conta?\n\nO item será removido do total da mesa.')) return;
+
+  var agora = Date.now();
+  // Atualiza localmente (otimista)
+  var itensAtualizados = (conta.itens||[]).map(function(it){
+    if(it.itemKey === itemKey){
+      return Object.assign({}, it, {
+        status: 'cancelado',
+        canceladoEm: agora,
+        canceladoPor: _nomeGarcom || 'Garçom',
+        motivoCancelamento: 'Cancelado na tela de fechamento'
+      });
+    }
+    return it;
+  });
+  var totais = calcularTotaisConta({itens: itensAtualizados, pagamentos: conta.pagamentos||[]});
+  _fecharConta.itens = itensAtualizados;
+  _fecharConta.subtotal = totais.subtotal;
+  _fecharConta.taxa10 = totais.taxa10;
+  _fecharConta.total = totais.total;
+  _fecharConta.restante = totais.restante;
+  renderFecharConta();
+  showToast('✕ Item cancelado', '#f87171');
+  try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+
+  // Persiste no Firestore
+  fbDb.collection('contas_mesa').doc(conta.id).update({
+    itens: itensAtualizados,
+    subtotal: totais.subtotal,
+    taxa10: totais.taxa10,
+    total: totais.total,
+    pagoTotal: totais.pagoTotal,
+    restante: totais.restante,
+    atualizadoEm: agora
+  }).then(function(){
+    // Tenta marcar o item correspondente no pedido também (se achar)
+    if(item.pedidoId){
+      fbDb.collection('pedidos').doc(item.pedidoId).get().then(function(doc){
+        if(!doc.exists) return;
+        var ped = doc.data();
+        var itensP = (ped.itens||[]).map(function(it){
+          var bate = (it.itemKey && it.itemKey === itemKey) ||
+                     (it.id === item.id && it.nome === item.nome && it.status !== 'cancelado');
+          if(bate && it.status !== 'cancelado'){
+            return Object.assign({}, it, {
+              status: 'cancelado',
+              canceladoEm: agora,
+              canceladoPor: _nomeGarcom || 'Garçom',
+              motivoCancelamento: 'Cancelado na tela de fechamento'
+            });
+          }
+          return it;
+        });
+        fbDb.collection('pedidos').doc(item.pedidoId).update({
+          itens: itensP, atualizadoEm: agora
+        }).catch(function(){});
+      }).catch(function(){});
+    }
+  }).catch(function(e){
+    console.error('[CANCELAR-CONTA] erro:', e);
+    showToast('❌ Erro ao cancelar — tente novamente', '#f87171');
+  });
+}
+
 function renderFecharConta(){
   if(!_fecharConta) return;
   var body = document.getElementById('fechar-conta-body');
@@ -9296,6 +9406,10 @@ function renderFecharConta(){
       var btnAbater = (clickable && (it.preco||0) > 0 && !(it.divisao && it.divisao.total > 1))
         ? '<button onclick="event.stopPropagation();abrirAbatimentoItem(\''+it.itemKey+'\')" title="Abater valor parcial" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">$</button>'
         : '';
+      // Botão de cancelar item direto na conta (resolve itens "presos" após transferência)
+      var btnCancelarConta = (clickable && !(it.divisao && it.divisao.total > 1))
+        ? '<button onclick="event.stopPropagation();cancelarItemNaConta(\''+it.itemKey+'\')" title="Cancelar este item" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">✕</button>'
+        : '';
       // Cálculo do valor RESTANTE do item (considera valorAbatido)
       var temAbatimento = (it.valorAbatido||0) > 0.01 && it.status !== 'pago';
       var valorRestante = temAbatimento ? Math.max(0, valorTotal - (it.valorAbatido||0)) : valorTotal;
@@ -9316,6 +9430,7 @@ function renderFecharConta(){
         )+
         btnDividir+
         btnAbater+
+        btnCancelarConta+
       '</div>';
     });
     html += '</div>';

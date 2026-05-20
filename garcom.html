@@ -1536,6 +1536,21 @@ function _impEhCozinha(imp){
   return tipo === 'cozinha' || nome.indexOf('cozinha') >= 0;
 }
 
+// Verifica se um pedido pertence a uma mesa com conta atualmente aberta
+// (não tá fechada e o contaId bate, pra não pegar de uma rodada anterior)
+function _pedidoPertenceAContaAberta(p){
+  if(!p || !p.mesa) return false;
+  var mesa = String(p.mesa);
+  var conta = _contasMesaCache[mesa];
+  if(!conta) return false; // mesa não tem conta aberta no momento
+  // Se o pedido tem contaId, confere com o contaId atual da mesa
+  if(p.contaId){
+    return p.contaId === conta.id;
+  }
+  // Pedido sem contaId — só aceita se foi criado APÓS a abertura da conta atual
+  return (p.criadoEm || 0) >= (conta.abertaEm || 0);
+}
+
 // Filtra itens que aparecem no sininho da cozinha
 // Usa o campo "apareceSininho" dos modelos de impressão (configurado no PDV)
 var _cozinhaDebugLogado = false;
@@ -1604,6 +1619,8 @@ function contarItensCozinhaMesa(numMesa){
     // Aceita mesa como número ou string
     if(String(p.mesa) !== String(numMesa)) return;
     if(p.status === 'cancelado') return;
+    // Só pedidos da conta atualmente aberta
+    if(!_pedidoPertenceAContaAberta(p)) return;
     var itensCoz = filtrarItensCozinha(p.itens || []);
     itensCoz.forEach(function(it){
       if(!it.descido){
@@ -1622,6 +1639,8 @@ function getItensCozinhaMesa(numMesa){
   _pedidosCozinha.forEach(function(p){
     if(String(p.mesa) !== String(numMesa)) return;
     if(p.status === 'cancelado') return;
+    // Só pedidos da conta atualmente aberta
+    if(!_pedidoPertenceAContaAberta(p)) return;
     var itensCoz = filtrarItensCozinha(p.itens || []);
     itensCoz.forEach(function(it){
       var entry = {
@@ -1671,6 +1690,7 @@ function atualizarBadgesCozinha(){
   if(_pedidosCozinha && _pedidosCozinha.length){
     _pedidosCozinha.forEach(function(p){
       if(p.status === 'cancelado') return;
+      if(!_pedidoPertenceAContaAberta(p)) return;
       var itensCoz = filtrarItensCozinha(p.itens || []);
       itensCoz.forEach(function(it){
         if(!it.descido){
@@ -1743,6 +1763,7 @@ function abrirModalCozinhaGeral(){
   if(_pedidosCozinha && _pedidosCozinha.length){
     _pedidosCozinha.forEach(function(p){
       if(p.status === 'cancelado') return;
+      if(!_pedidoPertenceAContaAberta(p)) return;
       var itensCoz = filtrarItensCozinha(p.itens || []);
       itensCoz.forEach(function(it){
         if(!it.descido){
@@ -1974,6 +1995,20 @@ function setCozinhaAba(aba){
 // Marca item como descido (sincroniza pra todos os garçons)
 function marcarDescido(pedidoId, idx){
   if(!pedidoId) return;
+  // OTIMISTA: atualiza localmente primeiro pra resposta imediata
+  var pedidoLocal = _pedidosCozinha.find(function(p){ return p.id === pedidoId; });
+  if(pedidoLocal && pedidoLocal.itens && pedidoLocal.itens[idx]){
+    pedidoLocal.itens[idx].descido = true;
+    pedidoLocal.itens[idx].descidoEm = Date.now();
+    pedidoLocal.itens[idx].descidoPor = _nomeGarcom || 'Garçom';
+    // Re-renderiza o modal e os badges IMEDIATAMENTE
+    try{ renderModalCozinha(); }catch(e){}
+    try{ atualizarBadgesCozinha(); }catch(e){}
+    showToast('✅ Item marcado como entregue', '#22c55e', 1500);
+    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+  }
+
+  // Salva no Firestore em background
   fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
     if(!doc.exists){
       showToast('Pedido não encontrado', '#f87171');
@@ -1989,18 +2024,33 @@ function marcarDescido(pedidoId, idx){
     itens[idx].descidoEm = Date.now();
     itens[idx].descidoPor = _nomeGarcom || 'Garçom';
     return fbDb.collection('pedidos').doc(pedidoId).update({ itens: itens });
-  }).then(function(){
-    showToast('✅ Item marcado como entregue', '#22c55e', 1500);
-    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
   }).catch(function(e){
     console.error('[COZINHA] erro marcar descido:', e);
-    showToast('❌ ' + (e.message||'erro'), '#f87171');
+    showToast('❌ Erro ao salvar: ' + (e.message||'erro'), '#f87171');
+    // Reverte UI se falhou
+    if(pedidoLocal && pedidoLocal.itens && pedidoLocal.itens[idx]){
+      pedidoLocal.itens[idx].descido = false;
+      try{ renderModalCozinha(); }catch(e){}
+      try{ atualizarBadgesCozinha(); }catch(e){}
+    }
   });
 }
 
 // Reverte item descido (volta pra pendente)
 function reverterDescido(pedidoId, idx){
   if(!pedidoId) return;
+  // OTIMISTA: atualiza localmente primeiro
+  var pedidoLocal = _pedidosCozinha.find(function(p){ return p.id === pedidoId; });
+  if(pedidoLocal && pedidoLocal.itens && pedidoLocal.itens[idx]){
+    pedidoLocal.itens[idx].descido = false;
+    delete pedidoLocal.itens[idx].descidoEm;
+    delete pedidoLocal.itens[idx].descidoPor;
+    try{ renderModalCozinha(); }catch(e){}
+    try{ atualizarBadgesCozinha(); }catch(e){}
+    showToast('↩️ Item revertido', '#f7a34f', 1500);
+    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+  }
+
   fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
     if(!doc.exists){
       showToast('Pedido não encontrado', '#f87171');
@@ -2016,12 +2066,9 @@ function reverterDescido(pedidoId, idx){
     delete itens[idx].descidoEm;
     delete itens[idx].descidoPor;
     return fbDb.collection('pedidos').doc(pedidoId).update({ itens: itens });
-  }).then(function(){
-    showToast('↩️ Item revertido', '#f7a34f', 1500);
-    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
   }).catch(function(e){
     console.error('[COZINHA] erro reverter:', e);
-    showToast('❌ ' + (e.message||'erro'), '#f87171');
+    showToast('❌ Erro ao salvar: ' + (e.message||'erro'), '#f87171');
   });
 }
 

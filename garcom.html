@@ -5777,26 +5777,32 @@ function iniciarListeners(){
   if(_unsubPedidosCozinha) _unsubPedidosCozinha();
   _unsubPedidosCozinha = fbDb.collection('pedidos')
     .where('restauranteId','==', _restauranteId)
-    .where('status','in', ['aguardando','preparando','pronto','entregue'])
     .limit(200)
     .onSnapshot(function(snap){
       _pedidosCozinha = [];
       snap.forEach(function(d){
-        _pedidosCozinha.push(Object.assign({id: d.id}, d.data()));
+        var p = Object.assign({id: d.id}, d.data());
+        // Filtra em memória — só pedidos ativos (não cancelados/fechados)
+        var status = (p.status||'').toLowerCase();
+        if(status === 'cancelado' || status === 'cancelada') return;
+        // Pedidos "entregue" antigos podem entulhar — só pega dos últimos 8h
+        var idade = Date.now() - (p.criadoEm || 0);
+        if(idade > 8 * 60 * 60 * 1000) return; // mais de 8h
+        _pedidosCozinha.push(p);
       });
-      console.log('[COZINHA] pedidos abertos:', _pedidosCozinha.length);
+      console.log('[COZINHA] pedidos ativos:', _pedidosCozinha.length);
+      // Conta quantos têm itens marcados pra sininho (debug)
+      var totalItensCoz = 0;
+      _pedidosCozinha.forEach(function(p){
+        var itensCoz = filtrarItensCozinha(p.itens || []);
+        itensCoz.forEach(function(it){
+          if(!it.descido) totalItensCoz += (it.qtd||1);
+        });
+      });
+      console.log('[COZINHA] total itens cozinha pendentes:', totalItensCoz);
       try{ atualizarBadgesCozinha(); }catch(e){}
     }, function(e){
-      console.warn('[COZINHA] erro pedidos:', e.code);
-      // Fallback sem filtro de status
-      _unsubPedidosCozinha = fbDb.collection('pedidos')
-        .where('restauranteId','==', _restauranteId)
-        .limit(200)
-        .onSnapshot(function(snap){
-          _pedidosCozinha = [];
-          snap.forEach(function(d){ _pedidosCozinha.push(Object.assign({id: d.id}, d.data())); });
-          try{ atualizarBadgesCozinha(); }catch(e){}
-        });
+      console.warn('[COZINHA] erro pedidos:', e.code, e.message);
     });
 
   // Só escuta pedidos se já entrou em alguma mesa (no pré-load não há mesa)

@@ -1615,7 +1615,9 @@ function getItensCozinhaMesa(numMesa){
         qtd: it.qtd || 1,
         obs: it.obs || '',
         selecoes: it.selecoes || [],
-        criadoEm: p.criadoEm || 0,
+        // Usa o tempo POR ITEM se existir (sobrevive a transferências),
+        // senão usa o tempo do pedido
+        criadoEm: it.cozinhaCriadoEm || p.criadoEm || 0,
         descido: it.descido || false,
         descidoEm: it.descidoEm || 0,
         descidoPor: it.descidoPor || ''
@@ -1732,16 +1734,18 @@ function abrirModalCozinhaGeral(){
       var itensCoz = filtrarItensCozinha(p.itens || []);
       itensCoz.forEach(function(it){
         if(!it.descido){
+          // Tempo por item (sobrevive a transferências), senão do pedido
+          var tempoItem = it.cozinhaCriadoEm || p.criadoEm || Date.now();
           if(!mesasMap[p.mesa]){
             mesasMap[p.mesa] = {
               mesa: p.mesa,
               qtdItens: 0,
-              maisAntigo: p.criadoEm || Date.now()
+              maisAntigo: tempoItem
             };
           }
           mesasMap[p.mesa].qtdItens += (it.qtd || 1);
-          if(p.criadoEm && p.criadoEm < mesasMap[p.mesa].maisAntigo){
-            mesasMap[p.mesa].maisAntigo = p.criadoEm;
+          if(tempoItem < mesasMap[p.mesa].maisAntigo){
+            mesasMap[p.mesa].maisAntigo = tempoItem;
           }
         }
       });
@@ -8211,13 +8215,16 @@ function enviarPedido(){
   }
   var mesaInt = ehComanda ? null : (parseInt(_mesaAtiva) || _mesaAtiva);
   var contaId = conta.id;
+  var _agoraPedido = Date.now();
   var itensPedido = _carrinho.map(function(it){
     var ehKg = it.tipoVenda === 'kg' && it.peso;
     var item = {
       id:it.id, nome:it.nome, preco:it.preco, qtd:it.qtd, obs:it.obs||'',
       selecoes: it.selecoes || [],
       precoBase: it.precoBase || it.preco,
-      extras: it.extras || 0
+      extras: it.extras || 0,
+      // Marca o tempo da cozinha por item — sobrevive a transferências
+      cozinhaCriadoEm: _agoraPedido
     };
     // Itens por kg: passa tipoVenda + peso pro cupom mostrar corretamente
     if(ehKg){
@@ -9070,7 +9077,10 @@ function confirmarTransferencia(numDestino){
             selecoes: it.selecoes || [],
             itemKey: it.itemKey,  // mantém o itemKey pra rastreio
             precoBase: it.precoBase || it.preco,
-            extras: it.extras || 0
+            extras: it.extras || 0,
+            // PRESERVA o tempo original da cozinha — não reseta na transferência.
+            // Se o item não tinha o campo, usa o criadoEm do pedido herdado.
+            cozinhaCriadoEm: it.cozinhaCriadoEm || pedidoHerdadoData.criadoEm || Date.now()
           };
         });
 

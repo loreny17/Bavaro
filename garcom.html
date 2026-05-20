@@ -1536,34 +1536,18 @@ function _impEhCozinha(imp){
   return tipo === 'cozinha' || nome.indexOf('cozinha') >= 0;
 }
 
-// Filtra itens que vão pra cozinha (sininho)
+// Filtra itens que aparecem no sininho da cozinha
+// Usa o campo "apareceSininho" dos modelos de impressão (configurado no PDV)
 function filtrarItensCozinha(itens){
   if(!itens || !itens.length) return [];
 
-  // Prioridade 1: modelos com apareceSininho=true (campo configurado no PDV)
-  var modelosComSininho = _modelosCozinha.filter(function(m){
-    return m.apareceSininho === true;
-  });
+  // Pega APENAS os modelos marcados como "aparece no sininho"
+  var modelosCoz = _modelosCozinha.filter(function(m){ return m.apareceSininho; });
 
-  // Prioridade 2 (fallback): se nenhum tem apareceSininho marcado,
-  // usa a lógica antiga (impressora com tipo='cozinha' ou nome contém 'cozinha')
-  var modelosCoz;
-  if(modelosComSininho.length > 0){
-    modelosCoz = modelosComSininho;
-  } else {
-    var impsCozinhaIds = _impressorasCozinha
-      .filter(_impEhCozinha)
-      .map(function(i){ return i.id; });
-    if(!impsCozinhaIds.length){
-      // Nenhuma impressora marcada como cozinha — usa todos os modelos
-      impsCozinhaIds = _impressorasCozinha.map(function(i){ return i.id; });
-    }
-    modelosCoz = _modelosCozinha.filter(function(m){
-      return impsCozinhaIds.indexOf(m.impressoraId) >= 0;
-    });
+  if(!modelosCoz.length){
+    // Sem modelo marcado pro sininho — não mostra nada
+    return [];
   }
-
-  if(!modelosCoz.length) return [];
 
   // Filtra itens que se encaixam em algum desses modelos
   var resultado = [];
@@ -1573,6 +1557,7 @@ function filtrarItensCozinha(itens){
       if(m.filtro === 'item'){
         return (m.itens||[]).indexOf(it.id) >= 0;
       } else {
+        // filtro == 'categoria'
         var itemDef = _itens.find(function(i){ return i.id === it.id; });
         var catId = itemDef ? itemDef.categoriaId : '';
         return (m.categorias||[]).indexOf(catId) >= 0;
@@ -5733,12 +5718,11 @@ function iniciarListeners(){
           filtro: v.filtro || 'categoria',
           categorias: v.categorias || [],
           itens: v.itens || [],
-          apareceSininho: !!v.apareceSininho  // campo novo — controla sininho
+          apareceSininho: !!v.apareceSininho // NOVO: marca se aparece no sininho
         });
       });
-      // Também busca a configuração de impressoras pra saber qual é a da cozinha
-      console.log('[COZINHA] modelos carregados:', _modelosCozinha.length);
-      // Atualiza mapa de mesas se já renderizado
+      var qtdSininho = _modelosCozinha.filter(function(m){ return m.apareceSininho; }).length;
+      console.log('[COZINHA] modelos carregados:', _modelosCozinha.length, '— marcados pra sininho:', qtdSininho);
       try{ if(typeof atualizarBadgesCozinha === 'function') atualizarBadgesCozinha(); }catch(e){}
     }, function(e){ console.warn('[COZINHA] erro modelos:', e.code); });
 

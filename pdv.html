@@ -1951,6 +1951,9 @@ function renderPedidosPDV() {
         '<span class="pedido-garcom">👤 ' + escapeHtml(p.garcom||'—') + '</span>' +
         '<span class="pedido-hora">' + hora + '</span>' +
       '</div>' +
+      (p.teste === true
+        ? '<div style="background:linear-gradient(90deg,#f7a34f,#f59e0b);color:#000;font-size:0.68rem;font-weight:800;padding:3px 8px;border-radius:6px;display:inline-block;margin-bottom:8px;letter-spacing:0.03em;">🧪 PEDIDO DE TESTE</div>'
+        : '') +
       '<div style="margin-bottom:8px;">' +
         '<span class="pedido-status-tag ' + st + '">' + (statusMap[st]||st) + '</span>' +
       '</div>' +
@@ -2142,6 +2145,8 @@ function carregarHistoricoPDV(){
     .get().then(function(snap){
       var contas = [];
       snap.forEach(function(d){ contas.push(Object.assign({id: d.id}, d.data())); });
+      // MODO TESTE: ignora contas de teste no histórico e nas vendas
+      contas = contas.filter(function(c){ return c.teste !== true; });
       contas.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });
       if(!contas.length){
         lista.innerHTML = '<div class="empty"><div class="empty-icon">📜</div><div class="empty-titulo">Nenhuma conta fechada ainda</div><div class="empty-sub">Contas fechadas aparecerão aqui.</div></div>';
@@ -4514,6 +4519,11 @@ function iniciarListenerImpressao(){
 }
 
 function imprimirPedidoAutomatico(pedido){
+  // MODO TESTE: pedidos marcados como teste NÃO imprimem
+  if(pedido && pedido.teste === true){
+    console.log('[IMPRESSAO] pedido de teste — impressão ignorada:', pedido.id);
+    return;
+  }
   if(!_modelos.length || !_impressoras.length) return;
   // SÓ usa modelos do tipo "pedido" (não fechamento)
   _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido'; }).forEach(function(modelo){
@@ -5795,6 +5805,8 @@ function carregarRelatorios(){
     .get().then(function(snap){
       _contasRel = [];
       snap.forEach(function(d){ _contasRel.push(Object.assign({id:d.id}, d.data())); });
+      // MODO TESTE: ignora contas de teste nos relatórios
+      _contasRel = _contasRel.filter(function(c){ return c.teste !== true; });
       renderRelatorios();
     }).catch(function(e){
       console.error('Erro relatórios:', e);

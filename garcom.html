@@ -703,6 +703,17 @@ header{
         </div>
       </button>
 
+      <button class="menu-lateral-item" id="menu-item-teste" onclick="fecharMenuLateral();abrirModoTeste()">
+        <span style="font-size:1.4rem;">🧪</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Modo Teste</div>
+          <div style="font-size:0.72rem;color:var(--muted);" id="menu-teste-sub">Treinar sem afetar as vendas</div>
+        </div>
+        <div style="width:42px;height:24px;border-radius:99px;flex-shrink:0;position:relative;transition:all 0.2s;background:var(--border2);" id="menu-teste-switch">
+          <div style="position:absolute;top:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:all 0.2s;left:2px;" id="menu-teste-knob"></div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" onclick="fecharMenuLateral();sair()" style="margin-top:18px;">
         <span style="font-size:1.4rem;">🚪</span>
         <div style="flex:1;text-align:left;">
@@ -1082,6 +1093,13 @@ function limparCarrinhoSalvo(){
   if(k){ try{ localStorage.removeItem(k); }catch(e){} }
 }
 var _modoCompacto = (function(){ try{ return localStorage.getItem('garcom_modo_compacto') === '1'; }catch(e){ return false; } })();
+
+// ═══════════════════════════════════════════════
+// 🧪 MODO TESTE — pedidos não imprimem, não contam nas vendas
+// ═══════════════════════════════════════════════
+var _modoTeste = (function(){
+  try{ return localStorage.getItem('garcom_modo_teste') === '1'; }catch(e){ return false; }
+})();
 var _meusPedidos = [];     // pedidos do garçom nessa mesa
 var _tabAtual = 'cardapio';
 var _unsubItens = null, _unsubCats = null, _unsubPedidos = null, _unsubGrupos = null;
@@ -1234,6 +1252,7 @@ function mostrarLoginOuMesas(){
   _ehAdmin = localStorage.getItem('garcom_admin') === '1';
   if(_nomeGarcom){
     try{ _carregarGestosAcoes(); }catch(e){}
+    try{ atualizarBannerModoTeste(); atualizarMenuModoTeste(); }catch(e){}
     document.getElementById('login-screen').classList.add('hidden');
     mostrarMesas();
   } else {
@@ -1390,6 +1409,7 @@ function aplicarLoginGarcom(match, nomeDigitado){
   // Inicia escuta de avisos AGORA (depois do login)
   try{ escutarAvisosGarcom(); }catch(e){ console.warn('Falhou ao iniciar avisos:', e); }
   try{ _carregarGestosAcoes(); }catch(e){}
+  try{ atualizarBannerModoTeste(); atualizarMenuModoTeste(); }catch(e){}
 }
 
 // Modal: garçom cadastrado em mais de um restaurante, escolha qual usar agora
@@ -2241,6 +2261,213 @@ function aplicarPrefsAparencia(){
 
 // ═══ MODAL DE APARÊNCIA ═══
 // Agrupa: modo de fotos, emojis, colunas do cardápio e das mesas
+// ═══════════════════════════════════════════════
+// 🧪 MODO TESTE
+// ═══════════════════════════════════════════════
+function abrirModoTeste(){
+  var ex = document.getElementById('modal-modo-teste');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-modo-teste';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:34px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  document.body.appendChild(mod);
+  renderModoTeste();
+}
+
+function renderModoTeste(){
+  var mod = document.getElementById('modal-modo-teste');
+  if(!mod) return;
+
+  var ligado = _modoTeste;
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid ' + (ligado?'#f7a34f':'var(--border2)') + ';border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">🧪</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1.05rem;">Modo Teste</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">Treinar e testar sem afetar o restaurante</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'modal-modo-teste\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' +
+
+        // Toggle principal
+        '<div onclick="alternarModoTeste()" style="display:flex;align-items:center;gap:12px;padding:14px;background:' + (ligado?'rgba(247,163,79,0.1)':'var(--bg)') + ';border:1px solid ' + (ligado?'#f7a34f':'var(--border2)') + ';border-radius:12px;margin-bottom:14px;cursor:pointer;">' +
+          '<span style="font-size:1.8rem;">' + (ligado?'🧪':'⚪') + '</span>' +
+          '<div style="flex:1;">' +
+            '<div style="font-weight:700;font-size:0.96rem;color:' + (ligado?'#f7a34f':'var(--text)') + ';">' + (ligado?'Modo Teste ATIVO':'Modo Teste desligado') + '</div>' +
+            '<div style="font-size:0.72rem;color:var(--muted);">' + (ligado?'Toque para voltar ao normal':'Toque para ativar') + '</div>' +
+          '</div>' +
+          '<div style="width:48px;height:28px;border-radius:99px;flex-shrink:0;position:relative;transition:all 0.2s;background:' + (ligado?'#f7a34f':'var(--border2)') + ';">' +
+            '<div style="position:absolute;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:all 0.2s;left:' + (ligado?'23px':'3px') + ';"></div>' +
+          '</div>' +
+        '</div>' +
+
+        // Explicação
+        '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:12px;margin-bottom:14px;">' +
+          '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;margin-bottom:6px;">Quando ativo:</div>' +
+          '<div style="font-size:0.8rem;color:var(--text);line-height:1.6;">' +
+            '✓ Pedidos <strong>não imprimem</strong> na cozinha<br>' +
+            '✓ <strong>Não contam</strong> nas vendas do dia<br>' +
+            '✓ Não aparecem nos relatórios<br>' +
+            '✓ Ficam marcados com 🧪 pra você identificar' +
+          '</div>' +
+        '</div>' +
+
+        // Botão limpar
+        '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:4px 2px 8px;">Limpar dados de teste</div>' +
+        '<button onclick="limparDadosTeste()" style="width:100%;padding:13px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:11px;font-weight:700;font-size:0.88rem;cursor:pointer;font-family:inherit;">' +
+          '🗑️ Apagar todos os pedidos de teste' +
+        '</button>' +
+        '<div style="font-size:0.7rem;color:var(--muted);margin-top:6px;text-align:center;">Remove pedidos, mesas e contas marcados como teste</div>' +
+
+      '</div>' +
+    '</div>';
+}
+
+function alternarModoTeste(){
+  _modoTeste = !_modoTeste;
+  try{ localStorage.setItem('garcom_modo_teste', _modoTeste ? '1' : '0'); }catch(e){}
+  renderModoTeste();
+  atualizarBannerModoTeste();
+  atualizarMenuModoTeste();
+  showToast(_modoTeste ? '🧪 Modo Teste ATIVADO' : '✓ Modo Teste desligado', _modoTeste ? '#f7a34f' : '#4ade80', 2000);
+  try{ if(navigator.vibrate) navigator.vibrate(50); }catch(e){}
+}
+
+// Atualiza o switch no menu lateral
+function atualizarMenuModoTeste(){
+  var sw = document.getElementById('menu-teste-switch');
+  var knob = document.getElementById('menu-teste-knob');
+  var sub = document.getElementById('menu-teste-sub');
+  if(sw) sw.style.background = _modoTeste ? '#f7a34f' : 'var(--border2)';
+  if(knob) knob.style.left = _modoTeste ? '20px' : '2px';
+  if(sub) sub.textContent = _modoTeste ? '🧪 ATIVO — pedidos de teste' : 'Treinar sem afetar as vendas';
+}
+
+// Banner fixo no topo quando o modo teste está ligado
+function atualizarBannerModoTeste(){
+  var ex = document.getElementById('banner-modo-teste');
+  if(_modoTeste){
+    if(!ex){
+      var b = document.createElement('div');
+      b.id = 'banner-modo-teste';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99980;background:linear-gradient(90deg,#f7a34f,#f59e0b);color:#000;text-align:center;padding:5px 12px;font-size:0.74rem;font-weight:800;letter-spacing:0.03em;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+      b.textContent = '🧪 MODO TESTE — pedidos não imprimem nem contam nas vendas';
+      b.onclick = function(){ abrirModoTeste(); };
+      document.body.appendChild(b);
+    }
+  } else {
+    if(ex) ex.remove();
+  }
+}
+
+// Apaga todos os pedidos/mesas/contas marcados como teste
+function limparDadosTeste(){
+  if(!confirm('Apagar TODOS os pedidos, mesas e contas marcados como teste?\n\nEsta ação não pode ser desfeita.')) return;
+
+  showToast('🗑️ Apagando dados de teste...', '#f7a34f', 3000);
+
+  var totalApagado = 0;
+  var erros = 0;
+
+  // Função pra apagar uma coleção filtrando por teste==true
+  function apagarColecao(nomeColecao){
+    return fbDb.collection(nomeColecao)
+      .where('restauranteId','==', _restauranteId)
+      .where('teste','==', true)
+      .get()
+      .then(function(snap){
+        if(snap.empty) return;
+        var batch = fbDb.batch();
+        var n = 0;
+        snap.forEach(function(d){
+          batch.delete(d.ref);
+          n++;
+          totalApagado++;
+        });
+        return batch.commit().then(function(){
+          console.log('[MODO-TESTE] ' + nomeColecao + ': ' + n + ' apagados');
+        });
+      })
+      .catch(function(e){
+        erros++;
+        console.error('[MODO-TESTE] erro em ' + nomeColecao + ':', e.code || e.message);
+      });
+  }
+
+  Promise.all([
+    apagarColecao('pedidos'),
+    apagarColecao('contas_mesa'),
+    apagarColecao('contas_fechadas'),
+    apagarColecao('comandos_impressao')
+  ]).then(function(){
+    if(erros > 0){
+      showToast('⚠️ ' + totalApagado + ' apagados, ' + erros + ' erros', '#f7a34f', 4000);
+    } else {
+      showToast('✓ ' + totalApagado + ' registro(s) de teste apagados', '#4ade80', 3000);
+    }
+    var m = document.getElementById('modal-modo-teste');
+    if(m) m.remove();
+  });
+}
+
+// Exclui UM pedido de teste específico (e seus itens da conta)
+function excluirPedidoTesteGarcom(pedidoId){
+  if(!pedidoId) return;
+  if(!confirm('Excluir este pedido de teste?\n\nOs itens dele serão removidos da conta da mesa.')) return;
+
+  showToast('🗑️ Excluindo...', '#f7a34f', 2000);
+
+  // Primeiro pega o pedido pra saber o contaId e os itens
+  fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
+    if(!doc.exists){
+      showToast('Pedido não encontrado', '#f87171');
+      return;
+    }
+    var ped = doc.data();
+    var contaId = ped.contaId;
+
+    // Remove o pedido
+    var promExcluirPedido = fbDb.collection('pedidos').doc(pedidoId).delete();
+
+    // Remove os itens desse pedido da conta_mesa
+    var promLimparConta = Promise.resolve();
+    if(contaId){
+      promLimparConta = fbDb.collection('contas_mesa').doc(contaId).get().then(function(cdoc){
+        if(!cdoc.exists) return;
+        var conta = cdoc.data();
+        // Remove itens que vieram desse pedido
+        var itensRestantes = (conta.itens||[]).filter(function(it){
+          return it.pedidoId !== pedidoId;
+        });
+        var totais = calcularTotaisConta({itens: itensRestantes, pagamentos: conta.pagamentos||[]});
+        return fbDb.collection('contas_mesa').doc(contaId).update({
+          itens: itensRestantes,
+          subtotal: totais.subtotal,
+          taxa10: totais.taxa10,
+          total: totais.total,
+          pagoTotal: totais.pagoTotal,
+          restante: totais.restante,
+          atualizadoEm: Date.now()
+        });
+      });
+    }
+
+    return Promise.all([promExcluirPedido, promLimparConta]);
+  }).then(function(){
+    showToast('✓ Pedido de teste excluído', '#4ade80', 2000);
+    try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+    // Re-renderiza a tela de ver pedidos se estiver aberta
+    try{ if(typeof verPedidosMesa === 'function' && _mesaAtiva) verPedidosMesa(_mesaAtiva); }catch(e){}
+  }).catch(function(e){
+    console.error('[MODO-TESTE] erro ao excluir pedido:', e);
+    showToast('❌ Erro ao excluir — tente novamente', '#f87171');
+  });
+}
+
 function abrirAparencia(){
   var ex = document.getElementById('modal-aparencia');
   if(ex) ex.remove();
@@ -4479,6 +4706,18 @@ function renderCaixaDoDia(){
   ]).then(function(results){
     var todasFechadas = results[0];
     var abertas = results[1];
+
+    // MODO TESTE: ignora contas marcadas como teste no caixa do dia
+    todasFechadas = todasFechadas.filter(function(c){ return c.teste !== true; });
+    // Contas abertas: remove as que só têm itens de teste
+    abertas = abertas.filter(function(c){
+      if(c.teste === true) return false;
+      var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+      if(itensValidos.length === 0) return true; // conta vazia — deixa passar
+      // Se TODOS os itens válidos são de teste, ignora a conta
+      var todosTeste = itensValidos.every(function(it){ return it.teste === true; });
+      return !todosTeste;
+    });
 
     // Filtra em memória — tenta vários nomes de campo de data
     function dataFechamento(c){
@@ -8297,7 +8536,8 @@ function enviarPedido(){
     status: 'preparo',
     criadoEm: Date.now(),
     itens: itensPedido,
-    total: totalPedido
+    total: totalPedido,
+    teste: _modoTeste ? true : false
   };
   // 1. Gera número sequencial e cria pedido
   console.log('[ENVIAR-PEDIDO] Iniciando — mesa:', mesaInt, 'contaId:', contaId, 'itens:', itensPedido.length);
@@ -8318,7 +8558,8 @@ function enviarPedido(){
         status: 'ativo',
         pagamentoId: null,
         adicionadoEm: Date.now(),
-        adicionadoPor: _nomeGarcom
+        adicionadoPor: _nomeGarcom,
+        teste: _modoTeste ? true : false
       };
       // Preserva campos de pesagem
       if(it.tipoVenda === 'kg' && it.peso){
@@ -10215,7 +10456,15 @@ function executarEncerramento(){
 
   var contaIdParaApagar = _fecharContaId;
   var mesaNum = String(c.mesa||'');
-  var registro = Object.assign({}, c, {status:'fechada', fechadoEm:Date.now(), fechadoPor:_nomeGarcom});
+  // Detecta se a conta é de teste (todos os itens válidos são de teste)
+  var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+  var contaEhTeste = itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; });
+  var registro = Object.assign({}, c, {
+    status:'fechada',
+    fechadoEm:Date.now(),
+    fechadoPor:_nomeGarcom,
+    teste: contaEhTeste
+  });
   delete registro.id;
 
   console.log('[ENCERRAR] Iniciando — mesa:', c.mesa, 'contaId:', contaIdParaApagar);
@@ -10506,14 +10755,18 @@ function renderVerPedidosMesa(pedidos){
       '</div>';
     }).join('');
     
-    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;">'+
+    html += '<div style="background:var(--surface);border:1px solid '+(p.teste===true?'#f7a34f':'var(--border)')+';border-radius:14px;padding:14px;margin-bottom:14px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:6px;flex-wrap:wrap;">'+
         '<div>'+
-          '<div style="font-weight:700;font-size:0.94rem;">Pedido #'+_numPedido(p)+'</div>'+
+          '<div style="font-weight:700;font-size:0.94rem;">Pedido #'+_numPedido(p)+
+            (p.teste===true?' <span style="background:linear-gradient(90deg,#f7a34f,#f59e0b);color:#000;font-size:0.62rem;font-weight:800;padding:2px 6px;border-radius:5px;letter-spacing:0.03em;vertical-align:middle;">🧪 TESTE</span>':'')+
+          '</div>'+
           '<div style="font-size:0.72rem;color:var(--muted);">'+hora+' • '+esc(p.garcom||'—')+'</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
-          '<button onclick="reimprimirPedidoGarcom(\''+p.id+'\')" title="Reimprimir pedido" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:5px 10px;border-radius:7px;font-size:0.74rem;font-family:inherit;cursor:pointer;font-weight:600;">🖨️ Reimprimir</button>'+
+          (p.teste===true
+            ? '<button onclick="excluirPedidoTesteGarcom(\''+p.id+'\')" title="Excluir pedido de teste" style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.4);color:#f87171;padding:5px 10px;border-radius:7px;font-size:0.74rem;font-family:inherit;cursor:pointer;font-weight:600;">🗑 Excluir</button>'
+            : '<button onclick="reimprimirPedidoGarcom(\''+p.id+'\')" title="Reimprimir pedido" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:5px 10px;border-radius:7px;font-size:0.74rem;font-family:inherit;cursor:pointer;font-weight:600;">🖨️ Reimprimir</button>')+
           (podeEditar ? '<button onclick="cancelarPedidoInteiroGarcom(\''+p.id+'\')" title="Cancelar pedido inteiro" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:5px 10px;border-radius:7px;font-size:0.74rem;font-family:inherit;cursor:pointer;font-weight:600;">✕ Cancelar pedido</button>' : '')+
           '<span style="background:var(--surface3);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;font-size:0.72rem;font-weight:600;">'+(statusMap[st]||st)+'</span>'+
         '</div>'+

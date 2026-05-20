@@ -1538,6 +1538,7 @@ function _impEhCozinha(imp){
 
 // Filtra itens que aparecem no sininho da cozinha
 // Usa o campo "apareceSininho" dos modelos de impressão (configurado no PDV)
+var _cozinhaDebugLogado = false;
 function filtrarItensCozinha(itens){
   if(!itens || !itens.length) return [];
 
@@ -1545,8 +1546,33 @@ function filtrarItensCozinha(itens){
   var modelosCoz = _modelosCozinha.filter(function(m){ return m.apareceSininho; });
 
   if(!modelosCoz.length){
-    // Sem modelo marcado pro sininho — não mostra nada
+    if(!_cozinhaDebugLogado){
+      console.log('[COZINHA-FILTRO] ⚠️ Nenhum modelo marcado pra sininho');
+      _cozinhaDebugLogado = true;
+    }
     return [];
+  }
+
+  // Log uma vez por sessão pra ajudar a debugar
+  if(!_cozinhaDebugLogado){
+    _cozinhaDebugLogado = true;
+    console.log('[COZINHA-FILTRO] modelos pro sininho:', JSON.stringify(modelosCoz.map(function(m){
+      return { nome: m.nome, filtro: m.filtro, categorias: m.categorias, itens: m.itens };
+    })));
+    console.log('[COZINHA-FILTRO] exemplo de item recebido:', JSON.stringify({
+      id: itens[0].id, nome: itens[0].nome, categoriaId: itens[0].categoriaId
+    }));
+    var itemDef = _itens.find(function(i){ return i.id === itens[0].id; });
+    console.log('[COZINHA-FILTRO] item no cardápio (_itens):', itemDef ? JSON.stringify({
+      id: itemDef.id, nome: itemDef.nome, categoriaId: itemDef.categoriaId
+    }) : 'NÃO ENCONTRADO');
+    console.log('[COZINHA-FILTRO] total de itens no cardápio:', _itens.length);
+    console.log('[COZINHA-FILTRO] total de categorias no cardápio:', _categorias.length);
+    if(_categorias.length){
+      console.log('[COZINHA-FILTRO] primeira categoria:', JSON.stringify({
+        id: _categorias[0].id, nome: _categorias[0].nome
+      }));
+    }
   }
 
   // Filtra itens que se encaixam em algum desses modelos
@@ -1560,6 +1586,8 @@ function filtrarItensCozinha(itens){
         // filtro == 'categoria'
         var itemDef = _itens.find(function(i){ return i.id === it.id; });
         var catId = itemDef ? itemDef.categoriaId : '';
+        // Também tenta o categoriaId direto do pedido (caso _itens não tenha carregado)
+        if(!catId) catId = it.categoriaId || '';
         return (m.categorias||[]).indexOf(catId) >= 0;
       }
     });
@@ -5723,6 +5751,7 @@ function iniciarListeners(){
       });
       var qtdSininho = _modelosCozinha.filter(function(m){ return m.apareceSininho; }).length;
       console.log('[COZINHA] modelos carregados:', _modelosCozinha.length, '— marcados pra sininho:', qtdSininho);
+      _cozinhaDebugLogado = false; // reset pra logar novamente
       try{ if(typeof atualizarBadgesCozinha === 'function') atualizarBadgesCozinha(); }catch(e){}
     }, function(e){ console.warn('[COZINHA] erro modelos:', e.code); });
 

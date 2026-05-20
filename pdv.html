@@ -2956,7 +2956,13 @@ function publicarListaGarcons(){
   if(!_restauranteAtivo) return;
   var ativos = _garconsCache.filter(function(g){ return (g.status||'ativo')==='ativo'; })
     .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||'', admin: g.admin === true}; });
+  // Publica SEMPRE com tenantId, nome e emoji — essencial pro app garçom
+  // carregar o cardápio do restaurante certo.
   fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
+    tenantId: _tenantId || null,
+    restauranteId: _restauranteAtivo.id,
+    nome: _restauranteAtivo.nome || '',
+    emoji: _restauranteAtivo.emoji || '🍽️',
     garcons: ativos,
     garconsAtualizadoEm: Date.now()
   }, {merge:true}).catch(function(e){ console.warn('publicarGarcons:', e); });
@@ -5483,6 +5489,120 @@ function menuIrPara(tab){
 }
 
 // ===== Tela de Seleção de Restaurante =====
+// ════════════════════════════════════════
+//  CRIAR NOVO RESTAURANTE (do zero, vazio)
+// ════════════════════════════════════════
+function abrirCriarRestaurante(){
+  var modal = document.getElementById('modal-rest');
+  var body = document.getElementById('modal-rest-body');
+  body.innerHTML =
+    '<div style="padding:4px;">' +
+      '<div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:11px;margin-bottom:14px;font-size:0.8rem;color:var(--muted);line-height:1.5;">' +
+        'O novo restaurante começa vazio. Depois você pode usar <strong>Copiar Cardápio</strong> pra trazer itens de outro, ou cadastrar do zero.' +
+      '</div>' +
+      '<div style="margin-bottom:12px;">' +
+        '<label style="font-size:0.8rem;color:var(--muted);font-weight:600;display:block;margin-bottom:5px;">Nome do restaurante</label>' +
+        '<input type="text" id="novo-rest-nome" placeholder="Ex: Filial Centro" ' +
+          'style="width:100%;padding:11px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:0.95rem;font-family:inherit;box-sizing:border-box;">' +
+      '</div>' +
+      '<div style="margin-bottom:12px;">' +
+        '<label style="font-size:0.8rem;color:var(--muted);font-weight:600;display:block;margin-bottom:5px;">Emoji (ícone)</label>' +
+        '<input type="text" id="novo-rest-emoji" placeholder="🍽️" maxlength="4" value="🍽️" ' +
+          'style="width:80px;padding:11px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:1.2rem;text-align:center;font-family:inherit;">' +
+      '</div>' +
+      '<div style="margin-bottom:14px;">' +
+        '<label style="font-size:0.8rem;color:var(--muted);font-weight:600;display:block;margin-bottom:5px;">ID do restaurante (interno)</label>' +
+        '<input type="text" id="novo-rest-id" placeholder="filial_centro" ' +
+          'style="width:100%;padding:11px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:0.9rem;font-family:monospace;box-sizing:border-box;">' +
+        '<div style="font-size:0.72rem;color:var(--muted);margin-top:5px;">Só letras minúsculas, números, _ e -. Não pode mudar depois.</div>' +
+      '</div>' +
+      '<div id="novo-rest-erro" style="display:none;color:#f87171;font-size:0.8rem;margin-bottom:10px;"></div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button onclick="mostrarSelecaoRestaurante()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button id="btn-criar-rest" onclick="executarCriarRestaurante()" style="flex:1.4;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Criar restaurante</button>' +
+      '</div>' +
+    '</div>';
+
+  // Auto-gera o ID a partir do nome
+  var inputNome = document.getElementById('novo-rest-nome');
+  inputNome.addEventListener('input', function(){
+    var idGerado = (this.value||'').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')  // remove acentos
+      .replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    document.getElementById('novo-rest-id').value = idGerado;
+  });
+  inputNome.focus();
+}
+
+function executarCriarRestaurante(){
+  var nome = (document.getElementById('novo-rest-nome').value||'').trim();
+  var emoji = (document.getElementById('novo-rest-emoji').value||'🍽️').trim() || '🍽️';
+  var id = (document.getElementById('novo-rest-id').value||'').trim().toLowerCase();
+  var erroEl = document.getElementById('novo-rest-erro');
+
+  function mostrarErro(msg){
+    erroEl.textContent = '⚠️ ' + msg;
+    erroEl.style.display = 'block';
+  }
+
+  if(!nome){ mostrarErro('Digite o nome do restaurante'); return; }
+  if(!id){ mostrarErro('Digite o ID do restaurante'); return; }
+  if(!/^[a-z0-9_-]+$/.test(id)){ mostrarErro('ID inválido. Use só a-z, 0-9, _ ou -'); return; }
+  if(id === 'default'){ mostrarErro('Esse ID é reservado. Escolha outro.'); return; }
+  if(!_tenantId){ mostrarErro('Tenant não carregado. Recarregue o PDV.'); return; }
+
+  var btn = document.getElementById('btn-criar-rest');
+  btn.disabled = true;
+  btn.textContent = 'Criando...';
+  erroEl.style.display = 'none';
+
+  // 1. Verifica se o ID já existe
+  var restRef = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(id);
+  restRef.get().then(function(doc){
+    if(doc.exists){
+      btn.disabled = false;
+      btn.textContent = 'Criar restaurante';
+      mostrarErro('Já existe um restaurante com esse ID.');
+      throw new Error('id-existe');
+    }
+    // 2. Cria o documento do restaurante
+    return restRef.set({
+      nome: nome,
+      emoji: emoji,
+      criadoEm: Date.now(),
+      criadoPor: (_user && _user.email) || ''
+    });
+  }).then(function(){
+    // 3. Publica em restaurantes_publicos (ESSENCIAL pro app garçom enxergar)
+    return fbDb.collection('restaurantes_publicos').doc(id).set({
+      tenantId: _tenantId,
+      restauranteId: id,
+      nome: nome,
+      emoji: emoji,
+      garcons: [],
+      criadoEm: Date.now(),
+      atualizadoEm: Date.now()
+    });
+  }).then(function(){
+    console.log('[RESTAURANTE] criado:', id);
+    btn.textContent = '✓ Criado!';
+    // Pergunta se quer trocar pra ele agora
+    setTimeout(function(){
+      if(confirm('✓ Restaurante "' + nome + '" criado!\n\nDeseja abrir esse restaurante agora pra configurar o cardápio?')){
+        trocarRestaurante(id, nome, emoji);
+      } else {
+        mostrarSelecaoRestaurante();
+      }
+    }, 400);
+  }).catch(function(e){
+    if(e.message === 'id-existe') return; // já tratado
+    console.error('[RESTAURANTE] erro ao criar:', e);
+    btn.disabled = false;
+    btn.textContent = 'Criar restaurante';
+    mostrarErro('Erro ao criar: ' + (e.message||'desconhecido'));
+  });
+}
+
 function mostrarSelecaoRestaurante(){
   var modal = document.getElementById('modal-rest');
   var body = document.getElementById('modal-rest-body');
@@ -5527,6 +5647,11 @@ function mostrarSelecaoRestaurante(){
     });
 
     var html = '';
+    // Botão de criar restaurante novo (sempre no topo)
+    html += '<div class="rest-card" onclick="abrirCriarRestaurante()" style="border:1.5px dashed var(--accent);background:rgba(212,168,67,0.05);">';
+    html += '<div class="emoji">➕</div>';
+    html += '<div class="info"><div class="nome" style="color:var(--accent);">Criar novo restaurante</div><div class="id-line">Adiciona um restaurante vazio</div></div>';
+    html += '</div>';
     lista.forEach(function(r){
       var ativo = (_restauranteAtivo && _restauranteAtivo.id === r.id);
       var nomeEsc = r.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');

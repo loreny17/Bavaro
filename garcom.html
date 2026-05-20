@@ -703,7 +703,7 @@ header{
         </div>
       </button>
 
-      <button class="menu-lateral-item" id="menu-item-teste" onclick="fecharMenuLateral();abrirModoTeste()">
+      <button class="menu-lateral-item" id="menu-item-teste" onclick="fecharMenuLateral();abrirModoTeste()" style="display:none;">
         <span style="font-size:1.4rem;">🧪</span>
         <div style="flex:1;text-align:left;">
           <div style="font-weight:600;">Modo Teste</div>
@@ -1813,6 +1813,7 @@ function abrirModalCozinhaGeral(){
   var mod = document.createElement('div');
   mod.id = 'modal-cozinha-geral';
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:40px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) fecharModalCozinhaGeral(); };
   mod.innerHTML =
     '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
       '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
@@ -1828,6 +1829,7 @@ function abrirModalCozinhaGeral(){
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
+  try{ pushHistory('modal-cozinha-geral'); }catch(e){}
 }
 
 function fecharModalCozinhaGeral(){
@@ -1847,10 +1849,12 @@ function abrirModalCozinha(numMesa){
   var mod = document.createElement('div');
   mod.id = 'modal-cozinha';
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:40px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) fecharModalCozinha(); };
   mod.innerHTML = '<div id="modal-cozinha-inner" style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;"></div>';
   document.body.appendChild(mod);
 
   renderModalCozinha();
+  try{ pushHistory('modal-cozinha'); }catch(e){}
 
   // Atualiza tempo a cada 30s
   if(_modalCozinhaTimer) clearInterval(_modalCozinhaTimer);
@@ -2085,6 +2089,15 @@ function mostrarMesas(){
   // Mostra/esconde item Admin no menu
   var admItem = document.getElementById('menu-item-admin-garcom');
   if(admItem) admItem.style.display = _ehAdmin ? '' : 'none';
+  // Modo Teste — só pra admin
+  var testeItem = document.getElementById('menu-item-teste');
+  if(testeItem) testeItem.style.display = _ehAdmin ? '' : 'none';
+  // Segurança: se não é admin, garante que o modo teste fica desligado
+  if(!_ehAdmin && _modoTeste){
+    _modoTeste = false;
+    try{ localStorage.setItem('garcom_modo_teste', '0'); }catch(e){}
+    try{ atualizarBannerModoTeste(); }catch(e){}
+  }
   carregarTenantParaMesas();
   // Esconde FAB quando volta pro mapa
   var fab = document.getElementById('fab-enviar');
@@ -11084,6 +11097,23 @@ window.addEventListener('popstate', function(e){
   // Tenta voltar no estado interno
   if(_historyStack.length > 0){
     _historyStack.pop();
+  }
+  // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
+  // Fecha o topo deles antes de qualquer outra coisa.
+  var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
+    'modal-personalizar-gestos', 'modal-modo-teste'];
+  for(var i = 0; i < modaisDinamicos.length; i++){
+    var md = document.getElementById(modaisDinamicos[i]);
+    if(md){
+      md.remove();
+      // limpa timer do modal de cozinha se for o caso
+      if(modaisDinamicos[i] === 'modal-cozinha' && _modalCozinhaTimer){
+        clearInterval(_modalCozinhaTimer);
+        _modalCozinhaTimer = null;
+      }
+      try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
+      return;
+    }
   }
   // Lógica de voltar baseada no estado atual visível
   // 1. Modal aberto? Fecha modal

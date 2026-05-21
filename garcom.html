@@ -703,6 +703,14 @@ header{
         </div>
       </button>
 
+      <button class="menu-lateral-item" id="menu-item-insumos" onclick="fecharMenuLateral();abrirPedidoInsumosGarcom()" style="display:none;">
+        <span style="font-size:1.4rem;">🚚</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Pedir Insumos ao Central</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Arroz, salmão e outros itens</div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" id="menu-item-teste" onclick="fecharMenuLateral();abrirModoTeste()" style="display:none;">
         <span style="font-size:1.4rem;">🧪</span>
         <div style="flex:1;text-align:left;">
@@ -1033,6 +1041,8 @@ var firebaseConfig = {
 var fbDb = null;
 var _nomeGarcom = null;    // nome salvo
 var _ehAdmin = false;       // se o garçom é admin (definido no login)
+var _podeInsumos = false;   // se o garçom pode pedir insumos ao Central
+var _nomeRestauranteG = ''; // nome do restaurante (pro pedido de insumos)
 var _mesaAtiva = null;     // número da mesa (ex: "3")
 var _tenantId = null;
 var _restauranteId = null;
@@ -1253,6 +1263,7 @@ window.addEventListener('online', function(){ revalidarConexaoFirestore(); });
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;
   _ehAdmin = localStorage.getItem('garcom_admin') === '1';
+  _podeInsumos = localStorage.getItem('garcom_pode_insumos') === '1';
   if(_nomeGarcom){
     try{ _carregarGestosAcoes(); }catch(e){}
     try{ atualizarBannerModoTeste(); atualizarMenuModoTeste(); }catch(e){}
@@ -1329,7 +1340,8 @@ function efetuarLogin(){
           nomeRest: nomeRest,
           emoji: emoji,
           nomeCanonico: match.apelido || (match.nome||'').split(' ')[0] || nome,
-          admin: match.admin === true
+          admin: match.admin === true,
+          podeInsumos: match.podeInsumos === true
         });
       }
     });
@@ -1384,6 +1396,8 @@ function aplicarLoginGarcom(match, nomeDigitado){
   _restauranteId = match.restauranteId;
   _tenantId = match.tenantId || _tenantId;
   _ehAdmin = match.admin === true;
+  _podeInsumos = match.podeInsumos === true;
+  _nomeRestauranteG = match.nomeRest || match.restauranteId;
 
   // Salva tudo no localStorage
   try{
@@ -1391,6 +1405,7 @@ function aplicarLoginGarcom(match, nomeDigitado){
     localStorage.setItem('garcom_restaurante_id', match.restauranteId);
     if(match.tenantId) localStorage.setItem('gestao_tenant_id', match.tenantId);
     localStorage.setItem('garcom_admin', _ehAdmin ? '1' : '0');
+    localStorage.setItem('garcom_pode_insumos', _podeInsumos ? '1' : '0');
 
     // Histórico de nomes recentes
     var raw = localStorage.getItem('garcom_nomes_salvos') || '[]';
@@ -2105,6 +2120,9 @@ function mostrarMesas(){
   // Modo Teste — só pra admin
   var testeItem = document.getElementById('menu-item-teste');
   if(testeItem) testeItem.style.display = _ehAdmin ? '' : 'none';
+  // Pedir Insumos — só pra quem tem permissão
+  var insumosItem = document.getElementById('menu-item-insumos');
+  if(insumosItem) insumosItem.style.display = _podeInsumos ? '' : 'none';
   // Segurança: se não é admin, garante que o modo teste fica desligado
   if(!_ehAdmin && _modoTeste){
     _modoTeste = false;
@@ -2491,6 +2509,177 @@ function excluirPedidoTesteGarcom(pedidoId){
   }).catch(function(e){
     console.error('[MODO-TESTE] erro ao excluir pedido:', e);
     showToast('❌ Erro ao excluir — tente novamente', '#f87171');
+  });
+}
+
+// ═══════════════════════════════════════════════
+// 🚚 PEDIR INSUMOS AO CENTRAL (Bávaro)
+// ═══════════════════════════════════════════════
+var _insumosCarrinhoG = [];
+var ID_CENTRAL_G = 'default';
+
+function _favInsumosKeyG(){
+  return 'insumos_fav_garcom_' + (_restauranteId||'_');
+}
+function _carregarFavInsumosG(){
+  try{
+    var raw = localStorage.getItem(_favInsumosKeyG());
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return ['Arroz', 'Salmão', 'Batata', 'Carne', 'Frango', 'Salada'];
+}
+function _salvarFavInsumosG(lista){
+  try{ localStorage.setItem(_favInsumosKeyG(), JSON.stringify(lista)); }catch(e){}
+}
+
+function abrirPedidoInsumosGarcom(){
+  _insumosCarrinhoG = [];
+  var ex = document.getElementById('modal-insumos-garcom');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-insumos-garcom';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) fecharPedidoInsumosGarcom(); };
+  document.body.appendChild(mod);
+  try{ pushHistory('modal-insumos-garcom'); }catch(e){}
+  renderPedidoInsumosGarcom();
+}
+
+function fecharPedidoInsumosGarcom(){
+  var m = document.getElementById('modal-insumos-garcom');
+  if(m) m.remove();
+}
+
+function renderPedidoInsumosGarcom(){
+  var mod = document.getElementById('modal-insumos-garcom');
+  if(!mod) return;
+  var favoritos = _carregarFavInsumosG();
+
+  var chipsHtml = favoritos.map(function(nome){
+    var noCarrinho = _insumosCarrinhoG.find(function(i){ return i.nome === nome; });
+    return '<button onclick="_addInsumoG(\'' + nome.replace(/'/g,"\\'") + '\')" ' +
+      'style="padding:9px 12px;background:' + (noCarrinho?'var(--accent)':'var(--bg)') + ';' +
+      'color:' + (noCarrinho?'#000':'var(--text)') + ';border:1px solid ' + (noCarrinho?'var(--accent)':'var(--border2)') + ';' +
+      'border-radius:9px;font-size:0.84rem;font-weight:600;cursor:pointer;font-family:inherit;">' +
+      esc(nome) + (noCarrinho ? ' ✓' : ' +') +
+    '</button>';
+  }).join('');
+
+  var carrinhoHtml = '';
+  if(_insumosCarrinhoG.length === 0){
+    carrinhoHtml = '<div style="text-align:center;color:var(--muted);padding:18px;font-size:0.84rem;">Toque nos itens acima ou adicione um novo</div>';
+  } else {
+    _insumosCarrinhoG.forEach(function(it, idx){
+      carrinhoHtml +=
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg);border:1px solid var(--border2);border-radius:10px;margin-bottom:6px;">' +
+          '<div style="flex:1;font-weight:600;font-size:0.9rem;">' + esc(it.nome) + '</div>' +
+          '<button onclick="_mudarQtdInsumoG(' + idx + ',-1)" style="width:32px;height:32px;border-radius:7px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:1.2rem;font-weight:700;cursor:pointer;">−</button>' +
+          '<span style="min-width:54px;text-align:center;font-weight:700;font-size:0.92rem;">' + it.qtd + ' ' + esc(it.unidade||'un') + '</span>' +
+          '<button onclick="_mudarQtdInsumoG(' + idx + ',1)" style="width:32px;height:32px;border-radius:7px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:1.2rem;font-weight:700;cursor:pointer;">+</button>' +
+          '<button onclick="_removerInsumoG(' + idx + ')" style="width:32px;height:32px;border-radius:7px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.95rem;cursor:pointer;">✕</button>' +
+        '</div>';
+    });
+  }
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:460px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">🚚</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1.05rem;">Pedir Insumos ao Central</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">Imprime nas impressoras do Bávaro</div>' +
+        '</div>' +
+        '<button onclick="fecharPedidoInsumosGarcom()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+          '<div style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Itens frequentes</div>' +
+          '<button onclick="_editarFavInsumosG()" style="background:transparent;border:none;color:var(--accent);font-size:0.76rem;cursor:pointer;font-family:inherit;font-weight:600;">✏️ Editar</button>' +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">' + chipsHtml + '</div>' +
+
+        '<div style="display:flex;gap:6px;margin-bottom:16px;">' +
+          '<input type="text" id="insumo-novo-g" placeholder="Adicionar outro item..." ' +
+            'onkeydown="if(event.key===\'Enter\')_addInsumoAvulsoG()" ' +
+            'style="flex:1;padding:11px;background:var(--bg);border:1px solid var(--border2);border-radius:9px;color:var(--text);font-size:0.88rem;font-family:inherit;box-sizing:border-box;">' +
+          '<button onclick="_addInsumoAvulsoG()" style="padding:11px 16px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Add</button>' +
+        '</div>' +
+
+        '<div style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">Pedido (' + _insumosCarrinhoG.length + ')</div>' +
+        carrinhoHtml +
+
+        '<div style="margin-top:12px;">' +
+          '<input type="text" id="insumo-obs-g" placeholder="Observação (opcional)" ' +
+            'style="width:100%;padding:11px;background:var(--bg);border:1px solid var(--border2);border-radius:9px;color:var(--text);font-size:0.84rem;font-family:inherit;box-sizing:border-box;">' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 14px;border-top:1px solid var(--border2);">' +
+        '<button onclick="enviarPedidoInsumosGarcom()" ' + (_insumosCarrinhoG.length===0?'disabled':'') + ' ' +
+          'style="width:100%;padding:14px;background:' + (_insumosCarrinhoG.length===0?'var(--border2)':'var(--accent)') + ';' +
+          'border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:' + (_insumosCarrinhoG.length===0?'default':'pointer') + ';font-family:inherit;">' +
+          '🚚 Enviar ao Central' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function _addInsumoG(nome){
+  var existe = _insumosCarrinhoG.find(function(i){ return i.nome === nome; });
+  if(existe){ existe.qtd++; }
+  else { _insumosCarrinhoG.push({nome: nome, qtd: 1, unidade: 'un'}); }
+  renderPedidoInsumosGarcom();
+}
+function _addInsumoAvulsoG(){
+  var input = document.getElementById('insumo-novo-g');
+  var nome = (input.value||'').trim();
+  if(!nome) return;
+  _addInsumoG(nome);
+  input.value = '';
+  setTimeout(function(){ var i = document.getElementById('insumo-novo-g'); if(i) i.focus(); }, 50);
+}
+function _mudarQtdInsumoG(idx, delta){
+  if(!_insumosCarrinhoG[idx]) return;
+  _insumosCarrinhoG[idx].qtd += delta;
+  if(_insumosCarrinhoG[idx].qtd < 1) _insumosCarrinhoG.splice(idx, 1);
+  renderPedidoInsumosGarcom();
+}
+function _removerInsumoG(idx){
+  _insumosCarrinhoG.splice(idx, 1);
+  renderPedidoInsumosGarcom();
+}
+function _editarFavInsumosG(){
+  var atual = _carregarFavInsumosG();
+  var novo = prompt('Itens frequentes (separados por vírgula):', atual.join(', '));
+  if(novo === null) return;
+  var lista = novo.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s; });
+  _salvarFavInsumosG(lista);
+  renderPedidoInsumosGarcom();
+}
+
+function enviarPedidoInsumosGarcom(){
+  if(_insumosCarrinhoG.length === 0) return;
+  var obs = (document.getElementById('insumo-obs-g').value||'').trim();
+  var origem = _nomeRestauranteG || _restauranteId || 'Restaurante';
+
+  var comando = {
+    tipo: 'insumos',
+    restauranteId: ID_CENTRAL_G,
+    origemRestauranteId: _restauranteId,
+    origemNome: origem,
+    itens: _insumosCarrinhoG.slice(),
+    obs: obs,
+    solicitadoPor: _nomeGarcom || '',
+    criadoEm: Date.now()
+  };
+
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
+    fecharPedidoInsumosGarcom();
+    showToast('✓ Pedido de insumos enviado ao Central!', '#4ade80', 3000);
+    try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+    _insumosCarrinhoG = [];
+  }).catch(function(e){
+    console.error('[INSUMOS] erro:', e);
+    showToast('❌ Erro ao enviar: ' + (e.message||'erro'), '#f87171', 4000);
   });
 }
 
@@ -11130,7 +11319,7 @@ window.addEventListener('popstate', function(e){
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
-    'modal-personalizar-gestos', 'modal-modo-teste'];
+    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom'];
   for(var i = 0; i < modaisDinamicos.length; i++){
     var md = document.getElementById(modaisDinamicos[i]);
     if(md){

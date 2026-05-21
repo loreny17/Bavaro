@@ -2876,6 +2876,7 @@ function abrirNovoGarcom(){
   document.getElementById('garcom-pdv-apelido').value = '';
   document.querySelector('input[name="garcom-status"][value="ativo"]').checked = true;
   document.getElementById('garcom-pdv-admin').checked = false;
+  (function(){ var c = document.getElementById('garcom-pode-insumos'); if(c) c.checked = false; })();
   document.getElementById('btn-excluir-garcom').style.display = 'none';
   document.getElementById('modal-garcom-pdv').classList.add('show');
   setTimeout(function(){ document.getElementById('garcom-pdv-nome').focus(); }, 100);
@@ -2889,6 +2890,7 @@ function abrirEditarGarcom(g){
   var st = g.status || 'ativo';
   document.querySelector('input[name="garcom-status"][value="'+st+'"]').checked = true;
   document.getElementById('garcom-pdv-admin').checked = (g.admin === true);
+  (function(){ var c = document.getElementById('garcom-pode-insumos'); if(c) c.checked = (g.podeInsumos === true); })();
   document.getElementById('btn-excluir-garcom').style.display = 'inline-flex';
   document.getElementById('modal-garcom-pdv').classList.add('show');
 }
@@ -2900,8 +2902,10 @@ function salvarGarcom(){
   var statusEl = document.querySelector('input[name="garcom-status"]:checked');
   var status = statusEl ? statusEl.value : 'ativo';
   var admin = document.getElementById('garcom-pdv-admin').checked === true;
+  var podeInsumos = (function(){ var c = document.getElementById('garcom-pode-insumos'); return c ? c.checked : false; })();
   var dados = {
     nome: nome, apelido: apelido, status: status, admin: admin,
+    podeInsumos: podeInsumos,
     atualizadoEm: Date.now()
   };
   var promessa;
@@ -2963,7 +2967,7 @@ function atualizarVisibilidadeAdmin(){
 function publicarListaGarcons(){
   if(!_restauranteAtivo) return;
   var ativos = _garconsCache.filter(function(g){ return (g.status||'ativo')==='ativo'; })
-    .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||'', admin: g.admin === true}; });
+    .map(function(g){ return {nome:g.nome||'', apelido:g.apelido||'', admin: g.admin === true, podeInsumos: g.podeInsumos === true}; });
   // Publica SEMPRE com tenantId, nome e emoji — essencial pro app garçom
   // carregar o cardápio do restaurante certo.
   fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
@@ -4593,6 +4597,20 @@ function iniciarListenerComandosImpressao(){
 }
 
 function processarComandoImpressao(cmdId, cmd){
+  if(cmd.tipo === 'insumos'){
+    // Pedido de insumos de outro restaurante — imprime em TODAS as impressoras
+    var cupom = gerarCupomInsumos(cmd);
+    if(_impressoras.length){
+      _impressoras.forEach(function(imp){
+        enviarParaImpressora(imp, cupom);
+      });
+      showToast('🚚 Pedido de insumos de ' + (cmd.origemNome||'?') + ' — impresso!', '#d4a843', 5000);
+    } else {
+      showToast('⚠️ Pedido de insumos recebido mas nenhuma impressora cadastrada', '#f7a34f', 5000);
+    }
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    return;
+  }
   if(cmd.tipo === 'reimprimir'){
     fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
       if(doc.exists){
@@ -5491,6 +5509,11 @@ function abrirMenuLateral(){
   try{
     if(typeof _restauranteAtivo !== 'undefined' && _restauranteAtivo){
       document.getElementById('menu-rest-nome').textContent = (_restauranteAtivo.emoji||'🍽️') + ' ' + _restauranteAtivo.nome;
+      // Botão "Pedir Insumos ao Central" — só aparece se NÃO for o Central (default)
+      var btnInsumos = document.getElementById('menu-item-insumos');
+      if(btnInsumos){
+        btnInsumos.style.display = (_restauranteAtivo.id !== 'default') ? '' : 'none';
+      }
     }
   }catch(e){}
 }
@@ -5510,6 +5533,246 @@ function menuIrPara(tab){
 // ════════════════════════════════════════
 //  CONFIGURAR TAXA DE SERVIÇO (por restaurante)
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+//  🚚 PEDIDO DE INSUMOS AO CENTRAL (Bávaro)
+//  Restaurantes (ex: Omar) pedem insumos pro Central.
+//  Imprime em todas as impressoras do Central, separado dos pedidos normais.
+// ════════════════════════════════════════
+var _insumosCarrinho = []; // [{nome, qtd, unidade}]
+var ID_CENTRAL = 'default'; // o Central é o Bávaro
+
+// Lista de insumos favoritos — fica salva por restaurante
+function _favoritosInsumosKey(){
+  return 'insumos_favoritos_' + (_restauranteAtivo ? _restauranteAtivo.id : '_');
+}
+function _carregarFavoritosInsumos(){
+  try{
+    var raw = localStorage.getItem(_favoritosInsumosKey());
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  // Padrão inicial
+  return ['Arroz', 'Salmão', 'Batata', 'Carne', 'Frango', 'Salada'];
+}
+function _salvarFavoritosInsumos(lista){
+  try{ localStorage.setItem(_favoritosInsumosKey(), JSON.stringify(lista)); }catch(e){}
+}
+
+function abrirPedidoInsumos(){
+  _insumosCarrinho = [];
+  var modal = document.getElementById('modal-insumos');
+  if(!modal){
+    var html = '<div class="modal-back" id="modal-insumos" onclick="if(event.target===this)fecharPedidoInsumos()">' +
+      '<div class="modal-box" style="max-width:480px;">' +
+        '<div class="modal-box-head">' +
+          '<h3>🚚 Pedir Insumos ao Central</h3>' +
+          '<button onclick="fecharPedidoInsumos()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+        '</div>' +
+        '<div class="modal-box-body" id="modal-insumos-body" style="max-height:75vh;overflow-y:auto;">' +
+          '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById('modal-insumos');
+  }
+  modal.classList.add('aberto');
+  renderPedidoInsumos();
+}
+
+function fecharPedidoInsumos(){
+  var m = document.getElementById('modal-insumos');
+  if(m) m.classList.remove('aberto');
+}
+
+function renderPedidoInsumos(){
+  var body = document.getElementById('modal-insumos-body');
+  if(!body) return;
+  var favoritos = _carregarFavoritosInsumos();
+
+  // Chips dos favoritos
+  var chipsHtml = favoritos.map(function(nome){
+    var noCarrinho = _insumosCarrinho.find(function(i){ return i.nome === nome; });
+    return '<button onclick="_addInsumo(\'' + nome.replace(/'/g,"\\'") + '\')" ' +
+      'style="padding:9px 12px;background:' + (noCarrinho?'var(--accent)':'var(--bg)') + ';' +
+      'color:' + (noCarrinho?'#000':'var(--text)') + ';border:1px solid ' + (noCarrinho?'var(--accent)':'var(--border)') + ';' +
+      'border-radius:9px;font-size:0.84rem;font-weight:600;cursor:pointer;font-family:inherit;">' +
+      escapeHtml(nome) + (noCarrinho ? ' ✓' : ' +') +
+    '</button>';
+  }).join('');
+
+  // Lista do carrinho
+  var carrinhoHtml = '';
+  if(_insumosCarrinho.length === 0){
+    carrinhoHtml = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:0.85rem;">Toque nos itens acima ou adicione um item novo</div>';
+  } else {
+    _insumosCarrinho.forEach(function(it, idx){
+      carrinhoHtml +=
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;">' +
+          '<div style="flex:1;font-weight:600;font-size:0.9rem;">' + escapeHtml(it.nome) + '</div>' +
+          '<button onclick="_mudarQtdInsumo(' + idx + ',-1)" style="width:30px;height:30px;border-radius:7px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:1.1rem;font-weight:700;cursor:pointer;">−</button>' +
+          '<span style="min-width:54px;text-align:center;font-weight:700;font-size:0.92rem;">' + it.qtd + ' ' + escapeHtml(it.unidade||'un') + '</span>' +
+          '<button onclick="_mudarQtdInsumo(' + idx + ',1)" style="width:30px;height:30px;border-radius:7px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:1.1rem;font-weight:700;cursor:pointer;">+</button>' +
+          '<button onclick="_removerInsumo(' + idx + ')" style="width:30px;height:30px;border-radius:7px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.95rem;cursor:pointer;">✕</button>' +
+        '</div>';
+    });
+  }
+
+  body.innerHTML =
+    '<div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:10px;margin-bottom:12px;font-size:0.78rem;color:var(--muted);">' +
+      'Este pedido vai imprimir nas impressoras do <strong style="color:var(--text);">Central (Bávaro)</strong>, separado dos pedidos de cliente.' +
+    '</div>' +
+
+    // Favoritos
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+      '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Itens frequentes</div>' +
+      '<button onclick="_editarFavoritosInsumos()" style="background:transparent;border:none;color:var(--accent);font-size:0.76rem;cursor:pointer;font-family:inherit;font-weight:600;">✏️ Editar lista</button>' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">' + chipsHtml + '</div>' +
+
+    // Adicionar item avulso
+    '<div style="display:flex;gap:6px;margin-bottom:16px;">' +
+      '<input type="text" id="insumo-novo-nome" placeholder="Adicionar outro item..." ' +
+        'onkeydown="if(event.key===\'Enter\')_addInsumoAvulso()" ' +
+        'style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:0.88rem;font-family:inherit;box-sizing:border-box;">' +
+      '<button onclick="_addInsumoAvulso()" style="padding:10px 16px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Add</button>' +
+    '</div>' +
+
+    // Carrinho
+    '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">Pedido (' + _insumosCarrinho.length + ' iten' + (_insumosCarrinho.length!==1?'s':'') + ')</div>' +
+    carrinhoHtml +
+
+    // Observação
+    '<div style="margin-top:12px;">' +
+      '<input type="text" id="insumo-obs" placeholder="Observação (opcional) — ex: pra retirar até 11h" ' +
+        'style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:0.84rem;font-family:inherit;box-sizing:border-box;">' +
+    '</div>' +
+
+    // Botão enviar
+    '<button onclick="enviarPedidoInsumos()" ' + (_insumosCarrinho.length===0?'disabled':'') + ' ' +
+      'style="width:100%;margin-top:14px;padding:14px;background:' + (_insumosCarrinho.length===0?'var(--border)':'var(--accent)') + ';' +
+      'border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:' + (_insumosCarrinho.length===0?'default':'pointer') + ';font-family:inherit;">' +
+      '🚚 Enviar pedido ao Central' +
+    '</button>';
+}
+
+function _addInsumo(nome){
+  var existe = _insumosCarrinho.find(function(i){ return i.nome === nome; });
+  if(existe){
+    existe.qtd++;
+  } else {
+    _insumosCarrinho.push({nome: nome, qtd: 1, unidade: 'un'});
+  }
+  renderPedidoInsumos();
+}
+
+function _addInsumoAvulso(){
+  var input = document.getElementById('insumo-novo-nome');
+  var nome = (input.value||'').trim();
+  if(!nome) return;
+  _addInsumo(nome);
+  input.value = '';
+  // re-foca pra adicionar vários rápido
+  setTimeout(function(){
+    var i = document.getElementById('insumo-novo-nome');
+    if(i) i.focus();
+  }, 50);
+}
+
+function _mudarQtdInsumo(idx, delta){
+  if(!_insumosCarrinho[idx]) return;
+  _insumosCarrinho[idx].qtd += delta;
+  if(_insumosCarrinho[idx].qtd < 1){
+    _insumosCarrinho.splice(idx, 1);
+  }
+  renderPedidoInsumos();
+}
+
+function _removerInsumo(idx){
+  _insumosCarrinho.splice(idx, 1);
+  renderPedidoInsumos();
+}
+
+function _editarFavoritosInsumos(){
+  var atual = _carregarFavoritosInsumos();
+  var novo = prompt('Itens frequentes (separados por vírgula):', atual.join(', '));
+  if(novo === null) return;
+  var lista = novo.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s; });
+  _salvarFavoritosInsumos(lista);
+  renderPedidoInsumos();
+}
+
+function enviarPedidoInsumos(){
+  if(_insumosCarrinho.length === 0) return;
+  if(!_restauranteAtivo || !_tenantId){
+    alert('Restaurante não carregado.');
+    return;
+  }
+  var obs = (document.getElementById('insumo-obs').value||'').trim();
+  var origem = _restauranteAtivo.nome || 'Restaurante';
+
+  // Monta o comando de impressão endereçado ao CENTRAL
+  var comando = {
+    tipo: 'insumos',
+    restauranteId: ID_CENTRAL,        // ← endereçado ao Central (Bávaro)
+    origemRestauranteId: _restauranteAtivo.id,
+    origemNome: origem,
+    itens: _insumosCarrinho.slice(),
+    obs: obs,
+    solicitadoPor: (_user && _user.email) || '',
+    criadoEm: Date.now()
+  };
+
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
+    fecharPedidoInsumos();
+    alert('✓ Pedido de insumos enviado ao Central!\n\nVai imprimir nas impressoras do Bávaro.\n\n' +
+      _insumosCarrinho.length + ' iten(s) solicitado(s).');
+    _insumosCarrinho = [];
+  }).catch(function(e){
+    console.error('[INSUMOS] erro:', e);
+    alert('❌ Erro ao enviar: ' + (e.message||'desconhecido'));
+  });
+}
+
+// Gera o cupom de pedido de insumos (impresso no Central)
+function gerarCupomInsumos(cmd){
+  var L = 48; // largura padrão
+  function linha(ch, n){ return new Array(n+1).join(ch); }
+  var s = '';
+  s += escposInit ? escposInit() : '';
+  s += escposCenter() + escposBold(true);
+  s += '*** PEDIDO DE INSUMOS ***\n';
+  s += escposBold(false);
+  s += 'Do: ' + (cmd.origemNome||'?') + '\n';
+  s += escposLeft();
+  s += linha('=', L) + '\n';
+  var data = new Date(cmd.criadoEm||Date.now());
+  s += 'Data: ' + data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += linha('-', L) + '\n';
+  s += escposBold(true);
+  (cmd.itens||[]).forEach(function(it){
+    var qtdTxt = (it.qtd||1) + ' ' + (it.unidade||'un');
+    var nome = it.nome || '';
+    var espaco = L - qtdTxt.length - nome.length;
+    if(espaco < 1){
+      s += qtdTxt + ' ' + nome + '\n';
+    } else {
+      s += qtdTxt + new Array(espaco+1).join(' ') + nome + '\n';
+    }
+  });
+  s += escposBold(false);
+  s += linha('-', L) + '\n';
+  if(cmd.obs){
+    s += 'Obs: ' + cmd.obs + '\n';
+    s += linha('-', L) + '\n';
+  }
+  s += escposCenter();
+  s += 'Total: ' + (cmd.itens||[]).length + ' item(ns)\n';
+  s += escposLeft();
+  s += '\n\n\n';
+  if(escposCut) s += escposCut();
+  return s;
+}
+
 function abrirConfigTaxa(){
   var modal = document.getElementById('modal-config-taxa');
   if(!modal){
@@ -7699,6 +7962,13 @@ function toggleAdminUsuario(garcomId, novoValor){
             <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Acesso ao painel de admin (logs, diagnóstico, manutenção)</div>
           </div>
         </label>
+        <label style="display:flex;align-items:center;gap:10px;background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.25);border-radius:10px;padding:12px;cursor:pointer;margin-top:8px;">
+          <input type="checkbox" id="garcom-pode-insumos" style="width:18px;height:18px;cursor:pointer;">
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:0.88rem;color:#60a5fa;">🚚 Pode pedir insumos ao Central</div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Mostra o botão "Pedir Insumos" no app deste garçom</div>
+          </div>
+        </label>
       </div>
     </div>
     <div class="modal-footer">
@@ -8023,6 +8293,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <button class="menu-item" id="menu-item-admin" onclick="menuIrPara('admin')" style="display:none;"><span class="ico">🛡️</span><span class="lbl">Admin</span></button>
     <div class="menu-divider"></div>
     <div class="menu-section-title">Restaurante</div>
+    <button class="menu-item" id="menu-item-insumos" onclick="abrirPedidoInsumos();fecharMenuLateral();" style="display:none;"><span class="ico">🚚</span><span class="lbl">Pedir Insumos ao Central</span></button>
     <button class="menu-item" onclick="abrirConfigTaxa();fecharMenuLateral();"><span class="ico">💵</span><span class="lbl">Taxa de Serviço</span></button>
     <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
     <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">📋</span><span class="lbl">Copiar Cardápio</span></button>

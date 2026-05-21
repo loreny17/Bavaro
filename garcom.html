@@ -804,6 +804,20 @@ header{
     </span>
   </button>
 
+  <!-- FAB Pedir Insumos ao Central (só pra quem tem permissão, no mapa de mesas) -->
+  <button id="fab-insumos" onclick="abrirPedidoInsumosGarcom()" style="
+    position:fixed;bottom:80px;right:16px;z-index:90;display:none;
+    background:linear-gradient(135deg,#60a5fa,#2563eb);color:#fff;
+    border:none;height:52px;border-radius:99px;padding:0 18px;
+    box-shadow:0 8px 24px rgba(37,99,235,0.45),0 2px 6px rgba(0,0,0,0.3);
+    cursor:pointer;font-family:inherit;font-weight:700;font-size:0.88rem;
+    align-items:center;justify-content:center;gap:8px;
+    transition:transform 0.15s ease;
+  ">
+    <span style="font-size:1.3rem;">🚚</span>
+    <span>Insumos</span>
+  </button>
+
   <!-- Bottom Nav -->
   <div class="bottom-nav">
     <button class="nav-btn active" id="nav-cardapio" onclick="showTab('cardapio')">
@@ -2130,9 +2144,11 @@ function mostrarMesas(){
     try{ atualizarBannerModoTeste(); }catch(e){}
   }
   carregarTenantParaMesas();
-  // Esconde FAB quando volta pro mapa
+  // Esconde FAB de enviar quando volta pro mapa
   var fab = document.getElementById('fab-enviar');
   if(fab) fab.style.display = 'none';
+  // Mostra o FAB de insumos (se tiver permissão)
+  try{ atualizarFabInsumos(); }catch(e){}
   // Reaparece banner de avisos não lidos (se houver)
   setTimeout(function(){
     try{ atualizarBannerAvisos(); }catch(e){}
@@ -6343,6 +6359,9 @@ function selecionarMesa(num){
   _mesaAtiva = num;
   _carrinho = [];
   _catAtiva = null;  // Volta para grade de categorias
+  // Esconde o FAB de insumos (só aparece no mapa de mesas)
+  var fabIns = document.getElementById('fab-insumos');
+  if(fabIns) fabIns.style.display = 'none';
   // Tenta restaurar carrinho salvo
   carregarCarrinho();
   document.getElementById('mesa-screen').classList.add('hidden');
@@ -8607,6 +8626,26 @@ function atualizarFabEnviar(){
     fab.style.display = 'flex';
     var count = document.getElementById('fab-enviar-count');
     if(count) count.textContent = totalItens > 99 ? '99+' : totalItens;
+  } else {
+    fab.style.display = 'none';
+  }
+  // Sempre que o FAB de enviar muda, reavalia o FAB de insumos
+  try{ atualizarFabInsumos(); }catch(e){}
+}
+
+// FAB de Insumos — aparece pra quem tem permissão, no mapa de mesas
+function atualizarFabInsumos(){
+  var fab = document.getElementById('fab-insumos');
+  if(!fab) return;
+  // Só mostra se: tem permissão + está na tela do mapa de mesas
+  var mesaScreen = document.getElementById('mesa-screen');
+  var noMapaMesas = mesaScreen && !mesaScreen.classList.contains('hidden');
+  // Não mostra junto com o FAB de enviar pedido (evita sobreposição)
+  var fabEnviar = document.getElementById('fab-enviar');
+  var fabEnviarVisivel = fabEnviar && fabEnviar.style.display !== 'none';
+
+  if(_podeInsumos && noMapaMesas && !fabEnviarVisivel){
+    fab.style.display = 'flex';
   } else {
     fab.style.display = 'none';
   }

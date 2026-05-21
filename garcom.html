@@ -2676,19 +2676,33 @@ function enviarPedidoInsumosGarcom(){
   if(_insumosCarrinhoG.length === 0) return;
   var obs = (document.getElementById('insumo-obs-g').value||'').trim();
   var origem = _nomeRestauranteG || _restauranteId || 'Restaurante';
+  var btn = event && event.target;
 
-  var comando = {
-    tipo: 'insumos',
-    restauranteId: ID_CENTRAL_G,
-    origemRestauranteId: _restauranteId,
-    origemNome: origem,
-    itens: _insumosCarrinhoG.slice(),
-    obs: obs,
-    solicitadoPor: _nomeGarcom || '',
-    criadoEm: Date.now()
-  };
+  // Lê a config do cupom de insumos do doc do restaurante (definida no PDV)
+  var pConfig = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId).get()
+    .then(function(doc){
+      if(doc.exists && doc.data().cupomInsumos){
+        return doc.data().cupomInsumos;
+      }
+      return null;
+    }).catch(function(){ return null; });
 
-  fbDb.collection('comandos_impressao').add(comando).then(function(){
+  pConfig.then(function(cfg){
+    var comando = {
+      tipo: 'insumos',
+      restauranteId: ID_CENTRAL_G,
+      origemRestauranteId: _restauranteId,
+      origemNome: origem,
+      itens: _insumosCarrinhoG.slice(),
+      obs: obs,
+      solicitadoPor: _nomeGarcom || '',
+      criadoEm: Date.now()
+    };
+    if(cfg) comando.cupomConfig = cfg;
+
+    return fbDb.collection('comandos_impressao').add(comando);
+  }).then(function(){
     fecharPedidoInsumosGarcom();
     showToast('✓ Pedido de insumos enviado ao Central!', '#4ade80', 3000);
     try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}

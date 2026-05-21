@@ -4659,9 +4659,11 @@ function _mostrarAvisoInsumos(cmd){
 function _reimprimirInsumos(cmdJson){
   try{
     var cmd = (typeof cmdJson === 'string') ? JSON.parse(cmdJson) : cmdJson;
-    var cupom = gerarCupomInsumos(cmd);
     if(_impressoras.length && _qzPronto){
-      _impressoras.forEach(function(imp){ enviarParaImpressora(imp, cupom); });
+      _impressoras.forEach(function(imp){
+        var cupom = gerarCupomInsumos(cmd, imp);
+        enviarParaImpressora(imp, cupom);
+      });
       showToast('🖨️ Pedido de insumos reimpresso', '#4ade80');
     } else {
       showToast('⚠️ Impressora não está pronta', '#f7a34f');
@@ -4676,12 +4678,13 @@ function processarComandoImpressao(cmdId, cmd){
   if(cmd.tipo === 'insumos'){
     console.log('[INSUMOS] recebido pedido de', cmd.origemNome, '— itens:', (cmd.itens||[]).length);
     // Pedido de insumos de outro restaurante — imprime em TODAS as impressoras
-    var cupom = gerarCupomInsumos(cmd);
     if(_impressoras.length && _qzPronto){
       _impressoras.forEach(function(imp){
         try{
+          // Gera o cupom com a largura específica DESTA impressora
+          var cupom = gerarCupomInsumos(cmd, imp);
           enviarParaImpressora(imp, cupom);
-          console.log('[INSUMOS] enviado pra impressora:', imp.nome);
+          console.log('[INSUMOS] enviado pra impressora:', imp.nome, '(' + (imp.largura||48) + ' col)');
         }catch(e){
           console.error('[INSUMOS] erro impressora', imp.nome, ':', e);
         }
@@ -5663,7 +5666,10 @@ function abrirPedidoInsumos(){
       '<div class="modal-box" style="max-width:480px;">' +
         '<div class="modal-box-head">' +
           '<h3>🚚 Pedir Insumos ao Central</h3>' +
-          '<button onclick="fecharPedidoInsumos()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<button onclick="abrirConfigCupomInsumos()" title="Configurar cupom" style="background:transparent;border:none;color:var(--accent);cursor:pointer;font-size:1.2rem;padding:0 6px;">⚙️</button>' +
+            '<button onclick="fecharPedidoInsumos()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+          '</div>' +
         '</div>' +
         '<div class="modal-box-body" id="modal-insumos-body" style="max-height:75vh;overflow-y:auto;">' +
           '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>' +
@@ -5674,7 +5680,7 @@ function abrirPedidoInsumos(){
     modal = document.getElementById('modal-insumos');
   }
   modal.classList.add('aberto');
-  renderPedidoInsumos();
+  carregarCfgInsumos().then(function(){ renderPedidoInsumos(); });
 }
 
 function fecharPedidoInsumos(){
@@ -5799,6 +5805,98 @@ function _editarFavoritosInsumos(){
   renderPedidoInsumos();
 }
 
+// Tela de configuração visual do cupom de insumos
+function abrirConfigCupomInsumos(){
+  var ex = document.getElementById('modal-cfg-insumos');
+  if(ex) ex.remove();
+
+  function selTamanho(id, valor){
+    var opts = [['normal','Normal'],['alto','Alto'],['largo','Largo'],['grande','Grande'],['extra','Extra']];
+    var h = '<select id="' + id + '" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;">';
+    opts.forEach(function(o){
+      h += '<option value="' + o[0] + '"' + (valor===o[0]?' selected':'') + '>' + o[1] + '</option>';
+    });
+    return h + '</select>';
+  }
+  function selSep(valor){
+    var opts = [['=','===='],['-','----'],['*','****']];
+    var h = '<select id="cfgins-sep" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;">';
+    opts.forEach(function(o){
+      h += '<option value="' + o[0] + '"' + (valor===o[0]?' selected':'') + '>' + o[1] + '</option>';
+    });
+    return h + '</select>';
+  }
+
+  var c = _cfgInsumos;
+  var html = '<div class="modal-back" id="modal-cfg-insumos" style="z-index:1000;" onclick="if(event.target===this)document.getElementById(\'modal-cfg-insumos\').remove()">' +
+    '<div class="modal-box" style="max-width:420px;">' +
+      '<div class="modal-box-head">' +
+        '<h3>⚙️ Configurar Cupom de Insumos</h3>' +
+        '<button onclick="document.getElementById(\'modal-cfg-insumos\').remove()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+      '</div>' +
+      '<div class="modal-box-body" style="max-height:70vh;overflow-y:auto;">' +
+        // Título
+        '<div style="font-size:0.76rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Título</div>' +
+        '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:4px;">Tamanho da letra</label>' +
+        selTamanho('cfgins-titulo-tam', c.tituloTamanho) +
+        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0 16px;cursor:pointer;">' +
+          '<input type="checkbox" id="cfgins-titulo-neg"' + (c.tituloNegrito?' checked':'') + ' style="width:16px;height:16px;"> ' +
+          '<span style="font-size:0.85rem;">Título em negrito</span>' +
+        '</label>' +
+
+        // Itens
+        '<div style="font-size:0.76rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Itens</div>' +
+        '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:4px;">Tamanho da letra</label>' +
+        selTamanho('cfgins-itens-tam', c.itensTamanho) +
+        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0 16px;cursor:pointer;">' +
+          '<input type="checkbox" id="cfgins-itens-neg"' + (c.itensNegrito?' checked':'') + ' style="width:16px;height:16px;"> ' +
+          '<span style="font-size:0.85rem;">Itens em negrito</span>' +
+        '</label>' +
+
+        // Total
+        '<div style="font-size:0.76rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Total</div>' +
+        '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:4px;">Tamanho da letra</label>' +
+        selTamanho('cfgins-total-tam', c.totalTamanho) +
+
+        // Separador
+        '<div style="font-size:0.76rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin:16px 0 8px;">Linha separadora</div>' +
+        selSep(c.separador) +
+      '</div>' +
+      '<div class="modal-footer">' +
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-cfg-insumos\').remove()">Cancelar</button>' +
+        '<button class="f-btn" style="flex:1.3;" onclick="salvarConfigCupomInsumos()">Salvar</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('modal-cfg-insumos').classList.add('aberto');
+}
+
+function salvarConfigCupomInsumos(){
+  _cfgInsumos = {
+    tituloTamanho: document.getElementById('cfgins-titulo-tam').value,
+    tituloNegrito: document.getElementById('cfgins-titulo-neg').checked,
+    itensTamanho: document.getElementById('cfgins-itens-tam').value,
+    itensNegrito: document.getElementById('cfgins-itens-neg').checked,
+    totalTamanho: document.getElementById('cfgins-total-tam').value,
+    separador: document.getElementById('cfgins-sep').value
+  };
+  // Salva no doc do restaurante
+  if(_tenantId && _restauranteAtivo){
+    fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteAtivo.id)
+      .set({ cupomInsumos: _cfgInsumos }, {merge:true})
+      .then(function(){
+        showToast('✓ Configuração do cupom salva', '#4ade80');
+        var m = document.getElementById('modal-cfg-insumos');
+        if(m) m.remove();
+      })
+      .catch(function(e){
+        alert('❌ Erro ao salvar: ' + (e.message||'erro'));
+      });
+  }
+}
+
 function enviarPedidoInsumos(){
   if(_insumosCarrinho.length === 0) return;
   if(!_restauranteAtivo || !_tenantId){
@@ -5816,6 +5914,7 @@ function enviarPedidoInsumos(){
     origemNome: origem,
     itens: _insumosCarrinho.slice(),
     obs: obs,
+    cupomConfig: Object.assign({}, _cfgInsumos), // config visual do cupom
     solicitadoPor: (_user && _user.email) || '',
     criadoEm: Date.now()
   };
@@ -5832,43 +5931,96 @@ function enviarPedidoInsumos(){
 }
 
 // Gera o cupom de pedido de insumos (impresso no Central)
-function gerarCupomInsumos(cmd){
-  var L = 48; // largura padrão
+// Remove acentos (impressoras térmicas não imprimem direito)
+function _semAcentoInsumos(txt){
+  return String(txt||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+// Config padrão do cupom de insumos
+var _cfgInsumos = {
+  tituloTamanho: 'grande',   // normal|alto|largo|grande|extra
+  tituloNegrito: true,
+  itensTamanho: 'normal',
+  itensNegrito: true,
+  totalTamanho: 'normal',
+  separador: '='             // = ou - ou *
+};
+
+function gerarCupomInsumos(cmd, imp){
+  // Usa a largura da impressora (config), 2 colunas a menos pra não quebrar
+  var L = imp && imp.largura ? Math.max(20, imp.largura - 2) : 30;
+  // A config vem JUNTO no comando (definida pelo restaurante que pediu)
+  var cfg = Object.assign({}, _cfgInsumos, cmd.cupomConfig || {});
   function linha(ch, n){ return new Array(n+1).join(ch); }
   var s = '';
   s += escposInit ? escposInit() : '';
-  s += escposCenter() + escposBold(true);
-  s += '*** PEDIDO DE INSUMOS ***\n';
-  s += escposBold(false);
-  s += 'Do: ' + (cmd.origemNome||'?') + '\n';
+
+  // ── TÍTULO ──
+  s += escposCenter();
+  s += escposSize(cfg.tituloTamanho);
+  if(cfg.tituloNegrito) s += escposBold(true);
+  s += 'PEDIDO DE INSUMOS\n';
+  if(cfg.tituloNegrito) s += escposBold(false);
+  s += escposSize('normal');
+  s += 'Do: ' + _semAcentoInsumos(cmd.origemNome||'?') + '\n';
   s += escposLeft();
-  s += linha('=', L) + '\n';
+  s += linha(cfg.separador || '=', L) + '\n';
+
+  // ── DATA ──
   var data = new Date(cmd.criadoEm||Date.now());
-  s += 'Data: ' + data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += _semAcentoInsumos('Data: ' + data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})) + '\n';
   s += linha('-', L) + '\n';
-  s += escposBold(true);
+
+  // ── ITENS ──
+  s += escposSize(cfg.itensTamanho);
+  if(cfg.itensNegrito) s += escposBold(true);
   (cmd.itens||[]).forEach(function(it){
-    var qtdTxt = (it.qtd||1) + ' ' + (it.unidade||'un');
-    var nome = it.nome || '';
-    var espaco = L - qtdTxt.length - nome.length;
-    if(espaco < 1){
-      s += qtdTxt + ' ' + nome + '\n';
+    var qtdTxt = (it.qtd||1) + ' ' + _semAcentoInsumos(it.unidade||'un');
+    var nome = _semAcentoInsumos(it.nome || '');
+    // Quando o texto é grande (largo/grande/extra), cabe menos por linha
+    var fator = (cfg.itensTamanho==='largo'||cfg.itensTamanho==='grande') ? 2 : (cfg.itensTamanho==='extra' ? 4 : 1);
+    var Litem = Math.max(8, Math.floor(L / fator));
+    var linhaItem = qtdTxt + '  ' + nome;
+    if(linhaItem.length <= Litem){
+      s += linhaItem + '\n';
     } else {
-      s += qtdTxt + new Array(espaco+1).join(' ') + nome + '\n';
+      s += qtdTxt + '\n  ' + nome + '\n';
     }
   });
-  s += escposBold(false);
+  if(cfg.itensNegrito) s += escposBold(false);
+  s += escposSize('normal');
   s += linha('-', L) + '\n';
+
+  // ── OBS ──
   if(cmd.obs){
-    s += 'Obs: ' + cmd.obs + '\n';
+    s += _semAcentoInsumos('Obs: ' + cmd.obs) + '\n';
     s += linha('-', L) + '\n';
   }
+
+  // ── TOTAL ──
   s += escposCenter();
+  s += escposSize(cfg.totalTamanho);
   s += 'Total: ' + (cmd.itens||[]).length + ' item(ns)\n';
+  s += escposSize('normal');
   s += escposLeft();
   s += '\n\n\n';
   if(escposCut) s += escposCut();
   return s;
+}
+
+// Carrega a config de insumos do Firestore (doc do restaurante)
+function carregarCfgInsumos(){
+  if(!_tenantId || !_restauranteAtivo) return Promise.resolve();
+  return fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id).get()
+    .then(function(doc){
+      if(doc.exists){
+        var d = doc.data() || {};
+        if(d.cupomInsumos){
+          _cfgInsumos = Object.assign(_cfgInsumos, d.cupomInsumos);
+        }
+      }
+    }).catch(function(e){ console.warn('[INSUMOS] cfg:', e.code); });
 }
 
 function abrirConfigTaxa(){

@@ -956,6 +956,9 @@ var fbDb = null, fbAuth = null;
 var _user = null;       // {uid, email}
 var _tenantId = null;   // tenant id do usuário logado
 var _restauranteAtivo = null; // {id, nome, emoji}
+// Config de taxa de serviço do restaurante ativo (padrão 10% ativa)
+var _taxaServicoAtivaPDV = true;
+var _taxaServicoPctPDV = 10;
 var _itens = [];        // cardápio em memória
 var _ehAdminPDV = false;  // se o usuário logado é admin (definido após carregar garcons)
 var _adminLogsCache = []; // logs de admin do Firestore
@@ -1195,7 +1198,10 @@ function prosseguirComTenant(){
         var d = doc.data() || {};
         if(d.nome) _restauranteAtivo.nome = d.nome;
         if(d.emoji) _restauranteAtivo.emoji = d.emoji;
-        console.log('[RESTAURANTE] nome atualizado do Firestore:', _restauranteAtivo.nome);
+        // Config de taxa de serviço
+        _taxaServicoAtivaPDV = d.taxaServicoAtiva !== false;
+        _taxaServicoPctPDV = (typeof d.taxaServicoPercentual === 'number') ? d.taxaServicoPercentual : 10;
+        console.log('[RESTAURANTE] nome:', _restauranteAtivo.nome, '| taxa:', _taxaServicoAtivaPDV ? _taxaServicoPctPDV+'%' : 'desligada');
         try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
       } else {
         console.log('[RESTAURANTE] doc não existe, mantendo nome local:', _restauranteAtivo.nome);
@@ -2209,7 +2215,9 @@ function verContaPDV(id){
     msg += '• ' + (it.qtd||1) + 'x ' + it.nome + ' — R$ ' + ((it.preco||0)*(it.qtd||1)).toFixed(2).replace('.',',') + '\n';
   });
   msg += '\nSubtotal: R$ ' + (c.subtotal||0).toFixed(2).replace('.',',') + '\n';
-  msg += '+ 10% Garçom: R$ ' + (c.taxa10||0).toFixed(2).replace('.',',') + '\n';
+  if((c.taxa10||0) > 0){
+    msg += '+ Taxa de serviço: R$ ' + (c.taxa10||0).toFixed(2).replace('.',',') + '\n';
+  }
   msg += 'TOTAL: R$ ' + (c.total||0).toFixed(2).replace('.',',') + '\n\n';
   msg += '⚠️ Restaurar mesa?\n\nIsso vai reabrir a mesa com os itens, ZERANDO os pagamentos (mesa volta como NÃO paga). NÃO reimprimirá na cozinha.';
   if(!confirm(msg)) return;
@@ -4336,14 +4344,17 @@ function gerarCupomPedido(pedido, modelo){
       if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
       return a + (i.preco||0)*(i.qtd||1);
     }, 0);
-    var taxa10 = subtotal * 0.10;
+    var taxa10 = subtotal * (_taxaServicoAtivaPDV ? (_taxaServicoPctPDV/100) : 0);
     var total = subtotal + taxa10;
     var lblSub = 'Subtotal';
     var valSub = 'R$ ' + formatarPreco(subtotal);
     s += lblSub + new Array(Math.max(1, L - lblSub.length - valSub.length + 1)).join(' ') + valSub + '\n';
-    var lblTaxa = '10% Garcom';
-    var valTaxa = 'R$ ' + formatarPreco(taxa10);
-    s += lblTaxa + new Array(Math.max(1, L - lblTaxa.length - valTaxa.length + 1)).join(' ') + valTaxa + '\n';
+    // Linha da taxa — só imprime se a taxa estiver ativa
+    if(_taxaServicoAtivaPDV){
+      var lblTaxa = _taxaServicoPctPDV + '% Servico';
+      var valTaxa = 'R$ ' + formatarPreco(taxa10);
+      s += lblTaxa + new Array(Math.max(1, L - lblTaxa.length - valTaxa.length + 1)).join(' ') + valTaxa + '\n';
+    }
     // Linha do TOTAL com estilo
     s += _aplicarEstilo(estTot);
     var lblTot = 'TOTAL';
@@ -4809,7 +4820,9 @@ function gerarCupomContaCompleta(conta){
 
   var totais = calcularTotaisContaPDV(conta);
   s += linhaValor('Total dos itens', 'R$ ' + formatarPreco(totais.subtotal));
-  s += linhaValor('Taxa de servico (10%)', 'R$ ' + formatarPreco(totais.taxa10));
+  if(_taxaServicoAtivaPDV){
+    s += linhaValor('Taxa de servico (' + _taxaServicoPctPDV + '%)', 'R$ ' + formatarPreco(totais.taxa10));
+  }
   s += escposBold(true);
   s += linhaValor('Total', 'R$ ' + formatarPreco(totais.total));
   if(!_aplicaNegrito(modelo)) s += escposBold(false);
@@ -4936,7 +4949,9 @@ function gerarCupomContaFinal(conta){
 
   var totais = calcularTotaisContaPDV(conta);
   s += linhaValor('Total dos itens', 'R$ ' + formatarPreco(totais.subtotal));
-  s += linhaValor('Taxa de servico (10%)', 'R$ ' + formatarPreco(totais.taxa10));
+  if(_taxaServicoAtivaPDV){
+    s += linhaValor('Taxa de servico (' + _taxaServicoPctPDV + '%)', 'R$ ' + formatarPreco(totais.taxa10));
+  }
   // Total com estilo personalizado
   s += _aplicarEstilo(estTot);
   var fatorTot = (estTot.tamanho === 'grande' || estTot.tamanho === 'largo' || estTot.tamanho === 'extra') ? 2 : 1;
@@ -5292,7 +5307,7 @@ function calcularTotaisContaPDV(c){
     if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
     return a + (i.preco||0)*(i.qtd||1);
   }, 0);
-  var taxa10 = subtotal * 0.10;
+  var taxa10 = subtotal * (_taxaServicoAtivaPDV ? (_taxaServicoPctPDV/100) : 0);
   var total = subtotal + taxa10;
   var pagoTotal = (c.pagamentos||[]).reduce(function(a,p){ return a + (p.valor||0); }, 0);
   var restante = Math.max(0, total - pagoTotal);
@@ -5492,6 +5507,163 @@ function menuIrPara(tab){
 // ════════════════════════════════════════
 //  CRIAR NOVO RESTAURANTE (do zero, vazio)
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+//  CONFIGURAR TAXA DE SERVIÇO (por restaurante)
+// ════════════════════════════════════════
+function abrirConfigTaxa(){
+  var modal = document.getElementById('modal-config-taxa');
+  if(!modal){
+    var html = '<div class="modal-back" id="modal-config-taxa" onclick="if(event.target===this)fecharConfigTaxa()">' +
+      '<div class="modal-box">' +
+        '<div class="modal-box-head">' +
+          '<h3>💵 Taxa de Serviço</h3>' +
+          '<button onclick="fecharConfigTaxa()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+        '</div>' +
+        '<div class="modal-box-body" id="modal-config-taxa-body">' +
+          '<div style="text-align:center;color:var(--muted);padding:20px;">Carregando...</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById('modal-config-taxa');
+  }
+  modal.classList.add('aberto');
+  carregarConfigTaxa();
+}
+
+function fecharConfigTaxa(){
+  var m = document.getElementById('modal-config-taxa');
+  if(m) m.classList.remove('aberto');
+}
+
+function carregarConfigTaxa(){
+  var body = document.getElementById('modal-config-taxa-body');
+  if(!_restauranteAtivo || !_tenantId){
+    body.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Restaurante não carregado.</div>';
+    return;
+  }
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id).get()
+    .then(function(doc){
+      var d = doc.exists ? doc.data() : {};
+      // Padrão: taxa ATIVA com 10% (mantém comportamento atual)
+      var taxaAtiva = d.taxaServicoAtiva !== false;
+      var taxaPct = (typeof d.taxaServicoPercentual === 'number') ? d.taxaServicoPercentual : 10;
+      renderConfigTaxa(taxaAtiva, taxaPct);
+    })
+    .catch(function(e){
+      body.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + (e.message||e) + '</div>';
+    });
+}
+
+function renderConfigTaxa(ativa, pct){
+  var body = document.getElementById('modal-config-taxa-body');
+  function pctBtn(v){
+    var sel = (pct === v);
+    return '<button onclick="_setConfigTaxaPct(' + v + ')" ' +
+      'style="flex:1;padding:12px;background:' + (sel?'var(--accent)':'var(--bg)') + ';' +
+      'color:' + (sel?'#000':'var(--text)') + ';border:1px solid ' + (sel?'var(--accent)':'var(--border)') + ';' +
+      'border-radius:9px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;">' + v + '%</button>';
+  }
+  body.innerHTML =
+    '<div style="padding:4px;">' +
+      '<div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:11px;margin-bottom:14px;font-size:0.8rem;color:var(--muted);line-height:1.5;">' +
+        'Restaurante: <strong style="color:var(--text);">' + escapeHtml(_restauranteAtivo.nome||'') + '</strong><br>' +
+        'A taxa de serviço (gorjeta do garçom) é somada ao total da conta.' +
+      '</div>' +
+
+      // Toggle liga/desliga
+      '<div onclick="_setConfigTaxaAtiva(' + (!ativa) + ')" style="display:flex;align-items:center;gap:12px;padding:13px;background:' + (ativa?'rgba(74,222,128,0.08)':'var(--bg)') + ';border:1px solid ' + (ativa?'rgba(74,222,128,0.3)':'var(--border)') + ';border-radius:11px;margin-bottom:14px;cursor:pointer;">' +
+        '<span style="font-size:1.5rem;">' + (ativa?'✅':'⛔') + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:0.92rem;color:' + (ativa?'#4ade80':'var(--text)') + ';">' + (ativa?'Taxa ATIVA':'Taxa desligada') + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);">' + (ativa?'A conta cobra a taxa de serviço':'A conta não cobra taxa') + '</div>' +
+        '</div>' +
+        '<div style="width:48px;height:28px;border-radius:99px;flex-shrink:0;position:relative;transition:all 0.2s;background:' + (ativa?'#4ade80':'var(--border)') + ';">' +
+          '<div style="position:absolute;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:all 0.2s;left:' + (ativa?'23px':'3px') + ';"></div>' +
+        '</div>' +
+      '</div>' +
+
+      // Percentual (só se ativa)
+      (ativa
+        ? '<div style="margin-bottom:14px;">' +
+            '<div style="font-size:0.8rem;color:var(--muted);font-weight:600;margin-bottom:8px;">Percentual da taxa</div>' +
+            '<div style="display:flex;gap:6px;">' + pctBtn(5) + pctBtn(10) + pctBtn(12) + pctBtn(15) + '</div>' +
+          '</div>'
+        : '') +
+
+      '<button id="btn-salvar-taxa" onclick="salvarConfigTaxa(' + ativa + ',' + pct + ')" style="width:100%;padding:13px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Salvar configuração</button>' +
+    '</div>';
+}
+
+// Estado temporário enquanto edita
+var _configTaxaTemp = {ativa: true, pct: 10};
+function _setConfigTaxaAtiva(v){
+  _configTaxaTemp.ativa = v;
+  renderConfigTaxa(v, _configTaxaTemp.pct);
+}
+function _setConfigTaxaPct(v){
+  _configTaxaTemp.pct = v;
+  renderConfigTaxa(_configTaxaTemp.ativa, v);
+}
+
+function salvarConfigTaxa(ativa, pct){
+  // Usa os valores do estado temp (mais atualizados)
+  ativa = _configTaxaTemp.ativa;
+  pct = _configTaxaTemp.pct;
+
+  var btn = document.getElementById('btn-salvar-taxa');
+  if(btn){ btn.disabled = true; btn.textContent = 'Salvando...'; }
+
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .set({
+      taxaServicoAtiva: ativa,
+      taxaServicoPercentual: pct
+    }, {merge:true})
+    .then(function(){
+      // Publica também em restaurantes_publicos pro app garçom ler
+      return fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id)
+        .set({
+          taxaServicoAtiva: ativa,
+          taxaServicoPercentual: pct
+        }, {merge:true});
+    })
+    .then(function(){
+      if(btn){ btn.textContent = '✓ Salvo!'; }
+      setTimeout(function(){
+        fecharConfigTaxa();
+        alert('✓ Taxa de serviço atualizada!\n\n' + (ativa ? 'Cobrando ' + pct + '%' : 'Taxa desligada') + '\n\nOs garçons precisam recarregar o app.');
+      }, 400);
+    })
+    .catch(function(e){
+      console.error('[TAXA] erro:', e);
+      if(btn){ btn.disabled = false; btn.textContent = 'Salvar configuração'; }
+      alert('❌ Erro ao salvar: ' + (e.message||'desconhecido'));
+    });
+}
+
+// Hook: quando o modal abre, sincroniza o estado temp
+(function(){
+  var _origCarregarConfigTaxa = carregarConfigTaxa;
+  carregarConfigTaxa = function(){
+    if(!_restauranteAtivo || !_tenantId){ _origCarregarConfigTaxa(); return; }
+    fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteAtivo.id).get()
+      .then(function(doc){
+        var d = doc.exists ? doc.data() : {};
+        var taxaAtiva = d.taxaServicoAtiva !== false;
+        var taxaPct = (typeof d.taxaServicoPercentual === 'number') ? d.taxaServicoPercentual : 10;
+        _configTaxaTemp = {ativa: taxaAtiva, pct: taxaPct};
+        renderConfigTaxa(taxaAtiva, taxaPct);
+      })
+      .catch(function(e){
+        var body = document.getElementById('modal-config-taxa-body');
+        if(body) body.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + (e.message||e) + '</div>';
+      });
+  };
+})();
+
 function abrirCriarRestaurante(){
   var modal = document.getElementById('modal-rest');
   var body = document.getElementById('modal-rest-body');
@@ -7851,6 +8023,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <button class="menu-item" id="menu-item-admin" onclick="menuIrPara('admin')" style="display:none;"><span class="ico">🛡️</span><span class="lbl">Admin</span></button>
     <div class="menu-divider"></div>
     <div class="menu-section-title">Restaurante</div>
+    <button class="menu-item" onclick="abrirConfigTaxa();fecharMenuLateral();"><span class="ico">💵</span><span class="lbl">Taxa de Serviço</span></button>
     <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
     <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">📋</span><span class="lbl">Copiar Cardápio</span></button>
     <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>

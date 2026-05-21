@@ -1036,6 +1036,9 @@ var _ehAdmin = false;       // se o garçom é admin (definido no login)
 var _mesaAtiva = null;     // número da mesa (ex: "3")
 var _tenantId = null;
 var _restauranteId = null;
+// Config de taxa de serviço (carregada de restaurantes_publicos)
+var _taxaServicoAtiva = true;  // padrão: cobra taxa (mantém comportamento atual)
+var _taxaServicoPct = 10;      // padrão: 10%
 var _itens = [];
 var _categorias = [];
 var _catAtiva = null;       // null = mostra categorias; 'todas' ou id = mostra itens
@@ -1490,6 +1493,16 @@ function escutarConfigMesas(){
       localStorage.setItem('garcom_total_mesas', String(novo));
       // Re-renderiza o grid de mesas se estiver visível
       if(typeof renderMesas === 'function') renderMesas();
+    }
+    // Config de taxa de serviço (por restaurante)
+    var taxaAtivaNova = d.taxaServicoAtiva !== false; // padrão: ativa
+    var taxaPctNova = (typeof d.taxaServicoPercentual === 'number') ? d.taxaServicoPercentual : 10;
+    if(taxaAtivaNova !== _taxaServicoAtiva || taxaPctNova !== _taxaServicoPct){
+      _taxaServicoAtiva = taxaAtivaNova;
+      _taxaServicoPct = taxaPctNova;
+      console.log('[TAXA] config:', _taxaServicoAtiva ? _taxaServicoPct + '%' : 'desligada');
+      // Re-renderiza telas que mostram total
+      try{ if(typeof renderFecharConta === 'function') renderFecharConta(); }catch(e){}
     }
   }, function(e){ console.warn('escutar config mesas:', e); });
 }
@@ -8650,7 +8663,9 @@ function calcularTotaisConta(c){
   var subtotal = ativos.reduce(function(a,i){ return a + valorItem(i); }, 0);
   var subtotalAberto = ativos.filter(function(i){ return i.status!=='pago'; })
     .reduce(function(a,i){ return a + valorItem(i); }, 0);
-  var taxa10 = subtotal * 0.10;
+  // Taxa de serviço configurável por restaurante (padrão 10%)
+  var taxaFrac = _taxaServicoAtiva ? (_taxaServicoPct / 100) : 0;
+  var taxa10 = subtotal * taxaFrac;
   var total = subtotal + taxa10;
   var pagoTotal = (c.pagamentos||[]).reduce(function(a,p){ return a + (p.valor||0); }, 0);
   var restante = Math.max(0, total - pagoTotal);
@@ -9604,7 +9619,9 @@ function renderFecharConta(){
       '<div style="font-size:0.7rem;color:var(--muted);">Garçom: '+esc(c.garcomPrincipal||'—')+'</div>'+
     '</div>'+
     '<div class="fechar-linha"><span>Subtotal</span><span class="v">R$ ' + fmtPreco(totais.subtotal) + '</span></div>'+
-    '<div class="fechar-linha"><span>+ 10% Garçom</span><span class="v">R$ ' + fmtPreco(totais.taxa10) + '</span></div>'+
+    (_taxaServicoAtiva
+      ? '<div class="fechar-linha"><span>+ ' + _taxaServicoPct + '% Serviço</span><span class="v">R$ ' + fmtPreco(totais.taxa10) + '</span></div>'
+      : '')+
     '<div class="fechar-linha total"><span>TOTAL DA MESA</span><span class="v">R$ ' + fmtPreco(totais.total) + '</span></div>'+
     '<div class="fechar-linha" style="color:var(--success);margin-top:6px;"><span>✓ Pago</span><span class="v" style="color:var(--success);">R$ ' + fmtPreco(totais.pagoTotal) + '</span></div>'+
     '<div class="fechar-linha total" style="border-top:none;padding-top:4px;"><span style="color:'+(totais.restante>0?'var(--accent)':'var(--success)')+';">RESTANTE</span><span class="v" style="color:'+(totais.restante>0?'var(--accent)':'var(--success)')+';">R$ ' + fmtPreco(totais.restante) + '</span></div>'+
@@ -10961,7 +10978,9 @@ function verContaDetalhe(c){
   html += '</div>';
   html += '<div class="fechar-bloco">'+
     '<div class="fechar-linha"><span>Subtotal</span><span class="v">R$ '+fmtPreco(c.subtotal||0)+'</span></div>'+
-    '<div class="fechar-linha"><span>+ 10% Garçom</span><span class="v">R$ '+fmtPreco(c.taxa10||0)+'</span></div>'+
+    (_taxaServicoAtiva && (c.taxa10||0) > 0
+      ? '<div class="fechar-linha"><span>+ ' + _taxaServicoPct + '% Serviço</span><span class="v">R$ '+fmtPreco(c.taxa10||0)+'</span></div>'
+      : '')+
     '<div class="fechar-linha total"><span>TOTAL</span><span class="v">R$ '+fmtPreco(c.total||0)+'</span></div>'+
   '</div>';
   if((c.pagamentos||[]).length){

@@ -1238,6 +1238,8 @@ function iniciarApp(){
   // Listeners em tempo real
   iniciarListeners();
   try { iniciarListenerPedidos(); } catch(e){ console.warn('Erro pedidos:', e); }
+  // Listener de comandos de impressão (insumos, reimpressão) — independente da impressora
+  try { iniciarListenerComandosImpressao(); } catch(e){ console.warn('Erro comandos imp:', e); }
 }
 
 // ═══ LISTENERS ═══
@@ -4574,13 +4576,34 @@ function reimprimirPedido(pedidoId){
 var _comandosImpProcessados = {};
 var _impCmdListenerAtivo = false;
 function iniciarListenerComandosImpressao(){
-  if(_impCmdListenerAtivo || !_qzPronto || !_restauranteAtivo) return;
+  // NÃO depende mais do _qzPronto — o listener deve rodar sempre que houver
+  // restaurante ativo. Assim os pedidos de insumos chegam mesmo que a
+  // conexão com a impressora ainda não esteja pronta (tenta imprimir na hora).
+  if(_impCmdListenerAtivo || !_restauranteAtivo) return;
   _impCmdListenerAtivo = true;
-  // Marca comandos antigos pra não processar de novo no início
+  // Marca comandos antigos pra não processar de novo no início.
+  // EXCEÇÃO: comandos de insumos pendentes — esses DEVEM ser impressos
+  // mesmo que tenham sido criados antes do PDV abrir.
   fbDb.collection('comandos_impressao')
     .where('restauranteId','==', _restauranteAtivo.id)
     .get().then(function(snap){
-      snap.forEach(function(d){ _comandosImpProcessados[d.id] = true; });
+      snap.forEach(function(d){
+        var c = d.data() || {};
+        if(c.tipo === 'insumos'){
+          // Não marca como processado — deixa o listener pegar e imprimir
+          console.log('[INSUMOS] comando pendente encontrado ao abrir:', d.id);
+          return;
+        }
+        _comandosImpProcessados[d.id] = true;
+      });
+      // Processa os insumos pendentes agora
+      snap.forEach(function(d){
+        var c = d.data() || {};
+        if(c.tipo === 'insumos' && !_comandosImpProcessados[d.id]){
+          _comandosImpProcessados[d.id] = true;
+          processarComandoImpressao(d.id, c);
+        }
+      });
     });
   fbDb.collection('comandos_impressao')
     .where('restauranteId','==', _restauranteAtivo.id)
@@ -4596,19 +4619,94 @@ function iniciarListenerComandosImpressao(){
     });
 }
 
+// Mostra um aviso visível na tela do PDV com o pedido de insumos recebido
+function _mostrarAvisoInsumos(cmd){
+  var ex = document.getElementById('aviso-insumos-pdv');
+  if(ex) ex.remove();
+
+  var itensHtml = (cmd.itens||[]).map(function(it){
+    return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+      '<span style="font-weight:600;">' + escapeHtml(it.nome||'') + '</span>' +
+      '<span style="font-weight:800;color:var(--accent);">' + (it.qtd||1) + ' ' + escapeHtml(it.unidade||'un') + '</span>' +
+    '</div>';
+  }).join('');
+
+  var box = document.createElement('div');
+  box.id = 'aviso-insumos-pdv';
+  box.style.cssText = 'position:fixed;top:70px;right:16px;z-index:99990;background:var(--surface);border:2px solid #d4a843;border-radius:14px;padding:14px;max-width:320px;box-shadow:0 12px 40px rgba(0,0,0,0.5);animation:slideMenuPDV 0.3s ease;';
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
+      '<span style="font-size:1.5rem;">🚚</span>' +
+      '<div style="flex:1;">' +
+        '<div style="font-weight:800;font-size:0.95rem;color:#d4a843;">PEDIDO DE INSUMOS</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);">De: ' + escapeHtml(cmd.origemNome||'?') + '</div>' +
+      '</div>' +
+      '<button onclick="document.getElementById(\'aviso-insumos-pdv\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:var(--text);width:26px;height:26px;border-radius:50%;cursor:pointer;">×</button>' +
+    '</div>' +
+    '<div style="font-size:0.84rem;">' + itensHtml + '</div>' +
+    (cmd.obs ? '<div style="margin-top:8px;font-size:0.76rem;color:var(--muted);font-style:italic;">Obs: ' + escapeHtml(cmd.obs) + '</div>' : '') +
+    '<button onclick="_reimprimirInsumos(' + JSON.stringify(JSON.stringify(cmd)).replace(/"/g,'&quot;') + ')" style="width:100%;margin-top:10px;padding:8px;background:var(--accent);border:none;color:#000;border-radius:8px;font-weight:700;font-size:0.8rem;cursor:pointer;font-family:inherit;">🖨️ Imprimir de novo</button>';
+  document.body.appendChild(box);
+
+  // Some sozinho depois de 30s
+  setTimeout(function(){
+    var b = document.getElementById('aviso-insumos-pdv');
+    if(b) b.remove();
+  }, 30000);
+}
+
+// Reimprime um pedido de insumos manualmente
+function _reimprimirInsumos(cmdJson){
+  try{
+    var cmd = (typeof cmdJson === 'string') ? JSON.parse(cmdJson) : cmdJson;
+    var cupom = gerarCupomInsumos(cmd);
+    if(_impressoras.length && _qzPronto){
+      _impressoras.forEach(function(imp){ enviarParaImpressora(imp, cupom); });
+      showToast('🖨️ Pedido de insumos reimpresso', '#4ade80');
+    } else {
+      showToast('⚠️ Impressora não está pronta', '#f7a34f');
+    }
+  }catch(e){
+    console.error('[INSUMOS] erro reimprimir:', e);
+    showToast('❌ Erro ao reimprimir', '#f87171');
+  }
+}
+
 function processarComandoImpressao(cmdId, cmd){
   if(cmd.tipo === 'insumos'){
+    console.log('[INSUMOS] recebido pedido de', cmd.origemNome, '— itens:', (cmd.itens||[]).length);
     // Pedido de insumos de outro restaurante — imprime em TODAS as impressoras
     var cupom = gerarCupomInsumos(cmd);
-    if(_impressoras.length){
+    if(_impressoras.length && _qzPronto){
       _impressoras.forEach(function(imp){
-        enviarParaImpressora(imp, cupom);
+        try{
+          enviarParaImpressora(imp, cupom);
+          console.log('[INSUMOS] enviado pra impressora:', imp.nome);
+        }catch(e){
+          console.error('[INSUMOS] erro impressora', imp.nome, ':', e);
+        }
       });
-      showToast('🚚 Pedido de insumos de ' + (cmd.origemNome||'?') + ' — impresso!', '#d4a843', 5000);
+      showToast('🚚 Pedido de insumos de ' + (cmd.origemNome||'?') + ' — impresso!', '#d4a843', 6000);
+      // Mostra um alerta visível também (caso o caixa não veja o toast)
+      _mostrarAvisoInsumos(cmd);
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     } else {
-      showToast('⚠️ Pedido de insumos recebido mas nenhuma impressora cadastrada', '#f7a34f', 5000);
+      // Impressora não pronta — NÃO apaga o comando, mostra aviso e tenta de novo
+      var motivo = !_impressoras.length ? 'nenhuma impressora cadastrada' : 'impressora desconectada';
+      console.warn('[INSUMOS] não imprimiu —', motivo, '— vai tentar de novo');
+      showToast('⚠️ Pedido de insumos recebido — ' + motivo, '#f7a34f', 8000);
+      _mostrarAvisoInsumos(cmd);
+      // Re-tenta em 10s (deixa o comando no Firestore)
+      _comandosImpProcessados[cmdId] = false;
+      setTimeout(function(){
+        fbDb.collection('comandos_impressao').doc(cmdId).get().then(function(d){
+          if(d.exists && !_comandosImpProcessados[cmdId]){
+            _comandosImpProcessados[cmdId] = true;
+            processarComandoImpressao(cmdId, d.data());
+          }
+        }).catch(function(){});
+      }, 10000);
     }
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     return;
   }
   if(cmd.tipo === 'reimprimir'){

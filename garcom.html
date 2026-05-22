@@ -8716,6 +8716,11 @@ function confirmarEnvioFab(){
         maisItens +
       '</div>' +
       '<div style="padding:12px 14px;border-top:1px solid var(--border2);background:var(--surface2);">' +
+        '<label style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:9px;margin-bottom:10px;cursor:pointer;">' +
+          '<input type="checkbox" id="fab-imprimir-check" checked style="width:19px;height:19px;cursor:pointer;flex-shrink:0;">' +
+          '<span style="font-size:1.05rem;">🖨️</span>' +
+          '<span style="font-size:0.84rem;font-weight:600;color:var(--text);">Imprimir na cozinha</span>' +
+        '</label>' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
           '<span style="font-size:0.84rem;color:var(--muted);">Total</span>' +
           '<span style="font-size:1.3rem;font-weight:700;color:var(--accent);font-family:Bebas Neue,sans-serif;">R$ ' + fmtPreco(totalValor) + '</span>' +
@@ -8737,6 +8742,9 @@ function confirmarEnvioFab(){
 }
 
 function enviarPedidoFromFab(){
+  // Captura a escolha do checkbox de imprimir ANTES de remover o modal
+  var chkFab = document.getElementById('fab-imprimir-check');
+  _imprimirPedidoOverride = chkFab ? chkFab.checked : true;
   var m = document.getElementById('modal-fab-confirma');
   if(m) m.remove();
   // Chama o fluxo normal de envio
@@ -8744,6 +8752,10 @@ function enviarPedidoFromFab(){
     enviarPedido();
   }
 }
+
+// Override de impressão: usado quando o pedido vem do FAB (não do carrinho)
+// null = sem override (usa o checkbox do carrinho)
+var _imprimirPedidoOverride = null;
 
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
@@ -8814,9 +8826,15 @@ function enviarPedido(){
   // Toast otimista (sem número ainda — vamos atualizar quando vier)
   showToast('✓ Pedido enviado!', '#4ade80');
   voltarParaMesas();
-  // Lê o checkbox "Imprimir na cozinha" (padrão: marcado = imprime)
-  var _chkImprimir = document.getElementById('cart-imprimir-check');
-  var _deveImprimir = _chkImprimir ? _chkImprimir.checked : true;
+  // Decide se imprime: override do FAB tem prioridade, senão usa o checkbox do carrinho
+  var _deveImprimir;
+  if(_imprimirPedidoOverride !== null){
+    _deveImprimir = _imprimirPedidoOverride;
+    _imprimirPedidoOverride = null; // limpa pro próximo pedido
+  } else {
+    var _chkImprimir = document.getElementById('cart-imprimir-check');
+    _deveImprimir = _chkImprimir ? _chkImprimir.checked : true;
+  }
 
   var pedido = {
     garcom: _nomeGarcom,

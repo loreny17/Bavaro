@@ -901,6 +901,13 @@ header{
         <span style="font-size:0.9rem;font-weight:600;color:var(--text);" id="cart-garcom-val">—</span>
       </div>
       <div id="cart-items-wrap"></div>
+      <label id="cart-imprimir-row" style="display:none;align-items:center;gap:10px;padding:11px 12px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.25);border-radius:10px;margin-top:10px;cursor:pointer;">
+        <input type="checkbox" id="cart-imprimir-check" checked style="width:20px;height:20px;cursor:pointer;flex-shrink:0;">
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:0.9rem;color:var(--text);">🖨️ Imprimir na cozinha</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Desmarque só se não quiser imprimir este pedido</div>
+        </div>
+      </label>
       <div class="cart-total-row" id="cart-total-row" style="display:none;">
         <span class="cart-total-label">Total do pedido</span>
         <span class="cart-total-val" id="cart-total-val">R$ 0,00</span>
@@ -8419,6 +8426,9 @@ function atualizarCarrinhoBadge(){
 //  MODAL CARRINHO
 // ════════════════════════════════════════
 function abrirModalCarrinho(){
+  // Garante que o checkbox de imprimir começa SEMPRE marcado
+  var chk = document.getElementById('cart-imprimir-check');
+  if(chk) chk.checked = true;
   renderCarrinho();
   document.getElementById('modal-carrinho').classList.add('show');
 }
@@ -8432,6 +8442,8 @@ function renderCarrinho(){
   if(!_carrinho.length){
     wrap.innerHTML = '<div class="cart-empty">🛒 Carrinho vazio.<br>Adicione itens do cardápio.</div>';
     totalRow.style.display = 'none';
+    var impRowV = document.getElementById('cart-imprimir-row');
+    if(impRowV) impRowV.style.display = 'none';
     btnEnviar.disabled = true;
     btnEnviar.style.opacity = '0.45';
     return;
@@ -8492,6 +8504,8 @@ function renderCarrinho(){
   });
   document.getElementById('cart-total-val').textContent = 'R$ '+fmtPreco(total);
   totalRow.style.display = 'flex';
+  var impRow = document.getElementById('cart-imprimir-row');
+  if(impRow) impRow.style.display = 'flex';
 }
 function cartAlterarQtd(idx, delta){
   // Ignora pra itens kg (eles têm botão "Editar" próprio)
@@ -8803,6 +8817,10 @@ function enviarPedido(){
   // Toast otimista (sem número ainda — vamos atualizar quando vier)
   showToast('✓ Pedido enviado!', '#4ade80');
   voltarParaMesas();
+  // Lê o checkbox "Imprimir na cozinha" (padrão: marcado = imprime)
+  var _chkImprimir = document.getElementById('cart-imprimir-check');
+  var _deveImprimir = _chkImprimir ? _chkImprimir.checked : true;
+
   var pedido = {
     garcom: _nomeGarcom,
     mesa: mesaInt,
@@ -8815,7 +8833,8 @@ function enviarPedido(){
     criadoEm: Date.now(),
     itens: itensPedido,
     total: totalPedido,
-    teste: _modoTeste ? true : false
+    teste: _modoTeste ? true : false,
+    imprimir: _deveImprimir   // false = não imprime na cozinha
   };
   // 1. Gera número sequencial e cria pedido
   console.log('[ENVIAR-PEDIDO] Iniciando — mesa:', mesaInt, 'contaId:', contaId, 'itens:', itensPedido.length);

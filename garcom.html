@@ -722,6 +722,14 @@ header{
         </div>
       </button>
 
+      <button class="menu-lateral-item" id="menu-item-encerrar" onclick="fecharMenuLateral();abrirEncerrarDiaGarcom()" style="display:none;">
+        <span style="font-size:1.4rem;">🌙</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Encerrar o Dia</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Fecha contas abertas e libera mesas</div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" onclick="fecharMenuLateral();sair()" style="margin-top:18px;">
         <span style="font-size:1.4rem;">🚪</span>
         <div style="flex:1;text-align:left;">
@@ -2138,6 +2146,9 @@ function mostrarMesas(){
   // Modo Teste — só pra admin
   var testeItem = document.getElementById('menu-item-teste');
   if(testeItem) testeItem.style.display = _ehAdmin ? '' : 'none';
+  // Encerrar o Dia — só pra admin
+  var encerrarItem = document.getElementById('menu-item-encerrar');
+  if(encerrarItem) encerrarItem.style.display = _ehAdmin ? '' : 'none';
   // Pedir Insumos — só pra quem tem permissão
   var insumosItem = document.getElementById('menu-item-insumos');
   if(insumosItem) insumosItem.style.display = _podeInsumos ? '' : 'none';
@@ -2328,6 +2339,164 @@ function aplicarPrefsAparencia(){
 // ═══════════════════════════════════════════════
 // 🧪 MODO TESTE
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// 🌙 ENCERRAR O DIA (garçom — só admin)
+// Fecha todas as contas abertas como venda e libera as mesas.
+// ═══════════════════════════════════════════════
+function abrirEncerrarDiaGarcom(){
+  var ex = document.getElementById('modal-encerrar-dia-g');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-encerrar-dia-g';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) fecharEncerrarDiaGarcom(); };
+  document.body.appendChild(mod);
+  try{ pushHistory('modal-encerrar-dia-g'); }catch(e){}
+  carregarEncerrarDiaGarcom();
+}
+
+function fecharEncerrarDiaGarcom(){
+  var m = document.getElementById('modal-encerrar-dia-g');
+  if(m) m.remove();
+}
+
+function carregarEncerrarDiaGarcom(){
+  var mod = document.getElementById('modal-encerrar-dia-g');
+  if(!mod) return;
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:460px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.6rem;">🌙</div>' +
+        '<div style="flex:1;"><div style="font-weight:700;font-size:1.05rem;">Encerrar o Dia</div>' +
+        '<div style="font-size:0.72rem;color:var(--muted);">Fecha contas abertas e libera mesas</div></div>' +
+        '<button onclick="fecharEncerrarDiaGarcom()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div id="encerrar-dia-g-body" style="flex:1;overflow-y:auto;padding:14px;">' +
+        '<div style="text-align:center;color:var(--muted);padding:24px;">Buscando mesas abertas...</div>' +
+      '</div>' +
+    '</div>';
+
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('status','==','aberta')
+    .get()
+    .then(function(snap){
+      var contas = [];
+      snap.forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
+      renderEncerrarDiaGarcom(contas);
+    })
+    .catch(function(e){
+      var b = document.getElementById('encerrar-dia-g-body');
+      if(b) b.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + (e.message||e) + '</div>';
+    });
+}
+
+var _encerrarDiaContasG = [];
+function renderEncerrarDiaGarcom(contas){
+  _encerrarDiaContasG = contas;
+  var body = document.getElementById('encerrar-dia-g-body');
+  if(!body) return;
+
+  if(contas.length === 0){
+    body.innerHTML =
+      '<div style="text-align:center;padding:30px 16px;">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">✅</div>' +
+        '<div style="font-weight:700;font-size:1.05rem;">Nenhuma mesa aberta</div>' +
+        '<div style="font-size:0.85rem;color:var(--muted);margin-top:6px;">Está tudo certo! Não há contas pendentes.</div>' +
+      '</div>';
+    return;
+  }
+
+  var totalGeral = 0;
+  var hojeStrG = new Date().toLocaleDateString('pt-BR');
+  var listaHtml = contas.map(function(c){
+    var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    totalGeral += (c.total||0);
+    var dataAb = c.abertaEm || c.criadoEm || c.criadaEm || 0;
+    var dataStr = dataAb ? new Date(dataAb).toLocaleDateString('pt-BR') : '?';
+    var ehHoje = (dataStr === hojeStrG);
+    var tagData = ehHoje
+      ? '<span style="background:rgba(74,222,128,0.15);color:#4ade80;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;">HOJE</span>'
+      : '<span style="background:rgba(247,163,79,0.15);color:#f7a34f;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;">' + dataStr + '</span>';
+    return '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:10px;padding:11px;margin-bottom:8px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<div>' +
+          '<div style="font-weight:700;font-size:0.92rem;display:flex;align-items:center;gap:6px;">' +
+            (c.tipoConta === 'avulsa' || c.tipoConta === 'comanda' ? '🗒️ ' + esc(c.cliente||'Comanda') : '🪑 Mesa ' + (c.mesa||'?')) +
+            tagData +
+          '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);">' + itensValidos.length + ' item(ns) • ' + esc(c.garcomPrincipal||c.garcom||'—') + '</div>' +
+        '</div>' +
+        '<div style="font-weight:800;font-size:1rem;color:var(--accent);">R$ ' + fmtPreco(c.total||0) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  body.innerHTML =
+    '<div style="background:rgba(247,163,79,0.08);border:1px solid rgba(247,163,79,0.3);border-radius:10px;padding:11px;margin-bottom:14px;font-size:0.82rem;line-height:1.5;">' +
+      '⚠️ As <strong>' + contas.length + ' conta(s)</strong> abaixo serão <strong>fechadas como venda</strong> (vão pro relatório) e as mesas ficarão livres.' +
+    '</div>' +
+    listaHtml +
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--surface2);border-radius:10px;margin:6px 0 14px;">' +
+      '<span style="font-weight:700;">Total a registrar</span>' +
+      '<span style="font-weight:800;font-size:1.15rem;color:var(--accent);">R$ ' + fmtPreco(totalGeral) + '</span>' +
+    '</div>' +
+    '<button id="btn-encerrar-dia-g" onclick="executarEncerrarDiaGarcom()" style="width:100%;padding:14px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;">' +
+      '🌙 Encerrar o dia e fechar ' + contas.length + ' conta(s)' +
+    '</button>';
+}
+
+function executarEncerrarDiaGarcom(){
+  if(!_encerrarDiaContasG.length) return;
+  if(!confirm('Encerrar o dia?\n\n' + _encerrarDiaContasG.length + ' conta(s) serão fechadas como venda e as mesas liberadas.\n\nNão pode ser desfeito.')) return;
+
+  var btn = document.getElementById('btn-encerrar-dia-g');
+  if(btn){ btn.disabled = true; btn.textContent = 'Encerrando...'; btn.style.opacity = '0.6'; }
+
+  var agora = Date.now();
+  var processadas = 0, erros = 0;
+
+  var promessas = _encerrarDiaContasG.map(function(c){
+    var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var ehTeste = itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; });
+    // A venda conta no dia em que a mesa foi ABERTA (não no dia do clique).
+    var dataVenda = c.abertaEm || c.criadoEm || c.criadaEm || agora;
+    var registro = Object.assign({}, c, {
+      status: 'fechada',
+      fechadoEm: dataVenda,            // ← data da venda = abertura da mesa
+      fechadoPor: _nomeGarcom || 'Admin',
+      encerradoNoFimDoDia: true,
+      encerradoClicadoEm: agora,       // hora real do clique
+      teste: ehTeste
+    });
+    delete registro.id;
+
+    return fbDb.collection('contas_fechadas').add(registro)
+      .then(function(){
+        return fbDb.collection('contas_mesa').doc(c.id).delete();
+      })
+      .then(function(){ processadas++; })
+      .catch(function(e){
+        console.error('[ENCERRAR-DIA] erro conta', c.id, ':', e);
+        erros++;
+      });
+  });
+
+  Promise.all(promessas).then(function(){
+    fecharEncerrarDiaGarcom();
+    if(erros > 0){
+      showToast('⚠️ ' + processadas + ' fechada(s), ' + erros + ' erro(s)', '#f7a34f', 5000);
+    } else {
+      showToast('✅ Dia encerrado! ' + processadas + ' conta(s) fechada(s)', '#4ade80', 4000);
+    }
+    try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){}
+    // Re-renderiza o mapa de mesas
+    try{ if(typeof renderMesas === 'function') renderMesas(); }catch(e){}
+  });
+}
+
+function abrirEncerrarDiaGarcom_fim(){}
+
 function abrirModoTeste(){
   var ex = document.getElementById('modal-modo-teste');
   if(ex) ex.remove();
@@ -11442,7 +11611,7 @@ window.addEventListener('popstate', function(e){
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
-    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom'];
+    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g'];
   for(var i = 0; i < modaisDinamicos.length; i++){
     var md = document.getElementById(modaisDinamicos[i]);
     if(md){

@@ -6038,6 +6038,168 @@ function carregarCfgInsumos(){
     }).catch(function(e){ console.warn('[INSUMOS] cfg:', e.code); });
 }
 
+// ════════════════════════════════════════
+//  🌙 ENCERRAR O DIA
+//  Fecha todas as contas abertas como venda e libera as mesas.
+//  Manual — o gerente aperta quando quiser (não é automático).
+// ════════════════════════════════════════
+function abrirEncerrarDia(){
+  var ex = document.getElementById('modal-encerrar-dia');
+  if(ex) ex.remove();
+
+  var modal = document.createElement('div');
+  modal.id = 'modal-encerrar-dia';
+  modal.className = 'modal-back';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
+  modal.onclick = function(e){ if(e.target === modal) modal.remove(); };
+  modal.innerHTML =
+    '<div class="modal-box" style="max-width:460px;">' +
+      '<div class="modal-box-head">' +
+        '<h3>🌙 Encerrar o Dia</h3>' +
+        '<button onclick="document.getElementById(\'modal-encerrar-dia\').remove()" style="background:transparent;border:none;color:var(--text);cursor:pointer;font-size:1.4rem;padding:0 4px;">×</button>' +
+      '</div>' +
+      '<div class="modal-box-body" id="encerrar-dia-body" style="max-height:70vh;overflow-y:auto;">' +
+        '<div style="text-align:center;color:var(--muted);padding:24px;">Buscando mesas abertas...</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  carregarEncerrarDia();
+}
+
+function carregarEncerrarDia(){
+  var body = document.getElementById('encerrar-dia-body');
+  if(!body) return;
+  var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
+
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==', restId)
+    .where('status','==','aberta')
+    .get()
+    .then(function(snap){
+      var contas = [];
+      snap.forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
+      renderEncerrarDia(contas);
+    })
+    .catch(function(e){
+      body.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro ao buscar mesas: ' + (e.message||e) + '</div>';
+    });
+}
+
+var _encerrarDiaContas = [];
+function renderEncerrarDia(contas){
+  _encerrarDiaContas = contas;
+  var body = document.getElementById('encerrar-dia-body');
+  if(!body) return;
+
+  if(contas.length === 0){
+    body.innerHTML =
+      '<div style="text-align:center;padding:30px 16px;">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">✅</div>' +
+        '<div style="font-weight:700;font-size:1.05rem;color:var(--text);">Nenhuma mesa aberta</div>' +
+        '<div style="font-size:0.85rem;color:var(--muted);margin-top:6px;">Está tudo certo! Não há contas pendentes pra encerrar.</div>' +
+      '</div>';
+    return;
+  }
+
+  var totalGeral = 0;
+  var hojeStr = new Date().toLocaleDateString('pt-BR');
+  var listaHtml = contas.map(function(c){
+    var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var total = c.total || 0;
+    totalGeral += total;
+    // Data de abertura da mesa
+    var dataAb = c.abertaEm || c.criadoEm || c.criadaEm || 0;
+    var dataStr = dataAb ? new Date(dataAb).toLocaleDateString('pt-BR') : '?';
+    var ehHoje = (dataStr === hojeStr);
+    var tagData = ehHoje
+      ? '<span style="background:rgba(74,222,128,0.15);color:#4ade80;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;">HOJE</span>'
+      : '<span style="background:rgba(247,163,79,0.15);color:#f7a34f;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;">' + dataStr + '</span>';
+    return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px;margin-bottom:8px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<div>' +
+          '<div style="font-weight:700;font-size:0.92rem;display:flex;align-items:center;gap:6px;">' +
+            (c.tipoConta === 'avulsa' || c.tipoConta === 'comanda' ? '🗒️ ' + escapeHtml(c.cliente||'Comanda') : '🪑 Mesa ' + (c.mesa||'?')) +
+            tagData +
+          '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);">' + itensValidos.length + ' item(ns) • ' + escapeHtml(c.garcomPrincipal||c.garcom||'—') + '</div>' +
+        '</div>' +
+        '<div style="font-weight:800;font-size:1rem;color:var(--accent);">R$ ' + formatarPreco(total) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  body.innerHTML =
+    '<div style="background:rgba(247,163,79,0.08);border:1px solid rgba(247,163,79,0.3);border-radius:10px;padding:11px;margin-bottom:14px;font-size:0.82rem;color:var(--text);line-height:1.5;">' +
+      '⚠️ As <strong>' + contas.length + ' conta(s)</strong> abaixo serão <strong>fechadas como venda</strong> (vão pro relatório do dia) e as mesas ficarão livres.' +
+    '</div>' +
+    listaHtml +
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--surface2);border-radius:10px;margin-top:6px;margin-bottom:14px;">' +
+      '<span style="font-weight:700;">Total a registrar</span>' +
+      '<span style="font-weight:800;font-size:1.15rem;color:var(--accent);">R$ ' + formatarPreco(totalGeral) + '</span>' +
+    '</div>' +
+    '<button id="btn-encerrar-dia" onclick="executarEncerrarDia()" style="width:100%;padding:14px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;">' +
+      '🌙 Encerrar o dia e fechar ' + contas.length + ' conta(s)' +
+    '</button>';
+}
+
+function executarEncerrarDia(){
+  if(!_encerrarDiaContas.length) return;
+  if(!confirm('Encerrar o dia?\n\n' + _encerrarDiaContas.length + ' conta(s) serão fechadas como venda e as mesas liberadas.\n\nEsta ação não pode ser desfeita.')) return;
+
+  var btn = document.getElementById('btn-encerrar-dia');
+  if(btn){ btn.disabled = true; btn.textContent = 'Encerrando...'; }
+
+  var quem = (_user && _user.email) || 'PDV';
+  var agora = Date.now();
+  var totalContas = _encerrarDiaContas.length;
+  var processadas = 0;
+  var erros = 0;
+
+  // Processa cada conta: cria conta_fechada + apaga conta_mesa
+  var promessas = _encerrarDiaContas.map(function(c){
+    var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
+    var ehTeste = itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; });
+    // A venda conta no dia em que a mesa foi ABERTA (não no dia do clique).
+    // Assim, mesa de ontem encerrada hoje conta no faturamento de ontem.
+    var dataVenda = c.abertaEm || c.criadoEm || c.criadaEm || agora;
+    var registro = Object.assign({}, c, {
+      status: 'fechada',
+      fechadoEm: dataVenda,            // ← data da venda = abertura da mesa
+      fechadoPor: quem,
+      encerradoNoFimDoDia: true,       // marca que foi pelo "Encerrar o Dia"
+      encerradoClicadoEm: agora,       // hora real em que o botão foi apertado
+      teste: ehTeste
+    });
+    delete registro.id;
+
+    // 1. Cria a conta fechada
+    return fbDb.collection('contas_fechadas').add(registro)
+      .then(function(){
+        // 2. Apaga a conta_mesa (libera a mesa)
+        return fbDb.collection('contas_mesa').doc(c.id).delete();
+      })
+      .then(function(){
+        processadas++;
+      })
+      .catch(function(e){
+        console.error('[ENCERRAR-DIA] erro na conta', c.id, ':', e);
+        erros++;
+      });
+  });
+
+  Promise.all(promessas).then(function(){
+    var modal = document.getElementById('modal-encerrar-dia');
+    if(modal) modal.remove();
+    if(erros > 0){
+      alert('⚠️ Dia encerrado com avisos.\n\n' + processadas + ' conta(s) fechada(s).\n' + erros + ' erro(s) — tente de novo pras que faltaram.');
+    } else {
+      alert('✅ Dia encerrado!\n\n' + processadas + ' conta(s) fechada(s) e registrada(s) no relatório.\nTodas as mesas estão livres.');
+    }
+    // Recarrega relatórios se estiver na tela
+    try{ if(typeof carregarRelatorios === 'function') carregarRelatorios(); }catch(e){}
+  });
+}
+
 function abrirConfigTaxa(){
   var modal = document.getElementById('modal-config-taxa');
   if(!modal){
@@ -8563,6 +8725,9 @@ function toggleAdminUsuario(garcomId, novoValor){
     <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
     <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">📋</span><span class="lbl">Copiar Cardápio</span></button>
     <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>
+    <div class="menu-divider"></div>
+    <div class="menu-section-title">Operação</div>
+    <button class="menu-item" onclick="abrirEncerrarDia();fecharMenuLateral();"><span class="ico">🌙</span><span class="lbl">Encerrar o Dia</span></button>
     <div class="menu-divider"></div>
     <button class="menu-item" onclick="window.location.href='index.html'"><span class="ico">🏠</span><span class="lbl">Voltar ao App</span></button>
   </div>

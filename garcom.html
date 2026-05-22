@@ -2563,6 +2563,18 @@ function abrirPedidoInsumosGarcom(){
   document.body.appendChild(mod);
   try{ pushHistory('modal-insumos-garcom'); }catch(e){}
   renderPedidoInsumosGarcom();
+
+  // Carrega a config do cupom EM BACKGROUND (não trava nada).
+  // Quando o garçom for enviar, a config já estará pronta em cache.
+  if(_tenantId && _restauranteId){
+    fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteId).get()
+      .then(function(doc){
+        if(doc.exists && doc.data().cupomInsumos){
+          _cfgInsumosCacheG = doc.data().cupomInsumos;
+        }
+      }).catch(function(){ /* sem config, usa padrão */ });
+  }
 }
 
 function fecharPedidoInsumosGarcom(){
@@ -2682,64 +2694,55 @@ function _editarFavInsumosG(){
 }
 
 var _enviandoInsumos = false; // trava anti clique-duplo
+var _cfgInsumosCacheG = null; // config do cupom em cache (carregada antes)
+
 function enviarPedidoInsumosGarcom(){
   if(_insumosCarrinhoG.length === 0){
     showToast('Adicione pelo menos 1 item', '#f7a34f');
     return;
   }
-  // TRAVA: impede enviar 2x se a internet estiver lenta
   if(_enviandoInsumos){
-    console.log('[INSUMOS] já está enviando, ignora clique duplo');
-    return;
+    return; // já está enviando
   }
   _enviandoInsumos = true;
 
-  // Desabilita o botão visualmente
+  // FEEDBACK IMEDIATO — antes de qualquer coisa
   var btn = document.getElementById('btn-enviar-insumos-g');
   if(btn){
     btn.disabled = true;
-    btn.textContent = 'Enviando...';
+    btn.textContent = '⏳ Enviando...';
     btn.style.opacity = '0.6';
   }
+  showToast('⏳ Enviando pedido...', '#f7a34f', 2000);
 
   var obs = (document.getElementById('insumo-obs-g')||{}).value || '';
   obs = obs.trim();
   var origem = _nomeRestauranteG || _restauranteId || 'Restaurante';
 
-  // Lê a config do cupom de insumos do doc do restaurante (definida no PDV)
-  var pConfig = fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteId).get()
-    .then(function(doc){
-      if(doc.exists && doc.data().cupomInsumos){
-        return doc.data().cupomInsumos;
-      }
-      return null;
-    }).catch(function(){ return null; });
+  // Monta o comando JÁ — não espera buscar config no servidor.
+  // Usa a config em cache se tiver (carregada quando abriu a tela).
+  var comando = {
+    tipo: 'insumos',
+    restauranteId: ID_CENTRAL_G,
+    origemRestauranteId: _restauranteId,
+    origemNome: origem,
+    itens: _insumosCarrinhoG.slice(),
+    obs: obs,
+    solicitadoPor: _nomeGarcom || '',
+    criadoEm: Date.now()
+  };
+  if(_cfgInsumosCacheG) comando.cupomConfig = _cfgInsumosCacheG;
 
-  pConfig.then(function(cfg){
-    var comando = {
-      tipo: 'insumos',
-      restauranteId: ID_CENTRAL_G,
-      origemRestauranteId: _restauranteId,
-      origemNome: origem,
-      itens: _insumosCarrinhoG.slice(),
-      obs: obs,
-      solicitadoPor: _nomeGarcom || '',
-      criadoEm: Date.now()
-    };
-    if(cfg) comando.cupomConfig = cfg;
-
-    return fbDb.collection('comandos_impressao').add(comando);
-  }).then(function(){
+  // Envia direto — sem await de config, vai rápido
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
     fecharPedidoInsumosGarcom();
-    showToast('✓ Pedido de insumos enviado ao Central!', '#4ade80', 3000);
+    showToast('✓ Pedido enviado ao Central!', '#4ade80', 3000);
     try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
     _insumosCarrinhoG = [];
     _enviandoInsumos = false;
   }).catch(function(e){
     console.error('[INSUMOS] erro:', e);
-    showToast('❌ Erro ao enviar: ' + (e.message||'erro'), '#f87171', 4000);
-    // Libera pra tentar de novo
+    showToast('❌ Erro ao enviar — tente de novo', '#f87171', 4000);
     _enviandoInsumos = false;
     var b = document.getElementById('btn-enviar-insumos-g');
     if(b){

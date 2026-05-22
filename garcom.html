@@ -2634,7 +2634,7 @@ function renderPedidoInsumosGarcom(){
         '</div>' +
       '</div>' +
       '<div style="padding:12px 14px;border-top:1px solid var(--border2);">' +
-        '<button onclick="enviarPedidoInsumosGarcom()" ' + (_insumosCarrinhoG.length===0?'disabled':'') + ' ' +
+        '<button id="btn-enviar-insumos-g" onclick="enviarPedidoInsumosGarcom()" ' + (_insumosCarrinhoG.length===0?'disabled':'') + ' ' +
           'style="width:100%;padding:14px;background:' + (_insumosCarrinhoG.length===0?'var(--border2)':'var(--accent)') + ';' +
           'border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:' + (_insumosCarrinhoG.length===0?'default':'pointer') + ';font-family:inherit;">' +
           '🚚 Enviar ao Central' +
@@ -2651,10 +2651,15 @@ function _addInsumoG(nome){
 }
 function _addInsumoAvulsoG(){
   var input = document.getElementById('insumo-novo-g');
+  if(!input) return;
   var nome = (input.value||'').trim();
-  if(!nome) return;
+  if(!nome){
+    showToast('Digite o nome do item', '#f7a34f', 1500);
+    return;
+  }
   _addInsumoG(nome);
   input.value = '';
+  showToast('✓ ' + nome + ' adicionado', '#4ade80', 1200);
   setTimeout(function(){ var i = document.getElementById('insumo-novo-g'); if(i) i.focus(); }, 50);
 }
 function _mudarQtdInsumoG(idx, delta){
@@ -2676,11 +2681,30 @@ function _editarFavInsumosG(){
   renderPedidoInsumosGarcom();
 }
 
+var _enviandoInsumos = false; // trava anti clique-duplo
 function enviarPedidoInsumosGarcom(){
-  if(_insumosCarrinhoG.length === 0) return;
-  var obs = (document.getElementById('insumo-obs-g').value||'').trim();
+  if(_insumosCarrinhoG.length === 0){
+    showToast('Adicione pelo menos 1 item', '#f7a34f');
+    return;
+  }
+  // TRAVA: impede enviar 2x se a internet estiver lenta
+  if(_enviandoInsumos){
+    console.log('[INSUMOS] já está enviando, ignora clique duplo');
+    return;
+  }
+  _enviandoInsumos = true;
+
+  // Desabilita o botão visualmente
+  var btn = document.getElementById('btn-enviar-insumos-g');
+  if(btn){
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+    btn.style.opacity = '0.6';
+  }
+
+  var obs = (document.getElementById('insumo-obs-g')||{}).value || '';
+  obs = obs.trim();
   var origem = _nomeRestauranteG || _restauranteId || 'Restaurante';
-  var btn = event && event.target;
 
   // Lê a config do cupom de insumos do doc do restaurante (definida no PDV)
   var pConfig = fbDb.collection('tenants').doc(_tenantId)
@@ -2711,9 +2735,18 @@ function enviarPedidoInsumosGarcom(){
     showToast('✓ Pedido de insumos enviado ao Central!', '#4ade80', 3000);
     try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
     _insumosCarrinhoG = [];
+    _enviandoInsumos = false;
   }).catch(function(e){
     console.error('[INSUMOS] erro:', e);
     showToast('❌ Erro ao enviar: ' + (e.message||'erro'), '#f87171', 4000);
+    // Libera pra tentar de novo
+    _enviandoInsumos = false;
+    var b = document.getElementById('btn-enviar-insumos-g');
+    if(b){
+      b.disabled = false;
+      b.textContent = '🚚 Enviar ao Central';
+      b.style.opacity = '1';
+    }
   });
 }
 

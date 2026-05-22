@@ -5902,12 +5902,20 @@ function salvarConfigCupomInsumos(){
   }
 }
 
+var _enviandoInsumosPDV = false;
 function enviarPedidoInsumos(){
-  if(_insumosCarrinho.length === 0) return;
+  if(_insumosCarrinho.length === 0){
+    alert('Adicione pelo menos 1 item.');
+    return;
+  }
   if(!_restauranteAtivo || !_tenantId){
     alert('Restaurante não carregado.');
     return;
   }
+  // TRAVA anti clique-duplo
+  if(_enviandoInsumosPDV) return;
+  _enviandoInsumosPDV = true;
+
   var obs = (document.getElementById('insumo-obs').value||'').trim();
   var origem = _restauranteAtivo.nome || 'Restaurante';
 
@@ -5929,9 +5937,11 @@ function enviarPedidoInsumos(){
     alert('✓ Pedido de insumos enviado ao Central!\n\nVai imprimir nas impressoras do Bávaro.\n\n' +
       _insumosCarrinho.length + ' iten(s) solicitado(s).');
     _insumosCarrinho = [];
+    _enviandoInsumosPDV = false;
   }).catch(function(e){
     console.error('[INSUMOS] erro:', e);
     alert('❌ Erro ao enviar: ' + (e.message||'desconhecido'));
+    _enviandoInsumosPDV = false;
   });
 }
 

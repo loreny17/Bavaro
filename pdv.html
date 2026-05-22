@@ -976,15 +976,10 @@ window.addEventListener('load', function(){
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
-    // Tenta habilitar — mas NÃO trava o boot se falhar.
-    // O app inicia o Auth em paralelo, sem esperar persistence.
-    if(fbDb.enablePersistence){
-      fbDb.enablePersistence({synchronizeTabs:true}).catch(function(err){
-        // failed-precondition = múltiplas abas / unimplemented = browser sem suporte
-        // Em ambos os casos o app funciona normal, só sem cache local.
-        console.log('Firestore persistence não habilitado:', err.code);
-      });
-    }
+    // NÃO usamos mais persistence com synchronizeTabs (multi-aba).
+    // No PWA isso causava o Firestore a usar uma sessão de auth antiga,
+    // resultando em "permission-denied" mesmo com login OK.
+    // O app funciona normal sem cache offline — só não guarda dados localmente.
     fbAuth = firebase.auth();
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     fbAuth.onAuthStateChanged(function(user){
@@ -992,7 +987,16 @@ window.addEventListener('load', function(){
       if(user){
         _user = {uid:user.uid, email:user.email};
         document.getElementById('auth-overlay').classList.add('hidden');
-        carregarTenantECarrapio();
+        // IMPORTANTE: garante que o token está propagado pro Firestore
+        // ANTES de fazer qualquer query. Resolve o permission-denied no PWA.
+        user.getIdToken(true).then(function(){
+          console.log('[INIT] token confirmado, carregando tenant');
+          carregarTenantECarrapio();
+        }).catch(function(e){
+          console.warn('[INIT] erro ao confirmar token:', e.code || e.message);
+          // Mesmo com erro, tenta carregar (a função tem retry interno)
+          carregarTenantECarrapio();
+        });
       } else {
         document.getElementById('auth-overlay').classList.remove('hidden');
         document.getElementById('app').style.display = 'none';
@@ -1083,8 +1087,6 @@ function limparCacheRecarregar(){
 function carregarTenantECarrapio(){
   console.log('[CARREGAR-TENANT] Buscando users/' + _user.uid);
 
-  // Garante que o token de auth está fresh antes de fazer queries
-  // (resolve race condition quando o PDV é aberto direto do app principal)
   var userAtual = fbAuth.currentUser;
   if(!userAtual){
     console.error('[CARREGAR-TENANT] currentUser é null! Aguardando...');
@@ -1106,21 +1108,64 @@ function carregarTenantECarrapio(){
     }
     _tenantId = doc.data().tenantId;
     console.log('[CARREGAR-TENANT] tenantId encontrado:', _tenantId);
+    _carregarTenantTentativas = 0; // sucesso — reseta contador
     prosseguirComTenant();
   }).catch(function(e){
-    console.error('[CARREGAR-TENANT] erro buscar users:', e);
-    // Retry uma vez com delay maior (race condition do Auth)
-    if(!_carregarTenantRetried && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
-      _carregarTenantRetried = true;
-      console.log('[CARREGAR-TENANT] retry após 1.5s (permission-denied — provável race condition)');
-      setTimeout(carregarTenantECarrapio, 1500);
+    console.error('[CARREGAR-TENANT] erro buscar users:', e.code || e.message);
+    // Retry até 4 vezes com delays crescentes (PWA pode demorar pra propagar token)
+    if(_carregarTenantTentativas < 4 && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
+      _carregarTenantTentativas++;
+      var delay = _carregarTenantTentativas * 1500; // 1.5s, 3s, 4.5s, 6s
+      console.log('[CARREGAR-TENANT] retry ' + _carregarTenantTentativas + '/4 após ' + (delay/1000) + 's (permission-denied)');
+      setTimeout(function(){
+        // Força recarregar a sessão de auth antes de tentar de novo
+        var u = fbAuth.currentUser;
+        if(u){
+          u.reload().then(function(){
+            carregarTenantECarrapio();
+          }).catch(function(){
+            carregarTenantECarrapio();
+          });
+        } else {
+          carregarTenantECarrapio();
+        }
+      }, delay);
       return;
     }
-    // Tenta fallback antes de desistir
+    // Esgotou as tentativas — mostra erro claro
+    if(e.code === 'permission-denied'){
+      mostrarErroPermissao();
+      return;
+    }
     tentarFallbackTenant();
   });
 }
-var _carregarTenantRetried = false;
+var _carregarTenantTentativas = 0;
+
+// Erro de permissão persistente — orienta o usuário
+function mostrarErroPermissao(){
+  document.getElementById('app').style.display = 'none';
+  var loading = document.getElementById('loading');
+  if(loading){
+    loading.classList.remove('hidden');
+    loading.innerHTML =
+      '<div style="text-align:center;padding:30px 20px;max-width:340px;margin:0 auto;">' +
+        '<div style="font-size:3rem;margin-bottom:12px;">🔒</div>' +
+        '<div style="font-weight:700;font-size:1.1rem;color:#f87171;margin-bottom:10px;">Erro de conexão</div>' +
+        '<div style="font-size:0.88rem;color:#999;line-height:1.6;margin-bottom:18px;">' +
+          'O login funcionou, mas o app não conseguiu acessar os dados. ' +
+          'Isso costuma acontecer com cache antigo no app instalado.' +
+        '</div>' +
+        '<div style="font-size:0.84rem;color:#ccc;text-align:left;line-height:1.7;background:rgba(255,255,255,0.04);padding:14px;border-radius:10px;margin-bottom:16px;">' +
+          '<strong>Tente isto:</strong><br>' +
+          '1. Feche o app completamente<br>' +
+          '2. Abra de novo<br><br>' +
+          'Se não resolver, desinstale o app e instale de novo pelo Chrome.' +
+        '</div>' +
+        '<button onclick="location.reload(true)" style="width:100%;padding:13px;background:#d4a843;border:none;color:#000;border-radius:10px;font-weight:700;font-size:0.95rem;cursor:pointer;font-family:inherit;">🔄 Tentar de novo</button>' +
+      '</div>';
+  }
+}
 
 // Fallback: busca em /tenants/ qual tem o usuário como owner
 function tentarFallbackTenant(){

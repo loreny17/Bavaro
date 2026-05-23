@@ -779,7 +779,18 @@ header{
 
   <!-- Busca -->
   <div class="busca-bar">
-    <input type="text" class="busca-input" id="busca-input" placeholder="Buscar no cardápio..." oninput="renderItens()">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" class="busca-input" id="busca-input" placeholder="Buscar no cardápio..." oninput="renderItens()" style="flex:1;">
+      <button id="btn-busca-voz" onclick="iniciarBuscaVoz()" title="Buscar por voz"
+        style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <!-- Tabs content -->
@@ -1157,6 +1168,13 @@ var _grupos = [];
 //  INIT
 // ════════════════════════════════════════
 window.addEventListener('load', function(){
+  // Esconde o botão de busca por voz se o aparelho não suportar
+  try{
+    if(!(window.SpeechRecognition || window.webkitSpeechRecognition)){
+      var bv = document.getElementById('btn-busca-voz');
+      if(bv) bv.style.display = 'none';
+    }
+  }catch(e){}
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
@@ -6878,6 +6896,79 @@ function renderCatBar(){
   });
 }
 
+// ═══════════════════════════════════════════════
+// 🎤 BUSCA POR VOZ no cardápio
+// ═══════════════════════════════════════════════
+var _reconhecimentoVoz = null;
+function iniciarBuscaVoz(){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){
+    showToast('Busca por voz não disponível neste aparelho', '#f7a34f', 3000);
+    return;
+  }
+  var btn = document.getElementById('btn-busca-voz');
+  var input = document.getElementById('busca-input');
+
+  // Se já está escutando, para
+  if(_reconhecimentoVoz){
+    try{ _reconhecimentoVoz.stop(); }catch(e){}
+    _reconhecimentoVoz = null;
+    return;
+  }
+
+  var recon = new Recon();
+  recon.lang = 'pt-BR';
+  recon.continuous = false;
+  recon.interimResults = false;
+  recon.maxAlternatives = 1;
+  _reconhecimentoVoz = recon;
+
+  // Feedback visual: microfone fica vermelho enquanto escuta
+  if(btn){
+    btn.style.background = '#dc2626';
+    btn.style.borderColor = '#dc2626';
+    btn.style.color = '#fff';
+  }
+  if(input) input.placeholder = '🔴 Ouvindo... fale o item';
+
+  recon.onresult = function(e){
+    var texto = (e.results[0][0].transcript || '').trim();
+    if(input){
+      input.value = texto;
+      renderItens(); // filtra o cardápio com o que foi falado
+    }
+    showToast('🎤 "' + texto + '"', '#4ade80', 2000);
+  };
+
+  recon.onerror = function(e){
+    var msg = 'Não entendi, tente de novo';
+    if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+      msg = 'Permita o microfone nas configurações';
+    } else if(e.error === 'no-speech'){
+      msg = 'Não ouvi nada — tente de novo';
+    }
+    showToast(msg, '#f7a34f', 3000);
+  };
+
+  recon.onend = function(){
+    _reconhecimentoVoz = null;
+    if(btn){
+      btn.style.background = 'var(--surface2)';
+      btn.style.borderColor = 'var(--border2)';
+      btn.style.color = 'var(--accent)';
+    }
+    if(input) input.placeholder = 'Buscar no cardápio...';
+  };
+
+  try{
+    recon.start();
+  }catch(e){
+    console.error('[VOZ] erro:', e);
+    _reconhecimentoVoz = null;
+    showToast('Erro ao iniciar busca por voz', '#f87171');
+  }
+}
+
 function renderItens(){
   var grid = document.getElementById('itens-grid');
   if(!grid) return;
@@ -6895,7 +6986,28 @@ function renderItens(){
 
   // Tela de CATEGORIAS (quando nenhuma selecionada)
   if(_catAtiva === null){
-    if(buscaBar) buscaBar.style.display = 'none';
+    // A busca AGORA aparece na tela de categorias também
+    if(buscaBar) buscaBar.style.display = '';
+    var buscaCat = (buscaInput && buscaInput.value || '').toLowerCase().trim();
+
+    // Se o garçom digitou algo na busca → mostra ITENS de todo o cardápio
+    if(buscaCat){
+      var listaBusca = _itens.filter(function(it){
+        return it.disponivel && it.nome.toLowerCase().includes(buscaCat);
+      });
+      grid.className = 'itens-grid cols-' + _colsCardapio + (_modoCompacto ? ' compacto' : '');
+      if(!listaBusca.length){
+        grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">🔍</div>' +
+          '<div class="empty-titulo">Nenhum item</div>' +
+          '<div class="empty-sub">Nada encontrado para "' + esc(buscaCat) + '"</div></div>';
+        return;
+      }
+      grid.innerHTML = '';
+      listaBusca.forEach(function(it){ _renderCardItem(it, grid); });
+      return;
+    }
+
+    // Sem busca → mostra a grade de categorias normal
     if(!_categorias.length){
       grid.innerHTML = '<div class="empty" style="grid-column:1/-1;">' +
         '<div class="empty-icon">📂</div>' +
@@ -6944,36 +7056,37 @@ function renderItens(){
     return;
   }
   grid.innerHTML = '';
-  lista.forEach(function(it){
-    var qtdNoCarrinho = _carrinho.filter(function(c){ return c.id===it.id; }).reduce(function(acc,c){ return acc+c.qtd; },0);
-    var card = document.createElement('div');
-    card.className = 'item-card';
-    var fotoHtml = it.foto
-      ? '<div class="item-foto"><img src="'+it.foto+'" alt="'+it.nome+'" loading="lazy" onerror="this.parentNode.innerHTML=\'🍽️\'"></div>'
-      : '<div class="item-foto">🍽️</div>';
-    var badge = qtdNoCarrinho > 0
-      ? '<div class="item-add-badge" style="position:absolute;bottom:6px;right:6px;">'+qtdNoCarrinho+'</div>'
-      : '';
-    var ehKg = it.tipoVenda === 'kg';
-    var sufixoPreco = ehKg ? '<span style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
-    card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+'</div>'+
-      '<div class="item-info">'+
-        '<div class="item-nome">'+esc(it.nome)+'</div>'+
-        (it.desc ? '<div class="item-desc">'+esc(it.desc)+'</div>' : '')+
-        '<div class="item-preco">R$ '+fmtPreco(it.preco)+sufixoPreco+'</div>'+
-      '</div>';
-    card.onclick = (function(item){ return function(){
-      // Se acabou de fazer swipe, ignora o click
-      if(_swipeItemDisparou){ _swipeItemDisparou = false; return; }
-      abrirModalItem(item);
-    }; })(it);
-    grid.appendChild(card);
-    // Anexa swipe pra todos itens unidade (não kg)
-    if(!ehKg){
-      anexarSwipeItemCardapio(card, it);
-      anexarLongPressItem(card, it);
-    }
-  });
+  lista.forEach(function(it){ _renderCardItem(it, grid); });
+}
+
+// Renderiza UM card de item dentro do grid (reaproveitável)
+function _renderCardItem(it, grid){
+  var qtdNoCarrinho = _carrinho.filter(function(c){ return c.id===it.id; }).reduce(function(acc,c){ return acc+c.qtd; },0);
+  var card = document.createElement('div');
+  card.className = 'item-card';
+  var fotoHtml = it.foto
+    ? '<div class="item-foto"><img src="'+it.foto+'" alt="'+it.nome+'" loading="lazy" onerror="this.parentNode.innerHTML=\'🍽️\'"></div>'
+    : '<div class="item-foto">🍽️</div>';
+  var badge = qtdNoCarrinho > 0
+    ? '<div class="item-add-badge" style="position:absolute;bottom:6px;right:6px;">'+qtdNoCarrinho+'</div>'
+    : '';
+  var ehKg = it.tipoVenda === 'kg';
+  var sufixoPreco = ehKg ? '<span style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
+  card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+'</div>'+
+    '<div class="item-info">'+
+      '<div class="item-nome">'+esc(it.nome)+'</div>'+
+      (it.desc ? '<div class="item-desc">'+esc(it.desc)+'</div>' : '')+
+      '<div class="item-preco">R$ '+fmtPreco(it.preco)+sufixoPreco+'</div>'+
+    '</div>';
+  card.onclick = (function(item){ return function(){
+    if(_swipeItemDisparou){ _swipeItemDisparou = false; return; }
+    abrirModalItem(item);
+  }; })(it);
+  grid.appendChild(card);
+  if(!ehKg){
+    anexarSwipeItemCardapio(card, it);
+    anexarLongPressItem(card, it);
+  }
 }
 
 // Verifica se o item tem grupo de opção obrigatório (não pode ser adicionado direto)

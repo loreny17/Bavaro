@@ -7051,20 +7051,28 @@ function _extrairNumerosMesa(texto){
 // Interpreta "mais um chopp na 5" → {qtd, termoItem, mesa}
 function _interpretarComandoMaisItem(texto){
   var t = _normalizarVoz(texto);
-  // Remove a palavra "mais" do início
-  t = t.replace(/^mais\s+/, '');
+  // Remove a palavra "mais"/"mas" do início
+  t = t.replace(/^(mais|mas)\s+/, '');
   // Acha onde está a mesa: "na 5", "na mesa 5", "mesa 5"
   var matchMesa = t.match(/\bn?a?\s*mesa\s+(\d+)|\bna\s+(\d+)|\bmesa\s+(\d+)/);
-  if(!matchMesa) return null;
-  var mesaNum = parseInt(matchMesa[1] || matchMesa[2] || matchMesa[3], 10);
-  if(!mesaNum) return null;
-
-  // Remove a parte da mesa do texto pra sobrar "qtd + item"
-  var semMesa = t.substring(0, matchMesa.index).trim();
-  if(!semMesa) return null;
+  var mesaNum, semMesa;
+  if(matchMesa){
+    mesaNum = parseInt(matchMesa[1] || matchMesa[2] || matchMesa[3], 10);
+    semMesa = t.substring(0, matchMesa.index).trim();
+  } else {
+    // Sem "na"/"mesa" — pega o ÚLTIMO número da frase como mesa
+    var todosNumeros = t.match(/\d+/g);
+    if(!todosNumeros) return null;
+    var ultimoNum = todosNumeros[todosNumeros.length - 1];
+    mesaNum = parseInt(ultimoNum, 10);
+    // Remove esse último número do texto
+    var idx = t.lastIndexOf(ultimoNum);
+    semMesa = (t.substring(0, idx) + t.substring(idx + ultimoNum.length)).trim();
+  }
+  if(!mesaNum || !semMesa) return null;
 
   // Primeira palavra pode ser quantidade
-  var palavras = semMesa.split(/\s+/);
+  var palavras = semMesa.split(/\s+/).filter(Boolean);
   var qtd = 1, inicio = 0;
   if(_numerosVoz[palavras[0]] !== undefined){
     qtd = _numerosVoz[palavras[0]];
@@ -7081,17 +7089,79 @@ function _interpretarComandoMaisItem(texto){
 }
 
 // Mostra confirmação e adiciona o item rápido na mesa
-function _confirmarItemRapidoVoz(r){
+// permitirCriar=true → se a mesa estiver livre, cria a conta automaticamente
+function _confirmarItemRapidoVoz(r, permitirCriar){
   if(!r.item){
     showToast('❌ Item "' + r.termoItem + '" não encontrado', '#f87171', 4000);
     return;
   }
-  // Verifica se a mesa está aberta
+  // Verifica se a mesa está aberta — primeiro no cache
   var conta = _contasMesaCache[String(r.mesa)];
-  if(!conta){
-    showToast('⚠️ Mesa ' + r.mesa + ' não está aberta. Abra a mesa primeiro.', '#f7a34f', 4500);
+  if(conta){
+    _continuarItemRapidoVoz(r, conta);
     return;
   }
+  // Não está no cache — busca direto no Firestore (cache pode estar
+  // desatualizado, ex: logo após uma transferência de mesa)
+  showToast('Verificando mesa ' + r.mesa + '...', '#f7a34f', 1500);
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('mesa','==', r.mesa)
+    .where('status','==','aberta')
+    .limit(1).get()
+    .then(function(snap){
+      if(snap.empty){
+        if(permitirCriar){
+          // Mesa livre + veio do "Add Rápido" → cria a conta antes
+          _criarContaEAdicionar(r);
+          return;
+        }
+        _vibrarErro();
+        showToast('⚠️ Mesa ' + r.mesa + ' não está aberta. Abra a mesa primeiro.', '#f7a34f', 4500);
+        return;
+      }
+      var doc = snap.docs[0];
+      var contaFs = Object.assign({id: doc.id}, doc.data());
+      _contasMesaCache[String(r.mesa)] = contaFs; // atualiza o cache
+      _continuarItemRapidoVoz(r, contaFs);
+    })
+    .catch(function(e){
+      console.error('[VOZ-ITEM] erro buscar mesa:', e);
+      _vibrarErro();
+      showToast('❌ Erro ao verificar a mesa', '#f87171', 4000);
+    });
+}
+
+// Cria a conta de uma mesa livre e depois adiciona o item
+function _criarContaEAdicionar(r){
+  if(!confirm('🍽️ Mesa ' + r.mesa + ' está livre.\n\nAbrir a conta e adicionar?\n\n' +
+      r.qtd + 'x ' + r.item.nome + ' — R$ ' + fmtPreco(r.item.preco * r.qtd))){
+    return;
+  }
+  if(itemTemObrigatorio(r.item)){
+    showToast('⚠️ "' + r.item.nome + '" tem opções — adicione pela mesa', '#f7a34f', 4500);
+    return;
+  }
+  var novaConta = {
+    restauranteId: _restauranteId, tenantId: _tenantId || null,
+    mesa: r.mesa, status: 'aberta', itens: [], pagamentos: [],
+    subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
+    garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom
+  };
+  showToast('Abrindo mesa ' + r.mesa + '...', '#f7a34f', 1500);
+  fbDb.collection('contas_mesa').add(novaConta).then(function(ref){
+    var contaCriada = Object.assign({id: ref.id}, novaConta);
+    _contasMesaCache[String(r.mesa)] = contaCriada;
+    // Adiciona o item direto (pula a confirmação — já confirmou acima)
+    _enviarItemRapidoVoz(r, contaCriada);
+  }).catch(function(e){
+    console.error('[ADD-RAPIDO] erro criar conta:', e);
+    _vibrarErro();
+    showToast('❌ Erro ao abrir a mesa', '#f87171', 4000);
+  });
+}
+
+function _continuarItemRapidoVoz(r, conta){
   // Item com opção obrigatória → não dá pra mandar direto
   if(itemTemObrigatorio(r.item)){
     showToast('⚠️ "' + r.item.nome + '" tem opções — adicione pela mesa', '#f7a34f', 4500);
@@ -7215,21 +7285,75 @@ function _processarComandoMesa(texto){
     return;
   }
 
+  // IMPRIMIR: "imprimir mesa 5" — abre o fechamento E imprime direto
+  if(t.indexOf('imprimir') >= 0 || t.indexOf('imprime') >= 0){
+    if(numeros.length >= 1){
+      var impNum = numeros[0];
+      var contaImp = _contasMesaCache[String(impNum)];
+      if(!contaImp){
+        _vibrarErro();
+        showToast('⚠️ Mesa ' + impNum + ' não está aberta', '#f7a34f', 3500);
+        return;
+      }
+      _vibrarSucesso();
+      showToast('🖨️ Imprimindo conta da mesa ' + impNum + '...', '#4ade80', 2500);
+      // Abre a tela de fechar conta
+      if(typeof abrirFecharConta === 'function'){
+        abrirFecharConta(impNum);
+      }
+      // Imprime direto (espera a tela montar)
+      setTimeout(function(){
+        if(typeof imprimirContaMesa === 'function'){
+          imprimirContaMesa('final');
+        }
+      }, 700);
+    } else {
+      showToast('Diga: "imprimir mesa 5"', '#f7a34f', 3000);
+    }
+    return;
+  }
+
+  // VER PEDIDOS: "ver pedidos da mesa 5"
+  if(t.indexOf('pedidos') >= 0 || t.indexOf('pedido da') >= 0){
+    if(numeros.length >= 1){
+      var pNum = numeros[0];
+      var contaPed = _contasMesaCache[String(pNum)];
+      if(!contaPed){
+        _vibrarErro();
+        showToast('⚠️ Mesa ' + pNum + ' não está aberta', '#f7a34f', 3500);
+        return;
+      }
+      _vibrarSucesso();
+      showToast('Abrindo pedidos da mesa ' + pNum + '...', '#4ade80', 2000);
+      // Entra na mesa e vai pra aba de pedidos
+      if(typeof selecionarMesa === 'function'){
+        selecionarMesa(pNum);
+        setTimeout(function(){
+          if(typeof showTab === 'function') showTab('pedidos');
+        }, 700);
+      }
+    } else {
+      showToast('Diga: "ver pedidos da mesa 5"', '#f7a34f', 3000);
+    }
+    return;
+  }
+
   // ── "MAIS UM CHOPP NA 5" — adiciona item rápido numa mesa ──
   // (depois das ações; só cai aqui se não for transferir/fechar)
-  // Aceita: "mais X mesa N", "mais X na N", "X mesa N", "X na N"
+  // Aceita: "mais X mesa N", "mais X na N", "X mesa N", "X na N",
+  // e também "mais X N" (sem "na"/"mesa", o número final é a mesa)
   var temPadraoMesa = /\bna\s+\d+|\bmesa\s+\d+|\bna\s+mesa\s+\d+/.test(t);
-  if(temPadraoMesa){
+  var comecaComMais = (t.indexOf('mais ') === 0 || t.indexOf('mas ') === 0);
+  if(temPadraoMesa || (comecaComMais && numeros.length >= 1)){
     var resultadoItem = _interpretarComandoMaisItem(texto);
     if(resultadoItem && resultadoItem.item){
       _confirmarItemRapidoVoz(resultadoItem);
       return;
     }
     // Detectou padrão de item + mesa, mas não achou o item → avisa
-    // (só avisa se tinha algo além do número — senão deixa cair em "abrir mesa")
     if(resultadoItem && resultadoItem.termoItem && resultadoItem.termoItem.length >= 2){
       _vibrarErro();
-      showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado', '#f87171', 4000);
+      showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado no cardápio', '#f87171', 4000);
       return;
     }
   }
@@ -10085,6 +10209,97 @@ function showToast(msg, cor){
 // ════════════════════════════════════════
 var _mesaMenuAtual = null;
 
+// ═══════════════════════════════════════════════
+// ⚡ ADICIONAR ITEM RÁPIDO direto do mapa de mesas
+// Busca um item e adiciona à mesa sem precisar entrar nela.
+// ═══════════════════════════════════════════════
+function abrirAddRapidoMesa(){
+  var num = _mesaMenuAtual;
+  if(!num){ showToast('Mesa não identificada', '#f87171'); return; }
+  // Fecha o menu da mesa
+  var menu = document.getElementById('modal-mesa-menu');
+  if(menu) menu.classList.remove('show');
+
+  var ex = document.getElementById('modal-add-rapido');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-add-rapido';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:1.5rem;">⚡</div>' +
+        '<div style="flex:1;"><div style="font-weight:700;font-size:1.05rem;">Adicionar à Mesa ' + num + '</div>' +
+        '<div style="font-size:0.72rem;color:var(--muted);">Busque o item — confirma antes de enviar</div></div>' +
+        '<button onclick="document.getElementById(\'modal-add-rapido\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:12px 14px;border-bottom:1px solid var(--border2);">' +
+        '<input type="text" id="add-rapido-busca" placeholder="🔍 Buscar item..." autocomplete="off" ' +
+          'style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:0.92rem;font-family:inherit;outline:none;box-sizing:border-box;">' +
+      '</div>' +
+      '<div id="add-rapido-lista" style="flex:1;overflow-y:auto;padding:10px 14px;">' +
+        '<div style="text-align:center;color:var(--muted);padding:24px;font-size:0.85rem;">Digite o nome do item acima</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  try{ pushHistory('modal-add-rapido'); }catch(e){}
+
+  var input = document.getElementById('add-rapido-busca');
+  input.addEventListener('input', function(){ _renderAddRapidoLista(num, input.value); });
+  setTimeout(function(){ input.focus(); }, 200);
+}
+
+function _renderAddRapidoLista(mesaNum, busca){
+  var lista = document.getElementById('add-rapido-lista');
+  if(!lista) return;
+  busca = (busca||'').toLowerCase().trim();
+  if(!busca){
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px;font-size:0.85rem;">Digite o nome do item acima</div>';
+    return;
+  }
+  var encontrados = _itens.filter(function(i){
+    if(!i.disponivel) return false;
+    var nome = _normalizarVoz(i.nome);
+    var pv = i.palavrasVoz ? _normalizarVoz(i.palavrasVoz) : '';
+    var b = _normalizarVoz(busca);
+    return nome.indexOf(b) >= 0 || pv.indexOf(b) >= 0;
+  }).slice(0, 30);
+
+  if(!encontrados.length){
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px;font-size:0.85rem;">Nenhum item encontrado</div>';
+    return;
+  }
+  lista.innerHTML = encontrados.map(function(it){
+    return '<div onclick="_addRapidoEscolher(\'' + it.id + '\',' + mesaNum + ')" ' +
+      'style="display:flex;align-items:center;gap:10px;padding:11px;background:var(--bg);border:1px solid var(--border2);border-radius:9px;margin-bottom:6px;cursor:pointer;">' +
+      '<div style="flex:1;">' +
+        '<div style="font-weight:600;font-size:0.9rem;">' + esc(it.nome) + '</div>' +
+        '<div style="font-size:0.74rem;color:var(--accent);">R$ ' + fmtPreco(it.preco) + '</div>' +
+      '</div>' +
+      '<div style="font-size:1.3rem;color:var(--accent);">+</div>' +
+    '</div>';
+  }).join('');
+}
+
+function _addRapidoEscolher(itemId, mesaNum){
+  var item = _itens.find(function(i){ return i.id === itemId; });
+  if(!item){ showToast('Item não encontrado', '#f87171'); return; }
+  // Pergunta a quantidade
+  var qtdStr = prompt('Quantos "' + item.nome + '"?\n\nDigite a quantidade:', '1');
+  if(qtdStr === null) return;
+  var qtd = parseInt(qtdStr, 10);
+  if(!qtd || qtd < 1){ showToast('Quantidade inválida', '#f7a34f'); return; }
+
+  var mod = document.getElementById('modal-add-rapido');
+  if(mod) mod.remove();
+
+  // Reusa a mesma lógica do comando de voz (com confirmação + fallback Firestore)
+  // permitirCriar=true → se a mesa estiver livre, cria a conta
+  _confirmarItemRapidoVoz({ qtd: qtd, termoItem: item.nome, mesa: mesaNum, item: item }, true);
+}
+
 function abrirMenuMesa(num, eOcupada){
   // Se o app ficou tempo bloqueado, revalida conexão (silencioso)
   if(typeof revalidarConexaoFirestore === 'function') revalidarConexaoFirestore();
@@ -10108,6 +10323,13 @@ function abrirMenuMesa(num, eOcupada){
         '<div style="flex:1;text-align:left;">'+
           '<div class="titulo-grande">Fazer Pedido</div>'+
           '<div class="sub-pequeno">Adicionar itens à mesa</div>'+
+        '</div>'+
+      '</button>'+
+      '<button class="mesa-menu-item" onclick="abrirAddRapidoMesa()">'+
+        '<span class="icone-grande">⚡</span>'+
+        '<div style="flex:1;text-align:left;">'+
+          '<div class="titulo-grande">Adicionar Item Rápido</div>'+
+          '<div class="sub-pequeno">Busca rápida — adiciona sem entrar na mesa</div>'+
         '</div>'+
       '</button>'+
       '<button class="mesa-menu-item" onclick="acaoMesa(\'ver-pedidos\')">'+
@@ -10143,6 +10365,13 @@ function abrirMenuMesa(num, eOcupada){
         '<div style="flex:1;text-align:left;">'+
           '<div class="titulo-grande" style="color:var(--accent);">Abrir Conta da Mesa</div>'+
           '<div class="sub-pequeno">Cria a conta e libera para fazer pedidos</div>'+
+        '</div>'+
+      '</button>'+
+      '<button class="mesa-menu-item" onclick="abrirAddRapidoMesa()">'+
+        '<span class="icone-grande">⚡</span>'+
+        '<div style="flex:1;text-align:left;">'+
+          '<div class="titulo-grande">Adicionar Item Rápido</div>'+
+          '<div class="sub-pequeno">Abre a conta e adiciona o item de uma vez</div>'+
         '</div>'+
       '</button>';
   }
@@ -12395,7 +12624,7 @@ window.addEventListener('popstate', function(e){
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
-    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g', 'modal-confirma-voz'];
+    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g', 'modal-confirma-voz', 'modal-add-rapido'];
   for(var i = 0; i < modaisDinamicos.length; i++){
     var md = document.getElementById(modaisDinamicos[i]);
     if(md){

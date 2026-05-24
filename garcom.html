@@ -6989,9 +6989,134 @@ function _extrairNumerosMesa(texto){
   return numeros;
 }
 
+// Interpreta "mais um chopp na 5" → {qtd, termoItem, mesa}
+function _interpretarComandoMaisItem(texto){
+  var t = _normalizarVoz(texto);
+  // Remove a palavra "mais" do início
+  t = t.replace(/^mais\s+/, '');
+  // Acha onde está a mesa: "na 5", "na mesa 5", "mesa 5"
+  var matchMesa = t.match(/\bn?a?\s*mesa\s+(\d+)|\bna\s+(\d+)|\bmesa\s+(\d+)/);
+  if(!matchMesa) return null;
+  var mesaNum = parseInt(matchMesa[1] || matchMesa[2] || matchMesa[3], 10);
+  if(!mesaNum) return null;
+
+  // Remove a parte da mesa do texto pra sobrar "qtd + item"
+  var semMesa = t.substring(0, matchMesa.index).trim();
+  if(!semMesa) return null;
+
+  // Primeira palavra pode ser quantidade
+  var palavras = semMesa.split(/\s+/);
+  var qtd = 1, inicio = 0;
+  if(_numerosVoz[palavras[0]] !== undefined){
+    qtd = _numerosVoz[palavras[0]];
+    inicio = 1;
+  } else if(/^\d+$/.test(palavras[0]) && parseInt(palavras[0],10) <= 20){
+    qtd = parseInt(palavras[0],10);
+    inicio = 1;
+  }
+  var termoItem = palavras.slice(inicio).join(' ').trim();
+  if(!termoItem) return null;
+
+  var item = _acharItemPorVoz(termoItem);
+  return { qtd: qtd, termoItem: termoItem, mesa: mesaNum, item: item };
+}
+
+// Mostra confirmação e adiciona o item rápido na mesa
+function _confirmarItemRapidoVoz(r){
+  if(!r.item){
+    showToast('❌ Item "' + r.termoItem + '" não encontrado', '#f87171', 4000);
+    return;
+  }
+  // Verifica se a mesa está aberta
+  var conta = _contasMesaCache[String(r.mesa)];
+  if(!conta){
+    showToast('⚠️ Mesa ' + r.mesa + ' não está aberta. Abra a mesa primeiro.', '#f7a34f', 4500);
+    return;
+  }
+  // Item com opção obrigatória → não dá pra mandar direto
+  if(itemTemObrigatorio(r.item)){
+    showToast('⚠️ "' + r.item.nome + '" tem opções — adicione pela mesa', '#f7a34f', 4500);
+    return;
+  }
+  // Confirmação
+  if(!confirm('🍽️ Adicionar à Mesa ' + r.mesa + '?\n\n' +
+      r.qtd + 'x ' + r.item.nome + '\n' +
+      'R$ ' + fmtPreco(r.item.preco * r.qtd))){
+    return;
+  }
+  _enviarItemRapidoVoz(r, conta);
+}
+
+// Cria o pedido na mesa e adiciona à conta
+function _enviarItemRapidoVoz(r, conta){
+  var agora = Date.now();
+  var item = {
+    id: r.item.id, nome: r.item.nome, preco: r.item.preco, qtd: r.qtd,
+    obs: '', selecoes: [], precoBase: r.item.preco, extras: 0,
+    cozinhaCriadoEm: agora
+  };
+  var total = r.item.preco * r.qtd;
+
+  // Cria o pedido
+  var pedido = {
+    garcom: _nomeGarcom,
+    mesa: r.mesa,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    contaId: conta.id,
+    tipoConta: 'mesa',
+    status: 'preparo',
+    criadoEm: agora,
+    itens: [item],
+    total: total,
+    teste: _modoTeste ? true : false,
+    imprimir: true,
+    origemVoz: true
+  };
+
+  showToast('⏳ Enviando ' + r.qtd + 'x ' + r.item.nome + ' pra mesa ' + r.mesa + '...', '#f7a34f', 2000);
+
+  fbDb.collection('pedidos').add(pedido).then(function(ref){
+    var pedidoId = ref.id;
+    // Adiciona o item à conta_mesa
+    var itensConta = (conta.itens||[]).slice();
+    itensConta.push({
+      itemKey: pedidoId + '_' + Math.random().toString(36).substring(2,8),
+      pedidoId: pedidoId,
+      id: r.item.id, nome: r.item.nome, preco: r.item.preco, qtd: r.qtd,
+      obs: '', selecoes: [], status: 'ativo', pagamentoId: null,
+      cozinhaCriadoEm: agora,
+      adicionadoEm: agora, adicionadoPor: _nomeGarcom
+    });
+    var totais = calcularTotaisConta({itens: itensConta, pagamentos: conta.pagamentos||[]});
+    return fbDb.collection('contas_mesa').doc(conta.id).update({
+      itens: itensConta,
+      subtotal: totais.subtotal, taxa10: totais.taxa10, total: totais.total,
+      pagoTotal: totais.pagoTotal, restante: totais.restante,
+      atualizadoEm: agora
+    });
+  }).then(function(){
+    showToast('✓ ' + r.qtd + 'x ' + r.item.nome + ' → Mesa ' + r.mesa, '#4ade80', 3000);
+    try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+  }).catch(function(e){
+    console.error('[VOZ-ITEM] erro:', e);
+    showToast('❌ Erro ao adicionar — tente de novo', '#f87171', 4000);
+  });
+}
+
 function _processarComandoMesa(texto){
   var t = _normalizarVoz(texto);
   var numeros = _extrairNumerosMesa(texto);
+
+  // ── "MAIS UM CHOPP NA 5" — adiciona item rápido numa mesa ──
+  // Detecta padrão: (mais) QTD ITEM (na|mesa) NUMERO
+  if(t.indexOf('mais ') === 0 || /\bna\s+\d+|\bna\s+mesa|\bmesa\s+\d+/.test(t)){
+    var resultado = _interpretarComandoMaisItem(texto);
+    if(resultado){
+      _confirmarItemRapidoVoz(resultado);
+      return;
+    }
+  }
 
   // TRANSFERIR: "transferir mesa 5 para 8"
   if(t.indexOf('transferir') >= 0 || t.indexOf('transfere') >= 0 || t.indexOf('passar') >= 0){

@@ -7168,15 +7168,8 @@ function _processarComandoMesa(texto){
   var t = _normalizarVoz(texto);
   var numeros = _extrairNumerosMesa(texto);
 
-  // ── "MAIS UM CHOPP NA 5" — adiciona item rápido numa mesa ──
-  // Detecta padrão: (mais) QTD ITEM (na|mesa) NUMERO
-  if(t.indexOf('mais ') === 0 || /\bna\s+\d+|\bna\s+mesa|\bmesa\s+\d+/.test(t)){
-    var resultado = _interpretarComandoMaisItem(texto);
-    if(resultado){
-      _confirmarItemRapidoVoz(resultado);
-      return;
-    }
-  }
+  // ═══ PRIMEIRO: comandos de AÇÃO (transferir/fechar) têm prioridade ═══
+  // Senão "transferir mesa 5..." seria confundido com pedido de item.
 
   // TRANSFERIR: "transferir mesa 5 para 8"
   if(t.indexOf('transferir') >= 0 || t.indexOf('transfere') >= 0 || t.indexOf('passar') >= 0){
@@ -7220,6 +7213,22 @@ function _processarComandoMesa(texto){
       showToast('Diga: "fechar mesa 5"', '#f7a34f', 3000);
     }
     return;
+  }
+
+  // ── "MAIS UM CHOPP NA 5" — adiciona item rápido numa mesa ──
+  // (depois das ações; só cai aqui se não for transferir/fechar)
+  if(t.indexOf('mais ') === 0 || /\bna\s+\d+|\bna\s+mesa\s+\d+/.test(t)){
+    var resultadoItem = _interpretarComandoMaisItem(texto);
+    if(resultadoItem && resultadoItem.item){
+      _confirmarItemRapidoVoz(resultadoItem);
+      return;
+    }
+    // Se detectou padrão de item mas não achou o item, avisa
+    if(resultadoItem && !resultadoItem.item){
+      _vibrarErro();
+      showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado', '#f87171', 4000);
+      return;
+    }
   }
 
   // ABRIR / SÓ O NÚMERO: "abrir mesa 5" / "mesa 5"

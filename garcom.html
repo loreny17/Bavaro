@@ -469,6 +469,20 @@ header{
 .success-screen{text-align:center;padding:30px 20px;}
 .success-icon{font-size:4rem;margin-bottom:18px;animation:bounce 0.5s ease-out;}
 @keyframes bounce{0%{transform:scale(0.5);}70%{transform:scale(1.15);}100%{transform:scale(1);}}
+/* ─── Animação de "ouvindo" (ondas de voz) ─── */
+@keyframes vozOnda{0%,100%{transform:scaleY(0.3);}50%{transform:scaleY(1);}}
+@keyframes vozPulso{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.5);}50%{transform:scale(1.06);box-shadow:0 0 0 14px rgba(220,38,38,0);}}
+#voz-overlay{position:fixed;left:0;right:0;bottom:0;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px 34px;background:linear-gradient(to top,rgba(13,13,13,0.98),rgba(13,13,13,0.92));border-top:2px solid #dc2626;animation:bannerSlideDown 0.25s ease;}
+.voz-mic-circulo{width:74px;height:74px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;animation:vozPulso 1.4s ease-in-out infinite;}
+.voz-ondas{display:flex;align-items:center;gap:5px;height:34px;margin-top:14px;}
+.voz-ondas span{width:5px;height:100%;background:#dc2626;border-radius:3px;animation:vozOnda 0.9s ease-in-out infinite;}
+.voz-ondas span:nth-child(1){animation-delay:0s;}
+.voz-ondas span:nth-child(2){animation-delay:0.15s;}
+.voz-ondas span:nth-child(3){animation-delay:0.3s;}
+.voz-ondas span:nth-child(4){animation-delay:0.45s;}
+.voz-ondas span:nth-child(5){animation-delay:0.2s;}
+.voz-ondas span:nth-child(6){animation-delay:0.35s;}
+.voz-ondas span:nth-child(7){animation-delay:0.1s;}
 .success-titulo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:0.08em;color:var(--success);margin-bottom:8px;}
 .success-sub{font-size:0.88rem;color:var(--muted);line-height:1.5;}
 .success-num{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--accent);margin-top:12px;}
@@ -6925,6 +6939,47 @@ var _reconhecimentoVoz = null;
 // "abrir mesa 5" / "transferir mesa 5 para 8" / "fechar mesa 5"
 // ═══════════════════════════════════════════════
 var _reconhecimentoVozMesa = null;
+// ─── Overlay visual de "ouvindo" (ondas + vibração) ───
+function _mostrarOverlayVoz(titulo){
+  _esconderOverlayVoz();
+  var ov = document.createElement('div');
+  ov.id = 'voz-overlay';
+  ov.innerHTML =
+    '<div class="voz-mic-circulo">' +
+      '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>' +
+        '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>' +
+        '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>' +
+      '</svg>' +
+    '</div>' +
+    '<div class="voz-ondas"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>' +
+    '<div style="margin-top:14px;font-weight:700;font-size:1rem;color:#fff;">' + (titulo || 'Ouvindo...') + '</div>' +
+    '<div style="font-size:0.76rem;color:#999;margin-top:3px;">Toque pra cancelar</div>';
+  ov.onclick = function(){
+    // Cancela o reconhecimento ao tocar no overlay
+    if(_reconhecimentoVoz){ try{ _reconhecimentoVoz.stop(); }catch(e){} _reconhecimentoVoz = null; }
+    if(_reconhecimentoVozMesa){ try{ _reconhecimentoVozMesa.stop(); }catch(e){} _reconhecimentoVozMesa = null; }
+    _esconderOverlayVoz();
+  };
+  document.body.appendChild(ov);
+  // Vibração curta ao começar a ouvir
+  try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+}
+
+function _esconderOverlayVoz(){
+  var ov = document.getElementById('voz-overlay');
+  if(ov) ov.remove();
+}
+
+// Vibração de sucesso (2 toques curtos)
+function _vibrarSucesso(){
+  try{ if(navigator.vibrate) navigator.vibrate([50, 60, 50]); }catch(e){}
+}
+// Vibração de erro (1 toque longo)
+function _vibrarErro(){
+  try{ if(navigator.vibrate) navigator.vibrate(200); }catch(e){}
+}
+
 function iniciarVozMesa(){
   var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!Recon){
@@ -6951,6 +7006,8 @@ function iniciarVozMesa(){
     btn.style.borderColor = '#dc2626';
     btn.style.color = '#fff';
   }
+  // Overlay visual "ouvindo" + vibração
+  _mostrarOverlayVoz('Diga o comando da mesa');
 
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();
@@ -6960,9 +7017,11 @@ function iniciarVozMesa(){
     var msg = 'Não entendi, tente de novo';
     if(e.error === 'not-allowed') msg = 'Permita o microfone';
     else if(e.error === 'no-speech') msg = 'Não ouvi nada';
+    _vibrarErro();
     showToast(msg, '#f7a34f', 3000);
   };
   recon.onend = function(){
+    _esconderOverlayVoz();
     _reconhecimentoVozMesa = null;
     if(btn){
       btn.style.background = 'var(--surface2)';
@@ -7097,9 +7156,10 @@ function _enviarItemRapidoVoz(r, conta){
     });
   }).then(function(){
     showToast('✓ ' + r.qtd + 'x ' + r.item.nome + ' → Mesa ' + r.mesa, '#4ade80', 3000);
-    try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+    _vibrarSucesso();
   }).catch(function(e){
     console.error('[VOZ-ITEM] erro:', e);
+    _vibrarErro();
     showToast('❌ Erro ao adicionar — tente de novo', '#f87171', 4000);
   });
 }
@@ -7165,6 +7225,7 @@ function _processarComandoMesa(texto){
   // ABRIR / SÓ O NÚMERO: "abrir mesa 5" / "mesa 5"
   if(numeros.length >= 1){
     var num = numeros[0];
+    _vibrarSucesso();
     showToast('Abrindo mesa ' + num + '...', '#4ade80', 2000);
     if(typeof selecionarMesa === 'function'){
       selecionarMesa(num);
@@ -7172,6 +7233,7 @@ function _processarComandoMesa(texto){
     return;
   }
 
+  _vibrarErro();
   showToast('Não entendi. Diga "mesa 5", "fechar mesa 5" ou "transferir mesa 5 para 8"', '#f7a34f', 4000);
 }
 
@@ -7203,8 +7265,11 @@ function iniciarBuscaVoz(){
     btn.style.background = '#dc2626';
     btn.style.borderColor = '#dc2626';
     btn.style.color = '#fff';
+    btn.style.animation = 'vozPulso 1.4s ease-in-out infinite';
   }
   if(input) input.placeholder = '🔴 Ouvindo... fale o pedido';
+  // Vibração ao começar a ouvir
+  try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
 
   recon.onresult = function(e){
     // Junta tudo que foi reconhecido até agora
@@ -7245,6 +7310,7 @@ function iniciarBuscaVoz(){
     } else if(e.error === 'no-speech'){
       msg = 'Não ouvi nada — tente de novo';
     }
+    _vibrarErro();
     showToast(msg, '#f7a34f', 3000);
   };
 
@@ -7254,6 +7320,7 @@ function iniciarBuscaVoz(){
       btn.style.background = 'var(--surface2)';
       btn.style.borderColor = 'var(--border2)';
       btn.style.color = 'var(--accent)';
+      btn.style.animation = '';
     }
     if(input) input.placeholder = 'Buscar no cardápio...';
   };

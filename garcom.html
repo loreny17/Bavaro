@@ -643,7 +643,18 @@ header{
     </button>
   </div>
   <div class="mesa-search" id="mesa-search-bar">
-    <input type="text" id="mesa-search-input" placeholder="Buscar mesa..." inputmode="numeric" oninput="renderMesas()">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="mesa-search-input" placeholder="Buscar mesa..." inputmode="numeric" oninput="renderMesas()" style="flex:1;">
+      <button id="btn-voz-mesa" onclick="iniciarVozMesa()" title="Comando de voz"
+        style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+    </div>
   </div>
   <div class="mesa-search" id="comanda-search-bar" style="display:none;">
     <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
@@ -1168,11 +1179,13 @@ var _grupos = [];
 //  INIT
 // ════════════════════════════════════════
 window.addEventListener('load', function(){
-  // Esconde o botão de busca por voz se o aparelho não suportar
+  // Esconde os botões de voz se o aparelho não suportar
   try{
     if(!(window.SpeechRecognition || window.webkitSpeechRecognition)){
       var bv = document.getElementById('btn-busca-voz');
       if(bv) bv.style.display = 'none';
+      var bvm = document.getElementById('btn-voz-mesa');
+      if(bvm) bvm.style.display = 'none';
     }
   }catch(e){}
   try{
@@ -6907,6 +6920,123 @@ function renderCatBar(){
 // 🎤 BUSCA POR VOZ no cardápio
 // ═══════════════════════════════════════════════
 var _reconhecimentoVoz = null;
+// ═══════════════════════════════════════════════
+// 🎤 COMANDO DE VOZ no mapa de mesas
+// "abrir mesa 5" / "transferir mesa 5 para 8" / "fechar mesa 5"
+// ═══════════════════════════════════════════════
+var _reconhecimentoVozMesa = null;
+function iniciarVozMesa(){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){
+    showToast('Comando de voz não disponível neste aparelho', '#f7a34f', 3000);
+    return;
+  }
+  var btn = document.getElementById('btn-voz-mesa');
+
+  if(_reconhecimentoVozMesa){
+    try{ _reconhecimentoVozMesa.stop(); }catch(e){}
+    _reconhecimentoVozMesa = null;
+    return;
+  }
+
+  var recon = new Recon();
+  recon.lang = 'pt-BR';
+  recon.continuous = false;
+  recon.interimResults = false;
+  recon.maxAlternatives = 1;
+  _reconhecimentoVozMesa = recon;
+
+  if(btn){
+    btn.style.background = '#dc2626';
+    btn.style.borderColor = '#dc2626';
+    btn.style.color = '#fff';
+  }
+
+  recon.onresult = function(e){
+    var texto = (e.results[0][0].transcript || '').trim();
+    _processarComandoMesa(texto);
+  };
+  recon.onerror = function(e){
+    var msg = 'Não entendi, tente de novo';
+    if(e.error === 'not-allowed') msg = 'Permita o microfone';
+    else if(e.error === 'no-speech') msg = 'Não ouvi nada';
+    showToast(msg, '#f7a34f', 3000);
+  };
+  recon.onend = function(){
+    _reconhecimentoVozMesa = null;
+    if(btn){
+      btn.style.background = 'var(--surface2)';
+      btn.style.borderColor = 'var(--border2)';
+      btn.style.color = 'var(--accent)';
+    }
+  };
+  try{ recon.start(); }
+  catch(e){ _reconhecimentoVozMesa = null; showToast('Erro ao iniciar voz', '#f87171'); }
+}
+
+// Extrai números de um texto falado (dígitos ou por extenso)
+function _extrairNumerosMesa(texto){
+  var t = _normalizarVoz(texto);
+  var palavras = t.split(/\s+/);
+  var numeros = [];
+  palavras.forEach(function(p){
+    if(/^\d+$/.test(p)){
+      numeros.push(parseInt(p, 10));
+    } else if(_numerosVoz[p] !== undefined){
+      numeros.push(_numerosVoz[p]);
+    }
+  });
+  return numeros;
+}
+
+function _processarComandoMesa(texto){
+  var t = _normalizarVoz(texto);
+  var numeros = _extrairNumerosMesa(texto);
+
+  // TRANSFERIR: "transferir mesa 5 para 8"
+  if(t.indexOf('transferir') >= 0 || t.indexOf('transfere') >= 0 || t.indexOf('passar') >= 0){
+    if(numeros.length >= 2){
+      var origem = numeros[0], destino = numeros[1];
+      if(confirm('🔄 Transferir a Mesa ' + origem + ' para a Mesa ' + destino + '?')){
+        if(typeof abrirTransferirMesa === 'function'){
+          // Abre a tela de transferência da mesa origem
+          abrirTransferirMesa(origem);
+          showToast('Confirme a transferência pra mesa ' + destino, '#4ade80', 3000);
+        }
+      }
+    } else {
+      showToast('Diga: "transferir mesa 5 para 8"', '#f7a34f', 3000);
+    }
+    return;
+  }
+
+  // FECHAR / CONTA: "fechar mesa 5" / "conta da mesa 5"
+  if(t.indexOf('fechar') >= 0 || t.indexOf('conta') >= 0 || t.indexOf('fecha') >= 0){
+    if(numeros.length >= 1){
+      var mNum = numeros[0];
+      showToast('Abrindo conta da mesa ' + mNum + '...', '#4ade80', 2000);
+      if(typeof abrirFecharConta === 'function'){
+        abrirFecharConta(mNum);
+      }
+    } else {
+      showToast('Diga: "fechar mesa 5"', '#f7a34f', 3000);
+    }
+    return;
+  }
+
+  // ABRIR / SÓ O NÚMERO: "abrir mesa 5" / "mesa 5"
+  if(numeros.length >= 1){
+    var num = numeros[0];
+    showToast('Abrindo mesa ' + num + '...', '#4ade80', 2000);
+    if(typeof selecionarMesa === 'function'){
+      selecionarMesa(num);
+    }
+    return;
+  }
+
+  showToast('Não entendi. Diga "mesa 5", "fechar mesa 5" ou "transferir mesa 5 para 8"', '#f7a34f', 4000);
+}
+
 function iniciarBuscaVoz(){
   var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!Recon){

@@ -6997,12 +6997,25 @@ function _processarComandoMesa(texto){
   if(t.indexOf('transferir') >= 0 || t.indexOf('transfere') >= 0 || t.indexOf('passar') >= 0){
     if(numeros.length >= 2){
       var origem = numeros[0], destino = numeros[1];
-      if(confirm('🔄 Transferir a Mesa ' + origem + ' para a Mesa ' + destino + '?')){
-        if(typeof abrirTransferirMesa === 'function'){
-          // Abre a tela de transferência da mesa origem
-          abrirTransferirMesa(origem);
-          showToast('Confirme a transferência pra mesa ' + destino, '#4ade80', 3000);
-        }
+      // Verifica se a mesa origem tem conta aberta
+      var contaOrigem = _contasMesaCache[String(origem)];
+      if(!contaOrigem){
+        showToast('Mesa ' + origem + ' não tem conta aberta', '#f7a34f', 3500);
+        return;
+      }
+      var itensAtivos = (contaOrigem.itens||[]).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago'; });
+      if(!itensAtivos.length){
+        showToast('Mesa ' + origem + ' não tem itens pra transferir', '#f7a34f', 3500);
+        return;
+      }
+      var totalT = itensAtivos.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+      if(confirm('🔄 Transferir a Mesa ' + origem + ' INTEIRA para a Mesa ' + destino + '?\n\n' +
+          itensAtivos.length + ' item(ns) — R$ ' + fmtPreco(totalT))){
+        // Configura o estado de transferência e executa DIRETO (sem abrir tela)
+        _transferirOrigemNum = origem;
+        _transferirModo = 'mesa';
+        _transferirItensSel = {};
+        confirmarTransferencia(destino, true); // true = já confirmado pela voz
       }
     } else {
       showToast('Diga: "transferir mesa 5 para 8"', '#f7a34f', 3000);
@@ -10318,7 +10331,7 @@ function escolherDestinoTransferencia(){
 }
 
 // ─── Confirma e executa a transferência ───
-function confirmarTransferencia(numDestino){
+function confirmarTransferencia(numDestino, pularConfirmacao){
   var conta = _contasMesaCache[String(_transferirOrigemNum)];
   if(!conta){ showToast('Conta não encontrada','#f87171'); return; }
 
@@ -10332,7 +10345,10 @@ function confirmarTransferencia(numDestino){
   if(!itensSelecionados.length){ showToast('Nenhum item selecionado','#f7a34f'); return; }
 
   var totalTransfer = itensSelecionados.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
-  if(!confirm('Transferir '+itensSelecionados.length+' item(s) (R$ '+fmtPreco(totalTransfer)+') da Mesa '+_transferirOrigemNum+' para a Mesa '+numDestino+'?\n\n⚠️ Esta ação não dispara reimpressão da comanda.')) return;
+  // Pula o confirm interno se já foi confirmado antes (ex: comando de voz)
+  if(!pularConfirmacao){
+    if(!confirm('Transferir '+itensSelecionados.length+' item(s) (R$ '+fmtPreco(totalTransfer)+') da Mesa '+_transferirOrigemNum+' para a Mesa '+numDestino+'?\n\n⚠️ Esta ação não dispara reimpressão da comanda.')) return;
+  }
 
   var contaDestino = _contasMesaCache[String(numDestino)];
   var promiseDestino;

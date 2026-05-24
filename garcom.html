@@ -7008,22 +7008,63 @@ function _normalizarVoz(s){
 function _acharItemPorVoz(termo){
   termo = _normalizarVoz(termo);
   if(!termo) return null;
+  // Remove números soltos do termo (ex: "pilsen 500" se "500" atrapalhar,
+  // mas mantém o termo completo pra tentar primeiro)
   var disp = _itens.filter(function(i){ return i.disponivel; });
-  var a = disp.find(function(i){ return _normalizarVoz(i.nome) === termo; });
-  if(a) return a;
-  a = disp.find(function(i){
-    if(!i.palavrasVoz) return false;
-    return i.palavrasVoz.split(',').map(function(p){ return _normalizarVoz(p); }).indexOf(termo) >= 0;
+  if(!disp.length) return null;
+
+  // Função: lista de palavras-chave de um item (nome + palavrasVoz cadastradas)
+  function chavesDoItem(it){
+    var lista = [_normalizarVoz(it.nome)];
+    if(it.palavrasVoz){
+      it.palavrasVoz.split(',').forEach(function(p){
+        var n = _normalizarVoz(p);
+        if(n) lista.push(n);
+      });
+    }
+    return lista;
+  }
+
+  // ── Nível 1: match EXATO (nome ou palavra-chave igual ao termo) ──
+  var a = disp.find(function(i){
+    return chavesDoItem(i).indexOf(termo) >= 0;
   });
   if(a) return a;
-  a = disp.find(function(i){ return _normalizarVoz(i.nome).indexOf(termo) >= 0; });
-  if(a) return a;
+
+  // ── Nível 2: o termo falado CONTÉM a chave inteira, ou vice-versa ──
+  // Ex: falou "pilsen 500", item tem nome "pilsen 500 ml" → match
   a = disp.find(function(i){
-    if(!i.palavrasVoz) return false;
-    return i.palavrasVoz.split(',').map(function(p){ return _normalizarVoz(p); })
-      .some(function(p){ return p && (p.indexOf(termo)>=0 || termo.indexOf(p)>=0); });
+    return chavesDoItem(i).some(function(chave){
+      if(chave.length < 3) return false; // ignora chaves muito curtas
+      return chave === termo || chave.indexOf(termo) >= 0 || termo.indexOf(chave) >= 0;
+    });
   });
-  return a || null;
+  if(a) return a;
+
+  // ── Nível 3: match por PALAVRAS em comum (pelo menos 1 palavra significativa) ──
+  // Quebra o termo em palavras e procura item que tenha essas palavras.
+  var palavrasTermo = termo.split(/\s+/).filter(function(w){ return w.length >= 3; });
+  if(palavrasTermo.length){
+    // Pontua cada item pela quantidade de palavras que batem
+    var melhor = null, melhorPonto = 0;
+    disp.forEach(function(i){
+      var texto = chavesDoItem(i).join(' ');
+      var ponto = 0;
+      palavrasTermo.forEach(function(w){
+        // Palavra inteira presente no texto do item
+        var regex = new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'i');
+        if(regex.test(texto)) ponto++;
+      });
+      if(ponto > melhorPonto){
+        melhorPonto = ponto;
+        melhor = i;
+      }
+    });
+    // Só aceita se bateu pelo menos 1 palavra significativa
+    if(melhor && melhorPonto >= 1) return melhor;
+  }
+
+  return null;
 }
 // Interpreta "duas coca e uma fritas" → lista de itens
 function _interpretarPedidoVoz(texto){

@@ -6939,11 +6939,19 @@ function iniciarBuscaVoz(){
 
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();
-    if(input){
-      input.value = texto;
-      renderItens(); // filtra o cardápio com o que foi falado
+    // Tenta interpretar como pedido ("duas coca e uma fritas")
+    var itensDetectados = _interpretarPedidoVoz(texto);
+    if(itensDetectados && itensDetectados.length > 0){
+      // Achou itens → abre tela de confirmação
+      _mostrarConfirmacaoVoz(texto, itensDetectados);
+    } else {
+      // Não detectou itens → usa como busca simples
+      if(input){
+        input.value = texto;
+        renderItens();
+      }
+      showToast('🎤 "' + texto + '"', '#4ade80', 2000);
     }
-    showToast('🎤 "' + texto + '"', '#4ade80', 2000);
   };
 
   recon.onerror = function(e){
@@ -6980,6 +6988,130 @@ function limparBuscaCardapio(){
   var input = document.getElementById('busca-input');
   if(input) input.value = '';
   _catAtiva = null; // volta pra grade de categorias
+}
+
+// Converte número falado em dígito
+var _numerosVoz = {
+  'um':1,'uma':1,'dois':2,'duas':2,'tres':3,'três':3,'quatro':4,'cinco':5,
+  'seis':6,'sete':7,'oito':8,'nove':9,'dez':10,
+  '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10
+};
+function _normalizarVoz(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+}
+// Procura item pelo nome OU palavras-chave de voz
+function _acharItemPorVoz(termo){
+  termo = _normalizarVoz(termo);
+  if(!termo) return null;
+  var disp = _itens.filter(function(i){ return i.disponivel; });
+  var a = disp.find(function(i){ return _normalizarVoz(i.nome) === termo; });
+  if(a) return a;
+  a = disp.find(function(i){
+    if(!i.palavrasVoz) return false;
+    return i.palavrasVoz.split(',').map(function(p){ return _normalizarVoz(p); }).indexOf(termo) >= 0;
+  });
+  if(a) return a;
+  a = disp.find(function(i){ return _normalizarVoz(i.nome).indexOf(termo) >= 0; });
+  if(a) return a;
+  a = disp.find(function(i){
+    if(!i.palavrasVoz) return false;
+    return i.palavrasVoz.split(',').map(function(p){ return _normalizarVoz(p); })
+      .some(function(p){ return p && (p.indexOf(termo)>=0 || termo.indexOf(p)>=0); });
+  });
+  return a || null;
+}
+// Interpreta "duas coca e uma fritas" → lista de itens
+function _interpretarPedidoVoz(texto){
+  var t = _normalizarVoz(texto);
+  if(!t) return [];
+  var pedacos = t.split(/\s+e\s+|,|\s+mais\s+/);
+  var resultado = [];
+  pedacos.forEach(function(pedaco){
+    pedaco = pedaco.trim();
+    if(!pedaco) return;
+    var palavras = pedaco.split(/\s+/);
+    var qtd = 1, inicioNome = 0;
+    if(_numerosVoz[palavras[0]] !== undefined){
+      qtd = _numerosVoz[palavras[0]];
+      inicioNome = 1;
+    }
+    var termoItem = palavras.slice(inicioNome).join(' ').trim();
+    if(!termoItem) return;
+    resultado.push({ termoFalado: termoItem, qtd: qtd, item: _acharItemPorVoz(termoItem) });
+  });
+  return resultado;
+}
+// Tela de confirmação do pedido por voz
+function _mostrarConfirmacaoVoz(textoOriginal, itens){
+  var ex = document.getElementById('modal-confirma-voz');
+  if(ex) ex.remove();
+  var linhasHtml = itens.map(function(d){
+    if(d.item){
+      var obrig = itemTemObrigatorio(d.item);
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border:1px solid ' + (obrig?'#f7a34f':'rgba(74,222,128,0.3)') + ';border-radius:9px;margin-bottom:6px;">' +
+        '<span style="font-size:1.1rem;">' + (obrig?'⚠️':'✅') + '</span>' +
+        '<div style="flex:1;"><div style="font-weight:700;font-size:0.9rem;">' + d.qtd + 'x ' + esc(d.item.nome) + '</div>' +
+        (obrig ? '<div style="font-size:0.7rem;color:#f7a34f;">Precisa escolher opções</div>' : '<div style="font-size:0.7rem;color:var(--muted);">R$ ' + fmtPreco(d.item.preco) + '</div>') +
+        '</div></div>';
+    }
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:9px;margin-bottom:6px;">' +
+      '<span style="font-size:1.1rem;">❌</span>' +
+      '<div style="flex:1;"><div style="font-weight:600;font-size:0.88rem;color:#f87171;">"' + esc(d.termoFalado) + '"</div>' +
+      '<div style="font-size:0.7rem;color:var(--muted);">Item não encontrado</div></div></div>';
+  }).join('');
+  var temValidos = itens.some(function(d){ return d.item; });
+  var mod = document.createElement('div');
+  mod.id = 'modal-confirma-voz';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);">' +
+        '<div style="font-weight:700;font-size:1.05rem;">🎤 Confirmar pedido</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Você falou: "' + esc(textoOriginal) + '"</div>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' + linhasHtml + '</div>' +
+      '<div style="padding:12px 14px;border-top:1px solid var(--border2);display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'modal-confirma-voz\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border2);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        (temValidos ? '<button id="btn-confirma-voz" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Adicionar ao carrinho</button>' : '') +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  var btnConf = document.getElementById('btn-confirma-voz');
+  if(btnConf) btnConf.onclick = function(){ _adicionarItensVoz(itens); };
+}
+// Adiciona os itens confirmados ao carrinho
+function _adicionarItensVoz(itens){
+  var mod = document.getElementById('modal-confirma-voz');
+  if(mod) mod.remove();
+  var adicionados = 0;
+  var precisaOpcao = [];
+  itens.forEach(function(d){
+    if(!d.item) return;
+    if(itemTemObrigatorio(d.item)){ precisaOpcao.push(d); return; }
+    for(var n = 0; n < d.qtd; n++){
+      _carrinho.push({
+        id: d.item.id, nome: d.item.nome, preco: d.item.preco,
+        precoBase: d.item.preco, qtd: 1, obs: '', selecoes: [], extras: 0
+      });
+    }
+    adicionados += d.qtd;
+  });
+  atualizarCarrinhoBadge();
+  limparBuscaCardapio();
+  renderCatBar();
+  renderItens();
+  if(adicionados > 0){
+    showToast('✓ ' + adicionados + ' item(ns) adicionado(s)', '#4ade80', 2500);
+    try{ if(navigator.vibrate) navigator.vibrate(50); }catch(e){}
+  }
+  if(precisaOpcao.length > 0){
+    showToast('⚠️ ' + precisaOpcao.length + ' item(ns) precisam de escolha — abrindo...', '#f7a34f', 3000);
+    // Abre o primeiro item que precisa de opção (o garçom escolhe e confirma)
+    setTimeout(function(){ abrirModalItem(precisaOpcao[0].item); }, 600);
+  } else if(adicionados > 0){
+    abrirModalCarrinho();
+  }
 }
 
 function renderItens(){
@@ -11742,7 +11874,7 @@ window.addEventListener('popstate', function(e){
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
-    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g'];
+    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g', 'modal-confirma-voz'];
   for(var i = 0; i < modaisDinamicos.length; i++){
     var md = document.getElementById(modaisDinamicos[i]);
     if(md){

@@ -6926,7 +6926,7 @@ function iniciarBuscaVoz(){
   var recon = new Recon();
   recon.lang = 'pt-BR';
   recon.continuous = false;
-  recon.interimResults = false;
+  recon.interimResults = true;  // resultados parciais — preview ao vivo
   recon.maxAlternatives = 1;
   _reconhecimentoVoz = recon;
 
@@ -6936,22 +6936,37 @@ function iniciarBuscaVoz(){
     btn.style.borderColor = '#dc2626';
     btn.style.color = '#fff';
   }
-  if(input) input.placeholder = '🔴 Ouvindo... fale o item';
+  if(input) input.placeholder = '🔴 Ouvindo... fale o pedido';
 
   recon.onresult = function(e){
-    var texto = (e.results[0][0].transcript || '').trim();
-    // Tenta interpretar como pedido ("duas coca e uma fritas")
-    var itensDetectados = _interpretarPedidoVoz(texto);
-    if(itensDetectados && itensDetectados.length > 0){
-      // Achou itens → abre tela de confirmação
-      _mostrarConfirmacaoVoz(texto, itensDetectados);
-    } else {
-      // Não detectou itens → usa como busca simples
-      if(input){
-        input.value = texto;
-        renderItens();
+    // Junta tudo que foi reconhecido até agora
+    var textoCompleto = '';
+    var ehFinal = false;
+    for(var i = 0; i < e.results.length; i++){
+      textoCompleto += e.results[i][0].transcript;
+      if(e.results[i].isFinal) ehFinal = true;
+    }
+    textoCompleto = textoCompleto.trim();
+    if(!textoCompleto) return;
+
+    if(!ehFinal){
+      // Resultado PARCIAL — mostra preview ao vivo (enquanto fala)
+      var itensParciais = _interpretarPedidoVoz(textoCompleto);
+      if(itensParciais && itensParciais.length > 0){
+        _mostrarConfirmacaoVoz(textoCompleto, itensParciais, true); // true = parcial
       }
-      showToast('🎤 "' + texto + '"', '#4ade80', 2000);
+    } else {
+      // Resultado FINAL — abre a confirmação definitiva
+      var itensDetectados = _interpretarPedidoVoz(textoCompleto);
+      if(itensDetectados && itensDetectados.length > 0){
+        _mostrarConfirmacaoVoz(textoCompleto, itensDetectados, false);
+      } else {
+        if(input){
+          input.value = textoCompleto;
+          renderItens();
+        }
+        showToast('🎤 "' + textoCompleto + '"', '#4ade80', 2000);
+      }
     }
   };
 
@@ -7004,67 +7019,133 @@ function _normalizarVoz(s){
   txt = txt.replace(/(\d)[.,](\d)/g, '$1$2');
   return txt.trim();
 }
-// Procura item pelo nome OU palavras-chave de voz
+// ── Conversão número ↔ palavra escrita (volumes de bebida) ──
+var _numParaExtenso = {
+  '100':'cem','150':'cento e cinquenta','200':'duzentos','250':'duzentos e cinquenta',
+  '300':'trezentos','330':'trezentos e trinta','350':'trezentos e cinquenta',
+  '400':'quatrocentos','473':'quatrocentos e setenta e tres','500':'quinhentos',
+  '600':'seiscentos','700':'setecentos','750':'setecentos e cinquenta',
+  '800':'oitocentos','900':'novecentos','1000':'mil'
+};
+var _extensoParaNum = {};
+Object.keys(_numParaExtenso).forEach(function(num){ _extensoParaNum[_numParaExtenso[num]] = num; });
+
+// Gera variações de um termo trocando número↔extenso
+function _variacoesTermo(termo){
+  var vs = [termo];
+  Object.keys(_numParaExtenso).forEach(function(num){
+    var rx = new RegExp('\\b'+num+'\\b','g');
+    if(rx.test(termo)) vs.push(termo.replace(new RegExp('\\b'+num+'\\b','g'), _numParaExtenso[num]));
+  });
+  Object.keys(_extensoParaNum).sort(function(a,b){ return b.length-a.length; }).forEach(function(ext){
+    if(termo.indexOf(ext) >= 0) vs.push(termo.replace(ext, _extensoParaNum[ext]));
+  });
+  return vs.filter(function(v,i){ return vs.indexOf(v)===i; });
+}
+
+// Distância de Levenshtein — mede quão "parecidas" são 2 palavras
+function _distanciaTexto(a, b){
+  var m = a.length, n = b.length;
+  if(!m) return n;
+  if(!n) return m;
+  var d = [];
+  for(var i=0;i<=m;i++) d[i] = [i];
+  for(var j=0;j<=n;j++) d[0][j] = j;
+  for(i=1;i<=m;i++){
+    for(j=1;j<=n;j++){
+      var custo = a[i-1] === b[j-1] ? 0 : 1;
+      d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+custo);
+    }
+  }
+  return d[m][n];
+}
+
+// Procura item pelo nome OU palavras-chave (com fuzzy match)
 function _acharItemPorVoz(termo){
   termo = _normalizarVoz(termo);
   if(!termo) return null;
-  // Remove números soltos do termo (ex: "pilsen 500" se "500" atrapalhar,
-  // mas mantém o termo completo pra tentar primeiro)
+  // Tenta o termo E suas variações de número↔extenso
+  var termos = _variacoesTermo(termo);
+  for(var t = 0; t < termos.length; t++){
+    var r = _buscarItemExato(termos[t]);
+    if(r) return r;
+  }
+  // Nenhuma variação exata → tenta fuzzy (tolera erro de fala)
+  return _buscarItemFuzzy(termo);
+}
+
+function chavesDoItem(it){
+  var lista = [_normalizarVoz(it.nome)];
+  if(it.palavrasVoz){
+    it.palavrasVoz.split(',').forEach(function(p){
+      var n = _normalizarVoz(p);
+      if(n) lista.push(n);
+    });
+  }
+  return lista;
+}
+
+function _buscarItemExato(termo){
+  termo = _normalizarVoz(termo);
+  if(!termo) return null;
   var disp = _itens.filter(function(i){ return i.disponivel; });
   if(!disp.length) return null;
 
-  // Função: lista de palavras-chave de um item (nome + palavrasVoz cadastradas)
-  function chavesDoItem(it){
-    var lista = [_normalizarVoz(it.nome)];
-    if(it.palavrasVoz){
-      it.palavrasVoz.split(',').forEach(function(p){
-        var n = _normalizarVoz(p);
-        if(n) lista.push(n);
-      });
-    }
-    return lista;
-  }
-
-  // ── Nível 1: match EXATO (nome ou palavra-chave igual ao termo) ──
-  var a = disp.find(function(i){
-    return chavesDoItem(i).indexOf(termo) >= 0;
-  });
+  // Nível 1: match exato
+  var a = disp.find(function(i){ return chavesDoItem(i).indexOf(termo) >= 0; });
   if(a) return a;
 
-  // ── Nível 2: o termo falado CONTÉM a chave inteira, ou vice-versa ──
-  // Ex: falou "pilsen 500", item tem nome "pilsen 500 ml" → match
+  // Nível 2: termo contém a chave inteira, ou vice-versa
   a = disp.find(function(i){
     return chavesDoItem(i).some(function(chave){
-      if(chave.length < 3) return false; // ignora chaves muito curtas
+      if(chave.length < 3) return false;
       return chave === termo || chave.indexOf(termo) >= 0 || termo.indexOf(chave) >= 0;
     });
   });
   if(a) return a;
 
-  // ── Nível 3: match por PALAVRAS em comum (pelo menos 1 palavra significativa) ──
-  // Quebra o termo em palavras e procura item que tenha essas palavras.
+  // Nível 3: match por palavras inteiras em comum
   var palavrasTermo = termo.split(/\s+/).filter(function(w){ return w.length >= 3; });
   if(palavrasTermo.length){
-    // Pontua cada item pela quantidade de palavras que batem
     var melhor = null, melhorPonto = 0;
     disp.forEach(function(i){
       var texto = chavesDoItem(i).join(' ');
       var ponto = 0;
       palavrasTermo.forEach(function(w){
-        // Palavra inteira presente no texto do item
-        var regex = new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'i');
-        if(regex.test(texto)) ponto++;
+        var rx = new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'i');
+        if(rx.test(texto)) ponto++;
       });
-      if(ponto > melhorPonto){
-        melhorPonto = ponto;
-        melhor = i;
-      }
+      if(ponto > melhorPonto){ melhorPonto = ponto; melhor = i; }
     });
-    // Só aceita se bateu pelo menos 1 palavra significativa
     if(melhor && melhorPonto >= 1) return melhor;
   }
-
   return null;
+}
+
+// Fuzzy: tolera erro de digitação/fala — "piusen" acha "Pilsen"
+function _buscarItemFuzzy(termo){
+  var disp = _itens.filter(function(i){ return i.disponivel; });
+  if(!disp.length) return null;
+  var palavrasTermo = termo.split(/\s+/).filter(function(w){ return w.length >= 3; });
+  if(!palavrasTermo.length) return null;
+
+  var melhor = null, melhorPonto = 0;
+  disp.forEach(function(i){
+    var chavesTexto = chavesDoItem(i).join(' ');
+    var palavrasItem = chavesTexto.split(/\s+/).filter(function(w){ return w.length >= 3; });
+    var ponto = 0;
+    palavrasTermo.forEach(function(wt){
+      // Pra cada palavra falada, vê se tem palavra parecida no item
+      palavrasItem.forEach(function(wi){
+        var dist = _distanciaTexto(wt, wi);
+        // Aceita se a diferença é pequena (até 2 letras pra palavras de 5+)
+        var limite = wt.length >= 6 ? 2 : (wt.length >= 4 ? 1 : 0);
+        if(dist <= limite) ponto += (limite - dist + 1);
+      });
+    });
+    if(ponto > melhorPonto){ melhorPonto = ponto; melhor = i; }
+  });
+  return (melhor && melhorPonto >= 1) ? melhor : null;
 }
 // Interpreta "duas coca e uma fritas" → lista de itens
 function _interpretarPedidoVoz(texto){
@@ -7122,14 +7203,14 @@ function _interpretarPedidoVoz(texto){
     });
 }
 // Tela de confirmação do pedido por voz
-function _mostrarConfirmacaoVoz(textoOriginal, itens){
+function _mostrarConfirmacaoVoz(textoOriginal, itens, ehParcial){
   var ex = document.getElementById('modal-confirma-voz');
   if(ex) ex.remove();
   var linhasHtml = itens.map(function(d){
     if(d.item){
       var obrig = itemTemObrigatorio(d.item);
       return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border:1px solid ' + (obrig?'#f7a34f':'rgba(74,222,128,0.3)') + ';border-radius:9px;margin-bottom:6px;">' +
-        '<span style="font-size:1.1rem;">' + (obrig?'⚠️':'✅') + '</span>' +
+        '<span style="font-size:1.1rem;">' + (obrig?'⚠️':'🟢') + '</span>' +
         '<div style="flex:1;"><div style="font-weight:700;font-size:0.9rem;">' + d.qtd + 'x ' + esc(d.item.nome) + '</div>' +
         (obrig ? '<div style="font-size:0.7rem;color:#f7a34f;">Precisa escolher opções</div>' : '<div style="font-size:0.7rem;color:var(--muted);">R$ ' + fmtPreco(d.item.preco) + '</div>') +
         '</div></div>';
@@ -7143,18 +7224,28 @@ function _mostrarConfirmacaoVoz(textoOriginal, itens){
   var mod = document.createElement('div');
   mod.id = 'modal-confirma-voz';
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
-  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
-  mod.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
-      '<div style="padding:14px;border-bottom:1px solid var(--border2);">' +
-        '<div style="font-weight:700;font-size:1.05rem;">🎤 Confirmar pedido</div>' +
-        '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Você falou: "' + esc(textoOriginal) + '"</div>' +
-      '</div>' +
-      '<div style="flex:1;overflow-y:auto;padding:14px;">' + linhasHtml + '</div>' +
-      '<div style="padding:12px 14px;border-top:1px solid var(--border2);display:flex;gap:8px;">' +
+  mod.onclick = function(e){ if(e.target === mod && !ehParcial) mod.remove(); };
+
+  // Cabeçalho: muda conforme parcial (ouvindo) ou final
+  var cabecalho = ehParcial
+    ? '<div style="font-weight:700;font-size:1.05rem;">🔴 Ouvindo...</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + esc(textoOriginal) + '</div>'
+    : '<div style="font-weight:700;font-size:1.05rem;">🎤 Confirmar pedido</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Você falou: "' + esc(textoOriginal) + '"</div>';
+
+  // Rodapé: parcial não tem botões (ainda ouvindo); final tem
+  var rodape = ehParcial
+    ? '<div style="padding:12px 14px;border-top:1px solid var(--border2);text-align:center;font-size:0.78rem;color:var(--muted);">Continue falando o pedido...</div>'
+    : '<div style="padding:12px 14px;border-top:1px solid var(--border2);display:flex;gap:8px;">' +
         '<button onclick="document.getElementById(\'modal-confirma-voz\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border2);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
         (temValidos ? '<button id="btn-confirma-voz" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Adicionar ao carrinho</button>' : '') +
-      '</div>' +
+      '</div>';
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;' + (ehParcial?'':'animation:bannerSlideDown 0.3s ease;') + '">' +
+      '<div style="padding:14px;border-bottom:1px solid var(--border2);">' + cabecalho + '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px;">' + (linhasHtml || '<div style="text-align:center;color:var(--muted);padding:14px;font-size:0.85rem;">Aguardando...</div>') + '</div>' +
+      rodape +
     '</div>';
   document.body.appendChild(mod);
   var btnConf = document.getElementById('btn-confirma-voz');

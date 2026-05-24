@@ -6998,7 +6998,11 @@ var _numerosVoz = {
   '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10
 };
 function _normalizarVoz(s){
-  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  var txt = String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  // Remove ponto/vírgula entre dígitos (ex: "2.500" ou "2,500" → "2500")
+  // Isso acontece quando o reconhecimento de voz junta números.
+  txt = txt.replace(/(\d)[.,](\d)/g, '$1$2');
+  return txt.trim();
 }
 // Procura item pelo nome OU palavras-chave de voz
 function _acharItemPorVoz(termo){
@@ -7032,10 +7036,36 @@ function _interpretarPedidoVoz(texto){
     if(!pedaco) return;
     var palavras = pedaco.split(/\s+/);
     var qtd = 1, inicioNome = 0;
-    if(_numerosVoz[palavras[0]] !== undefined){
-      qtd = _numerosVoz[palavras[0]];
+    var prim = palavras[0];
+
+    // Caso 1: primeira palavra é número por extenso ("duas", "tres"...)
+    if(_numerosVoz[prim] !== undefined && isNaN(parseInt(prim))){
+      qtd = _numerosVoz[prim];
       inicioNome = 1;
     }
+    // Caso 2: primeira palavra é dígito
+    else if(/^\d+$/.test(prim)){
+      var num = parseInt(prim, 10);
+      if(num >= 1 && num <= 20){
+        // Número pequeno = quantidade normal
+        qtd = num;
+        inicioNome = 1;
+      } else if(num > 20){
+        // Número grande — o reconhecimento de voz JUNTOU a quantidade
+        // com um número do nome do item. Ex: "2 Pilsen 500" virou "2500".
+        // Solução: o 1º dígito é a quantidade, o resto volta pro nome do item.
+        var str = String(num);
+        var primeiroDigito = parseInt(str[0], 10);
+        var resto = str.slice(1);
+        if(primeiroDigito >= 1 && primeiroDigito <= 9){
+          qtd = primeiroDigito;
+          // Substitui a 1ª palavra pelo "resto" (ex: "500") e mantém as outras
+          palavras[0] = resto;
+          inicioNome = 0; // o resto vira parte do nome
+        }
+      }
+    }
+
     var termoItem = palavras.slice(inicioNome).join(' ').trim();
     if(!termoItem) return;
     resultado.push({ termoFalado: termoItem, qtd: qtd, item: _acharItemPorVoz(termoItem) });

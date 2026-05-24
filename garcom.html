@@ -7217,14 +7217,17 @@ function _processarComandoMesa(texto){
 
   // ── "MAIS UM CHOPP NA 5" — adiciona item rápido numa mesa ──
   // (depois das ações; só cai aqui se não for transferir/fechar)
-  if(t.indexOf('mais ') === 0 || /\bna\s+\d+|\bna\s+mesa\s+\d+/.test(t)){
+  // Aceita: "mais X mesa N", "mais X na N", "X mesa N", "X na N"
+  var temPadraoMesa = /\bna\s+\d+|\bmesa\s+\d+|\bna\s+mesa\s+\d+/.test(t);
+  if(temPadraoMesa){
     var resultadoItem = _interpretarComandoMaisItem(texto);
     if(resultadoItem && resultadoItem.item){
       _confirmarItemRapidoVoz(resultadoItem);
       return;
     }
-    // Se detectou padrão de item mas não achou o item, avisa
-    if(resultadoItem && !resultadoItem.item){
+    // Detectou padrão de item + mesa, mas não achou o item → avisa
+    // (só avisa se tinha algo além do número — senão deixa cair em "abrir mesa")
+    if(resultadoItem && resultadoItem.termoItem && resultadoItem.termoItem.length >= 2){
       _vibrarErro();
       showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado', '#f87171', 4000);
       return;

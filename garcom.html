@@ -469,13 +469,20 @@ header{
 .success-screen{text-align:center;padding:30px 20px;}
 .success-icon{font-size:4rem;margin-bottom:18px;animation:bounce 0.5s ease-out;}
 @keyframes bounce{0%{transform:scale(0.5);}70%{transform:scale(1.15);}100%{transform:scale(1);}}
-/* ─── Indicador de "ouvindo" (barras reativas ao volume da voz) ─── */
+/* ─── Animação de "ouvindo" (ondas de voz) ─── */
+@keyframes vozOnda{0%,100%{transform:scaleY(0.3);}50%{transform:scaleY(1);}}
 @keyframes vozPulso{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.5);}50%{transform:scale(1.06);box-shadow:0 0 0 14px rgba(220,38,38,0);}}
 #voz-overlay{position:fixed;left:0;right:0;bottom:0;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px 34px;background:linear-gradient(to top,rgba(13,13,13,0.98),rgba(13,13,13,0.92));border-top:2px solid #dc2626;animation:bannerSlideDown 0.25s ease;}
 .voz-mic-circulo{width:74px;height:74px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;animation:vozPulso 1.4s ease-in-out infinite;}
-.voz-ondas{display:flex;align-items:center;justify-content:center;gap:4px;height:36px;margin-top:14px;}
-/* Cada barra começa baixinha (linha) e cresce conforme o volume da voz */
-.voz-ondas span{width:5px;height:5px;min-height:5px;background:#dc2626;border-radius:3px;transition:height 0.08s ease-out;}
+.voz-ondas{display:flex;align-items:center;gap:5px;height:34px;margin-top:14px;}
+.voz-ondas span{width:5px;height:100%;background:#dc2626;border-radius:3px;animation:vozOnda 0.9s ease-in-out infinite;}
+.voz-ondas span:nth-child(1){animation-delay:0s;}
+.voz-ondas span:nth-child(2){animation-delay:0.15s;}
+.voz-ondas span:nth-child(3){animation-delay:0.3s;}
+.voz-ondas span:nth-child(4){animation-delay:0.45s;}
+.voz-ondas span:nth-child(5){animation-delay:0.2s;}
+.voz-ondas span:nth-child(6){animation-delay:0.35s;}
+.voz-ondas span:nth-child(7){animation-delay:0.1s;}
 .success-titulo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:0.08em;color:var(--success);margin-bottom:8px;}
 .success-sub{font-size:0.88rem;color:var(--muted);line-height:1.5;}
 .success-num{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--accent);margin-top:12px;}
@@ -6935,17 +6942,10 @@ var _reconhecimentoVoz = null;
 // ═══════════════════════════════════════════════
 var _reconhecimentoVozMesa = null;
 // ─── Overlay visual de "ouvindo" (ondas + vibração) ───
-var _vozAudioCtx = null;
-var _vozAudioStream = null;
-var _vozAnimId = null;
-
 function _mostrarOverlayVoz(titulo){
   _esconderOverlayVoz();
   var ov = document.createElement('div');
   ov.id = 'voz-overlay';
-  // 9 barras pra dar uma onda mais suave
-  var barras = '';
-  for(var i = 0; i < 9; i++){ barras += '<span></span>'; }
   ov.innerHTML =
     '<div class="voz-mic-circulo">' +
       '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -6954,80 +6954,23 @@ function _mostrarOverlayVoz(titulo){
         '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>' +
       '</svg>' +
     '</div>' +
-    '<div class="voz-ondas" id="voz-ondas">' + barras + '</div>' +
+    '<div class="voz-ondas"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>' +
     '<div style="margin-top:14px;font-weight:700;font-size:1rem;color:#fff;">' + (titulo || 'Ouvindo...') + '</div>' +
     '<div style="font-size:0.76rem;color:#999;margin-top:3px;">Toque pra cancelar</div>';
   ov.onclick = function(){
+    // Cancela o reconhecimento ao tocar no overlay
     if(_reconhecimentoVoz){ try{ _reconhecimentoVoz.stop(); }catch(e){} _reconhecimentoVoz = null; }
     if(_reconhecimentoVozMesa){ try{ _reconhecimentoVozMesa.stop(); }catch(e){} _reconhecimentoVozMesa = null; }
     _esconderOverlayVoz();
   };
   document.body.appendChild(ov);
+  // Vibração curta ao começar a ouvir
   try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
-  // Inicia a captação de volume do microfone pras barras reagirem à voz
-  _iniciarVisualizadorVoz();
-}
-
-// Capta o volume do microfone e move as barras conforme a voz
-function _iniciarVisualizadorVoz(){
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
-    _vozAudioStream = stream;
-    var Ctx = window.AudioContext || window.webkitAudioContext;
-    if(!Ctx) return;
-    _vozAudioCtx = new Ctx();
-    var source = _vozAudioCtx.createMediaStreamSource(stream);
-    var analyser = _vozAudioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.6;
-    source.connect(analyser);
-    var dados = new Uint8Array(analyser.frequencyBinCount);
-    var barras = document.querySelectorAll('#voz-ondas span');
-
-    function animar(){
-      var ondas = document.getElementById('voz-ondas');
-      if(!ondas){ // overlay fechou
-        _vozAnimId = null;
-        return;
-      }
-      analyser.getByteFrequencyData(dados);
-      // Calcula o volume médio
-      var soma = 0;
-      for(var i = 0; i < dados.length; i++){ soma += dados[i]; }
-      var media = soma / dados.length; // 0 a ~255
-      // Move cada barra: silêncio = 5px (linha), voz alta = até 36px
-      for(var b = 0; b < barras.length; b++){
-        // Pega frequências diferentes pra cada barra (onda mais natural)
-        var idx = Math.floor((b / barras.length) * (dados.length / 2));
-        var valor = dados[idx] || 0;
-        // Mistura o valor da frequência com a média geral
-        var intensidade = (valor * 0.6 + media * 1.4) / 255;
-        var altura = 5 + Math.min(intensidade * 60, 31); // 5px a 36px
-        barras[b].style.height = altura + 'px';
-      }
-      _vozAnimId = requestAnimationFrame(animar);
-    }
-    animar();
-  }).catch(function(e){
-    // Sem permissão de microfone pro visualizador — tudo bem,
-    // o reconhecimento de voz ainda funciona, só não tem a animação reativa
-    console.log('[VOZ] visualizador não disponível:', e.name);
-  });
 }
 
 function _esconderOverlayVoz(){
   var ov = document.getElementById('voz-overlay');
   if(ov) ov.remove();
-  // Para o visualizador e libera o microfone
-  if(_vozAnimId){ cancelAnimationFrame(_vozAnimId); _vozAnimId = null; }
-  if(_vozAudioStream){
-    try{ _vozAudioStream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
-    _vozAudioStream = null;
-  }
-  if(_vozAudioCtx){
-    try{ _vozAudioCtx.close(); }catch(e){}
-    _vozAudioCtx = null;
-  }
 }
 
 // Vibração de sucesso (2 toques curtos)

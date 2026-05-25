@@ -469,20 +469,13 @@ header{
 .success-screen{text-align:center;padding:30px 20px;}
 .success-icon{font-size:4rem;margin-bottom:18px;animation:bounce 0.5s ease-out;}
 @keyframes bounce{0%{transform:scale(0.5);}70%{transform:scale(1.15);}100%{transform:scale(1);}}
-/* ─── Animação de "ouvindo" (ondas de voz) ─── */
-@keyframes vozOnda{0%,100%{transform:scaleY(0.3);}50%{transform:scaleY(1);}}
+/* ─── Indicador de "ouvindo" (barras reativas ao volume da voz) ─── */
 @keyframes vozPulso{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.5);}50%{transform:scale(1.06);box-shadow:0 0 0 14px rgba(220,38,38,0);}}
 #voz-overlay{position:fixed;left:0;right:0;bottom:0;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px 34px;background:linear-gradient(to top,rgba(13,13,13,0.98),rgba(13,13,13,0.92));border-top:2px solid #dc2626;animation:bannerSlideDown 0.25s ease;}
 .voz-mic-circulo{width:74px;height:74px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;animation:vozPulso 1.4s ease-in-out infinite;}
-.voz-ondas{display:flex;align-items:center;gap:5px;height:34px;margin-top:14px;}
-.voz-ondas span{width:5px;height:100%;background:#dc2626;border-radius:3px;animation:vozOnda 0.9s ease-in-out infinite;}
-.voz-ondas span:nth-child(1){animation-delay:0s;}
-.voz-ondas span:nth-child(2){animation-delay:0.15s;}
-.voz-ondas span:nth-child(3){animation-delay:0.3s;}
-.voz-ondas span:nth-child(4){animation-delay:0.45s;}
-.voz-ondas span:nth-child(5){animation-delay:0.2s;}
-.voz-ondas span:nth-child(6){animation-delay:0.35s;}
-.voz-ondas span:nth-child(7){animation-delay:0.1s;}
+.voz-ondas{display:flex;align-items:center;justify-content:center;gap:4px;height:36px;margin-top:14px;}
+/* Cada barra começa baixinha (linha) e cresce conforme o volume da voz */
+.voz-ondas span{width:5px;height:5px;min-height:5px;background:#dc2626;border-radius:3px;transition:height 0.08s ease-out;}
 .success-titulo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:0.08em;color:var(--success);margin-bottom:8px;}
 .success-sub{font-size:0.88rem;color:var(--muted);line-height:1.5;}
 .success-num{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--accent);margin-top:12px;}
@@ -6941,11 +6934,16 @@ var _reconhecimentoVoz = null;
 // "abrir mesa 5" / "transferir mesa 5 para 8" / "fechar mesa 5"
 // ═══════════════════════════════════════════════
 var _reconhecimentoVozMesa = null;
-// ─── Overlay visual de "ouvindo" (ondas + vibração) ───
+// ─── Overlay visual de "ouvindo" ───
+var _vozAnimId = null;
+var _vozFalando = false;
+
 function _mostrarOverlayVoz(titulo){
   _esconderOverlayVoz();
   var ov = document.createElement('div');
   ov.id = 'voz-overlay';
+  var barras = '';
+  for(var i = 0; i < 9; i++){ barras += '<span></span>'; }
   ov.innerHTML =
     '<div class="voz-mic-circulo">' +
       '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -6954,23 +6952,49 @@ function _mostrarOverlayVoz(titulo){
         '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>' +
       '</svg>' +
     '</div>' +
-    '<div class="voz-ondas"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>' +
+    '<div class="voz-ondas" id="voz-ondas">' + barras + '</div>' +
     '<div style="margin-top:14px;font-weight:700;font-size:1rem;color:#fff;">' + (titulo || 'Ouvindo...') + '</div>' +
     '<div style="font-size:0.76rem;color:#999;margin-top:3px;">Toque pra cancelar</div>';
   ov.onclick = function(){
-    // Cancela o reconhecimento ao tocar no overlay
     if(_reconhecimentoVoz){ try{ _reconhecimentoVoz.stop(); }catch(e){} _reconhecimentoVoz = null; }
     if(_reconhecimentoVozMesa){ try{ _reconhecimentoVozMesa.stop(); }catch(e){} _reconhecimentoVozMesa = null; }
     _esconderOverlayVoz();
   };
   document.body.appendChild(ov);
-  // Vibração curta ao começar a ouvir
   try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
+  _vozFalando = false;
+  _animarOndasVoz();
+}
+
+// Anima as barras. Quando _vozFalando=true (o reconhecimento detectou voz),
+// as barras dançam. Quando false (silêncio), ficam como uma linha.
+// NÃO usa getUserMedia — assim não conflita com o reconhecimento de voz.
+function _animarOndasVoz(){
+  var ondas = document.getElementById('voz-ondas');
+  if(!ondas){ _vozAnimId = null; return; }
+  var barras = ondas.querySelectorAll('span');
+  var t = Date.now() / 140;
+  for(var b = 0; b < barras.length; b++){
+    var altura;
+    if(_vozFalando){
+      // Falando — ondas animadas (senos defasados pra parecer natural)
+      var onda = Math.sin(t + b * 0.7) * 0.5 + 0.5;       // 0..1
+      var onda2 = Math.sin(t * 1.6 + b * 1.3) * 0.5 + 0.5;
+      altura = 6 + (onda * 0.6 + onda2 * 0.4) * 28;        // 6..34px
+    } else {
+      // Silêncio — quase uma linha (varia bem de leve)
+      altura = 5 + Math.sin(t * 0.5 + b) * 1.5;            // ~4..7px
+    }
+    barras[b].style.height = altura + 'px';
+  }
+  _vozAnimId = requestAnimationFrame(_animarOndasVoz);
 }
 
 function _esconderOverlayVoz(){
   var ov = document.getElementById('voz-overlay');
   if(ov) ov.remove();
+  if(_vozAnimId){ cancelAnimationFrame(_vozAnimId); _vozAnimId = null; }
+  _vozFalando = false;
 }
 
 // Vibração de sucesso (2 toques curtos)
@@ -7010,6 +7034,11 @@ function iniciarVozMesa(){
   }
   // Overlay visual "ouvindo" + vibração
   _mostrarOverlayVoz('Diga o comando da mesa');
+
+  // Quando o reconhecimento detecta voz, as ondas dançam
+  recon.onspeechstart = function(){ _vozFalando = true; };
+  recon.onspeechend = function(){ _vozFalando = false; };
+  recon.onaudiostart = function(){ _vozFalando = false; };
 
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();

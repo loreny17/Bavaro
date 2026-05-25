@@ -2503,7 +2503,8 @@ function executarEncerrarDiaGarcom(){
 
   var promessas = _encerrarDiaContasG.map(function(c){
     var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
-    var ehTeste = itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; });
+    var ehTeste = (c.teste === true) ||
+      (itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; }));
     // A venda conta no dia em que a mesa foi ABERTA (não no dia do clique).
     var dataVenda = c.abertaEm || c.criadoEm || c.criadaEm || agora;
     var registro = Object.assign({}, c, {
@@ -6474,7 +6475,8 @@ function abrirNovaComanda(){
     restante: 0,
     garcomPrincipal: _nomeGarcom,
     abertaEm: Date.now(),
-    abertaPor: _nomeGarcom
+    abertaPor: _nomeGarcom,
+    teste: _modoTeste ? true : false
   }).then(function(){
     showToast('✓ Comanda de '+nome+' aberta','#4ade80');
   }).catch(function(e){
@@ -7147,7 +7149,8 @@ function _criarContaEAdicionar(r){
     restauranteId: _restauranteId, tenantId: _tenantId || null,
     mesa: r.mesa, status: 'aberta', itens: [], pagamentos: [],
     subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
-    garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom
+    garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom,
+    teste: _modoTeste ? true : false
   };
   showToast('Abrindo mesa ' + r.mesa + '...', '#f7a34f', 1500);
   fbDb.collection('contas_mesa').add(novaConta).then(function(ref){
@@ -10586,7 +10589,8 @@ function abrirContaMesa(num){
         pagoTotal: 0, restante: 0,
         garcomPrincipal: _nomeGarcom,
         abertaEm: Date.now(),
-        abertaPor: _nomeGarcom
+        abertaPor: _nomeGarcom,
+        teste: _modoTeste ? true : false
       };
       entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
       fbDb.collection('contas_mesa').add(conta).catch(function(e){
@@ -10599,7 +10603,8 @@ function abrirContaMesa(num){
         restauranteId: _restauranteId, tenantId: _tenantId || null,
         mesa: mesaInt, status: 'aberta', itens: [], pagamentos: [],
         subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
-        garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom
+        garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom,
+        teste: _modoTeste ? true : false
       };
       entrarNaMesa(null);
       fbDb.collection('contas_mesa').add(conta).catch(function(e){
@@ -10861,7 +10866,8 @@ function confirmarTransferencia(numDestino, pularConfirmacao){
       garcomPrincipal: _nomeGarcom,
       abertaEm: Date.now(),
       abertaPor: _nomeGarcom,
-      criadaPorTransferencia: true
+      criadaPorTransferencia: true,
+      teste: (conta && conta.teste) ? true : (_modoTeste ? true : false)
     });
   }
 
@@ -12023,7 +12029,10 @@ function executarEncerramento(){
   var mesaNum = String(c.mesa||'');
   // Detecta se a conta é de teste (todos os itens válidos são de teste)
   var itensValidos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado'; });
-  var contaEhTeste = itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; });
+  // A conta é de teste se: a própria conta está marcada como teste,
+  // OU todos os itens são de teste. (a flag da conta é mais confiável)
+  var contaEhTeste = (c.teste === true) ||
+    (itensValidos.length > 0 && itensValidos.every(function(it){ return it.teste === true; }));
   var registro = Object.assign({}, c, {
     status:'fechada',
     fechadoEm:Date.now(),

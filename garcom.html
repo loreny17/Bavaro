@@ -469,13 +469,20 @@ header{
 .success-screen{text-align:center;padding:30px 20px;}
 .success-icon{font-size:4rem;margin-bottom:18px;animation:bounce 0.5s ease-out;}
 @keyframes bounce{0%{transform:scale(0.5);}70%{transform:scale(1.15);}100%{transform:scale(1);}}
-/* ─── Indicador de "ouvindo" (barras reativas ao volume da voz) ─── */
+/* ─── Animação de "ouvindo" (ondas de voz) ─── */
+@keyframes vozOnda{0%,100%{transform:scaleY(0.3);}50%{transform:scaleY(1);}}
 @keyframes vozPulso{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.5);}50%{transform:scale(1.06);box-shadow:0 0 0 14px rgba(220,38,38,0);}}
 #voz-overlay{position:fixed;left:0;right:0;bottom:0;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px 34px;background:linear-gradient(to top,rgba(13,13,13,0.98),rgba(13,13,13,0.92));border-top:2px solid #dc2626;animation:bannerSlideDown 0.25s ease;}
 .voz-mic-circulo{width:74px;height:74px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;animation:vozPulso 1.4s ease-in-out infinite;}
-.voz-ondas{display:flex;align-items:center;justify-content:center;gap:4px;height:36px;margin-top:14px;}
-/* Cada barra começa baixinha (linha) e cresce conforme o volume da voz */
-.voz-ondas span{width:5px;height:5px;min-height:5px;background:#dc2626;border-radius:3px;transition:height 0.08s ease-out;}
+.voz-ondas{display:flex;align-items:center;gap:5px;height:34px;margin-top:14px;}
+.voz-ondas span{width:5px;height:100%;background:#dc2626;border-radius:3px;animation:vozOnda 0.9s ease-in-out infinite;}
+.voz-ondas span:nth-child(1){animation-delay:0s;}
+.voz-ondas span:nth-child(2){animation-delay:0.15s;}
+.voz-ondas span:nth-child(3){animation-delay:0.3s;}
+.voz-ondas span:nth-child(4){animation-delay:0.45s;}
+.voz-ondas span:nth-child(5){animation-delay:0.2s;}
+.voz-ondas span:nth-child(6){animation-delay:0.35s;}
+.voz-ondas span:nth-child(7){animation-delay:0.1s;}
 .success-titulo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:0.08em;color:var(--success);margin-bottom:8px;}
 .success-sub{font-size:0.88rem;color:var(--muted);line-height:1.5;}
 .success-num{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--accent);margin-top:12px;}
@@ -6934,16 +6941,11 @@ var _reconhecimentoVoz = null;
 // "abrir mesa 5" / "transferir mesa 5 para 8" / "fechar mesa 5"
 // ═══════════════════════════════════════════════
 var _reconhecimentoVozMesa = null;
-// ─── Overlay visual de "ouvindo" ───
-var _vozAnimId = null;
-var _vozFalando = false;
-
+// ─── Overlay visual de "ouvindo" (ondas + vibração) ───
 function _mostrarOverlayVoz(titulo){
   _esconderOverlayVoz();
   var ov = document.createElement('div');
   ov.id = 'voz-overlay';
-  var barras = '';
-  for(var i = 0; i < 9; i++){ barras += '<span></span>'; }
   ov.innerHTML =
     '<div class="voz-mic-circulo">' +
       '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -6952,49 +6954,23 @@ function _mostrarOverlayVoz(titulo){
         '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>' +
       '</svg>' +
     '</div>' +
-    '<div class="voz-ondas" id="voz-ondas">' + barras + '</div>' +
+    '<div class="voz-ondas"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>' +
     '<div style="margin-top:14px;font-weight:700;font-size:1rem;color:#fff;">' + (titulo || 'Ouvindo...') + '</div>' +
     '<div style="font-size:0.76rem;color:#999;margin-top:3px;">Toque pra cancelar</div>';
   ov.onclick = function(){
+    // Cancela o reconhecimento ao tocar no overlay
     if(_reconhecimentoVoz){ try{ _reconhecimentoVoz.stop(); }catch(e){} _reconhecimentoVoz = null; }
     if(_reconhecimentoVozMesa){ try{ _reconhecimentoVozMesa.stop(); }catch(e){} _reconhecimentoVozMesa = null; }
     _esconderOverlayVoz();
   };
   document.body.appendChild(ov);
+  // Vibração curta ao começar a ouvir
   try{ if(navigator.vibrate) navigator.vibrate(40); }catch(e){}
-  _vozFalando = false;
-  _animarOndasVoz();
-}
-
-// Anima as barras. Quando _vozFalando=true (o reconhecimento detectou voz),
-// as barras dançam. Quando false (silêncio), ficam como uma linha.
-// NÃO usa getUserMedia — assim não conflita com o reconhecimento de voz.
-function _animarOndasVoz(){
-  var ondas = document.getElementById('voz-ondas');
-  if(!ondas){ _vozAnimId = null; return; }
-  var barras = ondas.querySelectorAll('span');
-  var t = Date.now() / 140;
-  for(var b = 0; b < barras.length; b++){
-    var altura;
-    if(_vozFalando){
-      // Falando — ondas animadas (senos defasados pra parecer natural)
-      var onda = Math.sin(t + b * 0.7) * 0.5 + 0.5;       // 0..1
-      var onda2 = Math.sin(t * 1.6 + b * 1.3) * 0.5 + 0.5;
-      altura = 6 + (onda * 0.6 + onda2 * 0.4) * 28;        // 6..34px
-    } else {
-      // Silêncio — quase uma linha (varia bem de leve)
-      altura = 5 + Math.sin(t * 0.5 + b) * 1.5;            // ~4..7px
-    }
-    barras[b].style.height = altura + 'px';
-  }
-  _vozAnimId = requestAnimationFrame(_animarOndasVoz);
 }
 
 function _esconderOverlayVoz(){
   var ov = document.getElementById('voz-overlay');
   if(ov) ov.remove();
-  if(_vozAnimId){ cancelAnimationFrame(_vozAnimId); _vozAnimId = null; }
-  _vozFalando = false;
 }
 
 // Vibração de sucesso (2 toques curtos)
@@ -7035,28 +7011,9 @@ function iniciarVozMesa(){
   // Overlay visual "ouvindo" + vibração
   _mostrarOverlayVoz('Diga o comando da mesa');
 
-  // Quando o reconhecimento detecta voz, as ondas dançam
-  recon.onspeechstart = function(){ _vozFalando = true; };
-  recon.onspeechend = function(){ _vozFalando = false; };
-  recon.onaudiostart = function(){ _vozFalando = false; };
-
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();
-    // Fecha o overlay ANTES de processar (senão fica por cima do que o comando abrir)
-    _esconderOverlayVoz();
-    _reconhecimentoVozMesa = null;
-    if(btn){
-      btn.style.background = 'var(--surface2)';
-      btn.style.borderColor = 'var(--border2)';
-      btn.style.color = 'var(--accent)';
-    }
-    // Processa o comando
-    if(texto){
-      _processarComandoMesa(texto);
-    } else {
-      _vibrarErro();
-      showToast('Não entendi — tente de novo', '#f7a34f', 3000);
-    }
+    _processarComandoMesa(texto);
   };
   recon.onerror = function(e){
     var msg = 'Não entendi, tente de novo';
@@ -7137,14 +7094,12 @@ function _interpretarComandoMaisItem(texto){
 // Mostra confirmação e adiciona o item rápido na mesa
 // permitirCriar=true → se a mesa estiver livre, cria a conta automaticamente
 function _confirmarItemRapidoVoz(r, permitirCriar){
-  console.log('[VOZ-ITEM] _confirmarItemRapidoVoz:', JSON.stringify({mesa:r.mesa, item: r.item?r.item.nome:null, qtd:r.qtd}));
   if(!r.item){
     showToast('❌ Item "' + r.termoItem + '" não encontrado', '#f87171', 4000);
     return;
   }
   // Verifica se a mesa está aberta — primeiro no cache
   var conta = _contasMesaCache[String(r.mesa)];
-  console.log('[VOZ-ITEM] mesa', r.mesa, 'no cache?', !!conta);
   if(conta){
     _continuarItemRapidoVoz(r, conta);
     return;
@@ -7287,7 +7242,6 @@ function _enviarItemRapidoVoz(r, conta){
 function _processarComandoMesa(texto){
   var t = _normalizarVoz(texto);
   var numeros = _extrairNumerosMesa(texto);
-  console.log('[VOZ-MESA] ouviu:', JSON.stringify(texto), '| normalizado:', JSON.stringify(t), '| números:', JSON.stringify(numeros));
 
   // ═══ PRIMEIRO: comandos de AÇÃO (transferir/fechar) têm prioridade ═══
   // Senão "transferir mesa 5..." seria confundido com pedido de item.
@@ -7397,7 +7351,6 @@ function _processarComandoMesa(texto){
   var comecaComMais = (t.indexOf('mais ') === 0 || t.indexOf('mas ') === 0);
   if(temPadraoMesa || (comecaComMais && numeros.length >= 1)){
     var resultadoItem = _interpretarComandoMaisItem(texto);
-    console.log('[VOZ-MESA] mais-item interpretado:', JSON.stringify(resultadoItem ? {qtd:resultadoItem.qtd, termoItem:resultadoItem.termoItem, mesa:resultadoItem.mesa, achouItem: !!resultadoItem.item, nomeItem: resultadoItem.item ? resultadoItem.item.nome : null} : null));
     if(resultadoItem && resultadoItem.item){
       // permitirCriar=true → se a mesa estiver livre, abre a conta (com confirmação)
       _confirmarItemRapidoVoz(resultadoItem, true);
@@ -7406,7 +7359,7 @@ function _processarComandoMesa(texto){
     // Detectou padrão de item + mesa, mas não achou o item → avisa
     if(resultadoItem && resultadoItem.termoItem && resultadoItem.termoItem.length >= 2){
       _vibrarErro();
-      showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado no cardápio', '#f87171', 4500);
+      showToast('❌ Item "' + resultadoItem.termoItem + '" não encontrado no cardápio', '#f87171', 4000);
       return;
     }
   }
@@ -7767,64 +7720,39 @@ function _itemExisteExato(termo){
   });
 }
 // Tela de confirmação do pedido por voz
-var _confirmaVozItens = [];
-var _confirmaVozTexto = '';
-
 function _mostrarConfirmacaoVoz(textoOriginal, itens, ehParcial){
   var ex = document.getElementById('modal-confirma-voz');
   if(ex) ex.remove();
-  _confirmaVozItens = itens;
-  _confirmaVozTexto = textoOriginal;
-
+  var linhasHtml = itens.map(function(d){
+    if(d.item){
+      var obrig = itemTemObrigatorio(d.item);
+      var obsHtml = d.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(d.obs) + '</div>' : '';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border:1px solid ' + (obrig?'#f7a34f':'rgba(74,222,128,0.3)') + ';border-radius:9px;margin-bottom:6px;">' +
+        '<span style="font-size:1.1rem;">' + (obrig?'⚠️':'🟢') + '</span>' +
+        '<div style="flex:1;"><div style="font-weight:700;font-size:0.9rem;">' + d.qtd + 'x ' + esc(d.item.nome) + '</div>' +
+        (obrig ? '<div style="font-size:0.7rem;color:#f7a34f;">Precisa escolher opções</div>' : '<div style="font-size:0.7rem;color:var(--muted);">R$ ' + fmtPreco(d.item.preco) + '</div>') +
+        obsHtml +
+        '</div></div>';
+    }
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:9px;margin-bottom:6px;">' +
+      '<span style="font-size:1.1rem;">❌</span>' +
+      '<div style="flex:1;"><div style="font-weight:600;font-size:0.88rem;color:#f87171;">"' + esc(d.termoFalado) + '"</div>' +
+      '<div style="font-size:0.7rem;color:var(--muted);">Item não encontrado</div></div></div>';
+  }).join('');
+  var temValidos = itens.some(function(d){ return d.item; });
   var mod = document.createElement('div');
   mod.id = 'modal-confirma-voz';
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px 20px;';
   mod.onclick = function(e){ if(e.target === mod && !ehParcial) mod.remove(); };
-  document.body.appendChild(mod);
-  _renderConfirmacaoVoz(ehParcial);
-}
 
-function _renderConfirmacaoVoz(ehParcial){
-  var mod = document.getElementById('modal-confirma-voz');
-  if(!mod) return;
-  var itens = _confirmaVozItens;
-
-  var linhasHtml = itens.map(function(d, idx){
-    if(d.item){
-      var obrig = itemTemObrigatorio(d.item);
-      var obsHtml = d.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(d.obs) + '</div>' : '';
-      // Controles de editar (só na tela final, não na parcial)
-      var controles = ehParcial ? '' :
-        '<div style="display:flex;align-items:center;gap:6px;">' +
-          '<button onclick="_editarQtdVoz(' + idx + ',-1)" style="width:30px;height:30px;border-radius:7px;background:var(--bg);border:1px solid var(--border2);color:var(--text);font-size:1.1rem;font-weight:700;cursor:pointer;">−</button>' +
-          '<span style="min-width:24px;text-align:center;font-weight:800;font-size:0.95rem;">' + d.qtd + '</span>' +
-          '<button onclick="_editarQtdVoz(' + idx + ',1)" style="width:30px;height:30px;border-radius:7px;background:var(--bg);border:1px solid var(--border2);color:var(--text);font-size:1.1rem;font-weight:700;cursor:pointer;">+</button>' +
-          '<button onclick="_removerItemVoz(' + idx + ')" style="width:30px;height:30px;border-radius:7px;background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:1rem;cursor:pointer;margin-left:2px;">×</button>' +
-        '</div>';
-      return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border:1px solid ' + (obrig?'#f7a34f':'rgba(74,222,128,0.3)') + ';border-radius:9px;margin-bottom:6px;">' +
-        '<span style="font-size:1.1rem;">' + (obrig?'⚠️':'🟢') + '</span>' +
-        '<div style="flex:1;"><div style="font-weight:700;font-size:0.9rem;">' + esc(d.item.nome) + '</div>' +
-        (obrig ? '<div style="font-size:0.7rem;color:#f7a34f;">Precisa escolher opções</div>' : '<div style="font-size:0.7rem;color:var(--muted);">R$ ' + fmtPreco(d.item.preco) + '</div>') +
-        obsHtml +
-        '</div>' + controles + '</div>';
-    }
-    // Item não encontrado — também pode ser removido
-    var btnRemover = ehParcial ? '' :
-      '<button onclick="_removerItemVoz(' + idx + ')" style="width:30px;height:30px;border-radius:7px;background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:1rem;cursor:pointer;">×</button>';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:9px;margin-bottom:6px;">' +
-      '<span style="font-size:1.1rem;">❌</span>' +
-      '<div style="flex:1;"><div style="font-weight:600;font-size:0.88rem;color:#f87171;">"' + esc(d.termoFalado) + '"</div>' +
-      '<div style="font-size:0.7rem;color:var(--muted);">Item não encontrado</div></div>' + btnRemover + '</div>';
-  }).join('');
-
-  var temValidos = itens.some(function(d){ return d.item; });
-
+  // Cabeçalho: muda conforme parcial (ouvindo) ou final
   var cabecalho = ehParcial
     ? '<div style="font-weight:700;font-size:1.05rem;">🔴 Ouvindo...</div>' +
-      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + esc(_confirmaVozTexto) + '</div>'
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + esc(textoOriginal) + '</div>'
     : '<div style="font-weight:700;font-size:1.05rem;">🎤 Confirmar pedido</div>' +
-      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Ajuste a quantidade ou remova itens antes de adicionar</div>';
+      '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Você falou: "' + esc(textoOriginal) + '"</div>';
 
+  // Rodapé: parcial não tem botões (ainda ouvindo); final tem
   var rodape = ehParcial
     ? '<div style="padding:12px 14px;border-top:1px solid var(--border2);text-align:center;font-size:0.78rem;color:var(--muted);">Continue falando o pedido...</div>'
     : '<div style="padding:12px 14px;border-top:1px solid var(--border2);display:flex;gap:8px;">' +
@@ -7838,29 +7766,9 @@ function _renderConfirmacaoVoz(ehParcial){
       '<div style="flex:1;overflow-y:auto;padding:14px;">' + (linhasHtml || '<div style="text-align:center;color:var(--muted);padding:14px;font-size:0.85rem;">Aguardando...</div>') + '</div>' +
       rodape +
     '</div>';
+  document.body.appendChild(mod);
   var btnConf = document.getElementById('btn-confirma-voz');
-  if(btnConf) btnConf.onclick = function(){ _adicionarItensVoz(_confirmaVozItens); };
-}
-
-// Ajusta a quantidade de um item na confirmação
-function _editarQtdVoz(idx, delta){
-  var d = _confirmaVozItens[idx];
-  if(!d) return;
-  d.qtd = Math.max(1, (d.qtd || 1) + delta);
-  try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
-  _renderConfirmacaoVoz(false);
-}
-
-// Remove um item da confirmação
-function _removerItemVoz(idx){
-  _confirmaVozItens.splice(idx, 1);
-  try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
-  if(_confirmaVozItens.length === 0){
-    var mod = document.getElementById('modal-confirma-voz');
-    if(mod) mod.remove();
-    return;
-  }
-  _renderConfirmacaoVoz(false);
+  if(btnConf) btnConf.onclick = function(){ _adicionarItensVoz(itens); };
 }
 // Adiciona os itens confirmados ao carrinho
 function _adicionarItensVoz(itens){

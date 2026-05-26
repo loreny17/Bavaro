@@ -7042,7 +7042,21 @@ function iniciarVozMesa(){
 
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();
-    _processarComandoMesa(texto);
+    // Fecha o overlay ANTES de processar (senão fica por cima do que o comando abrir)
+    _esconderOverlayVoz();
+    _reconhecimentoVozMesa = null;
+    if(btn){
+      btn.style.background = 'var(--surface2)';
+      btn.style.borderColor = 'var(--border2)';
+      btn.style.color = 'var(--accent)';
+    }
+    // Processa o comando
+    if(texto){
+      _processarComandoMesa(texto);
+    } else {
+      _vibrarErro();
+      showToast('Não entendi — tente de novo', '#f7a34f', 3000);
+    }
   };
   recon.onerror = function(e){
     var msg = 'Não entendi, tente de novo';
@@ -7271,6 +7285,7 @@ function _enviarItemRapidoVoz(r, conta){
 function _processarComandoMesa(texto){
   var t = _normalizarVoz(texto);
   var numeros = _extrairNumerosMesa(texto);
+  console.log('[VOZ-MESA] ouviu:', JSON.stringify(texto), '| normalizado:', JSON.stringify(t), '| números:', JSON.stringify(numeros));
 
   // ═══ PRIMEIRO: comandos de AÇÃO (transferir/fechar) têm prioridade ═══
   // Senão "transferir mesa 5..." seria confundido com pedido de item.

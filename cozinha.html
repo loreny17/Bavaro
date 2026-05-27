@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cozinha — Bávaro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  :root{
+    --bg:#0a0a0c;
+    --card:#16161a;
+    --card-borda:#2a2a30;
+    --texto:#f4f4f5;
+    --muted:#8a8a92;
+    --accent:#d4a843;
+    --verde:#22c55e;
+    --laranja:#f59e0b;
+    --vermelho:#ef4444;
+  }
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--texto);
+    font-family:'Inter',sans-serif;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ─── Cabeçalho ─── */
+  .topo{
+    display:flex;align-items:center;gap:14px;
+    padding:12px 20px;
+    background:linear-gradient(135deg,#1a1a1f,#101013);
+    border-bottom:2px solid var(--card-borda);
+    flex-shrink:0;
+  }
+  .topo h1{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.9rem;letter-spacing:0.06em;
+    color:var(--accent);
+  }
+  .topo .sub{font-size:0.78rem;color:var(--muted);}
+  .topo-stats{margin-left:auto;display:flex;gap:10px;}
+  .stat{
+    background:var(--card);border:1px solid var(--card-borda);
+    border-radius:10px;padding:6px 14px;text-align:center;
+  }
+  .stat .num{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;line-height:1;color:var(--texto);}
+  .stat .lbl{font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;}
+  .relogio{
+    font-family:'Bebas Neue',sans-serif;font-size:1.6rem;
+    color:var(--texto);letter-spacing:0.04em;
+  }
+  .ponto-conexao{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--verde);flex-shrink:0;
+    box-shadow:0 0 8px var(--verde);
+  }
+  .ponto-conexao.off{background:var(--vermelho);box-shadow:0 0 8px var(--vermelho);}
+
+  /* ─── Grade de pedidos ─── */
+  .grade{
+    flex:1;overflow-y:auto;
+    padding:16px;
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+    gap:14px;
+    align-content:start;
+  }
+  .grade::-webkit-scrollbar{width:10px;}
+  .grade::-webkit-scrollbar-thumb{background:var(--card-borda);border-radius:5px;}
+
+  /* ─── Card de pedido ─── */
+  .pedido{
+    background:var(--card);
+    border:1px solid var(--card-borda);
+    border-radius:14px;
+    overflow:hidden;
+    display:flex;flex-direction:column;
+    animation:entrar 0.35s ease;
+  }
+  @keyframes entrar{from{opacity:0;transform:scale(0.95) translateY(10px);}to{opacity:1;transform:scale(1) translateY(0);}}
+
+  .pedido.novo{animation:piscarNovo 1s ease 3;}
+  @keyframes piscarNovo{0%,100%{border-color:var(--card-borda);}50%{border-color:var(--accent);box-shadow:0 0 20px rgba(212,168,67,0.4);}}
+
+  /* Faixa de tempo (topo do card) */
+  .pedido-topo{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 14px;
+    border-bottom:1px solid var(--card-borda);
+  }
+  .pedido-mesa{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.7rem;letter-spacing:0.04em;line-height:1;
+  }
+  .pedido-tempo{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.4rem;letter-spacing:0.04em;
+    padding:2px 10px;border-radius:8px;
+    background:rgba(255,255,255,0.06);
+  }
+  /* Cores do tempo conforme demora */
+  .tempo-ok{color:var(--verde);}
+  .tempo-medio{color:var(--laranja);}
+  .tempo-alerta{
+    color:#fff;background:var(--vermelho)!important;
+    animation:pulsarAlerta 1.5s ease infinite;
+  }
+  @keyframes pulsarAlerta{0%,100%{opacity:1;}50%{opacity:0.6;}}
+
+  .pedido-info{
+    padding:3px 14px 8px;
+    font-size:0.72rem;color:var(--muted);
+    border-bottom:1px solid var(--card-borda);
+    display:flex;gap:10px;
+  }
+  .pedido-info .num-ped{color:var(--accent);font-weight:700;}
+
+  /* Lista de itens */
+  .itens{padding:8px 0;flex:1;}
+  .item{
+    display:flex;align-items:flex-start;gap:10px;
+    padding:9px 14px;
+  }
+  .item + .item{border-top:1px solid rgba(255,255,255,0.04);}
+  .item-qtd{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.5rem;line-height:1;
+    color:var(--accent);
+    min-width:34px;text-align:center;
+    background:rgba(212,168,67,0.1);
+    border-radius:7px;padding:4px 0;
+  }
+  .item-corpo{flex:1;}
+  .item-nome{font-size:1.02rem;font-weight:700;line-height:1.25;}
+  .item-obs{
+    font-size:0.82rem;color:var(--laranja);
+    margin-top:2px;font-weight:600;
+  }
+  .item-sel{font-size:0.76rem;color:var(--muted);margin-top:1px;}
+
+  /* Etiqueta de teste */
+  .tag-teste{
+    display:inline-block;
+    background:rgba(239,68,68,0.15);color:#f87171;
+    font-size:0.6rem;font-weight:800;
+    padding:2px 7px;border-radius:5px;
+    text-transform:uppercase;letter-spacing:0.05em;
+    vertical-align:middle;margin-left:6px;
+  }
+
+  /* ─── Tela vazia ─── */
+  .vazio{
+    grid-column:1/-1;
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    padding:80px 20px;color:var(--muted);
+    text-align:center;
+  }
+  .vazio .icone{font-size:4rem;margin-bottom:14px;opacity:0.4;}
+  .vazio .titulo{font-size:1.3rem;font-weight:700;color:var(--texto);}
+  .vazio .desc{font-size:0.9rem;margin-top:6px;}
+
+  /* ─── Tela de carregamento ─── */
+  #carregando{
+    position:fixed;inset:0;z-index:100;
+    background:var(--bg);
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;
+  }
+  .spinner{
+    width:46px;height:46px;
+    border:4px solid var(--card-borda);
+    border-top-color:var(--accent);
+    border-radius:50%;
+    animation:girar 0.8s linear infinite;
+  }
+  @keyframes girar{to{transform:rotate(360deg);}}
+  #carregando .txt{color:var(--muted);font-size:0.9rem;}
+  #carregando.escondido{display:none;}
+
+  /* ─── Erro ─── */
+  .erro-box{
+    max-width:380px;text-align:center;padding:24px;
+  }
+  .erro-box .icone{font-size:3rem;margin-bottom:12px;}
+  .erro-box .titulo{font-size:1.15rem;font-weight:700;color:var(--vermelho);margin-bottom:8px;}
+  .erro-box .desc{font-size:0.88rem;color:var(--muted);line-height:1.6;}
+  .erro-box button{
+    margin-top:16px;width:100%;padding:12px;
+    background:var(--accent);border:none;color:#000;
+    border-radius:10px;font-weight:700;font-size:0.95rem;
+    cursor:pointer;font-family:inherit;
+  }
+
+  /* Responsivo — tablet menor */
+  @media(max-width:600px){
+    .grade{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
+    .topo h1{font-size:1.5rem;}
+    .topo-stats .stat:nth-child(2){display:none;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Carregamento -->
+<div id="carregando">
+  <div class="spinner"></div>
+  <div class="txt">Conectando à cozinha...</div>
+</div>
+
+<!-- Cabeçalho -->
+<div class="topo">
+  <div class="ponto-conexao" id="ponto-conexao"></div>
+  <div>
+    <h1>🍳 COZINHA</h1>
+    <div class="sub" id="sub-restaurante">Carregando...</div>
+  </div>
+  <div class="topo-stats">
+    <div class="stat">
+      <div class="num" id="stat-pedidos">0</div>
+      <div class="lbl">Pedidos</div>
+    </div>
+    <div class="stat">
+      <div class="num" id="stat-itens">0</div>
+      <div class="lbl">Pratos</div>
+    </div>
+    <div class="stat">
+      <div class="num relogio" id="relogio">--:--</div>
+      <div class="lbl">Agora</div>
+    </div>
+  </div>
+</div>
+
+<!-- Grade de pedidos -->
+<div class="grade" id="grade">
+  <div class="vazio">
+    <div class="icone">🍽️</div>
+    <div class="titulo">Aguardando pedidos</div>
+    <div class="desc">Os pedidos da cozinha vão aparecer aqui</div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════
+//  TELA DE COZINHA — Bávaro
+//  Mostra os pedidos da cozinha em tempo real.
+//  Etapa 1: só visualização (a impressão continua normal).
+// ═══════════════════════════════════════════════
+
+var firebaseConfig = {
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.firebasestorage.app",
+  messagingSenderId: "510785409925",
+  appId: "1:510785409925:web:e687e387509fb0605b6aec"
+};
+
+// Configuração do restaurante — pode vir pela URL (?rest=default&tenant=xxx)
+var _params = new URLSearchParams(window.location.search);
+var _restauranteId = _params.get('rest') || 'default';
+var _tenantId = _params.get('tenant') || 'tnt_molrfz1k_rznlgl';
+
+var fbDb = null;
+var _modelosCozinha = [];
+var _itensCardapio = [];
+var _categorias = [];
+var _pedidosAtivos = [];
+var _contasAbertas = {};   // {contaId: true} — contas ainda abertas
+var _idsConhecidos = {};   // pra detectar pedido novo (piscar)
+var _primeiraCarga = true;
+
+// ─── Inicialização ───
+window.addEventListener('load', function(){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.firestore();
+    iniciar();
+  }catch(e){
+    mostrarErro('Erro ao iniciar', e.message || String(e));
+  }
+});
+
+function iniciar(){
+  document.getElementById('sub-restaurante').textContent =
+    'Restaurante: ' + _restauranteId;
+  // Relógio
+  atualizarRelogio();
+  setInterval(atualizarRelogio, 1000);
+  // Atualiza os tempos dos cards a cada 30s
+  setInterval(renderPedidos, 30000);
+  // Carrega cardápio e modelos, depois escuta os pedidos
+  carregarConfiguracao().then(function(){
+    escutarContasAbertas();
+    escutarPedidos();
+    document.getElementById('carregando').classList.add('escondido');
+  }).catch(function(e){
+    mostrarErro('Erro ao carregar', e.message || String(e));
+  });
+  // Detecta conexão
+  window.addEventListener('online', function(){ atualizarPontoConexao(true); });
+  window.addEventListener('offline', function(){ atualizarPontoConexao(false); });
+  atualizarPontoConexao(navigator.onLine !== false);
+}
+
+// ─── Carrega cardápio, categorias e modelos de impressão ───
+function carregarConfiguracao(){
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
+
+  var p1 = base.collection('cardapio').doc('data').collection('itens').get()
+    .then(function(snap){
+      _itensCardapio = [];
+      snap.forEach(function(d){
+        var v = d.data();
+        _itensCardapio.push({
+          id:d.id, nome:v.nome||'',
+          categoriaId: v.categoriaId || v.categoria || ''
+        });
+      });
+    }).catch(function(){ _itensCardapio = []; });
+
+  var p2 = base.collection('cardapio').doc('data').collection('categorias').get()
+    .then(function(snap){
+      _categorias = [];
+      snap.forEach(function(d){ _categorias.push(Object.assign({id:d.id}, d.data())); });
+    }).catch(function(){ _categorias = []; });
+
+  // Modelos de impressão (pra saber o que é "da cozinha")
+  // Caminho: impressao/config/modelos (subcoleção)
+  var p3 = base.collection('impressao').doc('config').collection('modelos').get()
+    .then(function(snap){
+      _modelosCozinha = [];
+      snap.forEach(function(d){
+        var v = d.data() || {};
+        if(v.apareceSininho){
+          _modelosCozinha.push({
+            id: d.id,
+            nome: v.nome || '',
+            filtro: v.filtro || 'categoria',
+            categorias: v.categorias || [],
+            itens: v.itens || []
+          });
+        }
+      });
+    }).catch(function(){ _modelosCozinha = []; });
+
+  return Promise.all([p1, p2, p3]);
+}
+
+// ─── Escuta as contas de mesa abertas ───
+function escutarContasAbertas(){
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .onSnapshot(function(snap){
+      _contasAbertas = {};
+      snap.forEach(function(d){
+        var c = d.data();
+        if(c.status === 'aberta' || !c.status){
+          _contasAbertas[d.id] = true;
+        }
+      });
+      renderPedidos();
+    }, function(e){
+      console.warn('[COZINHA] erro contas:', e);
+    });
+}
+
+// ─── Escuta os pedidos em tempo real ───
+function escutarPedidos(){
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .onSnapshot(function(snap){
+      var lista = [];
+      snap.forEach(function(d){
+        lista.push(Object.assign({id:d.id}, d.data()));
+      });
+      _pedidosAtivos = lista;
+      atualizarPontoConexao(true);
+      renderPedidos();
+      _primeiraCarga = false;
+    }, function(e){
+      console.error('[COZINHA] erro pedidos:', e);
+      atualizarPontoConexao(false);
+    });
+}
+
+// ─── Decide se um item é "da cozinha" ───
+function itemEhDaCozinha(item){
+  if(!_modelosCozinha.length) return true; // sem config = mostra tudo
+  return _modelosCozinha.some(function(m){
+    if(m.filtro === 'item'){
+      return (m.itens||[]).indexOf(item.id) >= 0;
+    } else {
+      // filtro por categoria
+      var def = _itensCardapio.find(function(i){ return i.id === item.id; });
+      var catId = def ? def.categoriaId : (item.categoriaId || '');
+      return (m.categorias||[]).indexOf(catId) >= 0;
+    }
+  });
+}
+
+// ─── Monta a tela ───
+function renderPedidos(){
+  var grade = document.getElementById('grade');
+
+  // Filtra: pedidos que ainda estão em preparo, de contas abertas,
+  // e que tenham itens da cozinha
+  var pedidosCozinha = _pedidosAtivos.filter(function(p){
+    // Só pedidos em preparo (não finalizados)
+    if(p.status && p.status !== 'preparo' && p.status !== 'novo') return false;
+    // Pedido precisa pertencer a uma conta ainda aberta
+    if(p.contaId && !_contasAbertas[p.contaId]) return false;
+    // Tem pelo menos um item da cozinha não cancelado?
+    var itensCoz = (p.itens||[]).filter(function(it){
+      return it.status !== 'cancelado' && itemEhDaCozinha(it);
+    });
+    return itensCoz.length > 0;
+  });
+
+  // Ordena: mais antigo primeiro (o que está esperando há mais tempo)
+  pedidosCozinha.sort(function(a,b){
+    return (a.criadoEm||0) - (b.criadoEm||0);
+  });
+
+  // Estatísticas
+  var totalItens = 0;
+  pedidosCozinha.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.status !== 'cancelado' && itemEhDaCozinha(it)){
+        totalItens += (it.qtd || 1);
+      }
+    });
+  });
+  document.getElementById('stat-pedidos').textContent = pedidosCozinha.length;
+  document.getElementById('stat-itens').textContent = totalItens;
+
+  // Tela vazia
+  if(pedidosCozinha.length === 0){
+    grade.innerHTML =
+      '<div class="vazio">' +
+        '<div class="icone">🍽️</div>' +
+        '<div class="titulo">Nenhum pedido na cozinha</div>' +
+        '<div class="desc">Os novos pedidos aparecem aqui automaticamente</div>' +
+      '</div>';
+    return;
+  }
+
+  grade.innerHTML = pedidosCozinha.map(function(p){
+    return montarCardPedido(p);
+  }).join('');
+
+  // Marca os IDs conhecidos (pra detectar novos da próxima vez)
+  pedidosCozinha.forEach(function(p){ _idsConhecidos[p.id] = true; });
+}
+
+// ─── Monta um card de pedido ───
+function montarCardPedido(p){
+  var itensCoz = (p.itens||[]).filter(function(it){
+    return it.status !== 'cancelado' && itemEhDaCozinha(it);
+  });
+
+  // Tempo de espera
+  var minutos = Math.floor((Date.now() - (p.criadoEm||Date.now())) / 60000);
+  var classeTempo = 'tempo-ok';
+  if(minutos >= 20) classeTempo = 'tempo-alerta';
+  else if(minutos >= 10) classeTempo = 'tempo-medio';
+  var textoTempo = minutos <= 0 ? 'agora' : minutos + ' min';
+
+  // É um pedido novo? (não estava na carga anterior)
+  var ehNovo = !_primeiraCarga && !_idsConhecidos[p.id];
+  var classeNovo = ehNovo ? ' novo' : '';
+
+  // Cabeçalho: mesa ou comanda
+  var titulo;
+  if(p.tipoConta === 'avulsa' || p.tipoConta === 'comanda'){
+    titulo = '🗒️ ' + escapar(p.cliente || 'Comanda');
+  } else {
+    titulo = 'MESA ' + (p.mesa || '?');
+  }
+
+  var tagTeste = p.teste ? '<span class="tag-teste">Teste</span>' : '';
+
+  // Linha de info
+  var numPed = p.numeroSequencial ? '#' + p.numeroSequencial : '';
+  var garcom = p.garcom || '';
+
+  // Itens
+  var itensHtml = itensCoz.map(function(it){
+    var obs = it.obs ? '<div class="item-obs">📝 ' + escapar(it.obs) + '</div>' : '';
+    var sel = '';
+    if(it.selecoes && it.selecoes.length){
+      var txtSel = it.selecoes.map(function(s){
+        return typeof s === 'string' ? s : (s.nome || s.opcao || '');
+      }).filter(Boolean).join(', ');
+      if(txtSel) sel = '<div class="item-sel">' + escapar(txtSel) + '</div>';
+    }
+    return '<div class="item">' +
+      '<div class="item-qtd">' + (it.qtd||1) + '</div>' +
+      '<div class="item-corpo">' +
+        '<div class="item-nome">' + escapar(it.nome||'') + '</div>' +
+        sel + obs +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="pedido' + classeNovo + '">' +
+    '<div class="pedido-topo">' +
+      '<div class="pedido-mesa">' + titulo + tagTeste + '</div>' +
+      '<div class="pedido-tempo ' + classeTempo + '">' + textoTempo + '</div>' +
+    '</div>' +
+    '<div class="pedido-info">' +
+      (numPed ? '<span class="num-ped">' + numPed + '</span>' : '') +
+      (garcom ? '<span>' + escapar(garcom) + '</span>' : '') +
+    '</div>' +
+    '<div class="itens">' + itensHtml + '</div>' +
+  '</div>';
+}
+
+// ─── Utilidades ───
+function escapar(s){
+  return String(s||'').replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function atualizarRelogio(){
+  var agora = new Date();
+  var h = String(agora.getHours()).padStart(2,'0');
+  var m = String(agora.getMinutes()).padStart(2,'0');
+  document.getElementById('relogio').textContent = h + ':' + m;
+}
+
+function atualizarPontoConexao(online){
+  var ponto = document.getElementById('ponto-conexao');
+  if(ponto) ponto.className = 'ponto-conexao' + (online ? '' : ' off');
+}
+
+function mostrarErro(titulo, desc){
+  var carr = document.getElementById('carregando');
+  carr.classList.remove('escondido');
+  carr.innerHTML =
+    '<div class="erro-box">' +
+      '<div class="icone">⚠️</div>' +
+      '<div class="titulo">' + escapar(titulo) + '</div>' +
+      '<div class="desc">' + escapar(desc) + '</div>' +
+      '<button onclick="location.reload()">🔄 Tentar de novo</button>' +
+    '</div>';
+}
+</script>
+</body>
+</html>

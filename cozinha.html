@@ -126,7 +126,11 @@
   .item{
     display:flex;align-items:flex-start;gap:10px;
     padding:9px 14px;
+    cursor:pointer;
+    transition:background 0.15s;
+    position:relative;
   }
+  .item:active{background:rgba(255,255,255,0.05);}
   .item + .item{border-top:1px solid rgba(255,255,255,0.04);}
   .item-qtd{
     font-family:'Bebas Neue',sans-serif;
@@ -135,6 +139,7 @@
     min-width:34px;text-align:center;
     background:rgba(212,168,67,0.1);
     border-radius:7px;padding:4px 0;
+    flex-shrink:0;
   }
   .item-corpo{flex:1;}
   .item-nome{font-size:1.02rem;font-weight:700;line-height:1.25;}
@@ -143,6 +148,34 @@
     margin-top:2px;font-weight:600;
   }
   .item-sel{font-size:0.76rem;color:var(--muted);margin-top:1px;}
+  /* Marcador de "feito" */
+  .item-check{
+    width:26px;height:26px;border-radius:50%;
+    border:2px solid var(--card-borda);
+    flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:0.95rem;
+    transition:all 0.2s;
+  }
+  /* Item PRONTO — fica verde e riscado */
+  .item.pronto{opacity:0.55;}
+  .item.pronto .item-nome{text-decoration:line-through;}
+  .item.pronto .item-qtd{background:rgba(34,197,94,0.15);color:var(--verde);}
+  .item.pronto .item-check{
+    background:var(--verde);border-color:var(--verde);color:#fff;
+  }
+
+  /* Card com TODOS os pratos prontos */
+  .pedido.completo{border-color:var(--verde);}
+  .pedido.completo .pedido-topo{
+    background:rgba(34,197,94,0.12);
+  }
+  .selo-completo{
+    background:var(--verde);color:#fff;
+    font-size:0.66rem;font-weight:800;
+    padding:3px 9px;border-radius:6px;
+    text-transform:uppercase;letter-spacing:0.05em;
+  }
 
   /* Etiqueta de teste */
   .tag-teste{
@@ -219,7 +252,7 @@
   <div class="ponto-conexao" id="ponto-conexao"></div>
   <div>
     <h1>🍳 COZINHA</h1>
-    <div class="sub" id="sub-restaurante">Carregando...</div>
+    <div class="sub" id="sub-restaurante">Toque no prato quando ficar pronto</div>
   </div>
   <div class="topo-stats">
     <div class="stat">
@@ -293,7 +326,7 @@ window.addEventListener('load', function(){
 
 function iniciar(){
   document.getElementById('sub-restaurante').textContent =
-    'Restaurante: ' + _restauranteId;
+    'Toque no prato quando ficar pronto · ' + _restauranteId;
   // Relógio
   atualizarRelogio();
   setInterval(atualizarRelogio, 1000);
@@ -410,6 +443,15 @@ function itemEhDaCozinha(item){
   });
 }
 
+// ─── Verifica se todos os itens de cozinha de um pedido estão prontos ───
+function _pedidoEstaCompleto(p){
+  var itensCoz = (p.itens||[]).filter(function(it){
+    return it.status !== 'cancelado' && itemEhDaCozinha(it);
+  });
+  if(!itensCoz.length) return false;
+  return itensCoz.every(function(it){ return it.prontoCozinha === true; });
+}
+
 // ─── Monta a tela ───
 function renderPedidos(){
   var grade = document.getElementById('grade');
@@ -428,8 +470,12 @@ function renderPedidos(){
     return itensCoz.length > 0;
   });
 
-  // Ordena: mais antigo primeiro (o que está esperando há mais tempo)
+  // Ordena: pedidos completos vão pro FINAL; entre os pendentes,
+  // o mais antigo primeiro (esperando há mais tempo).
   pedidosCozinha.sort(function(a,b){
+    var aCompleto = _pedidoEstaCompleto(a);
+    var bCompleto = _pedidoEstaCompleto(b);
+    if(aCompleto !== bCompleto) return aCompleto ? 1 : -1;
     return (a.criadoEm||0) - (b.criadoEm||0);
   });
 
@@ -466,9 +512,17 @@ function renderPedidos(){
 
 // ─── Monta um card de pedido ───
 function montarCardPedido(p){
-  var itensCoz = (p.itens||[]).filter(function(it){
-    return it.status !== 'cancelado' && itemEhDaCozinha(it);
+  // Mapeia os itens da cozinha junto com o índice REAL no array do pedido
+  var itensCoz = [];
+  (p.itens||[]).forEach(function(it, idxReal){
+    if(it.status !== 'cancelado' && itemEhDaCozinha(it)){
+      itensCoz.push({ item: it, idx: idxReal });
+    }
   });
+  if(!itensCoz.length) return '';
+
+  // Card está completo se TODOS os itens da cozinha estão prontos
+  var todosProntos = itensCoz.every(function(o){ return o.item.prontoCozinha === true; });
 
   // Tempo de espera
   var minutos = Math.floor((Date.now() - (p.criadoEm||Date.now())) / 60000);
@@ -480,6 +534,7 @@ function montarCardPedido(p){
   // É um pedido novo? (não estava na carga anterior)
   var ehNovo = !_primeiraCarga && !_idsConhecidos[p.id];
   var classeNovo = ehNovo ? ' novo' : '';
+  var classeCompleto = todosProntos ? ' completo' : '';
 
   // Cabeçalho: mesa ou comanda
   var titulo;
@@ -490,13 +545,16 @@ function montarCardPedido(p){
   }
 
   var tagTeste = p.teste ? '<span class="tag-teste">Teste</span>' : '';
+  var seloCompleto = todosProntos ? '<span class="selo-completo">✓ Pronto</span>' : '';
 
   // Linha de info
   var numPed = p.numeroSequencial ? '#' + p.numeroSequencial : '';
   var garcom = p.garcom || '';
 
-  // Itens
-  var itensHtml = itensCoz.map(function(it){
+  // Itens — cada um clicável (marca/desmarca pronto)
+  var itensHtml = itensCoz.map(function(o){
+    var it = o.item;
+    var pronto = it.prontoCozinha === true;
     var obs = it.obs ? '<div class="item-obs">📝 ' + escapar(it.obs) + '</div>' : '';
     var sel = '';
     if(it.selecoes && it.selecoes.length){
@@ -505,26 +563,66 @@ function montarCardPedido(p){
       }).filter(Boolean).join(', ');
       if(txtSel) sel = '<div class="item-sel">' + escapar(txtSel) + '</div>';
     }
-    return '<div class="item">' +
+    return '<div class="item' + (pronto?' pronto':'') + '" ' +
+      'onclick="marcarItem(\'' + p.id + '\',' + o.idx + ',' + (pronto?'false':'true') + ')">' +
       '<div class="item-qtd">' + (it.qtd||1) + '</div>' +
       '<div class="item-corpo">' +
         '<div class="item-nome">' + escapar(it.nome||'') + '</div>' +
         sel + obs +
       '</div>' +
+      '<div class="item-check">' + (pronto?'✓':'') + '</div>' +
     '</div>';
   }).join('');
 
-  return '<div class="pedido' + classeNovo + '">' +
+  return '<div class="pedido' + classeNovo + classeCompleto + '">' +
     '<div class="pedido-topo">' +
       '<div class="pedido-mesa">' + titulo + tagTeste + '</div>' +
-      '<div class="pedido-tempo ' + classeTempo + '">' + textoTempo + '</div>' +
+      (seloCompleto || '<div class="pedido-tempo ' + classeTempo + '">' + textoTempo + '</div>') +
     '</div>' +
     '<div class="pedido-info">' +
       (numPed ? '<span class="num-ped">' + numPed + '</span>' : '') +
       (garcom ? '<span>' + escapar(garcom) + '</span>' : '') +
+      (todosProntos ? '' : '<span style="margin-left:auto;">' + itensCoz.filter(function(o){return o.item.prontoCozinha;}).length + '/' + itensCoz.length + ' prontos</span>') +
     '</div>' +
     '<div class="itens">' + itensHtml + '</div>' +
   '</div>';
+}
+
+// ─── Marca/desmarca um item como pronto no Firestore ───
+var _marcandoItem = false;
+function marcarItem(pedidoId, idxItem, marcar){
+  if(_marcandoItem) return;
+  _marcandoItem = true;
+
+  // Acha o pedido na lista local
+  var pedido = _pedidosAtivos.find(function(p){ return p.id === pedidoId; });
+  if(!pedido || !pedido.itens || !pedido.itens[idxItem]){
+    _marcandoItem = false;
+    return;
+  }
+
+  // Atualiza o array de itens (cópia) com o novo estado
+  var novosItens = pedido.itens.map(function(it, i){
+    if(i === idxItem){
+      return Object.assign({}, it, { prontoCozinha: marcar });
+    }
+    return it;
+  });
+
+  // Salva no Firestore
+  fbDb.collection('pedidos').doc(pedidoId).update({
+    itens: novosItens
+  }).then(function(){
+    _marcandoItem = false;
+    // O onSnapshot vai re-renderizar sozinho — mas atualiza local na hora
+    pedido.itens = novosItens;
+    renderPedidos();
+    // Vibração leve (se o tablet suportar)
+    try{ if(navigator.vibrate) navigator.vibrate(marcar ? 40 : 20); }catch(e){}
+  }).catch(function(e){
+    _marcandoItem = false;
+    console.error('[COZINHA] erro ao marcar item:', e);
+  });
 }
 
 // ─── Utilidades ───

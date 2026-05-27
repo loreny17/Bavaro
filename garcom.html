@@ -1265,6 +1265,8 @@ function ficouOnline(){
   }
   // Revalida snapshots pra sincronizar dados pendentes
   setTimeout(revalidarConexaoFirestore, 500);
+  // Tenta enviar os pedidos que ficaram na fila offline
+  setTimeout(function(){ if(typeof _tentarEnviarFila === 'function') _tentarEnviarFila(false); }, 1500);
 }
 
 window.addEventListener('online', ficouOnline);
@@ -1499,6 +1501,8 @@ function aplicarLoginGarcom(match, nomeDigitado){
   try{ escutarAvisosGarcom(); }catch(e){ console.warn('Falhou ao iniciar avisos:', e); }
   try{ _carregarGestosAcoes(); }catch(e){}
   try{ atualizarBannerModoTeste(); atualizarMenuModoTeste(); }catch(e){}
+  // Inicia o vigia da fila de pedidos offline
+  try{ _iniciarVigiaFila(); }catch(e){ console.warn('Falhou ao iniciar vigia da fila:', e); }
 }
 
 // Modal: garçom cadastrado em mais de um restaurante, escolha qual usar agora
@@ -9913,6 +9917,166 @@ function enviarPedidoFromFab(){
 // null = sem override (usa o checkbox do carrinho)
 var _imprimirPedidoOverride = null;
 
+// ═══════════════════════════════════════════════════════════
+//  📡 FILA DE PEDIDOS OFFLINE
+//  Se o envio falhar (internet caiu), o pedido fica salvo no
+//  celular e é reenviado automaticamente quando a conexão volta.
+// ═══════════════════════════════════════════════════════════
+var _FILA_KEY = 'bavaro_fila_pedidos';
+var _filaTimer = null;
+var _filaProcessando = false;
+
+// Lê a fila do localStorage
+function _lerFilaPedidos(){
+  try{
+    var raw = localStorage.getItem(_FILA_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){
+    console.warn('[FILA] erro ao ler:', e);
+    return [];
+  }
+}
+
+// Salva a fila no localStorage
+function _salvarFilaPedidos(fila){
+  try{
+    localStorage.setItem(_FILA_KEY, JSON.stringify(fila));
+  }catch(e){
+    console.warn('[FILA] erro ao salvar:', e);
+  }
+}
+
+// Adiciona um pedido à fila offline
+function _adicionarPedidoNaFila(dadosPedido){
+  var fila = _lerFilaPedidos();
+  fila.push({
+    filaId: 'f_' + Date.now() + '_' + Math.random().toString(36).substring(2,7),
+    criadoEm: Date.now(),
+    tentativas: 0,
+    pedido: dadosPedido.pedido,
+    contaId: dadosPedido.contaId,
+    itensConta: dadosPedido.itensConta,
+    deveImprimir: dadosPedido.deveImprimir
+  });
+  _salvarFilaPedidos(fila);
+  _atualizarAvisoFila();
+  console.log('[FILA] pedido guardado. Total na fila:', fila.length);
+}
+
+// Atualiza o aviso visual "X pedidos aguardando envio"
+function _atualizarAvisoFila(){
+  var fila = _lerFilaPedidos();
+  var aviso = document.getElementById('aviso-fila-pedidos');
+  if(fila.length === 0){
+    if(aviso) aviso.remove();
+    return;
+  }
+  if(!aviso){
+    aviso = document.createElement('div');
+    aviso.id = 'aviso-fila-pedidos';
+    aviso.style.cssText = 'position:fixed;left:12px;right:12px;bottom:84px;z-index:9000;' +
+      'background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border-radius:12px;' +
+      'padding:11px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.3);' +
+      'font-size:0.86rem;cursor:pointer;';
+    aviso.onclick = function(){ _tentarEnviarFila(true); };
+    document.body.appendChild(aviso);
+  }
+  aviso.innerHTML =
+    '<span style="font-size:1.2rem;">📡</span>' +
+    '<div style="flex:1;">' +
+      '<div style="font-weight:700;">' + fila.length + ' pedido(s) aguardando envio</div>' +
+      '<div style="font-size:0.72rem;opacity:0.9;">Toque pra tentar enviar agora</div>' +
+    '</div>';
+}
+
+// Tenta enviar todos os pedidos da fila
+function _tentarEnviarFila(manual){
+  var fila = _lerFilaPedidos();
+  if(fila.length === 0) return;
+  if(_filaProcessando) return;
+  // Se está claramente offline e não foi pedido manual, nem tenta
+  if(!manual && navigator.onLine === false) return;
+
+  _filaProcessando = true;
+  if(manual) showToast('📡 Tentando enviar ' + fila.length + ' pedido(s)...', '#f59e0b', 2500);
+
+  // Processa o primeiro da fila
+  var item = fila[0];
+  item.tentativas = (item.tentativas || 0) + 1;
+
+  _enviarPedidoDaFila(item).then(function(){
+    // Sucesso — remove da fila
+    var filaAtual = _lerFilaPedidos();
+    filaAtual = filaAtual.filter(function(f){ return f.filaId !== item.filaId; });
+    _salvarFilaPedidos(filaAtual);
+    _atualizarAvisoFila();
+    _filaProcessando = false;
+    console.log('[FILA] pedido enviado. Restam:', filaAtual.length);
+    if(filaAtual.length > 0){
+      // Ainda tem — continua processando
+      setTimeout(function(){ _tentarEnviarFila(manual); }, 600);
+    } else {
+      showToast('✓ Todos os pedidos pendentes foram enviados!', '#4ade80', 3000);
+      try{ if(navigator.vibrate) navigator.vibrate([50,60,50]); }catch(e){}
+    }
+  }).catch(function(e){
+    console.warn('[FILA] falha ao reenviar:', e);
+    _filaProcessando = false;
+    // Atualiza as tentativas no localStorage
+    var filaAtual = _lerFilaPedidos();
+    var idx = filaAtual.findIndex(function(f){ return f.filaId === item.filaId; });
+    if(idx >= 0){ filaAtual[idx].tentativas = item.tentativas; _salvarFilaPedidos(filaAtual); }
+    if(manual){
+      showToast('📡 Ainda sem conexão — pedidos seguem na fila', '#f59e0b', 4000);
+    }
+  });
+}
+
+// Envia UM pedido da fila (cria pedido + atualiza conta)
+function _enviarPedidoDaFila(item){
+  var pedido = item.pedido;
+  return gerarNumeroSequencial().then(function(numero){
+    if(numero && !pedido.numeroSequencial) pedido.numeroSequencial = numero;
+    return fbDb.collection('pedidos').add(pedido);
+  }).then(function(ref){
+    var pedidoId = ref.id;
+    // Atualiza a conta da mesa via transação (não sobrescreve itens existentes)
+    return fbDb.runTransaction(function(tx){
+      var contaRef = fbDb.collection('contas_mesa').doc(item.contaId);
+      return tx.get(contaRef).then(function(doc){
+        if(!doc.exists) throw new Error('Conta não encontrada');
+        var data = doc.data();
+        var itensExistentes = data.itens || [];
+        // Liga os itens da conta ao pedido recém-criado
+        var itensComPedido = (item.itensConta || []).map(function(ic){
+          return Object.assign({}, ic, { pedidoId: pedidoId });
+        });
+        var todosItens = itensExistentes.concat(itensComPedido);
+        var totais = calcularTotaisConta({itens: todosItens, pagamentos: data.pagamentos||[]});
+        tx.update(contaRef, {
+          itens: todosItens,
+          subtotal: totais.subtotal, taxa10: totais.taxa10, total: totais.total,
+          pagoTotal: totais.pagoTotal, restante: totais.restante,
+          atualizadoEm: Date.now()
+        });
+      });
+    });
+  });
+}
+
+// Inicia o "vigia" — tenta esvaziar a fila a cada 12 segundos
+function _iniciarVigiaFila(){
+  if(_filaTimer) return;
+  _filaTimer = setInterval(function(){
+    var fila = _lerFilaPedidos();
+    if(fila.length > 0 && navigator.onLine !== false){
+      _tentarEnviarFila(false);
+    }
+  }, 12000);
+  // Mostra o aviso se já tem algo na fila (ex: app reaberto)
+  _atualizarAvisoFila();
+}
+
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
   var btn = document.getElementById('btn-enviar-pedido');
@@ -10071,14 +10235,43 @@ function enviarPedido(){
     }
   }).catch(function(e){
     console.error('[ENVIAR-PEDIDO] ❌ FALHOU:', e);
-    // Falhou no Firebase — restaura carrinho e avisa
-    _carrinho = carrinhoBackup;
-    atualizarCarrinhoBadge();
-    // Se está offline, mensagem mais branda — o Firestore vai tentar de novo automaticamente
-    if(!_estaOnline || navigator.onLine === false){
-      showToast('📡 Sem internet — pedido na fila, será enviado ao reconectar','#f59e0b', 5000);
+    // Falhou no envio. Verifica se é problema de conexão.
+    var ehProblemaConexao = !_estaOnline || navigator.onLine === false ||
+      (e && (e.code === 'unavailable' || e.code === 'deadline-exceeded' ||
+             (e.message && e.message.toLowerCase().indexOf('network') >= 0)));
+
+    if(ehProblemaConexao){
+      // SEM INTERNET → guarda o pedido na fila offline pra reenviar depois.
+      // Monta os itens da conta (mesma estrutura que o envio normal usaria)
+      var itensContaFila = itensPedido.map(function(it){
+        var item = {
+          itemKey: 'fila_' + Date.now() + '_' + Math.random().toString(36).substring(2,8),
+          pedidoId: null, // será preenchido quando o pedido for criado
+          id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
+          selecoes: it.selecoes || [],
+          status: 'ativo', pagamentoId: null,
+          adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
+          teste: _modoTeste ? true : false
+        };
+        if(it.tipoVenda === 'kg' && it.peso){
+          item.tipoVenda = 'kg'; item.peso = it.peso; item.precoBase = it.precoBase || 0;
+        }
+        return item;
+      });
+      _adicionarPedidoNaFila({
+        pedido: pedido,
+        contaId: contaId,
+        itensConta: itensContaFila,
+        deveImprimir: _deveImprimir
+      });
+      showToast('📡 Sem internet — pedido salvo, será enviado ao reconectar', '#f59e0b', 5000);
+      try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e2){}
+      // NÃO restaura o carrinho — o pedido já está garantido na fila
     } else {
-      showToast('❌ Falha ao enviar — toque no carrinho pra tentar de novo','#f87171');
+      // Erro que NÃO é de conexão (ex: conta não existe) — restaura o carrinho
+      _carrinho = carrinhoBackup;
+      atualizarCarrinhoBadge();
+      showToast('❌ Falha ao enviar — toque no carrinho pra tentar de novo', '#f87171');
     }
   });
 }

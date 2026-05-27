@@ -81,11 +81,11 @@
     border-radius:14px;
     overflow:hidden;
     display:flex;flex-direction:column;
-    animation:entrar 0.35s ease;
   }
   @keyframes entrar{from{opacity:0;transform:scale(0.95) translateY(10px);}to{opacity:1;transform:scale(1) translateY(0);}}
 
-  .pedido.novo{animation:piscarNovo 1s ease 3;}
+  /* Só o card NOVO anima a entrada + pisca */
+  .pedido.novo{animation:entrar 0.35s ease, piscarNovo 1s ease 3 0.35s;}
   @keyframes piscarNovo{0%,100%{border-color:var(--card-borda);}50%{border-color:var(--accent);box-shadow:0 0 20px rgba(212,168,67,0.4);}}
 
   /* Faixa de tempo (topo do card) */
@@ -255,6 +255,7 @@
     <div class="sub" id="sub-restaurante">Toque no prato quando ficar pronto</div>
   </div>
   <div class="topo-stats">
+    <button id="btn-som" onclick="alternarSom()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;">🔔</button>
     <div class="stat">
       <div class="num" id="stat-pedidos">0</div>
       <div class="lbl">Pedidos</div>
@@ -312,6 +313,7 @@ var _pedidosAtivos = [];
 var _contasAbertas = {};   // {contaId: true} — contas ainda abertas
 var _idsConhecidos = {};   // pra detectar pedido novo (piscar)
 var _primeiraCarga = true;
+var _somLigado = true;     // alerta sonoro de pedido novo
 
 // ─── Inicialização ───
 window.addEventListener('load', function(){
@@ -418,6 +420,26 @@ function escutarPedidos(){
       snap.forEach(function(d){
         lista.push(Object.assign({id:d.id}, d.data()));
       });
+
+      // Detecta pedidos NOVOS de cozinha (pra tocar o som)
+      if(!_primeiraCarga){
+        var temPedidoNovoCozinha = false;
+        snap.docChanges().forEach(function(ch){
+          if(ch.type === 'added'){
+            var p = Object.assign({id:ch.doc.id}, ch.doc.data());
+            // Só conta se tem item de cozinha e está em preparo
+            var temItemCoz = (p.itens||[]).some(function(it){
+              return it.status !== 'cancelado' && itemEhDaCozinha(it);
+            });
+            var emPreparo = !p.status || p.status === 'preparo' || p.status === 'novo';
+            if(temItemCoz && emPreparo){ temPedidoNovoCozinha = true; }
+          }
+        });
+        if(temPedidoNovoCozinha){
+          _tocarAlertaPedido();
+        }
+      }
+
       _pedidosAtivos = lista;
       atualizarPontoConexao(true);
       renderPedidos();
@@ -426,6 +448,36 @@ function escutarPedidos(){
       console.error('[COZINHA] erro pedidos:', e);
       atualizarPontoConexao(false);
     });
+}
+
+// ─── Som de alerta quando chega pedido novo ───
+var _audioCtx = null;
+function _tocarAlertaPedido(){
+  if(!_somLigado) return;
+  try{
+    if(!_audioCtx){
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if(!Ctx) return;
+      _audioCtx = new Ctx();
+    }
+    // Toca 2 "bips" curtos — um som de campainha simples
+    var agora = _audioCtx.currentTime;
+    [0, 0.18].forEach(function(offset){
+      var osc = _audioCtx.createOscillator();
+      var gain = _audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, agora + offset);
+      gain.gain.setValueAtTime(0.0001, agora + offset);
+      gain.gain.exponentialRampToValueAtTime(0.35, agora + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, agora + offset + 0.15);
+      osc.connect(gain);
+      gain.connect(_audioCtx.destination);
+      osc.start(agora + offset);
+      osc.stop(agora + offset + 0.16);
+    });
+  }catch(e){
+    console.warn('[COZINHA] erro ao tocar som:', e);
+  }
 }
 
 // ─── Decide se um item é "da cozinha" ───
@@ -563,7 +615,7 @@ function montarCardPedido(p){
       }).filter(Boolean).join(', ');
       if(txtSel) sel = '<div class="item-sel">' + escapar(txtSel) + '</div>';
     }
-    return '<div class="item' + (pronto?' pronto':'') + '" ' +
+    return '<div class="item' + (pronto?' pronto':'') + '" data-idx="' + o.idx + '" ' +
       'onclick="marcarItem(\'' + p.id + '\',' + o.idx + ',' + (pronto?'false':'true') + ')">' +
       '<div class="item-qtd">' + (it.qtd||1) + '</div>' +
       '<div class="item-corpo">' +
@@ -574,7 +626,7 @@ function montarCardPedido(p){
     '</div>';
   }).join('');
 
-  return '<div class="pedido' + classeNovo + classeCompleto + '">' +
+  return '<div class="pedido' + classeNovo + classeCompleto + '" data-pid="' + p.id + '">' +
     '<div class="pedido-topo">' +
       '<div class="pedido-mesa">' + titulo + tagTeste + '</div>' +
       (seloCompleto || '<div class="pedido-tempo ' + classeTempo + '">' + textoTempo + '</div>') +
@@ -609,20 +661,67 @@ function marcarItem(pedidoId, idxItem, marcar){
     return it;
   });
 
-  // Salva no Firestore
+  // Atualiza o estado local na hora (pro onSnapshot não "voltar" o item)
+  pedido.itens = novosItens;
+
+  // Atualiza SÓ o item tocado na tela — sem recriar os cards (evita piscar)
+  _atualizarItemNaTela(pedidoId, idxItem, marcar);
+  try{ if(navigator.vibrate) navigator.vibrate(marcar ? 40 : 20); }catch(e){}
+
+  // Salva no Firestore (em background — o onSnapshot confirma depois)
   fbDb.collection('pedidos').doc(pedidoId).update({
     itens: novosItens
   }).then(function(){
     _marcandoItem = false;
-    // O onSnapshot vai re-renderizar sozinho — mas atualiza local na hora
-    pedido.itens = novosItens;
-    renderPedidos();
-    // Vibração leve (se o tablet suportar)
-    try{ if(navigator.vibrate) navigator.vibrate(marcar ? 40 : 20); }catch(e){}
   }).catch(function(e){
     _marcandoItem = false;
     console.error('[COZINHA] erro ao marcar item:', e);
+    // Reverte visualmente se falhou
+    pedido.itens[idxItem].prontoCozinha = !marcar;
+    _atualizarItemNaTela(pedidoId, idxItem, !marcar);
   });
+}
+
+// Atualiza visualmente UM item (e o estado do card) sem recriar tudo
+function _atualizarItemNaTela(pedidoId, idxItem, marcar){
+  var card = document.querySelector('.pedido[data-pid="' + pedidoId + '"]');
+  if(!card){ renderPedidos(); return; } // fallback: não achou, re-renderiza
+  var itemEl = card.querySelector('.item[data-idx="' + idxItem + '"]');
+  if(itemEl){
+    if(marcar){
+      itemEl.classList.add('pronto');
+      var chk = itemEl.querySelector('.item-check');
+      if(chk) chk.textContent = '✓';
+    } else {
+      itemEl.classList.remove('pronto');
+      var chk2 = itemEl.querySelector('.item-check');
+      if(chk2) chk2.textContent = '';
+    }
+    // Atualiza o onclick pra refletir o novo estado
+    itemEl.setAttribute('onclick',
+      "marcarItem('" + pedidoId + "'," + idxItem + "," + (marcar?'false':'true') + ")");
+  }
+  // Verifica se o card ficou completo (ou deixou de estar)
+  var pedido = _pedidosAtivos.find(function(p){ return p.id === pedidoId; });
+  if(pedido){
+    var completo = _pedidoEstaCompleto(pedido);
+    var jaCompleto = card.classList.contains('completo');
+    if(completo !== jaCompleto){
+      // Mudou o estado de completude → aí sim re-renderiza
+      // (pra reordenar e atualizar o cabeçalho)
+      renderPedidos();
+      return;
+    }
+    // Atualiza só o contador "X/Y prontos"
+    var infoEl = card.querySelector('.pedido-info span:last-child');
+    if(infoEl && !completo){
+      var itensCoz = (pedido.itens||[]).filter(function(it){
+        return it.status !== 'cancelado' && itemEhDaCozinha(it);
+      });
+      var prontos = itensCoz.filter(function(it){ return it.prontoCozinha; }).length;
+      infoEl.textContent = prontos + '/' + itensCoz.length + ' prontos';
+    }
+  }
 }
 
 // ─── Utilidades ───
@@ -642,6 +741,28 @@ function atualizarRelogio(){
 function atualizarPontoConexao(online){
   var ponto = document.getElementById('ponto-conexao');
   if(ponto) ponto.className = 'ponto-conexao' + (online ? '' : ' off');
+}
+
+// Liga/desliga o som de alerta
+function alternarSom(){
+  _somLigado = !_somLigado;
+  var btn = document.getElementById('btn-som');
+  if(btn){
+    btn.textContent = _somLigado ? '🔔' : '🔕';
+    btn.style.opacity = _somLigado ? '1' : '0.5';
+  }
+  // Os navegadores exigem um clique do usuário pra "liberar" o áudio.
+  // Esse clique no botão já serve — toca um bip curtinho de confirmação.
+  if(_somLigado){
+    try{
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if(Ctx){
+        if(!_audioCtx) _audioCtx = new Ctx();
+        if(_audioCtx.state === 'suspended') _audioCtx.resume();
+        _tocarAlertaPedido();
+      }
+    }catch(e){}
+  }
 }
 
 function mostrarErro(titulo, desc){

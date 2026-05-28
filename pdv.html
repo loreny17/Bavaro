@@ -7775,8 +7775,16 @@ function totemAbrirModalGrupo(grupo){
   if(ex) ex.remove();
   var ehEdicao = !!grupo;
   grupo = grupo || { nome:'', tipo:'unica', opcoes:[] };
-  // Guardamos as opções num estado pra editar
-  window._totemOpcoesEditando = (grupo.opcoes||[]).map(function(o){ return Object.assign({}, o); });
+  // Guardamos qual grupo está sendo editado (pra excluí-lo do select de "abrir grupos")
+  window._totemGrupoEditandoId = ehEdicao ? grupo.id : null;
+  // Guardamos as opções num estado pra editar (com abreGrupos garantido)
+  window._totemOpcoesEditando = (grupo.opcoes||[]).map(function(o){
+    return {
+      nome: o.nome || '',
+      preco: o.preco || 0,
+      abreGrupos: (o.abreGrupos || []).slice()
+    };
+  });
 
   var mod = document.createElement('div');
   mod.id = 'modal-totem-grupo';
@@ -7823,12 +7831,44 @@ function totemRenderOpcoesNoModal(){
     box.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:8px 0;">Nenhuma opção. Adicione abaixo.</div>';
     return;
   }
+  // O grupo SENDO editado agora — usado pra não permitir auto-vinculação
+  var idGrupoAtual = window._totemGrupoEditandoId || null;
+  // Lista de outros grupos disponíveis pra "abrir"
+  var outrosGrupos = _totemGrupos.filter(function(g){ return g.id !== idGrupoAtual; });
+
   box.innerHTML = ops.map(function(o, idx){
     var precoTxt = o.preco ? '+R$ ' + (o.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '(sem custo)';
-    return '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border-radius:7px;margin-bottom:5px;">' +
-      '<span style="flex:1;font-size:0.86rem;">' + escapeHtml(o.nome||'') + '</span>' +
-      '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
-      '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
+    // Chips dos grupos vinculados a esta opção
+    var gruposAbre = o.abreGrupos || [];
+    var chipsGrupos = gruposAbre.map(function(gid){
+      var g = outrosGrupos.find(function(x){ return x.id === gid; });
+      var nomeG = g ? g.nome : '(grupo removido)';
+      return '<span class="op-grupo-chip">' + escapeHtml(nomeG) +
+        ' <span onclick="totemDesvincularGrupo(' + idx + ',\'' + gid + '\')" style="cursor:pointer;color:#f87171;font-weight:800;margin-left:3px;">×</span></span>';
+    }).join('');
+    // Select pra adicionar grupo
+    var opcoesSelect = '<option value="">+ vincular grupo...</option>' +
+      outrosGrupos
+        .filter(function(g){ return gruposAbre.indexOf(g.id) < 0; })
+        .map(function(g){ return '<option value="' + g.id + '">' + escapeHtml(g.nome) + '</option>'; })
+        .join('');
+    var selectHtml = outrosGrupos.length > gruposAbre.length
+      ? '<select onchange="totemVincularGrupo(' + idx + ',this.value);this.value=\'\';" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:0.76rem;font-family:inherit;">' + opcoesSelect + '</select>'
+      : '';
+
+    return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;">' +
+      // Linha 1: nome + preço + remover
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(o.nome||'') + '</span>' +
+        '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
+        '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
+      '</div>' +
+      // Linha 2: grupos que esta opção "abre"
+      '<div style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;">' +
+        '<span style="font-size:0.7rem;color:var(--muted);">Ao escolher, abre:</span>' +
+        chipsGrupos +
+        selectHtml +
+      '</div>' +
     '</div>';
   }).join('');
 }
@@ -7838,7 +7878,7 @@ function totemAddOpcao(){
   var preco = parseFloat(document.getElementById('tg-op-preco').value) || 0;
   if(!nome){ document.getElementById('tg-op-nome').focus(); return; }
   if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
-  window._totemOpcoesEditando.push({ nome:nome, preco:preco });
+  window._totemOpcoesEditando.push({ nome:nome, preco:preco, abreGrupos:[] });
   document.getElementById('tg-op-nome').value = '';
   document.getElementById('tg-op-preco').value = '';
   totemRenderOpcoesNoModal();
@@ -7848,6 +7888,23 @@ function totemAddOpcao(){
 function totemRemoverOpcao(idx){
   if(!window._totemOpcoesEditando) return;
   window._totemOpcoesEditando.splice(idx, 1);
+  totemRenderOpcoesNoModal();
+}
+
+// Vincula um grupo à opção (este grupo aparece no totem quando a opção é escolhida)
+function totemVincularGrupo(opIdx, grupoId){
+  if(!grupoId) return;
+  var ops = window._totemOpcoesEditando || [];
+  if(!ops[opIdx]) return;
+  if(!ops[opIdx].abreGrupos) ops[opIdx].abreGrupos = [];
+  if(ops[opIdx].abreGrupos.indexOf(grupoId) < 0) ops[opIdx].abreGrupos.push(grupoId);
+  totemRenderOpcoesNoModal();
+}
+function totemDesvincularGrupo(opIdx, grupoId){
+  var ops = window._totemOpcoesEditando || [];
+  if(!ops[opIdx] || !ops[opIdx].abreGrupos) return;
+  var i = ops[opIdx].abreGrupos.indexOf(grupoId);
+  if(i >= 0) ops[opIdx].abreGrupos.splice(i, 1);
   totemRenderOpcoesNoModal();
 }
 
@@ -9408,6 +9465,7 @@ function toggleAdminUsuario(garcomId, novoValor){
 .totem-foto-up .preview{width:64px;height:64px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:var(--muted);overflow:hidden;flex-shrink:0;}
 .totem-foto-up .preview img{width:100%;height:100%;object-fit:cover;}
 .totem-foto-up .lbl{font-size:0.84rem;color:var(--muted);}
+.op-grupo-chip{display:inline-flex;align-items:center;background:rgba(212,168,67,0.13);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:3px 8px;border-radius:6px;font-size:0.72rem;font-weight:600;}
 </style>
 
 <style>

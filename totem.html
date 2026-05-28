@@ -292,7 +292,14 @@
   .mi-desc{font-size:0.92rem;color:var(--muted);line-height:1.4;margin-bottom:16px;}
   /* Grupos no modal */
   #mi-grupos{margin-top:6px;}
-  .grupo-box{margin-bottom:18px;}
+  .grupo-box{
+    margin-bottom:18px;
+    animation:slideIn 0.25s ease;
+  }
+  @keyframes slideIn{
+    from{opacity:0;transform:translateY(-8px);}
+    to{opacity:1;transform:translateY(0);}
+  }
   .grupo-cab{margin-bottom:8px;}
   .grupo-nome{font-size:1.05rem;font-weight:700;}
   .grupo-sub{font-size:0.78rem;color:var(--muted);margin-top:2px;}
@@ -733,12 +740,59 @@ function _grupoValido(grupoId){
   return g && g.opcoes && g.opcoes.length;
 }
 
-// Pega os grupos vinculados a um item (filtra os válidos)
+// Pega os grupos vinculados a um item — FIXOS (do item) + CONDICIONAIS (das opções escolhidas)
 function _gruposDoItem(item){
-  if(!item || !item.gruposIds) return [];
-  return item.gruposIds
-    .map(function(gid){ return _grupos.find(function(x){ return x.id === gid; }); })
-    .filter(function(g){ return g && g.opcoes && g.opcoes.length; });
+  if(!item) return [];
+  var resultado = [];
+  var jaIncluidos = {};
+
+  // 1. Grupos fixos do item (sempre aparecem)
+  (item.gruposIds || []).forEach(function(gid){
+    var g = _grupos.find(function(x){ return x.id === gid; });
+    if(g && g.opcoes && g.opcoes.length && !jaIncluidos[gid]){
+      resultado.push(g);
+      jaIncluidos[gid] = true;
+    }
+  });
+
+  // 2. Grupos CONDICIONAIS — abertos pelas opções selecionadas
+  // (ex: cliente escolheu "Executivo" → adiciona "Sem ingrediente Executivo")
+  // Faz em loop pra suportar cadeias: opção abre grupo, opção desse grupo abre outro, etc
+  var mudou = true;
+  var seguranca = 0;
+  while(mudou && seguranca++ < 10){
+    mudou = false;
+    resultado.forEach(function(grupo){
+      var sel = _selecoesTemp[grupo.id] || [];
+      sel.forEach(function(idx){
+        var op = (grupo.opcoes||[])[idx];
+        if(!op || !op.abreGrupos) return;
+        op.abreGrupos.forEach(function(gid){
+          if(jaIncluidos[gid]) return;
+          var g = _grupos.find(function(x){ return x.id === gid; });
+          if(g && g.opcoes && g.opcoes.length){
+            resultado.push(g);
+            jaIncluidos[gid] = true;
+            mudou = true;
+          }
+        });
+      });
+    });
+  }
+
+  return resultado;
+}
+
+// Quando o cliente troca uma seleção, alguns grupos condicionais podem deixar de existir.
+// Limpa as seleções dos grupos que não estão mais "abertos".
+function _limparSelecoesOrfas(){
+  if(!_itemAberto) return;
+  var gruposAtivos = _gruposDoItem(_itemAberto);
+  var idsAtivos = {};
+  gruposAtivos.forEach(function(g){ idsAtivos[g.id] = true; });
+  Object.keys(_selecoesTemp).forEach(function(gid){
+    if(!idsAtivos[gid]) delete _selecoesTemp[gid];
+  });
 }
 
 // Calcula o preço total com adicionais
@@ -888,6 +942,8 @@ function selecionarOpcao(grupoId, idx){
     if(pos >= 0) atual.splice(pos, 1);
     else atual.push(idx);
   }
+  // Se a mudança "fechou" algum grupo condicional, remove as seleções dele
+  _limparSelecoesOrfas();
   renderModalItem();
   resetTimerInatividade();
 }

@@ -909,6 +909,18 @@
       </div>
     </div>
 
+    <!-- ══ DIAGNÓSTICO ══ -->
+    <div class="submenu">
+      <div class="submenu-cab" onclick="toggleSubmenu('sub-debug')">
+        <span>🔧 Diagnóstico</span>
+        <span class="submenu-seta" id="seta-sub-debug">▸</span>
+      </div>
+      <div class="submenu-corpo" id="sub-debug">
+        <button onclick="gerarDebug()" class="botao-config" style="margin-bottom:10px;">🔍 Verificar Estações</button>
+        <div id="debug-saida" style="font-size:0.72rem;color:var(--muted);white-space:pre-wrap;word-break:break-word;font-family:monospace;background:var(--bg);border:1px solid var(--card-borda);border-radius:8px;padding:10px;max-height:300px;overflow-y:auto;">Toque em "Verificar Estações" pra ver o diagnóstico.</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1698,10 +1710,22 @@ function _reRenderConfigSeAberta(){
 }
 
 function _salvarEstacoes(){
-  return _refCozinhaCfg('estacoes').set({ lista: _estacoes, atualizadoEm: Date.now() });
+  return _refCozinhaCfg('estacoes').set({ lista: _estacoes, atualizadoEm: Date.now() })
+    .then(function(){ console.log('[ESTAÇÕES] salvo OK'); })
+    .catch(function(e){
+      console.error('[ESTAÇÕES] ERRO AO SALVAR:', e.code, e.message);
+      alert('Erro ao salvar estação: ' + e.message + '\n\nProvavelmente falta a regra do Firestore pra coleção cozinha_config.');
+      throw e;
+    });
 }
 function _salvarFichas(){
-  return _refCozinhaCfg('fichas').set({ fichas: _fichas, atualizadoEm: Date.now() });
+  return _refCozinhaCfg('fichas').set({ fichas: _fichas, atualizadoEm: Date.now() })
+    .then(function(){ console.log('[FICHAS] salvo OK'); })
+    .catch(function(e){
+      console.error('[FICHAS] ERRO AO SALVAR:', e.code, e.message);
+      alert('Erro ao salvar ficha: ' + e.message);
+      throw e;
+    });
 }
 
 // Renderiza os chips de filtro no menu E as abas no topo
@@ -1737,6 +1761,17 @@ function renderFiltroEstacoes(){
 
 function filtrarEstacao(id){
   _estacaoFiltroAtiva = id;
+  console.log('[ESTAÇÃO] filtro ativo:', id);
+  console.log('[ESTAÇÃO] fichas configuradas:', JSON.stringify(Object.keys(_fichas)));
+  console.log('[ESTAÇÃO] fichas completas:', JSON.stringify(_fichas));
+  // Loga os ids dos itens dos pedidos ativos
+  var idsItensPedidos = [];
+  _pedidosAtivos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      idsItensPedidos.push({nome: it.nome, id: it.id});
+    });
+  });
+  console.log('[ESTAÇÃO] itens nos pedidos:', JSON.stringify(idsItensPedidos));
   renderFiltroEstacoes();
   renderPedidos();
 }
@@ -2046,6 +2081,74 @@ function _aplicarLayout(){
     btn.textContent = _modoCards ? 'Cards' : 'Lista';
     btn.title = _modoCards ? 'Trocar pra Lista' : 'Trocar pra Cards';
   }
+}
+
+// Gera um diagnóstico legível das estações/fichas/pedidos
+function gerarDebug(){
+  var saida = document.getElementById('debug-saida');
+  if(!saida) return;
+  var txt = '';
+
+  // 1. Estações criadas
+  txt += '═══ ESTAÇÕES ═══\n';
+  if(!_estacoes.length){
+    txt += '(nenhuma estação criada)\n';
+  } else {
+    _estacoes.forEach(function(e){
+      txt += '• ' + e.nome + '\n   id: ' + e.id + '\n';
+    });
+  }
+
+  // 2. Fichas configuradas
+  txt += '\n═══ FICHAS (pratos configurados) ═══\n';
+  var idsFicha = Object.keys(_fichas);
+  if(!idsFicha.length){
+    txt += '(nenhuma ficha configurada)\n';
+  } else {
+    idsFicha.forEach(function(itemId){
+      var nomeItem = _itensCardapio.find(function(c){ return c.id === itemId; });
+      txt += '• ' + (nomeItem ? nomeItem.nome : '???') + '\n   id: ' + itemId + '\n';
+      (_fichas[itemId]||[]).forEach(function(t){
+        var est = _estacoes.find(function(e){ return e.id === t.estacaoId; });
+        txt += '     → [' + (est?est.nome:'SEM ESTAÇÃO') + '] ' + (t.qtd?t.qtd+'x ':'') + t.desc + '\n';
+      });
+    });
+  }
+
+  // 3. Itens nos pedidos ativos
+  txt += '\n═══ ITENS NOS PEDIDOS AGORA ═══\n';
+  var achouItem = false;
+  _pedidosAtivos.forEach(function(p){
+    if(p.status && p.status !== 'preparo' && p.status !== 'novo') return;
+    if(p.contaId && !_contasAbertas[p.contaId]) return;
+    (p.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      achouItem = true;
+      var temFicha = _fichas[it.id] ? '✅ TEM ficha' : '❌ SEM ficha';
+      txt += '• ' + (it.nome||'?') + '\n   id: ' + (it.id||'(sem id!)') + '\n   ' + temFicha + '\n';
+    });
+  });
+  if(!achouItem) txt += '(nenhum pedido ativo na tela)\n';
+
+  // 4. Diagnóstico final
+  txt += '\n═══ DIAGNÓSTICO ═══\n';
+  txt += 'Filtro ativo: ' + (_estacaoFiltroAtiva || '(Todas)') + '\n';
+  // Verifica se os ids batem
+  var idsItensPedido = [];
+  _pedidosAtivos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){ if(it.id) idsItensPedido.push(it.id); });
+  });
+  var algumBate = idsItensPedido.some(function(id){ return _fichas[id]; });
+  if(idsFicha.length && idsItensPedido.length){
+    if(algumBate){
+      txt += '✅ Os ids batem! Toque numa estação pra filtrar.\n';
+    } else {
+      txt += '⚠️ PROBLEMA: os ids das fichas NÃO batem com os ids dos pedidos.\n';
+      txt += 'Isso explica por que não aparece. Me mande este texto.\n';
+    }
+  }
+
+  saida.textContent = txt;
 }
 
 // Abre/fecha um submenu (accordion)

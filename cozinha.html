@@ -720,6 +720,36 @@
     cursor:pointer;font-family:inherit;font-size:0.85rem;white-space:nowrap;
   }
 
+  /* Tarefas na tela (quando filtra por estação) */
+  .tarefas-box{margin-top:4px;}
+  .tarefa-item-linha{
+    font-size:0.88rem;color:var(--accent);
+    font-weight:600;line-height:1.4;
+  }
+  /* Ficha técnica na config */
+  .ficha-prato{
+    border:1px solid var(--card-borda);border-radius:9px;
+    margin-bottom:7px;overflow:hidden;
+  }
+  .ficha-prato-cab{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:11px 12px;cursor:pointer;font-size:0.88rem;font-weight:600;
+    background:var(--card);
+  }
+  .ficha-prato-corpo{padding:10px 12px;border-top:1px solid var(--card-borda);}
+  .tarefa-linha{
+    display:flex;align-items:center;gap:8px;
+    padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);
+  }
+  .tarefa-est{
+    background:rgba(212,168,67,0.15);color:var(--accent);
+    font-size:0.7rem;font-weight:700;padding:3px 8px;border-radius:6px;
+    white-space:nowrap;
+  }
+  .tarefa-desc{flex:1;font-size:0.84rem;}
+  .tarefa-add{display:flex;gap:6px;margin-top:10px;align-items:center;}
+  .tarefa-add .config-input{padding:8px;font-size:0.82rem;}
+
 </style>
 </head>
 <body>
@@ -1380,6 +1410,31 @@ function montarCardPedido(p){
       '</div>';
     }
 
+    // Se há estação filtrada E o item tem ficha → mostra as TAREFAS daquela estação
+    var tarefasEst = _tarefasDoItemNaEstacao(it.id);
+    if(tarefasEst && tarefasEst.length){
+      var qtdItem = it.qtd || 1;
+      var tarefasHtml = tarefasEst.map(function(t){
+        // Multiplica a qtd da tarefa pela qtd do item pedido
+        var qtdTarefa = '';
+        if(t.qtd){
+          var n = parseInt(t.qtd, 10);
+          qtdTarefa = (!isNaN(n) ? (n * qtdItem) : t.qtd) + 'x ';
+        }
+        return '<div class="tarefa-item-linha">▸ ' + qtdTarefa + escapar(t.desc||'') + '</div>';
+      }).join('');
+      return '<div class="item' + (pronto?' pronto':'') + '" data-idx="' + o.idx + '" ' +
+        'onclick="marcarItem(\'' + p.id + '\',' + o.idx + ',' + (pronto?'false':'true') + ')">' +
+        '<div class="item-qtd">' + qtdItem + '</div>' +
+        '<div class="item-corpo">' +
+          '<div class="item-nome">' + escapar(it.nome||'') + '</div>' +
+          '<div class="tarefas-box">' + tarefasHtml + '</div>' +
+          sel + obs +
+        '</div>' +
+        '<div class="item-check">' + (pronto?'✓':'') + '</div>' +
+      '</div>';
+    }
+
     // Item ativo — clicável pra marcar pronto
     // Acha a foto do item no cardápio (pra cozinha consultar a montagem)
     var defItem = _itensCardapio.find(function(c){ return c.id === it.id; });
@@ -1578,36 +1633,42 @@ function atualizarPontoConexao(online){
 }
 
 // ═══════════════════════════════════════════════
-//  👨‍🍳 ESTAÇÕES DE TRABALHO
-//  Cada estação (ex: Chapa/Rose, Montagem/Maria) tem uma lista
-//  de itens. A cozinha filtra pra ver só o que é da estação dela.
-//  Salvo no Firestore: .../cozinha_config/estacoes
+//  👨‍🍳 ESTAÇÕES + FICHAS TÉCNICAS
+//  Estações: lista de postos (Chapa/Rose, Montagem/Maria).
+//  Fichas: cada prato tem TAREFAS, cada tarefa numa estação.
+//  Ex: Bacon Duplo → "2x Hambúrguer (Chapa)" + "Montar prato (Montagem)"
+//  Salvo no Firestore: cozinha_config/estacoes e cozinha_config/fichas
 // ═══════════════════════════════════════════════
-var _estacoes = [];          // [{id, nome, itens:[idItem,...]}]
+var _estacoes = [];          // [{id, nome}]
+var _fichas = {};            // {itemId: [{estacaoId, qtd, desc}, ...]}
 var _estacaoFiltroAtiva = ''; // '' = todas
+var _fichaEditandoItem = ''; // item aberto na config
 
-function _refEstacoes(){
+function _refCozinhaCfg(doc){
   return fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId)
-    .collection('cozinha_config').doc('estacoes');
+    .collection('cozinha_config').doc(doc);
 }
 
-// Carrega as estações do Firestore (e escuta mudanças)
+// Carrega estações e fichas (escuta mudanças)
 function escutarEstacoes(){
-  _refEstacoes().onSnapshot(function(doc){
-    if(doc.exists){
-      var d = doc.data();
-      _estacoes = d.lista || [];
-    } else {
-      _estacoes = [];
-    }
+  _refCozinhaCfg('estacoes').onSnapshot(function(doc){
+    _estacoes = (doc.exists && doc.data().lista) || [];
     renderFiltroEstacoes();
     renderPedidos();
   }, function(e){ console.warn('[ESTAÇÕES] erro:', e); });
+
+  _refCozinhaCfg('fichas').onSnapshot(function(doc){
+    _fichas = (doc.exists && doc.data().fichas) || {};
+    renderPedidos();
+  }, function(e){ console.warn('[FICHAS] erro:', e); });
 }
 
 function _salvarEstacoes(){
-  return _refEstacoes().set({ lista: _estacoes, atualizadoEm: Date.now() });
+  return _refCozinhaCfg('estacoes').set({ lista: _estacoes, atualizadoEm: Date.now() });
+}
+function _salvarFichas(){
+  return _refCozinhaCfg('fichas').set({ fichas: _fichas, atualizadoEm: Date.now() });
 }
 
 // Renderiza os chips de filtro no menu
@@ -1631,15 +1692,26 @@ function filtrarEstacao(id){
   renderPedidos();
 }
 
-// Diz se um item pertence à estação filtrada
-function _itemNaEstacaoAtiva(item){
-  if(!_estacaoFiltroAtiva) return true; // "Todas"
-  var est = _estacoes.find(function(e){ return e.id === _estacaoFiltroAtiva; });
-  if(!est) return true;
-  return (est.itens||[]).indexOf(item.id) >= 0;
+// Retorna as tarefas de um item que pertencem à estação ativa.
+// Se não tem ficha, ou filtro é "Todas", retorna null (mostra o item inteiro normal).
+function _tarefasDoItemNaEstacao(itemId){
+  if(!_estacaoFiltroAtiva) return null; // "Todas" → item normal
+  var ficha = _fichas[itemId];
+  if(!ficha || !ficha.length) return null; // sem ficha → item normal
+  return ficha.filter(function(t){ return t.estacaoId === _estacaoFiltroAtiva; });
 }
 
-// ─── Modal de configuração de estações ───
+// Diz se um item deve aparecer na estação ativa
+function _itemNaEstacaoAtiva(item){
+  if(!_estacaoFiltroAtiva) return true; // "Todas"
+  var ficha = _fichas[item.id];
+  // Item SEM ficha: aparece em todas as estações (não foi detalhado ainda)
+  if(!ficha || !ficha.length) return true;
+  // Item COM ficha: só aparece se tem tarefa nessa estação
+  return ficha.some(function(t){ return t.estacaoId === _estacaoFiltroAtiva; });
+}
+
+// ─── Modal de configuração ───
 function abrirConfigEstacoes(){
   document.getElementById('config-estacoes-overlay').classList.add('aberto');
   document.getElementById('config-estacoes').classList.add('aberto');
@@ -1648,48 +1720,106 @@ function abrirConfigEstacoes(){
 function fecharConfigEstacoes(){
   document.getElementById('config-estacoes-overlay').classList.remove('aberto');
   document.getElementById('config-estacoes').classList.remove('aberto');
+  _fichaEditandoItem = '';
 }
 
 function renderConfigEstacoes(){
   var box = document.getElementById('config-conteudo');
   if(!box) return;
-
-  // Lista de itens da cozinha (pra atribuir)
-  var itensCozinha = _itensCardapio.filter(function(i){
-    return itemEhDaCozinha({ id: i.id, categoriaId: i.categoriaId });
-  });
-
   var html = '';
 
-  // Campo pra criar nova estação
-  html += '<div style="display:flex;gap:8px;margin-bottom:16px;">' +
-    '<input type="text" id="nova-estacao-nome" class="config-input" placeholder="Nome da estação (ex: Chapa, Montagem)">' +
+  // ── Seção 1: criar/excluir estações ──
+  html += '<div style="font-weight:700;font-size:0.9rem;margin-bottom:8px;">📍 Estações</div>';
+  html += '<div style="display:flex;gap:8px;margin-bottom:10px;">' +
+    '<input type="text" id="nova-estacao-nome" class="config-input" placeholder="Ex: Chapa, Montagem">' +
     '<button onclick="criarEstacao()" class="config-add-btn">+ Criar</button>' +
   '</div>';
-
-  if(!_estacoes.length){
-    html += '<div class="menu-vazio-txt">Crie sua primeira estação acima. Ex: "Chapa" (Rose), "Montagem" (Maria).</div>';
+  if(_estacoes.length){
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;">';
+    _estacoes.forEach(function(e){
+      html += '<span class="est-item-chip ativo">' + escapar(e.nome) +
+        ' <span onclick="excluirEstacao(\'' + e.id + '\')" style="cursor:pointer;color:#f87171;font-weight:800;margin-left:4px;">×</span></span>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="menu-vazio-txt" style="margin-bottom:18px;">Crie as estações primeiro (ex: Chapa, Montagem).</div>';
   }
 
-  // Cada estação com seus itens
-  _estacoes.forEach(function(est){
-    html += '<div class="est-bloco">';
-    html += '<div class="est-bloco-topo">' +
-      '<div class="est-bloco-nome">📍 ' + escapar(est.nome) + '</div>' +
-      '<button class="est-del" onclick="excluirEstacao(\'' + est.id + '\')">Excluir</button>' +
-    '</div>';
-    html += '<div class="est-itens-titulo">Toque nos itens que passam por esta estação:</div>';
-    html += '<div>';
-    itensCozinha.forEach(function(it){
-      var ativo = (est.itens||[]).indexOf(it.id) >= 0;
-      html += '<span class="est-item-chip' + (ativo?' ativo':'') + '" ' +
-        'onclick="toggleItemEstacao(\'' + est.id + '\',\'' + it.id + '\')">' +
-        (ativo?'✓ ':'') + escapar(it.nome) + '</span>';
+  // ── Seção 2: fichas técnicas dos pratos ──
+  if(_estacoes.length){
+    html += '<div style="font-weight:700;font-size:0.9rem;margin:6px 0 8px;border-top:1px solid var(--card-borda);padding-top:14px;">📋 Ficha de cada prato</div>';
+    html += '<div class="est-itens-titulo">Toque num prato pra definir as tarefas dele:</div>';
+
+    var itensCozinha = _itensCardapio.filter(function(i){
+      return itemEhDaCozinha({ id: i.id, categoriaId: i.categoriaId });
     });
-    html += '</div></div>';
-  });
+    itensCozinha.forEach(function(it){
+      var temFicha = _fichas[it.id] && _fichas[it.id].length;
+      var aberto = _fichaEditandoItem === it.id;
+      html += '<div class="ficha-prato">';
+      html += '<div class="ficha-prato-cab" onclick="abrirFichaItem(\'' + it.id + '\')">' +
+        '<span>' + (temFicha?'✅ ':'⚪ ') + escapar(it.nome) + '</span>' +
+        '<span style="color:var(--muted);">' + (aberto?'▾':'▸') + '</span>' +
+      '</div>';
+      if(aberto){
+        html += '<div class="ficha-prato-corpo">' + _renderTarefasFicha(it.id) + '</div>';
+      }
+      html += '</div>';
+    });
+  }
 
   box.innerHTML = html;
+}
+
+// Renderiza as tarefas de uma ficha (dentro do prato aberto)
+function _renderTarefasFicha(itemId){
+  var ficha = _fichas[itemId] || [];
+  var html = '';
+  if(ficha.length){
+    ficha.forEach(function(t, i){
+      var est = _estacoes.find(function(e){ return e.id === t.estacaoId; });
+      html += '<div class="tarefa-linha">' +
+        '<span class="tarefa-est">' + escapar(est?est.nome:'?') + '</span>' +
+        '<span class="tarefa-desc">' + (t.qtd?('<b>'+t.qtd+'x</b> '):'') + escapar(t.desc||'') + '</span>' +
+        '<span onclick="removerTarefa(\'' + itemId + '\',' + i + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
+      '</div>';
+    });
+  } else {
+    html += '<div class="menu-vazio-txt">Sem tarefas. Adicione abaixo.</div>';
+  }
+  // Formulário de adicionar tarefa
+  var opcoesEst = _estacoes.map(function(e){
+    return '<option value="' + e.id + '">' + escapar(e.nome) + '</option>';
+  }).join('');
+  html += '<div class="tarefa-add">' +
+    '<select id="nova-tarefa-est-' + itemId + '" class="config-input" style="flex:1.1;">' + opcoesEst + '</select>' +
+    '<input type="text" id="nova-tarefa-qtd-' + itemId + '" class="config-input" style="width:46px;text-align:center;" placeholder="qtd">' +
+    '<input type="text" id="nova-tarefa-desc-' + itemId + '" class="config-input" style="flex:2;" placeholder="Ex: Hambúrguer, Montar prato">' +
+    '<button onclick="adicionarTarefa(\'' + itemId + '\')" class="config-add-btn">+</button>' +
+  '</div>';
+  return html;
+}
+
+function abrirFichaItem(itemId){
+  _fichaEditandoItem = (_fichaEditandoItem === itemId) ? '' : itemId;
+  renderConfigEstacoes();
+}
+
+function adicionarTarefa(itemId){
+  var estId = document.getElementById('nova-tarefa-est-' + itemId).value;
+  var qtd = (document.getElementById('nova-tarefa-qtd-' + itemId).value || '').trim();
+  var desc = (document.getElementById('nova-tarefa-desc-' + itemId).value || '').trim();
+  if(!desc){ document.getElementById('nova-tarefa-desc-' + itemId).focus(); return; }
+  if(!_fichas[itemId]) _fichas[itemId] = [];
+  _fichas[itemId].push({ estacaoId: estId, qtd: qtd, desc: desc });
+  _salvarFichas().then(function(){ renderConfigEstacoes(); });
+}
+
+function removerTarefa(itemId, idx){
+  if(!_fichas[itemId]) return;
+  _fichas[itemId].splice(idx, 1);
+  if(!_fichas[itemId].length) delete _fichas[itemId];
+  _salvarFichas().then(function(){ renderConfigEstacoes(); });
 }
 
 function criarEstacao(){
@@ -1698,27 +1828,16 @@ function criarEstacao(){
   if(!nome){ inp.focus(); return; }
   _estacoes.push({
     id: 'est_' + Date.now() + '_' + Math.random().toString(36).substring(2,6),
-    nome: nome,
-    itens: []
+    nome: nome
   });
   inp.value = '';
   _salvarEstacoes().then(function(){ renderConfigEstacoes(); });
 }
 
 function excluirEstacao(id){
-  if(!confirm('Excluir esta estação?')) return;
+  if(!confirm('Excluir esta estação? As tarefas que usam ela ficam sem estação.')) return;
   _estacoes = _estacoes.filter(function(e){ return e.id !== id; });
   if(_estacaoFiltroAtiva === id) _estacaoFiltroAtiva = '';
-  _salvarEstacoes().then(function(){ renderConfigEstacoes(); });
-}
-
-function toggleItemEstacao(estId, itemId){
-  var est = _estacoes.find(function(e){ return e.id === estId; });
-  if(!est) return;
-  if(!est.itens) est.itens = [];
-  var idx = est.itens.indexOf(itemId);
-  if(idx >= 0) est.itens.splice(idx, 1);
-  else est.itens.push(itemId);
   _salvarEstacoes().then(function(){ renderConfigEstacoes(); });
 }
 

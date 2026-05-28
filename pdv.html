@@ -7418,18 +7418,20 @@ var _adminLogFiltroGarcom = '';
 
 // ════════════════════════════════════════════════════════════════
 //  📱 MÓDULO TOTEM (Autoatendimento)
-//  Cadastro do cardápio próprio do totem + escolha de categorias
-//  do cardápio principal que aparecem no totem (bebidas, etc).
+//  Cadastro próprio do totem: comidas, categorias, grupos de adicionais
+//  + escolha de quais categorias do principal entram no totem.
+//  Tudo isolado em variáveis _totem* — NÃO mexe nas vars do PDV principal.
 // ════════════════════════════════════════════════════════════════
 
 // Estado do módulo
-var _totemCats = [];           // categorias próprias do totem [{id, nome, ordem}]
-var _totemItens = [];          // itens próprios do totem [{id, nome, preco, categoriaId, foto, ativo}]
-var _totemCatsPrincipais = []; // ids das categorias do cardápio principal que entram no totem
+var _totemCats = [];           // categorias próprias [{id, nome, ordem}]
+var _totemItens = [];          // itens próprios
+var _totemGrupos = [];         // grupos de adicionais próprios
+var _totemCatsPrincipais = []; // ids de categorias do principal escolhidas
 var _totemAbaAtiva = 'comidas';
-var _unsubTotemCats = null;
-var _unsubTotemItens = null;
-var _unsubTotemConfig = null;
+var _totemFotoSelecionada = null; // base64 da foto sendo subida
+var _unsubTotemCats = null, _unsubTotemItens = null;
+var _unsubTotemGrupos = null, _unsubTotemConfig = null;
 
 function _refTotemBase(){
   return fbDb.collection('tenants').doc(_tenantId)
@@ -7437,13 +7439,9 @@ function _refTotemBase(){
     .collection('cardapio_totem');
 }
 
-// Abre a aba do totem (chamado pelo showTab)
+// Abre a aba (chamado pelo showTab)
 function abrirAbaTotem(){
-  if(!_restauranteAtivo){
-    var box = document.getElementById('totem-itens-lista');
-    if(box) box.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center;">Selecione um restaurante primeiro</div>';
-    return;
-  }
+  if(!_restauranteAtivo) return;
   totemEscutarDados();
   totemMostrarAba(_totemAbaAtiva);
 }
@@ -7452,6 +7450,7 @@ function abrirAbaTotem(){
 function totemEscutarDados(){
   if(_unsubTotemCats) _unsubTotemCats();
   if(_unsubTotemItens) _unsubTotemItens();
+  if(_unsubTotemGrupos) _unsubTotemGrupos();
   if(_unsubTotemConfig) _unsubTotemConfig();
 
   _unsubTotemCats = _refTotemBase().doc('data').collection('categorias')
@@ -7470,25 +7469,29 @@ function totemEscutarDados(){
       totemRenderItens();
     }, function(e){ console.warn('[TOTEM] itens erro:', e.code); });
 
-  // Config (categorias do principal selecionadas)
+  _unsubTotemGrupos = _refTotemBase().doc('data').collection('grupos_opcoes')
+    .onSnapshot(function(snap){
+      _totemGrupos = [];
+      snap.forEach(function(d){ _totemGrupos.push(Object.assign({id:d.id}, d.data())); });
+      totemRenderGrupos();
+    }, function(e){ console.warn('[TOTEM] grupos erro:', e.code); });
+
   _unsubTotemConfig = _refTotemBase().doc('config')
     .onSnapshot(function(doc){
-      if(doc.exists){
-        var d = doc.data();
-        _totemCatsPrincipais = d.categoriasPrincipais || [];
-      } else {
-        _totemCatsPrincipais = [];
-      }
+      if(doc.exists){ _totemCatsPrincipais = doc.data().categoriasPrincipais || []; }
+      else { _totemCatsPrincipais = []; }
       totemRenderCatsPrincipais();
     }, function(e){ console.warn('[TOTEM] config erro:', e.code); });
 }
 
 function totemMostrarAba(aba){
   _totemAbaAtiva = aba;
-  document.getElementById('totem-aba-comidas').classList.toggle('ativo', aba === 'comidas');
-  document.getElementById('totem-aba-cats').classList.toggle('ativo', aba === 'cats');
-  document.getElementById('totem-painel-comidas').style.display = aba === 'comidas' ? 'block' : 'none';
-  document.getElementById('totem-painel-cats').style.display = aba === 'cats' ? 'block' : 'none';
+  ['comidas','grupos','cats'].forEach(function(a){
+    var btn = document.getElementById('totem-aba-' + a);
+    var pn = document.getElementById('totem-painel-' + a);
+    if(btn) btn.classList.toggle('ativo', a === aba);
+    if(pn) pn.style.display = a === aba ? 'block' : 'none';
+  });
   if(aba === 'cats') totemRenderCatsPrincipais();
 }
 
@@ -7502,7 +7505,7 @@ function totemRenderCategorias(){
   }
   box.innerHTML = _totemCats.map(function(c){
     return '<span class="totem-cat-chip">' + escapeHtml(c.nome||'') +
-      ' <span class="x" onclick="totemExcluirCategoria(\'' + c.id + '\')">×</span></span>';
+      ' <span class="x" onclick="totemExcluirCategoria(\''+c.id+'\')">×</span></span>';
   }).join('');
 }
 
@@ -7511,25 +7514,16 @@ function totemCriarCategoria(){
   var nome = (inp.value||'').trim();
   if(!nome){ inp.focus(); return; }
   _refTotemBase().doc('data').collection('categorias').add({
-    nome: nome,
-    ordem: _totemCats.length,
-    criadoEm: Date.now()
-  }).then(function(){
-    inp.value = '';
-    showToast('✓ Categoria criada', '#4ade80');
-  }).catch(function(e){
-    showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
-  });
+    nome: nome, ordem: _totemCats.length, criadoEm: Date.now()
+  }).then(function(){ inp.value=''; showToast('✓ Categoria criada','#4ade80'); })
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code),'#f87171'); });
 }
 
 function totemExcluirCategoria(id){
-  // Confere se tem itens nessa categoria
   var temItens = _totemItens.some(function(it){ return it.categoriaId === id; });
-  if(temItens){
-    if(!confirm('Esta categoria tem itens. Excluir mesmo assim? Os itens ficarão sem categoria.')) return;
-  }
+  if(temItens && !confirm('Esta categoria tem itens. Excluir mesmo assim?')) return;
   _refTotemBase().doc('data').collection('categorias').doc(id).delete()
-    .catch(function(e){ showToast('Erro: ' + (e.message||e.code), '#f87171'); });
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code),'#f87171'); });
 }
 
 // ─── Itens próprios ───
@@ -7540,7 +7534,6 @@ function totemRenderItens(){
     box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem itens cadastrados. Toque em "+ Novo Item".</div>';
     return;
   }
-  // Agrupa por categoria
   var porCat = {};
   _totemItens.forEach(function(it){
     var catId = it.categoriaId || '_sem_';
@@ -7563,65 +7556,96 @@ function totemRenderItens(){
 
 function _totemRenderItemCard(it){
   var foto = it.foto
-    ? '<img src="' + it.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\'">'
+    ? '<img src="' + it.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\';">'
     : '🍽️';
   var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   var ativo = it.ativo !== false;
+  var ngrupos = (it.gruposIds||[]).length;
   return '<div class="totem-item-card" style="' + (ativo?'':'opacity:0.5;') + '">' +
     '<div class="foto">' + foto + '</div>' +
     '<div class="info">' +
       '<div class="nome">' + escapeHtml(it.nome||'') + '</div>' +
       '<div class="preco">R$ ' + preco + '</div>' +
-      (ativo ? '' : '<div class="meta">⚠ Inativo</div>') +
+      '<div class="meta">' + (ativo?'':'⚠ Inativo · ') + (ngrupos?(ngrupos + ' grupo(s) de adicionais'):'sem adicionais') + '</div>' +
     '</div>' +
     '<div class="acoes">' +
-      '<button class="btn-mini" onclick="totemEditarItem(\'' + it.id + '\')">Editar</button>' +
-      '<button class="btn-mini del" onclick="totemExcluirItem(\'' + it.id + '\')">×</button>' +
+      '<button class="btn-mini" onclick="totemEditarItem(\''+it.id+'\')">Editar</button>' +
+      '<button class="btn-mini del" onclick="totemExcluirItem(\''+it.id+'\')">×</button>' +
     '</div>' +
   '</div>';
 }
 
-function totemAbrirNovoItem(){
-  totemAbrirModalItem(null);
-}
+function totemAbrirNovoItem(){ totemAbrirModalItem(null); }
 function totemEditarItem(id){
   var it = _totemItens.find(function(x){ return x.id === id; });
   totemAbrirModalItem(it || null);
 }
 
 function totemAbrirModalItem(item){
-  var existente = document.getElementById('modal-totem-item');
-  if(existente) existente.remove();
+  var ex = document.getElementById('modal-totem-item');
+  if(ex) ex.remove();
+  _totemFotoSelecionada = null; // reset
 
   var ehEdicao = !!item;
-  item = item || { nome:'', preco:0, categoriaId:'', foto:'', ativo:true };
+  item = item || { nome:'', preco:0, categoriaId:'', foto:'', ativo:true, gruposIds:[] };
 
-  // Opções de categoria
   var opcoesCat = '<option value="">(sem categoria)</option>' +
     _totemCats.map(function(c){
       return '<option value="' + c.id + '"' + (c.id === item.categoriaId ? ' selected' : '') + '>' + escapeHtml(c.nome) + '</option>';
     }).join('');
 
+  // Checkboxes de grupos
+  var gruposHtml = '';
+  if(!_totemGrupos.length){
+    gruposHtml = '<div style="color:var(--muted);font-size:0.8rem;">Nenhum grupo cadastrado. Crie na sub-aba "Grupos de Adicionais".</div>';
+  } else {
+    var idsItem = item.gruposIds || [];
+    gruposHtml = _totemGrupos.map(function(g){
+      var marcado = idsItem.indexOf(g.id) >= 0;
+      return '<label style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+        '<input type="checkbox" data-grupo-id="' + g.id + '"' + (marcado?' checked':'') + ' style="width:16px;height:16px;cursor:pointer;">' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span>' +
+        '<span style="font-size:0.7rem;color:var(--muted);background:var(--surface);padding:2px 6px;border-radius:5px;">' + (g.tipo === 'multipla' ? 'Múltipla' : 'Única') + '</span>' +
+      '</label>';
+    }).join('');
+  }
+
+  // Preview da foto atual
+  var fotoPreviewHtml = item.foto
+    ? '<img src="' + item.foto + '" alt="">'
+    : '📷';
+
   var mod = document.createElement('div');
   mod.id = 'modal-totem-item';
-  // Estilo INLINE pra garantir que aparece (não depende da classe .aberto)
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px 20px;overflow-y:auto;';
   mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
   mod.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;overflow:hidden;">' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;">' +
       '<div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
         '<h3 style="margin:0;font-size:1.05rem;">' + (ehEdicao ? '✏️ Editar Item' : '➕ Novo Item') + '</h3>' +
         '<button onclick="document.getElementById(\'modal-totem-item\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
       '</div>' +
       '<div style="padding:16px;display:flex;flex-direction:column;gap:14px;">' +
+        // Foto upload
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Foto</label>' +
+          '<div class="totem-foto-up" onclick="document.getElementById(\'ti-foto-input\').click()">' +
+            '<div class="preview" id="ti-foto-preview">' + fotoPreviewHtml + '</div>' +
+            '<div class="lbl">Toque para escolher uma foto da galeria</div>' +
+          '</div>' +
+          '<input type="file" id="ti-foto-input" accept="image/*" style="display:none;" onchange="totemFotoEscolhida(event)">' +
+        '</div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Nome</label>' +
           '<input type="text" id="ti-nome" value="' + escapeHtml(item.nome||'') + '" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Preço (R$)</label>' +
           '<input type="number" id="ti-preco" value="' + (item.preco||0) + '" step="0.01" min="0" inputmode="decimal" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Categoria</label>' +
           '<select id="ti-cat" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;">' + opcoesCat + '</select></div>' +
-        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">URL da foto (opcional)</label>' +
-          '<input type="text" id="ti-foto" value="' + escapeHtml(item.foto||'') + '" placeholder="https://..." style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.88rem;box-sizing:border-box;"></div>' +
+        // Grupos de adicionais
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:8px;">Grupos de adicionais (sem cebola, + bacon, etc)</label>' +
+          '<div id="ti-grupos">' + gruposHtml + '</div>' +
+        '</div>' +
         '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
           '<input type="checkbox" id="ti-ativo"' + (item.ativo !== false ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
           '<span style="font-size:0.88rem;">Item ativo (aparece no totem)</span>' +
@@ -7629,22 +7653,59 @@ function totemAbrirModalItem(item){
       '</div>' +
       '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
         '<button onclick="document.getElementById(\'modal-totem-item\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
-        '<button onclick="totemSalvarItem(' + (ehEdicao ? "'" + item.id + "'" : 'null') + ')" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">' + (ehEdicao ? 'Salvar' : 'Criar') + '</button>' +
+        '<button onclick="totemSalvarItem(' + (ehEdicao ? "'" + item.id + "'" : 'null') + ',\'' + escapeHtml(item.foto||'').replace(/\'/g,"\\'") + '\')" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">' + (ehEdicao ? 'Salvar' : 'Criar') + '</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
   setTimeout(function(){ var n = document.getElementById('ti-nome'); if(n) n.focus(); }, 200);
 }
 
-function totemSalvarItem(id){
+// Foto escolhida — redimensiona e converte pra base64
+function totemFotoEscolhida(event){
+  var file = event.target.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      // Redimensiona pra max 600px (igual cardápio principal)
+      var max = 600;
+      var w = img.width, h = img.height;
+      if(w > h){
+        if(w > max){ h = h * (max/w); w = max; }
+      } else {
+        if(h > max){ w = w * (max/h); h = max; }
+      }
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      _totemFotoSelecionada = canvas.toDataURL('image/jpeg', 0.82);
+      // Atualiza preview
+      var prev = document.getElementById('ti-foto-preview');
+      if(prev) prev.innerHTML = '<img src="' + _totemFotoSelecionada + '" alt="">';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function totemSalvarItem(id, fotoAtual){
   var nome = (document.getElementById('ti-nome').value||'').trim();
   var preco = parseFloat(document.getElementById('ti-preco').value);
   var catId = document.getElementById('ti-cat').value;
-  var foto = (document.getElementById('ti-foto').value||'').trim();
   var ativo = document.getElementById('ti-ativo').checked;
+
+  // Coleta grupos marcados
+  var gruposIds = [];
+  document.querySelectorAll('#ti-grupos input[type=checkbox]:checked').forEach(function(cb){
+    gruposIds.push(cb.getAttribute('data-grupo-id'));
+  });
 
   if(!nome){ showToast('Digite o nome', '#f7a34f'); return; }
   if(isNaN(preco) || preco < 0){ showToast('Preço inválido', '#f7a34f'); return; }
+
+  // Foto: se trocou usa a nova, senão mantém a antiga
+  var foto = _totemFotoSelecionada !== null ? _totemFotoSelecionada : (fotoAtual || '');
 
   var dados = {
     nome: nome,
@@ -7652,19 +7713,15 @@ function totemSalvarItem(id){
     categoriaId: catId,
     foto: foto,
     ativo: ativo,
+    gruposIds: gruposIds,
     atualizadoEm: Date.now()
   };
 
   var ref = _refTotemBase().doc('data').collection('itens');
-  var op;
-  if(id){
-    op = ref.doc(id).update(dados);
-  } else {
-    dados.criadoEm = Date.now();
-    op = ref.add(dados);
-  }
+  var op = id ? ref.doc(id).update(dados) : ref.add(Object.assign({criadoEm:Date.now()}, dados));
   op.then(function(){
     document.getElementById('modal-totem-item').remove();
+    _totemFotoSelecionada = null;
     showToast('✓ Salvo', '#4ade80');
   }).catch(function(e){
     showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
@@ -7675,15 +7732,157 @@ function totemExcluirItem(id){
   var it = _totemItens.find(function(x){ return x.id === id; });
   if(!confirm('Excluir "' + (it ? it.nome : 'este item') + '"?')) return;
   _refTotemBase().doc('data').collection('itens').doc(id).delete()
-    .then(function(){ showToast('✓ Excluído', '#4ade80'); })
-    .catch(function(e){ showToast('Erro: ' + (e.message||e.code), '#f87171'); });
+    .then(function(){ showToast('✓ Excluído','#4ade80'); })
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code),'#f87171'); });
 }
 
-// ─── Categorias do cardápio PRINCIPAL ───
+// ─── Grupos de adicionais (próprios do totem) ───
+function totemRenderGrupos(){
+  var box = document.getElementById('totem-grupos-lista');
+  if(!box) return;
+  if(!_totemGrupos.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem grupos cadastrados. Toque em "+ Novo Grupo".</div>';
+    return;
+  }
+  box.innerHTML = _totemGrupos.map(function(g){
+    var opcoes = (g.opcoes||[]).map(function(o){
+      var precoTxt = o.preco ? ' (+R$ ' + (o.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) + ')' : '';
+      return '<span class="op">' + escapeHtml(o.nome||'') + precoTxt + '</span>';
+    }).join('');
+    var tipoTxt = g.tipo === 'multipla' ? 'Múltipla escolha' : 'Escolha única';
+    return '<div class="totem-grupo-card">' +
+      '<div class="topo">' +
+        '<span class="nome">' + escapeHtml(g.nome||'') + '</span>' +
+        '<span class="tipo">' + tipoTxt + '</span>' +
+      '</div>' +
+      '<div class="opcoes">' + (opcoes || '<span style="color:var(--muted);font-size:0.78rem;">sem opções</span>') + '</div>' +
+      '<div class="acoes">' +
+        '<button class="btn-mini" onclick="totemEditarGrupo(\''+g.id+'\')">Editar</button>' +
+        '<button class="btn-mini del" onclick="totemExcluirGrupo(\''+g.id+'\')">×</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function totemAbrirNovoGrupo(){ totemAbrirModalGrupo(null); }
+function totemEditarGrupo(id){
+  var g = _totemGrupos.find(function(x){ return x.id === id; });
+  totemAbrirModalGrupo(g || null);
+}
+
+function totemAbrirModalGrupo(grupo){
+  var ex = document.getElementById('modal-totem-grupo');
+  if(ex) ex.remove();
+  var ehEdicao = !!grupo;
+  grupo = grupo || { nome:'', tipo:'unica', opcoes:[] };
+  // Guardamos as opções num estado pra editar
+  window._totemOpcoesEditando = (grupo.opcoes||[]).map(function(o){ return Object.assign({}, o); });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-totem-grupo';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px 20px;overflow-y:auto;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;">' +
+      '<div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
+        '<h3 style="margin:0;font-size:1.05rem;">' + (ehEdicao ? '✏️ Editar Grupo' : '➕ Novo Grupo') + '</h3>' +
+        '<button onclick="document.getElementById(\'modal-totem-grupo\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px;display:flex;flex-direction:column;gap:14px;">' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Nome do grupo</label>' +
+          '<input type="text" id="tg-nome" value="' + escapeHtml(grupo.nome||'') + '" placeholder="Ex: Adicionais, Sem ingrediente, Ponto da carne" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Tipo</label>' +
+          '<select id="tg-tipo" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;">' +
+            '<option value="unica"' + (grupo.tipo!=='multipla'?' selected':'') + '>Escolha única (rádio)</option>' +
+            '<option value="multipla"' + (grupo.tipo==='multipla'?' selected':'') + '>Múltipla escolha (checkbox)</option>' +
+          '</select></div>' +
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Opções</label>' +
+          '<div id="tg-opcoes-lista"></div>' +
+          '<div style="display:flex;gap:6px;margin-top:8px;">' +
+            '<input type="text" id="tg-op-nome" placeholder="Nome (ex: Bacon)" style="flex:1.5;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.86rem;">' +
+            '<input type="number" id="tg-op-preco" placeholder="+R$ 0,00" step="0.01" min="0" inputmode="decimal" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.86rem;">' +
+            '<button onclick="totemAddOpcao()" style="background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.85rem;">+</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'modal-totem-grupo\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button onclick="totemSalvarGrupo(' + (ehEdicao ? "'" + grupo.id + "'" : 'null') + ')" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">' + (ehEdicao ? 'Salvar' : 'Criar') + '</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  totemRenderOpcoesNoModal();
+}
+
+function totemRenderOpcoesNoModal(){
+  var box = document.getElementById('tg-opcoes-lista');
+  if(!box) return;
+  var ops = window._totemOpcoesEditando || [];
+  if(!ops.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:8px 0;">Nenhuma opção. Adicione abaixo.</div>';
+    return;
+  }
+  box.innerHTML = ops.map(function(o, idx){
+    var precoTxt = o.preco ? '+R$ ' + (o.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '(sem custo)';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border-radius:7px;margin-bottom:5px;">' +
+      '<span style="flex:1;font-size:0.86rem;">' + escapeHtml(o.nome||'') + '</span>' +
+      '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
+      '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
+    '</div>';
+  }).join('');
+}
+
+function totemAddOpcao(){
+  var nome = (document.getElementById('tg-op-nome').value||'').trim();
+  var preco = parseFloat(document.getElementById('tg-op-preco').value) || 0;
+  if(!nome){ document.getElementById('tg-op-nome').focus(); return; }
+  if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
+  window._totemOpcoesEditando.push({ nome:nome, preco:preco });
+  document.getElementById('tg-op-nome').value = '';
+  document.getElementById('tg-op-preco').value = '';
+  totemRenderOpcoesNoModal();
+  document.getElementById('tg-op-nome').focus();
+}
+
+function totemRemoverOpcao(idx){
+  if(!window._totemOpcoesEditando) return;
+  window._totemOpcoesEditando.splice(idx, 1);
+  totemRenderOpcoesNoModal();
+}
+
+function totemSalvarGrupo(id){
+  var nome = (document.getElementById('tg-nome').value||'').trim();
+  var tipo = document.getElementById('tg-tipo').value;
+  if(!nome){ showToast('Digite o nome do grupo','#f7a34f'); return; }
+  var dados = {
+    nome: nome,
+    tipo: tipo,
+    opcoes: window._totemOpcoesEditando || [],
+    atualizadoEm: Date.now()
+  };
+  var ref = _refTotemBase().doc('data').collection('grupos_opcoes');
+  var op = id ? ref.doc(id).update(dados) : ref.add(Object.assign({criadoEm:Date.now()}, dados));
+  op.then(function(){
+    document.getElementById('modal-totem-grupo').remove();
+    window._totemOpcoesEditando = null;
+    showToast('✓ Grupo salvo','#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code),'#f87171');
+  });
+}
+
+function totemExcluirGrupo(id){
+  var g = _totemGrupos.find(function(x){ return x.id === id; });
+  if(!confirm('Excluir grupo "' + (g?g.nome:'') + '"?')) return;
+  _refTotemBase().doc('data').collection('grupos_opcoes').doc(id).delete()
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code),'#f87171'); });
+}
+
+// ─── Categorias do principal ───
 function totemRenderCatsPrincipais(){
   var box = document.getElementById('totem-cats-principais');
   if(!box) return;
-  // Usa as categorias do cardápio principal (variável global _categorias do PDV)
   var cats = (typeof _categorias !== 'undefined') ? _categorias : [];
   if(!cats.length){
     box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem categorias no cardápio principal</div>';
@@ -7691,12 +7890,8 @@ function totemRenderCatsPrincipais(){
   }
   box.innerHTML = cats.map(function(c){
     var ativa = _totemCatsPrincipais.indexOf(c.id) >= 0;
-    // Conta quantos itens dessa categoria
-    var n = 0;
-    if(typeof _itens !== 'undefined'){
-      n = _itens.filter(function(i){ return i.categoria === c.id; }).length;
-    }
-    return '<div class="totem-cat-principal-row' + (ativa?' ativa':'') + '" onclick="totemToggleCatPrincipal(\'' + c.id + '\')">' +
+    var n = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }).length : 0;
+    return '<div class="totem-cat-principal-row' + (ativa?' ativa':'') + '" onclick="totemToggleCatPrincipal(\''+c.id+'\')">' +
       '<div class="check">' + (ativa ? '✓' : '') + '</div>' +
       '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
       '<div class="conta">' + n + ' itens</div>' +
@@ -7712,7 +7907,7 @@ function totemToggleCatPrincipal(catId){
     categoriasPrincipais: _totemCatsPrincipais,
     atualizadoEm: Date.now()
   }).catch(function(e){
-    showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
+    showToast('Erro: ' + (e.message||e.code),'#f87171');
   });
 }
 
@@ -9122,16 +9317,17 @@ function toggleAdminUsuario(garcomId, novoValor){
     <div style="font-size:0.8rem;color:var(--muted);">Cardápio que aparece no tablet de autoatendimento</div>
   </div>
 
-  <!-- Sub-abas: Comidas (próprias) | Categorias do cardápio principal -->
-  <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px;">
-    <button id="totem-aba-comidas" onclick="totemMostrarAba('comidas')" class="totem-aba ativo">🍔 Comidas (próprias)</button>
-    <button id="totem-aba-cats" onclick="totemMostrarAba('cats')" class="totem-aba">🍹 Categorias do cardápio principal</button>
+  <!-- Sub-abas -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px;overflow-x:auto;">
+    <button id="totem-aba-comidas" onclick="totemMostrarAba('comidas')" class="totem-aba ativo">🍔 Comidas</button>
+    <button id="totem-aba-grupos" onclick="totemMostrarAba('grupos')" class="totem-aba">➕ Grupos de Adicionais</button>
+    <button id="totem-aba-cats" onclick="totemMostrarAba('cats')" class="totem-aba">🍹 Trazer do Principal</button>
   </div>
 
   <!-- ── COMIDAS DO TOTEM ── -->
   <div id="totem-painel-comidas">
     <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
-      💡 Cadastre aqui as <b>comidas/combos</b> que aparecem só no totem. As bebidas e outras categorias vêm do cardápio principal (aba ao lado).
+      💡 Cadastre aqui as <b>comidas/combos</b> do totem. As bebidas e outras categorias vêm do cardápio principal (sub-aba "Trazer do Principal").
     </div>
 
     <!-- Categorias do totem -->
@@ -9154,6 +9350,20 @@ function toggleAdminUsuario(garcomId, novoValor){
     </div>
   </div>
 
+  <!-- ── GRUPOS DE ADICIONAIS DO TOTEM ── -->
+  <div id="totem-painel-grupos" style="display:none;">
+    <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
+      💡 Crie grupos de opções pros itens do totem. Ex: "Sem ingrediente" (sem cebola, sem alface), "Adicionais" (+ bacon, + queijo).
+    </div>
+    <div style="font-weight:700;font-size:0.92rem;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+      <span>Grupos</span>
+      <button onclick="totemAbrirNovoGrupo()" style="background:var(--accent);color:#000;border:none;padding:8px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.82rem;">+ Novo Grupo</button>
+    </div>
+    <div id="totem-grupos-lista" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem grupos cadastrados</div>
+    </div>
+  </div>
+
   <!-- ── CATEGORIAS DO CARDÁPIO PRINCIPAL ── -->
   <div id="totem-painel-cats" style="display:none;">
     <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
@@ -9167,7 +9377,7 @@ function toggleAdminUsuario(garcomId, novoValor){
 </div>
 
 <style>
-.totem-aba{background:transparent;border:none;color:var(--muted);padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.86rem;}
+.totem-aba{background:transparent;border:none;color:var(--muted);padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;flex-shrink:0;}
 .totem-aba.ativo{background:rgba(212,168,67,0.13);color:var(--accent);}
 .totem-cat-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:18px;font-size:0.82rem;}
 .totem-cat-chip .x{cursor:pointer;color:#f87171;font-weight:800;}
@@ -9187,6 +9397,17 @@ function toggleAdminUsuario(garcomId, novoValor){
 .totem-cat-principal-row.ativa .check{background:var(--accent);color:#000;border-color:var(--accent);}
 .totem-cat-principal-row .nome{flex:1;font-weight:600;}
 .totem-cat-principal-row .conta{font-size:0.74rem;color:var(--muted);}
+.totem-grupo-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;}
+.totem-grupo-card .topo{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.totem-grupo-card .nome{font-weight:700;font-size:0.95rem;}
+.totem-grupo-card .tipo{font-size:0.72rem;color:var(--muted);background:var(--bg);padding:2px 8px;border-radius:6px;}
+.totem-grupo-card .opcoes{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
+.totem-grupo-card .op{background:var(--bg);font-size:0.75rem;padding:3px 8px;border-radius:6px;}
+.totem-grupo-card .acoes{display:flex;gap:6px;margin-top:8px;}
+.totem-foto-up{display:flex;align-items:center;gap:12px;background:var(--bg);border:1px dashed var(--border);border-radius:10px;padding:12px;cursor:pointer;}
+.totem-foto-up .preview{width:64px;height:64px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:var(--muted);overflow:hidden;flex-shrink:0;}
+.totem-foto-up .preview img{width:100%;height:100%;object-fit:cover;}
+.totem-foto-up .lbl{font-size:0.84rem;color:var(--muted);}
 </style>
 
 <style>

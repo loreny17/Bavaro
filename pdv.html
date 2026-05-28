@@ -1886,6 +1886,8 @@ function showTab(tab) {
   if(_painelR) _painelR.style.display = 'none';
   var _painelA = document.getElementById('painel-admin');
   if(_painelA) _painelA.style.display = 'none';
+  var _painelT = document.getElementById('painel-totem');
+  if(_painelT) _painelT.style.display = 'none';
   // Mostra a aba ativa
   if(tab === 'cardapio') {
     if(itensGrid) itensGrid.style.display = '';
@@ -1914,6 +1916,10 @@ function showTab(tab) {
     var painelA = document.getElementById('painel-admin');
     if(painelA) painelA.style.display = 'block';
     if(typeof abrirAbaAdmin === 'function') abrirAbaAdmin();
+  } else if(tab === 'totem') {
+    var painelT = document.getElementById('painel-totem');
+    if(painelT) painelT.style.display = 'block';
+    if(typeof abrirAbaTotem === 'function') abrirAbaTotem();
   }
 }
 
@@ -7410,6 +7416,307 @@ var _adminAbaAtiva = 'logs';
 var _adminLogFiltroTipo = 'todos';  // todos | erros | avisos
 var _adminLogFiltroGarcom = '';
 
+// ════════════════════════════════════════════════════════════════
+//  📱 MÓDULO TOTEM (Autoatendimento)
+//  Cadastro do cardápio próprio do totem + escolha de categorias
+//  do cardápio principal que aparecem no totem (bebidas, etc).
+// ════════════════════════════════════════════════════════════════
+
+// Estado do módulo
+var _totemCats = [];           // categorias próprias do totem [{id, nome, ordem}]
+var _totemItens = [];          // itens próprios do totem [{id, nome, preco, categoriaId, foto, ativo}]
+var _totemCatsPrincipais = []; // ids das categorias do cardápio principal que entram no totem
+var _totemAbaAtiva = 'comidas';
+var _unsubTotemCats = null;
+var _unsubTotemItens = null;
+var _unsubTotemConfig = null;
+
+function _refTotemBase(){
+  return fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio_totem');
+}
+
+// Abre a aba do totem (chamado pelo showTab)
+function abrirAbaTotem(){
+  if(!_restauranteAtivo){
+    var box = document.getElementById('totem-itens-lista');
+    if(box) box.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center;">Selecione um restaurante primeiro</div>';
+    return;
+  }
+  totemEscutarDados();
+  totemMostrarAba(_totemAbaAtiva);
+}
+
+// Listeners do Firestore
+function totemEscutarDados(){
+  if(_unsubTotemCats) _unsubTotemCats();
+  if(_unsubTotemItens) _unsubTotemItens();
+  if(_unsubTotemConfig) _unsubTotemConfig();
+
+  _unsubTotemCats = _refTotemBase().doc('data').collection('categorias')
+    .onSnapshot(function(snap){
+      _totemCats = [];
+      snap.forEach(function(d){ _totemCats.push(Object.assign({id:d.id}, d.data())); });
+      _totemCats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
+      totemRenderCategorias();
+      totemRenderItens();
+    }, function(e){ console.warn('[TOTEM] cats erro:', e.code); });
+
+  _unsubTotemItens = _refTotemBase().doc('data').collection('itens')
+    .onSnapshot(function(snap){
+      _totemItens = [];
+      snap.forEach(function(d){ _totemItens.push(Object.assign({id:d.id}, d.data())); });
+      totemRenderItens();
+    }, function(e){ console.warn('[TOTEM] itens erro:', e.code); });
+
+  // Config (categorias do principal selecionadas)
+  _unsubTotemConfig = _refTotemBase().doc('config')
+    .onSnapshot(function(doc){
+      if(doc.exists){
+        var d = doc.data();
+        _totemCatsPrincipais = d.categoriasPrincipais || [];
+      } else {
+        _totemCatsPrincipais = [];
+      }
+      totemRenderCatsPrincipais();
+    }, function(e){ console.warn('[TOTEM] config erro:', e.code); });
+}
+
+function totemMostrarAba(aba){
+  _totemAbaAtiva = aba;
+  document.getElementById('totem-aba-comidas').classList.toggle('ativo', aba === 'comidas');
+  document.getElementById('totem-aba-cats').classList.toggle('ativo', aba === 'cats');
+  document.getElementById('totem-painel-comidas').style.display = aba === 'comidas' ? 'block' : 'none';
+  document.getElementById('totem-painel-cats').style.display = aba === 'cats' ? 'block' : 'none';
+  if(aba === 'cats') totemRenderCatsPrincipais();
+}
+
+// ─── Categorias próprias ───
+function totemRenderCategorias(){
+  var box = document.getElementById('totem-categorias-lista');
+  if(!box) return;
+  if(!_totemCats.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;">Sem categorias. Crie a primeira abaixo.</div>';
+    return;
+  }
+  box.innerHTML = _totemCats.map(function(c){
+    return '<span class="totem-cat-chip">' + escapeHtml(c.nome||'') +
+      ' <span class="x" onclick="totemExcluirCategoria(\'' + c.id + '\')">×</span></span>';
+  }).join('');
+}
+
+function totemCriarCategoria(){
+  var inp = document.getElementById('totem-nova-cat');
+  var nome = (inp.value||'').trim();
+  if(!nome){ inp.focus(); return; }
+  _refTotemBase().doc('data').collection('categorias').add({
+    nome: nome,
+    ordem: _totemCats.length,
+    criadoEm: Date.now()
+  }).then(function(){
+    inp.value = '';
+    showToast('✓ Categoria criada', '#4ade80');
+  }).catch(function(e){
+    showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
+  });
+}
+
+function totemExcluirCategoria(id){
+  // Confere se tem itens nessa categoria
+  var temItens = _totemItens.some(function(it){ return it.categoriaId === id; });
+  if(temItens){
+    if(!confirm('Esta categoria tem itens. Excluir mesmo assim? Os itens ficarão sem categoria.')) return;
+  }
+  _refTotemBase().doc('data').collection('categorias').doc(id).delete()
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code), '#f87171'); });
+}
+
+// ─── Itens próprios ───
+function totemRenderItens(){
+  var box = document.getElementById('totem-itens-lista');
+  if(!box) return;
+  if(!_totemItens.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem itens cadastrados. Toque em "+ Novo Item".</div>';
+    return;
+  }
+  // Agrupa por categoria
+  var porCat = {};
+  _totemItens.forEach(function(it){
+    var catId = it.categoriaId || '_sem_';
+    if(!porCat[catId]) porCat[catId] = [];
+    porCat[catId].push(it);
+  });
+  var html = '';
+  _totemCats.forEach(function(c){
+    if(porCat[c.id]){
+      html += '<div style="font-weight:700;font-size:0.82rem;color:var(--muted);margin-top:8px;margin-bottom:4px;">' + escapeHtml(c.nome) + '</div>';
+      porCat[c.id].forEach(function(it){ html += _totemRenderItemCard(it); });
+    }
+  });
+  if(porCat['_sem_']){
+    html += '<div style="font-weight:700;font-size:0.82rem;color:var(--muted);margin-top:8px;margin-bottom:4px;">Sem categoria</div>';
+    porCat['_sem_'].forEach(function(it){ html += _totemRenderItemCard(it); });
+  }
+  box.innerHTML = html;
+}
+
+function _totemRenderItemCard(it){
+  var foto = it.foto
+    ? '<img src="' + it.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\'">'
+    : '🍽️';
+  var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  var ativo = it.ativo !== false;
+  return '<div class="totem-item-card" style="' + (ativo?'':'opacity:0.5;') + '">' +
+    '<div class="foto">' + foto + '</div>' +
+    '<div class="info">' +
+      '<div class="nome">' + escapeHtml(it.nome||'') + '</div>' +
+      '<div class="preco">R$ ' + preco + '</div>' +
+      (ativo ? '' : '<div class="meta">⚠ Inativo</div>') +
+    '</div>' +
+    '<div class="acoes">' +
+      '<button class="btn-mini" onclick="totemEditarItem(\'' + it.id + '\')">Editar</button>' +
+      '<button class="btn-mini del" onclick="totemExcluirItem(\'' + it.id + '\')">×</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function totemAbrirNovoItem(){
+  totemAbrirModalItem(null);
+}
+function totemEditarItem(id){
+  var it = _totemItens.find(function(x){ return x.id === id; });
+  totemAbrirModalItem(it || null);
+}
+
+function totemAbrirModalItem(item){
+  var existente = document.getElementById('modal-totem-item');
+  if(existente) existente.remove();
+
+  var ehEdicao = !!item;
+  item = item || { nome:'', preco:0, categoriaId:'', foto:'', ativo:true };
+
+  // Opções de categoria
+  var opcoesCat = '<option value="">(sem categoria)</option>' +
+    _totemCats.map(function(c){
+      return '<option value="' + c.id + '"' + (c.id === item.categoriaId ? ' selected' : '') + '>' + escapeHtml(c.nome) + '</option>';
+    }).join('');
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-totem-item';
+  mod.className = 'modal-back';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:480px;">' +
+      '<div class="modal-box-head">' +
+        '<h3>' + (ehEdicao ? '✏️ Editar Item' : '➕ Novo Item') + '</h3>' +
+        '<button class="modal-close" onclick="document.getElementById(\'modal-totem-item\').remove()">×</button>' +
+      '</div>' +
+      '<div style="padding:16px;display:flex;flex-direction:column;gap:14px;">' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Nome</label>' +
+          '<input type="text" id="ti-nome" value="' + escapeHtml(item.nome||'') + '" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Preço (R$)</label>' +
+          '<input type="number" id="ti-preco" value="' + (item.preco||0) + '" step="0.01" min="0" inputmode="decimal" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Categoria</label>' +
+          '<select id="ti-cat" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;">' + opcoesCat + '</select></div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">URL da foto (opcional)</label>' +
+          '<input type="text" id="ti-foto" value="' + escapeHtml(item.foto||'') + '" placeholder="https://..." style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.88rem;box-sizing:border-box;"></div>' +
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+          '<input type="checkbox" id="ti-ativo"' + (item.ativo !== false ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
+          '<span style="font-size:0.88rem;">Item ativo (aparece no totem)</span>' +
+        '</label>' +
+      '</div>' +
+      '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'modal-totem-item\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button onclick="totemSalvarItem(' + (ehEdicao ? "'" + item.id + "'" : 'null') + ')" style="flex:1.5;padding:12px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">' + (ehEdicao ? 'Salvar' : 'Criar') + '</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var n = document.getElementById('ti-nome'); if(n) n.focus(); }, 200);
+}
+
+function totemSalvarItem(id){
+  var nome = (document.getElementById('ti-nome').value||'').trim();
+  var preco = parseFloat(document.getElementById('ti-preco').value);
+  var catId = document.getElementById('ti-cat').value;
+  var foto = (document.getElementById('ti-foto').value||'').trim();
+  var ativo = document.getElementById('ti-ativo').checked;
+
+  if(!nome){ showToast('Digite o nome', '#f7a34f'); return; }
+  if(isNaN(preco) || preco < 0){ showToast('Preço inválido', '#f7a34f'); return; }
+
+  var dados = {
+    nome: nome,
+    preco: preco,
+    categoriaId: catId,
+    foto: foto,
+    ativo: ativo,
+    atualizadoEm: Date.now()
+  };
+
+  var ref = _refTotemBase().doc('data').collection('itens');
+  var op;
+  if(id){
+    op = ref.doc(id).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    op = ref.add(dados);
+  }
+  op.then(function(){
+    document.getElementById('modal-totem-item').remove();
+    showToast('✓ Salvo', '#4ade80');
+  }).catch(function(e){
+    showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
+  });
+}
+
+function totemExcluirItem(id){
+  var it = _totemItens.find(function(x){ return x.id === id; });
+  if(!confirm('Excluir "' + (it ? it.nome : 'este item') + '"?')) return;
+  _refTotemBase().doc('data').collection('itens').doc(id).delete()
+    .then(function(){ showToast('✓ Excluído', '#4ade80'); })
+    .catch(function(e){ showToast('Erro: ' + (e.message||e.code), '#f87171'); });
+}
+
+// ─── Categorias do cardápio PRINCIPAL ───
+function totemRenderCatsPrincipais(){
+  var box = document.getElementById('totem-cats-principais');
+  if(!box) return;
+  // Usa as categorias do cardápio principal (variável global _categorias do PDV)
+  var cats = (typeof _categorias !== 'undefined') ? _categorias : [];
+  if(!cats.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem categorias no cardápio principal</div>';
+    return;
+  }
+  box.innerHTML = cats.map(function(c){
+    var ativa = _totemCatsPrincipais.indexOf(c.id) >= 0;
+    // Conta quantos itens dessa categoria
+    var n = 0;
+    if(typeof _itens !== 'undefined'){
+      n = _itens.filter(function(i){ return i.categoria === c.id; }).length;
+    }
+    return '<div class="totem-cat-principal-row' + (ativa?' ativa':'') + '" onclick="totemToggleCatPrincipal(\'' + c.id + '\')">' +
+      '<div class="check">' + (ativa ? '✓' : '') + '</div>' +
+      '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
+      '<div class="conta">' + n + ' itens</div>' +
+    '</div>';
+  }).join('');
+}
+
+function totemToggleCatPrincipal(catId){
+  var idx = _totemCatsPrincipais.indexOf(catId);
+  if(idx >= 0) _totemCatsPrincipais.splice(idx, 1);
+  else _totemCatsPrincipais.push(catId);
+  _refTotemBase().doc('config').set({
+    categoriasPrincipais: _totemCatsPrincipais,
+    atualizadoEm: Date.now()
+  }).catch(function(e){
+    showToast('Erro ao salvar: ' + (e.message||e.code), '#f87171');
+  });
+}
+
+// Helper de escape — usa o escapeHtml global do PDV
+
 function abrirAbaAdmin(){
   // Quando entra na aba admin pela primeira vez ou retorno
   setAbaAdmin(_adminAbaAtiva || 'logs');
@@ -8802,6 +9109,85 @@ function toggleAdminUsuario(garcomId, novoValor){
     <div id="adm-users-lista">—</div>
   </div>
 </div>
+
+<!-- ════════════════════════════════════════════ -->
+<!--  📱 PAINEL: Cardápio do Totem (Autoatendimento) -->
+<!-- ════════════════════════════════════════════ -->
+<div id="painel-totem" style="display:none;padding:14px;padding-bottom:120px;">
+  <div style="margin-bottom:14px;">
+    <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+      📱 Cardápio do Totem
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted);">Cardápio que aparece no tablet de autoatendimento</div>
+  </div>
+
+  <!-- Sub-abas: Comidas (próprias) | Categorias do cardápio principal -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px;">
+    <button id="totem-aba-comidas" onclick="totemMostrarAba('comidas')" class="totem-aba ativo">🍔 Comidas (próprias)</button>
+    <button id="totem-aba-cats" onclick="totemMostrarAba('cats')" class="totem-aba">🍹 Categorias do cardápio principal</button>
+  </div>
+
+  <!-- ── COMIDAS DO TOTEM ── -->
+  <div id="totem-painel-comidas">
+    <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
+      💡 Cadastre aqui as <b>comidas/combos</b> que aparecem só no totem. As bebidas e outras categorias vêm do cardápio principal (aba ao lado).
+    </div>
+
+    <!-- Categorias do totem -->
+    <div style="margin-bottom:18px;">
+      <div style="font-weight:700;font-size:0.92rem;margin-bottom:8px;">Categorias</div>
+      <div id="totem-categorias-lista" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="totem-nova-cat" placeholder="Nova categoria (ex: Combos, Lanches)" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px;font-size:0.88rem;font-family:inherit;">
+        <button onclick="totemCriarCategoria()" style="background:var(--accent);color:#000;border:none;padding:9px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.85rem;">+ Criar</button>
+      </div>
+    </div>
+
+    <!-- Itens do totem -->
+    <div style="font-weight:700;font-size:0.92rem;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+      <span>Itens</span>
+      <button onclick="totemAbrirNovoItem()" style="background:var(--accent);color:#000;border:none;padding:8px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.82rem;">+ Novo Item</button>
+    </div>
+    <div id="totem-itens-lista" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem itens cadastrados</div>
+    </div>
+  </div>
+
+  <!-- ── CATEGORIAS DO CARDÁPIO PRINCIPAL ── -->
+  <div id="totem-painel-cats" style="display:none;">
+    <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
+      💡 Marque as <b>categorias do cardápio principal</b> que devem aparecer no totem (Bebidas, Sobremesas, etc).
+    </div>
+    <div id="totem-cats-principais" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Carregando categorias...</div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.totem-aba{background:transparent;border:none;color:var(--muted);padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.86rem;}
+.totem-aba.ativo{background:rgba(212,168,67,0.13);color:var(--accent);}
+.totem-cat-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:18px;font-size:0.82rem;}
+.totem-cat-chip .x{cursor:pointer;color:#f87171;font-weight:800;}
+.totem-item-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;}
+.totem-item-card .foto{width:54px;height:54px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:var(--muted);flex-shrink:0;overflow:hidden;}
+.totem-item-card .foto img{width:100%;height:100%;object-fit:cover;}
+.totem-item-card .info{flex:1;min-width:0;}
+.totem-item-card .nome{font-weight:700;font-size:0.92rem;}
+.totem-item-card .meta{font-size:0.74rem;color:var(--muted);margin-top:2px;}
+.totem-item-card .preco{color:var(--accent);font-weight:700;font-size:0.95rem;margin-top:2px;}
+.totem-item-card .acoes{display:flex;gap:6px;}
+.totem-item-card .btn-mini{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:7px;font-size:0.74rem;cursor:pointer;font-family:inherit;font-weight:600;}
+.totem-item-card .btn-mini.del{color:#f87171;border-color:rgba(248,113,113,0.3);}
+.totem-cat-principal-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;cursor:pointer;}
+.totem-cat-principal-row.ativa{border-color:var(--accent);background:rgba(212,168,67,0.06);}
+.totem-cat-principal-row .check{width:24px;height:24px;border-radius:6px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;}
+.totem-cat-principal-row.ativa .check{background:var(--accent);color:#000;border-color:var(--accent);}
+.totem-cat-principal-row .nome{flex:1;font-weight:600;}
+.totem-cat-principal-row .conta{font-size:0.74rem;color:var(--muted);}
+</style>
+
 <style>
 .admin-pill{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;font-weight:600;transition:all 0.15s;}
 .admin-pill:hover{border-color:var(--accent);}
@@ -8829,6 +9215,7 @@ function toggleAdminUsuario(garcomId, novoValor){
   <div class="menu-lateral-body">
     <div class="menu-section-title">Navegação</div>
     <button class="menu-item" onclick="menuIrPara('cardapio')"><span class="ico">📋</span><span class="lbl">Cardápio</span></button>
+    <button class="menu-item" onclick="menuIrPara('totem')"><span class="ico">📱</span><span class="lbl">Cardápio do Totem</span></button>
     <button class="menu-item" onclick="menuIrPara('grupos')"><span class="ico">🎛️</span><span class="lbl">Grupos</span></button>
     <button class="menu-item" onclick="menuIrPara('pedidos')"><span class="ico">🧾</span><span class="lbl">Pedidos</span></button>
     <button class="menu-item" onclick="menuIrPara('historico')"><span class="ico">📜</span><span class="lbl">Histórico</span></button>

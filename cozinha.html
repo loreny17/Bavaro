@@ -3,7 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Cozinha — Bávaro</title>
+<title>Bávaro KDS — Cozinha</title>
+<!-- PWA — manifest e ícones próprios do KDS (não conflita com garçom/PDV) -->
+<link rel="manifest" href="/manifest-kds.json">
+<meta name="theme-color" content="#0a0a0c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bávaro KDS">
+<link rel="apple-touch-icon" href="/kds-icons/kds-180.png">
+<link rel="icon" type="image/png" href="/kds-icons/kds-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -561,10 +570,7 @@
 <div class="topo">
   <button id="btn-menu" onclick="abrirMenuLateral()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:8px 12px;cursor:pointer;color:var(--accent);font-size:1.3rem;display:flex;align-items:center;" title="Menu">☰</button>
   <div class="ponto-conexao" id="ponto-conexao"></div>
-  <div>
-    <h1>🍳 COZINHA</h1>
-    <div class="sub" id="sub-restaurante">Carregando...</div>
-  </div>
+  <div style="font-size:1.7rem;">🍳</div>
   <div class="topo-stats">
     <button id="btn-layout" onclick="alternarLayout()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;" title="Alternar Lista/Cards">▦</button>
     <button id="btn-som" onclick="alternarSom()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;">🔔</button>
@@ -674,6 +680,12 @@ var _somLigado = true;     // alerta sonoro de pedido novo
 
 // ─── Inicialização ───
 window.addEventListener('load', function(){
+  // Registra o Service Worker do KDS (escopo próprio — não conflita com os outros)
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw-kds.js', { scope: '/cozinha.html' })
+      .then(function(){ console.log('[KDS] Service Worker registrado'); })
+      .catch(function(e){ console.warn('[KDS] SW falhou:', e); });
+  }
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
@@ -684,7 +696,7 @@ window.addEventListener('load', function(){
 });
 
 function iniciar(){
-  document.getElementById('sub-restaurante').textContent = _restauranteId;
+  // (título removido do topo pra ganhar espaço)
   // Aplica o layout salvo (lista ou cards)
   aplicarLayoutSalvo();
   // Relógio

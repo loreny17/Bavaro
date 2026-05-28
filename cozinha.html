@@ -750,6 +750,26 @@
   .tarefa-add{display:flex;gap:6px;margin-top:10px;align-items:center;}
   .tarefa-add .config-input{padding:8px;font-size:0.82rem;}
 
+  /* Barra de abas de estação (sempre visível) */
+  .abas-estacao{
+    display:flex;gap:8px;
+    padding:10px 16px;
+    background:#101013;
+    border-bottom:1px solid var(--card-borda);
+    overflow-x:auto;
+    flex-shrink:0;
+  }
+  .abas-estacao::-webkit-scrollbar{height:0;}
+  .aba-est{
+    padding:9px 20px;border-radius:9px;
+    background:var(--card);border:1px solid var(--card-borda);
+    font-size:0.92rem;font-weight:700;cursor:pointer;
+    color:var(--texto);white-space:nowrap;flex-shrink:0;
+  }
+  .aba-est.ativo{
+    background:var(--accent);color:#000;border-color:var(--accent);
+  }
+
 </style>
 </head>
 <body>
@@ -779,6 +799,9 @@
     </div>
   </div>
 </div>
+
+<!-- Barra de abas de estação (sempre visível quando há estações) -->
+<div id="abas-estacao" class="abas-estacao" style="display:none;"></div>
 
 <!-- Container: pedidos + barra de produção -->
 <div class="conteudo">
@@ -1656,12 +1679,22 @@ function escutarEstacoes(){
     _estacoes = (doc.exists && doc.data().lista) || [];
     renderFiltroEstacoes();
     renderPedidos();
+    _reRenderConfigSeAberta();
   }, function(e){ console.warn('[ESTAÇÕES] erro:', e); });
 
   _refCozinhaCfg('fichas').onSnapshot(function(doc){
     _fichas = (doc.exists && doc.data().fichas) || {};
     renderPedidos();
+    _reRenderConfigSeAberta();
   }, function(e){ console.warn('[FICHAS] erro:', e); });
+}
+
+// Re-renderiza a config se ela estiver aberta (pra atualizar na hora)
+function _reRenderConfigSeAberta(){
+  var painel = document.getElementById('config-estacoes');
+  if(painel && painel.classList.contains('aberto')){
+    renderConfigEstacoes();
+  }
 }
 
 function _salvarEstacoes(){
@@ -1671,8 +1704,24 @@ function _salvarFichas(){
   return _refCozinhaCfg('fichas').set({ fichas: _fichas, atualizadoEm: Date.now() });
 }
 
-// Renderiza os chips de filtro no menu
+// Renderiza os chips de filtro no menu E as abas no topo
 function renderFiltroEstacoes(){
+  // ── Abas no topo (sempre visíveis) ──
+  var abas = document.getElementById('abas-estacao');
+  if(abas){
+    if(!_estacoes.length){
+      abas.style.display = 'none';
+    } else {
+      abas.style.display = 'flex';
+      var htmlAbas = '<div class="aba-est' + (_estacaoFiltroAtiva===''?' ativo':'') + '" onclick="filtrarEstacao(\'\')">🍽️ Todas</div>';
+      htmlAbas += _estacoes.map(function(e){
+        return '<div class="aba-est' + (_estacaoFiltroAtiva===e.id?' ativo':'') + '" onclick="filtrarEstacao(\'' + e.id + '\')">' + escapar(e.nome) + '</div>';
+      }).join('');
+      abas.innerHTML = htmlAbas;
+    }
+  }
+
+  // ── Chips no menu (atalho) ──
   var box = document.getElementById('filtro-estacoes');
   if(!box) return;
   if(!_estacoes.length){

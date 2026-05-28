@@ -320,6 +320,24 @@
   .pedido.completo .pedido-topo{
     background:rgba(34,197,94,0.12);
   }
+  /* Card completo é deslizável pra esquerda → arquiva */
+  .pedido.completo{
+    transition:transform 0.2s ease, opacity 0.2s ease;
+    position:relative;
+  }
+  .pedido.deslizando{transition:none;}
+  .pedido.arquivando{
+    transform:translateX(-110%)!important;
+    opacity:0;
+  }
+  /* Dica de deslizar (aparece no card completo) */
+  .dica-deslizar{
+    position:absolute;
+    right:118px;top:50%;transform:translateY(-50%);
+    font-size:0.62rem;color:var(--verde);
+    opacity:0.7;pointer-events:none;
+    display:flex;align-items:center;gap:3px;
+  }
   .selo-completo{
     background:var(--verde);color:#fff;
     font-size:0.66rem;font-weight:800;
@@ -457,6 +475,78 @@
     .grupo-qtd{font-size:1.5rem;min-width:44px;padding:5px 7px;}
     .grupo-nome{font-size:0.84rem;}
   }
+  /* ─── Menu lateral (drawer) ─── */
+  .menu-overlay{
+    position:fixed;inset:0;z-index:200;
+    background:rgba(0,0,0,0.6);
+    opacity:0;visibility:hidden;
+    transition:opacity 0.25s;
+  }
+  .menu-overlay.aberto{opacity:1;visibility:visible;}
+  .menu-lateral{
+    position:fixed;top:0;left:0;bottom:0;z-index:201;
+    width:340px;max-width:88vw;
+    background:linear-gradient(180deg,#16161c,#0e0e12);
+    border-right:2px solid var(--card-borda);
+    transform:translateX(-100%);
+    transition:transform 0.28s ease;
+    display:flex;flex-direction:column;
+  }
+  .menu-lateral.aberto{transform:translateX(0);}
+  .menu-cabecalho{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px;border-bottom:1px solid var(--card-borda);
+    flex-shrink:0;
+  }
+  .menu-titulo{font-weight:800;font-size:1.05rem;color:var(--accent);}
+  .menu-fechar{
+    background:rgba(255,255,255,0.08);border:none;color:var(--texto);
+    width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.4rem;
+  }
+  .menu-conteudo{flex:1;overflow-y:auto;padding:14px;}
+  .menu-secao{margin-bottom:22px;}
+  .menu-secao-titulo{
+    font-size:0.82rem;font-weight:700;color:var(--texto);
+    margin-bottom:10px;display:flex;align-items:center;gap:8px;
+  }
+  .menu-badge{
+    background:var(--verde);color:#fff;
+    font-size:0.68rem;font-weight:800;
+    padding:1px 8px;border-radius:10px;
+  }
+  .menu-tempo-medio{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2.6rem;line-height:1;color:var(--accent);
+  }
+  .menu-tempo-sub{font-size:0.7rem;color:var(--muted);margin-top:4px;}
+  .menu-vazio-txt{font-size:0.8rem;color:var(--muted);padding:8px 0;}
+  /* Linha de item lento */
+  .lento-linha{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 10px;background:var(--card);
+    border:1px solid var(--card-borda);border-radius:9px;
+    margin-bottom:7px;
+  }
+  .lento-pos{
+    font-family:'Bebas Neue',sans-serif;font-size:1.2rem;
+    color:var(--laranja);min-width:22px;text-align:center;
+  }
+  .lento-corpo{flex:1;min-width:0;}
+  .lento-nome{font-size:0.86rem;font-weight:600;line-height:1.2;}
+  .lento-tempo{font-size:0.72rem;color:var(--laranja);font-weight:700;margin-top:1px;}
+  .lento-qtd{font-size:0.66rem;color:var(--muted);}
+  /* Linha de pedido pronto (arquivado) */
+  .pronto-linha{
+    display:flex;align-items:center;gap:10px;
+    padding:10px;background:rgba(34,197,94,0.06);
+    border:1px solid rgba(34,197,94,0.25);border-radius:9px;
+    margin-bottom:7px;
+  }
+  .pronto-corpo{flex:1;min-width:0;}
+  .pronto-mesa{font-weight:700;font-size:0.92rem;}
+  .pronto-itens{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+  .pronto-hora{font-size:0.66rem;color:var(--verde);margin-top:2px;}
+
 </style>
 </head>
 <body>
@@ -469,13 +559,14 @@
 
 <!-- Cabeçalho -->
 <div class="topo">
+  <button id="btn-menu" onclick="abrirMenuLateral()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:8px 12px;cursor:pointer;color:var(--accent);font-size:1.3rem;display:flex;align-items:center;" title="Menu">☰</button>
   <div class="ponto-conexao" id="ponto-conexao"></div>
   <div>
     <h1>🍳 COZINHA</h1>
     <div class="sub" id="sub-restaurante">Carregando...</div>
   </div>
   <div class="topo-stats">
-    <button id="btn-layout" onclick="alternarLayout()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;" title="Alternar Lista/Cards">☰</button>
+    <button id="btn-layout" onclick="alternarLayout()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;" title="Alternar Lista/Cards">▦</button>
     <button id="btn-som" onclick="alternarSom()" style="background:var(--card);border:1px solid var(--card-borda);border-radius:10px;padding:6px 14px;cursor:pointer;color:var(--texto);font-size:1.2rem;display:flex;align-items:center;">🔔</button>
     <div class="stat">
       <div class="num" id="stat-pedidos">0</div>
@@ -514,6 +605,34 @@
     </div>
     <div class="barra-lista" id="barra-lista">
       <div class="barra-vazio">Sem pratos pendentes</div>
+    </div>
+  </div>
+</div>
+
+<!-- Menu lateral (drawer) -->
+<div id="menu-overlay" class="menu-overlay" onclick="fecharMenuLateral()"></div>
+<div id="menu-lateral" class="menu-lateral">
+  <div class="menu-cabecalho">
+    <div class="menu-titulo">📋 Painel da Cozinha</div>
+    <button onclick="fecharMenuLateral()" class="menu-fechar">×</button>
+  </div>
+  <div class="menu-conteudo">
+    <div class="menu-secao">
+      <div class="menu-secao-titulo">⏱️ Tempo Médio de Preparo</div>
+      <div class="menu-tempo-medio" id="menu-tempo-medio">—</div>
+      <div class="menu-tempo-sub" id="menu-tempo-sub">Baseado nos pratos marcados como prontos</div>
+    </div>
+    <div class="menu-secao">
+      <div class="menu-secao-titulo">🐢 Itens que mais demoram</div>
+      <div id="menu-lentos">
+        <div class="menu-vazio-txt">Ainda sem dados suficientes</div>
+      </div>
+    </div>
+    <div class="menu-secao">
+      <div class="menu-secao-titulo">✅ Pedidos Prontos <span id="menu-prontos-contador" class="menu-badge">0</span></div>
+      <div id="menu-prontos">
+        <div class="menu-vazio-txt">Nenhum pedido arquivado</div>
+      </div>
     </div>
   </div>
 </div>
@@ -753,6 +872,8 @@ function renderPedidos(){
     if(p.status && p.status !== 'preparo' && p.status !== 'novo') return false;
     // Pedido precisa pertencer a uma conta ainda aberta
     if(p.contaId && !_contasAbertas[p.contaId]) return false;
+    // Arquivado (deslizado pra aba "Prontos") não aparece na tela principal
+    if(p.arquivadoCozinha === true) return false;
     // Tem pelo menos um item de cozinha visível?
     // (ativos OU cancelados-que-a-cozinha-ainda-não-removeu)
     var itensVisiveis = (p.itens||[]).filter(function(it){
@@ -805,6 +926,79 @@ function renderPedidos(){
 
   // Atualiza a barra de produção (agrupamento de pratos pendentes)
   renderBarraProducao(pedidosCozinha);
+
+  // Se o menu lateral estiver aberto, atualiza os dados dele
+  var ml = document.getElementById('menu-lateral');
+  if(ml && ml.classList.contains('aberto')){
+    atualizarPainelMenu();
+  }
+
+  // Ativa o "deslizar pra arquivar" nos cards completos
+  ativarSwipeCards();
+}
+
+// ─── Deslizar pra esquerda (card completo) → arquiva pra aba "Prontos" ───
+function ativarSwipeCards(){
+  var cards = document.querySelectorAll('.pedido.completo');
+  cards.forEach(function(card){
+    if(card._swipeAtivo) return; // já tem
+    card._swipeAtivo = true;
+    var x0 = 0, y0 = 0, dx = 0, arrastando = false;
+
+    card.addEventListener('touchstart', function(e){
+      var t = e.touches[0];
+      x0 = t.clientX; y0 = t.clientY; dx = 0; arrastando = true;
+      card.classList.add('deslizando');
+    }, {passive:true});
+
+    card.addEventListener('touchmove', function(e){
+      if(!arrastando) return;
+      var t = e.touches[0];
+      dx = t.clientX - x0;
+      var dy = t.clientY - y0;
+      // Só considera swipe horizontal (ignora rolagem vertical)
+      if(Math.abs(dy) > Math.abs(dx)){ return; }
+      // Só pra esquerda
+      if(dx < 0){
+        card.style.transform = 'translateX(' + dx + 'px)';
+        card.style.opacity = String(Math.max(0.3, 1 + dx / 300));
+      }
+    }, {passive:true});
+
+    card.addEventListener('touchend', function(){
+      arrastando = false;
+      card.classList.remove('deslizando');
+      var pid = card.getAttribute('data-pid');
+      // Passou de 90px pra esquerda → arquiva
+      if(dx < -90){
+        card.classList.add('arquivando');
+        setTimeout(function(){ arquivarPedido(pid); }, 200);
+      } else {
+        // Volta pro lugar
+        card.style.transform = '';
+        card.style.opacity = '';
+      }
+    });
+  });
+}
+
+// Marca o pedido como arquivado (vai pra aba "Prontos")
+function arquivarPedido(pedidoId){
+  var pedido = _pedidosAtivos.find(function(p){ return p.id === pedidoId; });
+  if(!pedido) return;
+  pedido.arquivadoCozinha = true;
+  pedido.arquivadoEm = Date.now();
+  try{ if(navigator.vibrate) navigator.vibrate(50); }catch(e){}
+  fbDb.collection('pedidos').doc(pedidoId).update({
+    arquivadoCozinha: true,
+    arquivadoEm: Date.now()
+  }).then(function(){
+    renderPedidos();
+  }).catch(function(e){
+    console.error('[COZINHA] erro ao arquivar:', e);
+    pedido.arquivadoCozinha = false;
+    renderPedidos();
+  });
 }
 
 // ─── Barra de produção: soma os pratos iguais pendentes ───
@@ -963,6 +1157,8 @@ function montarCardPedido(p){
     contadorOuSelo = '<div class="contador-prontos">' + qtdProntos + '/' + totaisItens + ' prontos</div>';
   }
 
+  var dicaDeslizar = todosProntos ? '<div class="dica-deslizar">← arraste pra arquivar</div>' : '';
+
   return '<div class="pedido' + classeNovo + classeCompleto + '" data-pid="' + p.id + '">' +
     // ESQUERDA: mesa + info
     '<div class="pedido-topo">' +
@@ -979,6 +1175,7 @@ function montarCardPedido(p){
       '<div class="pedido-tempo ' + classeTempo + '">' + textoTempo + '</div>' +
       contadorOuSelo +
     '</div>' +
+    dicaDeslizar +
   '</div>';
 }
 
@@ -1033,7 +1230,15 @@ function marcarItem(pedidoId, idxItem, marcar){
   // Atualiza o array de itens (cópia) com o novo estado
   var novosItens = pedido.itens.map(function(it, i){
     if(i === idxItem){
-      return Object.assign({}, it, { prontoCozinha: marcar });
+      // Salva o horário que ficou pronto (pras estatísticas de tempo)
+      var extra = { prontoCozinha: marcar };
+      if(marcar){
+        extra.prontoEm = Date.now();
+        // Tempo que levou pra ficar pronto (em segundos), se temos a hora de criação
+        var criadoEm = it.cozinhaCriadoEm || pedido.criadoEm || 0;
+        if(criadoEm) extra.tempoPreparoSeg = Math.round((Date.now() - criadoEm) / 1000);
+      }
+      return Object.assign({}, it, extra);
     }
     return it;
   });
@@ -1120,6 +1325,118 @@ function atualizarPontoConexao(online){
   if(ponto) ponto.className = 'ponto-conexao' + (online ? '' : ' off');
 }
 
+// ─── Menu lateral (drawer) ───
+function abrirMenuLateral(){
+  document.getElementById('menu-overlay').classList.add('aberto');
+  document.getElementById('menu-lateral').classList.add('aberto');
+  atualizarPainelMenu();
+}
+function fecharMenuLateral(){
+  document.getElementById('menu-overlay').classList.remove('aberto');
+  document.getElementById('menu-lateral').classList.remove('aberto');
+}
+
+// Atualiza tempo médio, top 5 lentos e pedidos prontos
+function atualizarPainelMenu(){
+  // Junta TODOS os itens prontos com tempo de preparo registrado
+  var temposPorItem = {}; // {nome: [seg, seg, ...]}
+  var todosTempos = [];
+  _pedidosAtivos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.prontoCozinha === true && typeof it.tempoPreparoSeg === 'number' && it.tempoPreparoSeg > 0){
+        var nome = (it.nome||'').trim();
+        if(!nome) return;
+        if(!temposPorItem[nome]) temposPorItem[nome] = [];
+        temposPorItem[nome].push(it.tempoPreparoSeg);
+        todosTempos.push(it.tempoPreparoSeg);
+      }
+    });
+  });
+
+  // Tempo médio geral
+  var elTempo = document.getElementById('menu-tempo-medio');
+  if(todosTempos.length){
+    var soma = todosTempos.reduce(function(a,b){ return a+b; }, 0);
+    var mediaSeg = soma / todosTempos.length;
+    elTempo.textContent = _formatarTempo(mediaSeg);
+    document.getElementById('menu-tempo-sub').textContent =
+      'Média de ' + todosTempos.length + ' prato(s) preparado(s)';
+  } else {
+    elTempo.textContent = '—';
+    document.getElementById('menu-tempo-sub').textContent =
+      'Marque pratos como prontos pra começar a medir';
+  }
+
+  // Top 5 itens mais lentos (por média de tempo)
+  var lentos = Object.keys(temposPorItem).map(function(nome){
+    var arr = temposPorItem[nome];
+    var med = arr.reduce(function(a,b){return a+b;},0) / arr.length;
+    return { nome: nome, media: med, qtd: arr.length };
+  });
+  lentos.sort(function(a,b){ return b.media - a.media; });
+  lentos = lentos.slice(0, 5);
+
+  var elLentos = document.getElementById('menu-lentos');
+  if(lentos.length){
+    elLentos.innerHTML = lentos.map(function(l, i){
+      return '<div class="lento-linha">' +
+        '<div class="lento-pos">' + (i+1) + 'º</div>' +
+        '<div class="lento-corpo">' +
+          '<div class="lento-nome">' + escapar(l.nome) + '</div>' +
+          '<div class="lento-tempo">' + _formatarTempo(l.media) + ' em média' +
+            ' <span class="lento-qtd">(' + l.qtd + 'x)</span></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } else {
+    elLentos.innerHTML = '<div class="menu-vazio-txt">Ainda sem dados suficientes</div>';
+  }
+
+  // Pedidos prontos (arquivados, de contas ainda abertas)
+  var prontos = _pedidosAtivos.filter(function(p){
+    if(!p.arquivadoCozinha) return false;
+    if(p.contaId && !_contasAbertas[p.contaId]) return false;
+    return true;
+  });
+  prontos.sort(function(a,b){ return (b.arquivadoEm||0) - (a.arquivadoEm||0); });
+
+  document.getElementById('menu-prontos-contador').textContent = prontos.length;
+  var elProntos = document.getElementById('menu-prontos');
+  if(prontos.length){
+    elProntos.innerHTML = prontos.map(function(p){
+      var titulo = (p.tipoConta === 'avulsa' || p.tipoConta === 'comanda')
+        ? (p.cliente || 'Comanda') : 'Mesa ' + (p.mesa || '?');
+      var nomesItens = (p.itens||[])
+        .filter(function(it){ return it.status !== 'cancelado' && itemEhDaCozinha(it); })
+        .map(function(it){ return (it.qtd||1) + 'x ' + (it.nome||''); })
+        .join(', ');
+      var hora = p.arquivadoEm ? _horaDe(p.arquivadoEm) : '';
+      return '<div class="pronto-linha">' +
+        '<div class="pronto-corpo">' +
+          '<div class="pronto-mesa">' + escapar(titulo) + '</div>' +
+          '<div class="pronto-itens">' + escapar(nomesItens) + '</div>' +
+          (hora ? '<div class="pronto-hora">✓ arquivado às ' + hora + '</div>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } else {
+    elProntos.innerHTML = '<div class="menu-vazio-txt">Nenhum pedido arquivado</div>';
+  }
+}
+
+// Formata segundos → "Xm Ys" ou "Xs"
+function _formatarTempo(seg){
+  seg = Math.round(seg);
+  if(seg < 60) return seg + 's';
+  var min = Math.floor(seg / 60);
+  var resto = seg % 60;
+  return resto > 0 ? (min + 'm ' + resto + 's') : (min + 'm');
+}
+function _horaDe(ts){
+  var d = new Date(ts);
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
 // Alterna entre layout em LISTA (linhas) e CARDS
 var _modoCards = false;
 function aplicarLayoutSalvo(){
@@ -1136,7 +1453,7 @@ function _aplicarLayout(){
     else grade.classList.remove('modo-cards');
   }
   if(btn){
-    btn.textContent = _modoCards ? '▦' : '☰';
+    btn.textContent = _modoCards ? '▤' : '▦';
     btn.title = _modoCards ? 'Ver em Lista' : 'Ver em Cards';
   }
 }

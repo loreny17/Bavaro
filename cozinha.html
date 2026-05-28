@@ -331,6 +331,75 @@
     .topo h1{font-size:1.5rem;}
     .topo-stats .stat:nth-child(2){display:none;}
   }
+
+  .painel-metricas{
+    display:flex;
+    gap:10px;
+    padding:10px 16px;
+    border-bottom:1px solid var(--card-borda);
+    background:#111114;
+    flex-wrap:wrap;
+  }
+
+  .metrica{
+    background:var(--card);
+    border:1px solid var(--card-borda);
+    border-radius:10px;
+    padding:10px 14px;
+    min-width:120px;
+  }
+
+  .metrica .valor{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.6rem;
+    color:var(--accent);
+    line-height:1;
+  }
+
+  .metrica .titulo{
+    font-size:0.7rem;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin-top:4px;
+  }
+
+  .secao-status{
+    margin-bottom:24px;
+  }
+
+  .titulo-secao{
+    font-family:'Bebas Neue',sans-serif;
+    letter-spacing:0.05em;
+    font-size:1.4rem;
+    margin-bottom:12px;
+    color:var(--accent);
+  }
+
+  .historico-box{
+    margin:16px;
+    background:var(--card);
+    border:1px solid var(--card-borda);
+    border-radius:14px;
+    overflow:hidden;
+  }
+
+  .historico-topo{
+    padding:12px 16px;
+    border-bottom:1px solid var(--card-borda);
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.3rem;
+    color:var(--accent);
+  }
+
+  .historico-item{
+    padding:10px 16px;
+    border-top:1px solid rgba(255,255,255,0.04);
+    display:flex;
+    justify-content:space-between;
+    font-size:0.9rem;
+  }
+
 </style>
 </head>
 <body>
@@ -370,6 +439,25 @@
     </div>
   </div>
 </div>
+
+
+<div class="painel-metricas">
+  <div class="metrica">
+    <div class="valor" id="tempo-medio">0min</div>
+    <div class="titulo">Tempo Médio</div>
+  </div>
+
+  <div class="metrica">
+    <div class="valor" id="maior-atraso">0min</div>
+    <div class="titulo">Maior Atraso</div>
+  </div>
+
+  <div class="metrica">
+    <div class="valor" id="pedidos-finalizados">0</div>
+    <div class="titulo">Finalizados Hoje</div>
+  </div>
+</div>
+
 
 <!-- Grade de pedidos -->
 <div class="grade modo-cards" id="grade">
@@ -415,6 +503,10 @@ var _idsConhecidos = {};   // pra detectar pedido novo (piscar)
 var _primeiraCarga = true;
 var _somLigado = true;     // alerta sonoro de pedido novo
 var _modoVisual = 'cards';
+
+var _historicoFinalizados = [];
+var _pedidosFinalizadosHoje = 0;
+
 
 // ─── Inicialização ───
 window.addEventListener('load', function(){
@@ -544,6 +636,7 @@ function escutarContasAbertas(){
           _contasAbertas[d.id] = true;
         }
       });
+      verificarHistoricoFinalizados();
       renderPedidos();
     }, function(e){
       console.warn('[COZINHA] erro contas:', e);
@@ -682,7 +775,37 @@ function renderPedidos(){
   document.getElementById('stat-pedidos').textContent = pedidosCozinha.length;
   document.getElementById('stat-itens').textContent = totalItens;
 
+  
+  // Estatísticas avançadas
+  var tempos = pedidosCozinha.map(function(p){
+    return Math.floor((Date.now() - (p.criadoEm||Date.now())) / 60000);
+  });
+
+  var media = tempos.length
+    ? Math.round(tempos.reduce(function(a,b){ return a+b; },0) / tempos.length)
+    : 0;
+
+  var maior = tempos.length ? Math.max.apply(null, tempos) : 0;
+
+  var elMedia = document.getElementById('tempo-medio');
+  var elMaior = document.getElementById('maior-atraso');
+  var elFinalizados = document.getElementById('pedidos-finalizados');
+
+  if(elMedia) elMedia.textContent = media + 'min';
+  if(elMaior) elMaior.textContent = maior + 'min';
+  if(elFinalizados) elFinalizados.textContent = _pedidosFinalizadosHoje;
+
+  // Separa em preparo e prontos
+  var pedidosPreparo = pedidosCozinha.filter(function(p){
+    return !_pedidoEstaCompleto(p);
+  });
+
+  var pedidosProntos = pedidosCozinha.filter(function(p){
+    return _pedidoEstaCompleto(p);
+  });
+
   // Tela vazia
+
   if(pedidosCozinha.length === 0){
     grade.innerHTML =
       '<div class="vazio">' +
@@ -693,9 +816,18 @@ function renderPedidos(){
     return;
   }
 
-  grade.innerHTML = pedidosCozinha.map(function(p){
-    return montarCardPedido(p);
-  }).join('');
+  grade.innerHTML =
+    '<div class="secao-status">' +
+      '<div class="titulo-secao">🔥 EM PREPARO</div>' +
+      pedidosPreparo.map(function(p){ return montarCardPedido(p); }).join('') +
+    '</div>' +
+    '<div class="secao-status">' +
+      '<div class="titulo-secao">✅ PRONTO PARA ENTREGA</div>' +
+      (pedidosProntos.length
+        ? pedidosProntos.map(function(p){ return montarCardPedido(p); }).join('')
+        : '<div class="vazio"><div class="desc">Nenhum pedido pronto</div></div>') +
+    '</div>' +
+    montarHistorico();
 
   // Marca os IDs conhecidos (pra detectar novos da próxima vez)
   pedidosCozinha.forEach(function(p){ _idsConhecidos[p.id] = true; });
@@ -862,6 +994,46 @@ function _atualizarItemNaTela(pedidoId, idxItem, marcar){
     }
   }
 }
+
+
+function montarHistorico(){
+  if(!_historicoFinalizados.length) return '';
+
+  return '<div class="historico-box">' +
+    '<div class="historico-topo">🕘 Últimos Finalizados</div>' +
+    _historicoFinalizados.map(function(h){
+      return '<div class="historico-item">' +
+        '<span>' + escapar(h.nome) + '</span>' +
+        '<span>' + escapar(h.hora) + '</span>' +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
+
+// Detecta pedidos concluídos
+function verificarHistoricoFinalizados(){
+  _pedidosAtivos.forEach(function(p){
+    if(_pedidoEstaCompleto(p) && !p._jaHistorico){
+      p._jaHistorico = true;
+
+      var agora = new Date();
+      var hora = String(agora.getHours()).padStart(2,'0') + ':' +
+                 String(agora.getMinutes()).padStart(2,'0');
+
+      _historicoFinalizados.unshift({
+        nome: p.mesa ? ('Mesa ' + p.mesa) : (p.cliente || 'Pedido'),
+        hora: hora
+      });
+
+      _pedidosFinalizadosHoje++;
+
+      if(_historicoFinalizados.length > 8){
+        _historicoFinalizados.pop();
+      }
+    }
+  });
+}
+
 
 // ─── Utilidades ───
 function escapar(s){

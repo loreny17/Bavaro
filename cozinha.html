@@ -556,6 +556,48 @@
   .pronto-itens{font-size:0.72rem;color:var(--muted);margin-top:2px;}
   .pronto-hora{font-size:0.66rem;color:var(--verde);margin-top:2px;}
 
+  /* Botão de foto no item (📷) */
+  .item-foto-btn{
+    background:rgba(212,168,67,0.13);
+    border:1px solid rgba(212,168,67,0.3);
+    border-radius:7px;
+    width:34px;height:34px;
+    font-size:1rem;cursor:pointer;
+    flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .item-foto-btn:active{background:rgba(212,168,67,0.3);}
+
+  /* Modal de foto do prato (tela cheia) */
+  #foto-modal{
+    position:fixed;inset:0;z-index:300;
+    background:rgba(0,0,0,0.92);
+    display:none;
+    align-items:center;justify-content:center;
+    flex-direction:column;gap:16px;
+    padding:20px;
+  }
+  #foto-modal.aberto{display:flex;}
+  #foto-modal img{
+    max-width:92vw;max-height:78vh;
+    border-radius:14px;
+    border:2px solid var(--card-borda);
+    object-fit:contain;
+  }
+  #foto-modal .foto-nome{
+    font-size:1.2rem;font-weight:700;color:var(--texto);
+    text-align:center;
+  }
+  #foto-modal .foto-fechar{
+    background:var(--accent);color:#000;border:none;
+    padding:12px 30px;border-radius:10px;
+    font-weight:700;font-size:0.95rem;cursor:pointer;
+    font-family:inherit;
+  }
+  #foto-modal .foto-erro{
+    color:var(--muted);font-size:0.9rem;text-align:center;
+  }
+
 </style>
 </head>
 <body>
@@ -613,6 +655,14 @@
       <div class="barra-vazio">Sem pratos pendentes</div>
     </div>
   </div>
+</div>
+
+<!-- Modal de foto do prato (montagem) -->
+<div id="foto-modal" onclick="fecharFotoPrato()">
+  <div class="foto-nome" id="foto-modal-nome"></div>
+  <img id="foto-modal-img" src="" alt="" onerror="this.style.display='none';document.getElementById('foto-modal-erro').style.display='block';">
+  <div class="foto-erro" id="foto-modal-erro" style="display:none;">Não foi possível carregar a foto</div>
+  <button class="foto-fechar" onclick="fecharFotoPrato()">Fechar</button>
 </div>
 
 <!-- Menu lateral (drawer) -->
@@ -730,7 +780,8 @@ function carregarConfiguracao(){
         var v = d.data();
         _itensCardapio.push({
           id:d.id, nome:v.nome||'',
-          categoriaId: v.categoriaId || v.categoria || ''
+          categoriaId: v.categoriaId || v.categoria || '',
+          foto: v.foto || ''
         });
       });
     }).catch(function(){ _itensCardapio = []; });
@@ -1148,6 +1199,12 @@ function montarCardPedido(p){
     }
 
     // Item ativo — clicável pra marcar pronto
+    // Acha a foto do item no cardápio (pra cozinha consultar a montagem)
+    var defItem = _itensCardapio.find(function(c){ return c.id === it.id; });
+    var fotoItem = (defItem && defItem.foto) || it.foto || '';
+    var btnFoto = fotoItem
+      ? '<button class="item-foto-btn" onclick="event.stopPropagation();verFotoPrato(\'' + encodeURIComponent(fotoItem) + '\',\'' + encodeURIComponent(it.nome||'') + '\')" title="Ver montagem">📷</button>'
+      : '';
     return '<div class="item' + (pronto?' pronto':'') + '" data-idx="' + o.idx + '" ' +
       'onclick="marcarItem(\'' + p.id + '\',' + o.idx + ',' + (pronto?'false':'true') + ')">' +
       '<div class="item-qtd">' + (it.qtd||1) + '</div>' +
@@ -1155,6 +1212,7 @@ function montarCardPedido(p){
         '<div class="item-nome">' + escapar(it.nome||'') + '</div>' +
         sel + obs +
       '</div>' +
+      btnFoto +
       '<div class="item-check">' + (pronto?'✓':'') + '</div>' +
     '</div>';
   }).join('');
@@ -1335,6 +1393,23 @@ function atualizarRelogio(){
 function atualizarPontoConexao(online){
   var ponto = document.getElementById('ponto-conexao');
   if(ponto) ponto.className = 'ponto-conexao' + (online ? '' : ' off');
+}
+
+// ─── Foto do prato (montagem) ───
+function verFotoPrato(fotoCodificada, nomeCodificado){
+  var foto = decodeURIComponent(fotoCodificada);
+  var nome = decodeURIComponent(nomeCodificado);
+  var modal = document.getElementById('foto-modal');
+  var img = document.getElementById('foto-modal-img');
+  var erro = document.getElementById('foto-modal-erro');
+  document.getElementById('foto-modal-nome').textContent = nome;
+  erro.style.display = 'none';
+  img.style.display = 'block';
+  img.src = foto;
+  modal.classList.add('aberto');
+}
+function fecharFotoPrato(){
+  document.getElementById('foto-modal').classList.remove('aberto');
 }
 
 // ─── Menu lateral (drawer) ───

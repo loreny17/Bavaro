@@ -815,6 +815,8 @@ header{
           <line x1="8" y1="23" x2="16" y2="23"/>
         </svg>
       </button>
+      <button onclick="abrirItemAvulso()" title="Criar item avulso"
+        style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;">+</button>
     </div>
   </div>
 
@@ -7383,6 +7385,106 @@ function _processarComandoMesa(texto){
   showToast('Não entendi. Diga "mesa 5", "fechar mesa 5" ou "transferir mesa 5 para 8"', '#f7a34f', 4000);
 }
 
+// ═══════════════════════════════════════════════
+//  ➕ ITEM AVULSO — garçom cria uma porção na hora
+//  Só pra esse pedido (não vai pro cardápio).
+//  Escolhe nome, valor e a impressora.
+// ═══════════════════════════════════════════════
+function abrirItemAvulso(){
+  var ex = document.getElementById('modal-item-avulso');
+  if(ex) ex.remove();
+
+  // Monta as opções de impressora
+  var opcoesImp = '<option value="">Não imprimir</option>';
+  _impressorasCozinha.forEach(function(imp){
+    opcoesImp += '<option value="' + imp.id + '">' + esc(imp.nome) + '</option>';
+  });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-item-avulso';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px 20px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:420px;width:100%;overflow:hidden;">' +
+      '<div style="padding:16px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+        '<span style="font-size:1.4rem;">➕</span>' +
+        '<div style="flex:1;"><div style="font-weight:700;font-size:1.05rem;">Item Avulso</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);">Porção criada na hora, só pra este pedido</div></div>' +
+        '<button onclick="document.getElementById(\'modal-item-avulso\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px;display:flex;flex-direction:column;gap:14px;">' +
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Nome da porção</label>' +
+          '<input type="text" id="avulso-nome" placeholder="Ex: Porção de Torresmo" autocomplete="off" ' +
+            'style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;box-sizing:border-box;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Valor (R$)</label>' +
+          '<input type="number" id="avulso-valor" placeholder="0,00" inputmode="decimal" step="0.01" min="0" ' +
+            'style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;box-sizing:border-box;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Quantidade</label>' +
+          '<input type="number" id="avulso-qtd" value="1" inputmode="numeric" min="1" ' +
+            'style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;box-sizing:border-box;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Imprimir em qual impressora?</label>' +
+          '<select id="avulso-impressora" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;box-sizing:border-box;">' +
+            opcoesImp +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:14px 16px;border-top:1px solid var(--border2);display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'modal-item-avulso\').remove()" style="flex:1;padding:13px;background:var(--bg);border:1px solid var(--border2);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button onclick="adicionarItemAvulso()" style="flex:1.5;padding:13px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;">Adicionar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  try{ pushHistory('modal-item-avulso'); }catch(e){}
+  setTimeout(function(){ var n = document.getElementById('avulso-nome'); if(n) n.focus(); }, 200);
+}
+
+function adicionarItemAvulso(){
+  var nome = (document.getElementById('avulso-nome').value || '').trim();
+  var valor = parseFloat(document.getElementById('avulso-valor').value);
+  var qtd = parseInt(document.getElementById('avulso-qtd').value, 10) || 1;
+  var impressoraId = document.getElementById('avulso-impressora').value;
+
+  if(!nome){ showToast('Digite o nome da porção', '#f7a34f'); return; }
+  if(isNaN(valor) || valor < 0){ showToast('Digite um valor válido', '#f7a34f'); return; }
+
+  // Acha o nome da impressora escolhida (pra mostrar e registrar)
+  var impNome = '';
+  if(impressoraId){
+    var imp = _impressorasCozinha.find(function(i){ return i.id === impressoraId; });
+    impNome = imp ? imp.nome : '';
+  }
+
+  // Cria o item avulso no carrinho (id especial pra identificar)
+  _carrinho.push({
+    id: 'avulso_' + Date.now() + '_' + Math.random().toString(36).substring(2,6),
+    nome: nome,
+    tipoVenda: 'unidade',
+    preco: valor,
+    precoBase: valor,
+    extras: 0,
+    qtd: qtd,
+    obs: '',
+    foto: '',
+    selecoes: [],
+    avulso: true,                      // marca que é item avulso
+    impressoraForcada: impressoraId || '',  // impressora escolhida
+    impressoraForcadaNome: impNome
+  });
+
+  var mod = document.getElementById('modal-item-avulso');
+  if(mod) mod.remove();
+  atualizarCarrinhoBadge();
+  showToast('✓ ' + qtd + 'x ' + nome + ' adicionado', '#4ade80');
+  try{ abrirModalCarrinho(); }catch(e){}
+}
+
 function iniciarBuscaVoz(){
   var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!Recon){
@@ -10120,6 +10222,12 @@ function enviarPedido(){
     if(ehKg){
       item.tipoVenda = 'kg';
       item.peso = it.peso;
+    }
+    // Item avulso: leva a marca e a impressora escolhida
+    if(it.avulso){
+      item.avulso = true;
+      item.impressoraForcada = it.impressoraForcada || '';
+      item.impressoraForcadaNome = it.impressoraForcadaNome || '';
     }
     return item;
   });

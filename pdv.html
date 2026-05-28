@@ -4618,9 +4618,60 @@ function imprimirPedidoAutomatico(pedido){
       enviarParaImpressora(imp, cupom);
     }
   });
+
+  // ── ITENS AVULSOS com impressora forçada ──
+  // Agrupa os itens avulsos por impressora escolhida e imprime cada grupo.
+  var avulsos = (pedido.itens||[]).filter(function(it){
+    return it.avulso && it.impressoraForcada && it.status !== 'cancelado';
+  });
+  if(avulsos.length){
+    var porImpressora = {};
+    avulsos.forEach(function(it){
+      if(!porImpressora[it.impressoraForcada]) porImpressora[it.impressoraForcada] = [];
+      porImpressora[it.impressoraForcada].push(it);
+    });
+    Object.keys(porImpressora).forEach(function(impId){
+      var imp = _impressoras.find(function(i){ return i.id === impId; });
+      if(!imp) return;
+      var cupom = gerarCupomAvulso(pedido, porImpressora[impId]);
+      if(cupom) enviarParaImpressora(imp, cupom);
+    });
+  }
+
   // Marca como impresso no Firestore (evita reimprimir se outro PDV abrir)
   fbDb.collection('pedidos').doc(pedido.id).update({impresso: true, impressoEm: Date.now()})
     .catch(function(){});
+}
+
+// Gera um cupom simples pros itens avulsos
+function gerarCupomAvulso(pedido, itens){
+  var L = 48; // largura aprox
+  var linhas = [];
+  linhas.push(_centralizar('*** ITEM AVULSO ***', L));
+  linhas.push('');
+  if(pedido.mesa) linhas.push('Mesa: ' + pedido.mesa);
+  else if(pedido.cliente) linhas.push('Cliente: ' + pedido.cliente);
+  if(pedido.garcom) linhas.push('Garcom: ' + pedido.garcom);
+  var d = new Date(pedido.criadoEm || Date.now());
+  linhas.push('Hora: ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'));
+  linhas.push('--------------------------------');
+  itens.forEach(function(it){
+    linhas.push((it.qtd||1) + 'x ' + (it.nome||''));
+    if(it.obs) linhas.push('   Obs: ' + it.obs);
+  });
+  linhas.push('--------------------------------');
+  linhas.push('');
+  linhas.push('');
+  linhas.push('');
+  return linhas.join('\n');
+}
+
+// Centraliza um texto numa largura
+function _centralizar(txt, larg){
+  txt = String(txt||'');
+  if(txt.length >= larg) return txt;
+  var esp = Math.floor((larg - txt.length) / 2);
+  return ' '.repeat(esp) + txt;
 }
 
 // Permite reimprimir manualmente (usado em botão futuro)
@@ -6099,6 +6150,16 @@ function carregarCfgInsumos(){
 //  Fecha todas as contas abertas como venda e libera as mesas.
 //  Manual — o gerente aperta quando quiser (não é automático).
 // ════════════════════════════════════════
+// Abre a tela da cozinha (cozinha.html) numa aba nova,
+// já com o restaurante e tenant atuais na URL.
+function abrirTelaCozinha(){
+  var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
+  var tenant = _tenantId || '';
+  var url = 'cozinha.html?rest=' + encodeURIComponent(restId);
+  if(tenant) url += '&tenant=' + encodeURIComponent(tenant);
+  window.open(url, '_blank');
+}
+
 function abrirEncerrarDia(){
   var ex = document.getElementById('modal-encerrar-dia');
   if(ex) ex.remove();
@@ -8785,6 +8846,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <div class="menu-divider"></div>
     <div class="menu-section-title">Operação</div>
     <button class="menu-item" onclick="abrirEncerrarDia();fecharMenuLateral();"><span class="ico">🌙</span><span class="lbl">Encerrar o Dia</span></button>
+    <button class="menu-item" onclick="abrirTelaCozinha();fecharMenuLateral();"><span class="ico">🍳</span><span class="lbl">Tela da Cozinha</span></button>
     <div class="menu-divider"></div>
     <button class="menu-item" onclick="window.location.href='index.html'"><span class="ico">🏠</span><span class="lbl">Voltar ao App</span></button>
   </div>

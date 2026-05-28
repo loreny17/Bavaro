@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bávaro — Autoatendimento</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  :root{
+    --bg:#0a0a0c;
+    --surface:#16161c;
+    --surface2:#1d1d24;
+    --border:rgba(255,255,255,0.08);
+    --text:#f5f5f7;
+    --muted:#8a8a93;
+    --accent:#d4a843;
+    --verde:#22c55e;
+    --vermelho:#ef4444;
+  }
+  html,body{height:100%;overflow:hidden;}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:'Inter',sans-serif;
+    user-select:none;-webkit-user-select:none;
+    overscroll-behavior:none;
+  }
+
+  /* ═══ TELA INICIAL ═══ */
+  .tela-inicial{
+    position:fixed;inset:0;z-index:100;
+    background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;
+    transition:opacity 0.4s;
+  }
+  .tela-inicial.escondida{opacity:0;pointer-events:none;}
+  .ti-logo{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:7rem;letter-spacing:0.06em;
+    color:var(--accent);line-height:1;
+    margin-bottom:14px;
+    text-shadow:0 4px 30px rgba(212,168,67,0.3);
+  }
+  .ti-sub{
+    font-size:1.4rem;color:var(--muted);
+    margin-bottom:60px;font-weight:300;
+  }
+  .ti-bater{
+    font-size:2.2rem;font-weight:700;
+    color:var(--accent);
+    padding:24px 60px;
+    border:3px solid var(--accent);
+    border-radius:18px;
+    animation:pulse 1.8s ease infinite;
+  }
+  .ti-instrucao{
+    margin-top:30px;font-size:1.1rem;color:var(--muted);
+  }
+  @keyframes pulse{
+    0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(212,168,67,0.4);}
+    50%{transform:scale(1.04);box-shadow:0 0 0 20px rgba(212,168,67,0);}
+  }
+
+  /* ═══ APP PRINCIPAL ═══ */
+  #app{height:100%;display:flex;flex-direction:column;}
+
+  /* CABEÇALHO */
+  .topo{
+    display:flex;align-items:center;
+    padding:14px 26px;background:var(--surface);
+    border-bottom:1px solid var(--border);
+    gap:18px;flex-shrink:0;
+  }
+  .topo .logo{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2rem;color:var(--accent);letter-spacing:0.05em;line-height:1;
+  }
+  .topo .sub{font-size:0.78rem;color:var(--muted);}
+  .topo .voltar{
+    margin-left:auto;
+    background:var(--surface2);border:1px solid var(--border);
+    color:var(--text);padding:10px 18px;border-radius:10px;
+    font-size:0.86rem;font-weight:600;cursor:pointer;font-family:inherit;
+  }
+
+  /* ABAS DE CATEGORIAS */
+  .cats{
+    display:flex;gap:10px;
+    padding:14px 26px;background:var(--surface);
+    border-bottom:1px solid var(--border);
+    overflow-x:auto;flex-shrink:0;
+  }
+  .cats::-webkit-scrollbar{height:0;}
+  .cat{
+    padding:14px 26px;border-radius:14px;
+    background:var(--surface2);border:1px solid var(--border);
+    font-size:1.05rem;font-weight:700;color:var(--text);
+    cursor:pointer;white-space:nowrap;flex-shrink:0;
+    font-family:inherit;
+  }
+  .cat.ativa{background:var(--accent);color:#000;border-color:var(--accent);}
+
+  /* GRADE DE ITENS */
+  .conteudo{
+    flex:1;overflow-y:auto;
+    padding:20px 26px 140px;
+  }
+  .conteudo::-webkit-scrollbar{width:12px;}
+  .conteudo::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+  .grade{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+    gap:18px;
+  }
+  .item{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:18px;
+    overflow:hidden;
+    cursor:pointer;
+    transition:transform 0.15s, border-color 0.15s;
+    display:flex;flex-direction:column;
+  }
+  .item:active{transform:scale(0.97);border-color:var(--accent);}
+  .item .foto{
+    width:100%;aspect-ratio:4/3;
+    background:linear-gradient(135deg,#1d1d24,#13131a);
+    display:flex;align-items:center;justify-content:center;
+    font-size:3.5rem;color:#3a3a45;
+    overflow:hidden;
+  }
+  .item .foto img{width:100%;height:100%;object-fit:cover;}
+  .item .info{padding:14px 14px 16px;flex:1;display:flex;flex-direction:column;}
+  .item .nome{
+    font-size:1.05rem;font-weight:700;line-height:1.25;
+    margin-bottom:6px;
+  }
+  .item .desc{
+    font-size:0.8rem;color:var(--muted);line-height:1.3;
+    margin-bottom:8px;
+  }
+  .item .preco{
+    margin-top:auto;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.5rem;color:var(--accent);letter-spacing:0.02em;
+  }
+  .item .badge-cart{
+    position:absolute;
+    background:var(--verde);color:#fff;
+    font-size:0.8rem;font-weight:800;
+    width:28px;height:28px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    margin:8px;
+  }
+
+  /* VAZIO */
+  .vazio{
+    grid-column:1/-1;
+    text-align:center;padding:80px 20px;color:var(--muted);
+  }
+  .vazio .ico{font-size:4rem;margin-bottom:16px;}
+  .vazio .titulo{font-size:1.2rem;font-weight:600;margin-bottom:6px;}
+  .vazio .desc{font-size:0.9rem;}
+
+  /* ═══ BARRA INFERIOR (CARRINHO) ═══ */
+  .barra-carrinho{
+    position:fixed;left:0;right:0;bottom:0;z-index:50;
+    background:linear-gradient(180deg,#16161c,#0e0e12);
+    border-top:1px solid var(--border);
+    padding:16px 26px;
+    display:flex;align-items:center;gap:16px;
+    box-shadow:0 -4px 20px rgba(0,0,0,0.4);
+    transform:translateY(110%);
+    transition:transform 0.3s ease;
+  }
+  .barra-carrinho.visivel{transform:translateY(0);}
+  .barra-info{flex:1;}
+  .barra-titulo{font-size:0.82rem;color:var(--muted);}
+  .barra-total{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2rem;color:var(--accent);letter-spacing:0.02em;line-height:1;
+  }
+  .barra-btns{display:flex;gap:10px;}
+  .btn-ver-carrinho{
+    background:var(--surface2);border:1px solid var(--border);
+    color:var(--text);padding:14px 24px;border-radius:12px;
+    font-size:1rem;font-weight:700;cursor:pointer;font-family:inherit;
+  }
+  .btn-finalizar{
+    background:var(--accent);border:none;
+    color:#000;padding:16px 36px;border-radius:12px;
+    font-size:1.05rem;font-weight:800;cursor:pointer;font-family:inherit;
+  }
+  .btn-finalizar:active{transform:scale(0.96);}
+
+  /* ═══ MODAL CARRINHO ═══ */
+  .modal-bg{
+    position:fixed;inset:0;z-index:200;
+    background:rgba(0,0,0,0.85);
+    display:none;
+    align-items:center;justify-content:center;
+    padding:20px;
+  }
+  .modal-bg.aberto{display:flex;}
+  .modal-cart{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:20px;
+    max-width:640px;width:100%;
+    max-height:85vh;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+  .modal-cab{
+    padding:20px 24px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .modal-cab h2{font-size:1.4rem;font-weight:700;}
+  .modal-fechar{
+    background:var(--surface2);border:none;color:var(--text);
+    width:42px;height:42px;border-radius:50%;
+    font-size:1.5rem;cursor:pointer;font-family:inherit;
+  }
+  .modal-body{flex:1;overflow-y:auto;padding:16px 24px;}
+  .cart-vazio{
+    text-align:center;padding:40px 20px;color:var(--muted);
+    font-size:1.05rem;
+  }
+  .cart-item{
+    display:flex;align-items:center;gap:14px;
+    padding:14px 0;border-bottom:1px solid var(--border);
+  }
+  .cart-item .foto-mini{
+    width:60px;height:60px;border-radius:10px;
+    background:var(--surface2);
+    display:flex;align-items:center;justify-content:center;
+    font-size:1.6rem;color:var(--muted);overflow:hidden;flex-shrink:0;
+  }
+  .cart-item .foto-mini img{width:100%;height:100%;object-fit:cover;}
+  .cart-item .info{flex:1;min-width:0;}
+  .cart-item .nome{font-weight:700;font-size:0.98rem;line-height:1.2;}
+  .cart-item .preco{color:var(--accent);font-weight:700;font-size:0.92rem;margin-top:2px;}
+  .cart-qtd{display:flex;align-items:center;gap:10px;}
+  .cart-qtd button{
+    width:36px;height:36px;border-radius:50%;
+    background:var(--surface2);border:1px solid var(--border);
+    color:var(--text);font-size:1.2rem;font-weight:700;cursor:pointer;
+    font-family:inherit;
+  }
+  .cart-qtd .n{font-weight:700;min-width:24px;text-align:center;font-size:1rem;}
+  .cart-rodape{
+    padding:18px 24px;border-top:1px solid var(--border);
+    background:rgba(0,0,0,0.2);
+  }
+  .cart-total-linha{
+    display:flex;justify-content:space-between;align-items:baseline;
+    margin-bottom:14px;
+  }
+  .cart-total-lbl{font-size:1rem;color:var(--muted);}
+  .cart-total-val{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2rem;color:var(--accent);letter-spacing:0.02em;
+  }
+  .cart-rodape .btn-finalizar{width:100%;padding:18px;font-size:1.1rem;}
+
+  /* ═══ TIMER DE INATIVIDADE (volta pra tela inicial) ═══ */
+  .toast-vazio{
+    position:fixed;top:80px;left:50%;transform:translateX(-50%);
+    background:var(--surface);border:1px solid var(--border);
+    color:var(--text);padding:12px 24px;border-radius:12px;
+    font-size:0.9rem;z-index:300;
+    display:none;
+  }
+
+  /* ═══ TELA DE ERRO/CARREGANDO ═══ */
+  .carregando{
+    position:fixed;inset:0;z-index:90;
+    background:var(--bg);
+    display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;
+  }
+  .carregando.escondido{display:none;}
+  .spinner{
+    width:50px;height:50px;border:4px solid var(--border);
+    border-top-color:var(--accent);border-radius:50%;
+    animation:girar 0.8s linear infinite;
+  }
+  @keyframes girar{to{transform:rotate(360deg);}}
+  .carregando .txt{color:var(--muted);font-size:1rem;}
+
+  /* ═══ Responsivo: tablet em retrato ═══ */
+  @media(max-width:900px){
+    .ti-logo{font-size:5rem;}
+    .ti-sub{font-size:1.1rem;}
+    .ti-bater{font-size:1.6rem;padding:18px 40px;}
+    .grade{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;}
+    .conteudo{padding:14px 16px 130px;}
+    .topo,.cats{padding-left:16px;padding-right:16px;}
+    .item .nome{font-size:0.95rem;}
+    .item .preco{font-size:1.25rem;}
+    .cat{padding:11px 18px;font-size:0.92rem;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Tela inicial — cliente toca pra começar -->
+<div class="tela-inicial" id="tela-inicial" onclick="comecarPedido()">
+  <div class="ti-logo">BÁVARO</div>
+  <div class="ti-sub">Restaurante</div>
+  <div class="ti-bater">TOQUE PARA INICIAR</div>
+  <div class="ti-instrucao">Faça seu pedido por aqui 👆</div>
+</div>
+
+<!-- Loading -->
+<div class="carregando" id="carregando">
+  <div class="spinner"></div>
+  <div class="txt" id="carregando-txt">Carregando cardápio...</div>
+</div>
+
+<!-- App principal (escondido até cliente tocar) -->
+<div id="app" style="display:none;">
+
+  <!-- Cabeçalho -->
+  <div class="topo">
+    <div>
+      <div class="logo">BÁVARO</div>
+      <div class="sub">Faça seu pedido</div>
+    </div>
+    <button class="voltar" onclick="voltarTelaInicial()">← Cancelar</button>
+  </div>
+
+  <!-- Categorias -->
+  <div class="cats" id="cats"></div>
+
+  <!-- Itens -->
+  <div class="conteudo">
+    <div class="grade" id="grade">
+      <div class="vazio">
+        <div class="ico">⏳</div>
+        <div class="titulo">Carregando itens...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Barra do carrinho (fixa embaixo) -->
+<div class="barra-carrinho" id="barra-carrinho">
+  <div class="barra-info">
+    <div class="barra-titulo" id="barra-resumo">0 itens</div>
+    <div class="barra-total" id="barra-total">R$ 0,00</div>
+  </div>
+  <div class="barra-btns">
+    <button class="btn-ver-carrinho" onclick="abrirCarrinho()">Ver carrinho</button>
+    <button class="btn-finalizar" onclick="finalizarPedido()">Finalizar →</button>
+  </div>
+</div>
+
+<!-- Modal carrinho -->
+<div class="modal-bg" id="modal-carrinho" onclick="if(event.target===this)fecharCarrinho()">
+  <div class="modal-cart">
+    <div class="modal-cab">
+      <h2>🛒 Seu Pedido</h2>
+      <button class="modal-fechar" onclick="fecharCarrinho()">×</button>
+    </div>
+    <div class="modal-body" id="cart-itens">
+      <div class="cart-vazio">Carrinho vazio</div>
+    </div>
+    <div class="cart-rodape">
+      <div class="cart-total-linha">
+        <span class="cart-total-lbl">Total</span>
+        <span class="cart-total-val" id="cart-total-val">R$ 0,00</span>
+      </div>
+      <button class="btn-finalizar" onclick="fecharCarrinho();finalizarPedido();">Finalizar Pedido →</button>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  BÁVARO TOTEM — Autoatendimento (tablet do cliente)
+//  Lê 2 fontes de cardápio:
+//   - cardapio_totem/data/ (comidas próprias)
+//   - cardapio/data/ (categorias selecionadas no PDV — bebidas, etc)
+// ════════════════════════════════════════════════════════════════
+
+var firebaseConfig = {
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.appspot.com",
+  messagingSenderId: "1071289891873",
+  appId: "1:1071289891873:web:bavaro-app"
+};
+var fbDb = null;
+
+// Tenant/restaurante (via URL ou padrão)
+var _params = new URLSearchParams(window.location.search);
+var _tenantId = _params.get('tenant') || 'tnt_molrfz1k_rznlgl';
+var _restauranteId = _params.get('rest') || 'default';
+
+// Estado
+var _totemItens = [];        // itens do cardapio_totem
+var _totemCats = [];         // categorias do cardapio_totem
+var _catsPrincipaisIds = []; // ids das categorias do principal escolhidas
+var _itensPrincipal = [];    // itens do principal que entram (filtrados pelas cats)
+var _catsPrincipal = [];     // categorias do principal (pra ter o nome)
+
+var _carrinho = [];          // [{itemId, nome, preco, foto, qtd}]
+var _catAtiva = '';          // id da categoria ativa (vazio = primeira)
+var _timerInatividade = null;
+
+// ─── Inicialização ───
+window.addEventListener('load', function(){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.firestore();
+    carregarTudo();
+  }catch(e){
+    mostrarErro('Erro ao iniciar: ' + e.message);
+  }
+});
+
+function mostrarErro(msg){
+  document.getElementById('carregando-txt').textContent = msg;
+  document.getElementById('carregando').style.background = '#2a1010';
+}
+
+// Carrega o cardápio (totem próprio + categorias selecionadas do principal)
+function carregarTudo(){
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
+
+  // 1. Config do totem (categorias do principal escolhidas)
+  var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
+    if(doc.exists){
+      var d = doc.data();
+      _catsPrincipaisIds = d.categoriasPrincipais || [];
+    }
+  }).catch(function(e){ console.warn('config:', e); });
+
+  // 2. Categorias do totem (próprias)
+  var p2 = base.collection('cardapio_totem').doc('data').collection('categorias').get()
+    .then(function(snap){
+      _totemCats = [];
+      snap.forEach(function(d){ _totemCats.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
+      _totemCats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
+    }).catch(function(e){ console.warn('cats totem:', e); _totemCats = []; });
+
+  // 3. Itens do totem (próprios)
+  var p3 = base.collection('cardapio_totem').doc('data').collection('itens').get()
+    .then(function(snap){
+      _totemItens = [];
+      snap.forEach(function(d){
+        var v = d.data();
+        if(v.ativo === false) return; // só ativos
+        _totemItens.push(Object.assign({id:d.id, fonte:'totem'}, v));
+      });
+    }).catch(function(e){ console.warn('itens totem:', e); _totemItens = []; });
+
+  // 4. Categorias do cardápio PRINCIPAL (todas, depois filtra pelas escolhidas)
+  var p4 = base.collection('cardapio').doc('data').collection('categorias').get()
+    .then(function(snap){
+      _catsPrincipal = [];
+      snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
+    }).catch(function(e){ console.warn('cats principal:', e); _catsPrincipal = []; });
+
+  // 5. Itens do cardápio principal (todos, depois filtra pelas categorias)
+  var p5 = base.collection('cardapio').doc('data').collection('itens').get()
+    .then(function(snap){
+      _itensPrincipal = [];
+      snap.forEach(function(d){
+        var v = d.data();
+        if(v.disponivel === false) return; // só disponíveis
+        _itensPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, v));
+      });
+    }).catch(function(e){ console.warn('itens principal:', e); _itensPrincipal = []; });
+
+  Promise.all([p1, p2, p3, p4, p5]).then(function(){
+    montarCardapio();
+  });
+}
+
+// Junta tudo e renderiza
+function montarCardapio(){
+  // Filtra categorias do principal que foram selecionadas
+  var catsPrincSelecionadas = _catsPrincipal.filter(function(c){
+    return _catsPrincipaisIds.indexOf(c.id) >= 0;
+  });
+  // Filtra itens do principal que estão nas categorias selecionadas
+  var itensPrincFiltrados = _itensPrincipal.filter(function(it){
+    return _catsPrincipaisIds.indexOf(it.categoria) >= 0;
+  });
+
+  // Junta as categorias (próprias do totem primeiro, depois do principal)
+  window._cardapioCats = _totemCats.concat(catsPrincSelecionadas);
+  // Junta os itens
+  window._cardapioItens = _totemItens.concat(itensPrincFiltrados.map(function(it){
+    // Normaliza: principal usa "categoria", totem usa "categoriaId"
+    return Object.assign({}, it, { categoriaId: it.categoria });
+  }));
+
+  if(!window._cardapioCats.length){
+    document.getElementById('carregando-txt').textContent =
+      'Nenhum item cadastrado no cardápio do totem.\nCadastre pelo PDV em "Cardápio do Totem".';
+    return;
+  }
+
+  // Esconde o carregando
+  document.getElementById('carregando').classList.add('escondido');
+
+  renderCategorias();
+  renderItens();
+}
+
+// Renderiza as abas de categoria
+function renderCategorias(){
+  var box = document.getElementById('cats');
+  if(!window._cardapioCats || !window._cardapioCats.length){
+    box.innerHTML = '';
+    return;
+  }
+  if(!_catAtiva) _catAtiva = window._cardapioCats[0].id;
+
+  box.innerHTML = window._cardapioCats.map(function(c){
+    return '<button class="cat' + (c.id === _catAtiva ? ' ativa' : '') +
+      '" onclick="trocarCategoria(\'' + c.id + '\')">' +
+      escapar(c.nome || '') + '</button>';
+  }).join('');
+}
+
+function trocarCategoria(id){
+  _catAtiva = id;
+  renderCategorias();
+  renderItens();
+  resetTimerInatividade();
+}
+
+// Renderiza a grade de itens da categoria ativa
+function renderItens(){
+  var grade = document.getElementById('grade');
+  if(!window._cardapioItens){
+    grade.innerHTML = '';
+    return;
+  }
+  var itens = window._cardapioItens.filter(function(it){
+    return it.categoriaId === _catAtiva;
+  });
+  if(!itens.length){
+    grade.innerHTML = '<div class="vazio">' +
+      '<div class="ico">🍽️</div>' +
+      '<div class="titulo">Sem itens nesta categoria</div>' +
+    '</div>';
+    return;
+  }
+  grade.innerHTML = itens.map(function(it){
+    var fotoHtml = it.foto
+      ? '<img src="' + it.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\';">'
+      : '🍽️';
+    var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var qtdNoCart = _carrinho.filter(function(c){ return c.itemId === it.id; }).reduce(function(s,c){ return s + c.qtd; }, 0);
+    var badge = qtdNoCart > 0 ? '<div class="badge-cart">' + qtdNoCart + '</div>' : '';
+    return '<div class="item" onclick="adicionarItem(\'' + it.id + '\',\'' + it.fonte + '\')">' +
+      badge +
+      '<div class="foto">' + fotoHtml + '</div>' +
+      '<div class="info">' +
+        '<div class="nome">' + escapar(it.nome||'') + '</div>' +
+        (it.descricao ? '<div class="desc">' + escapar(it.descricao) + '</div>' : '') +
+        '<div class="preco">R$ ' + preco + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ─── Carrinho ───
+function adicionarItem(itemId, fonte){
+  var it = window._cardapioItens.find(function(x){ return x.id === itemId && x.fonte === fonte; });
+  if(!it) return;
+
+  // Procura se já está no carrinho — se sim, incrementa
+  var existente = _carrinho.find(function(c){ return c.itemId === itemId; });
+  if(existente){
+    existente.qtd += 1;
+  } else {
+    _carrinho.push({
+      itemId: it.id,
+      fonte: it.fonte,
+      nome: it.nome,
+      preco: it.preco || 0,
+      foto: it.foto || '',
+      qtd: 1
+    });
+  }
+  atualizarBarra();
+  renderItens(); // pra atualizar o badge
+  try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
+  resetTimerInatividade();
+}
+
+function alterarQtd(itemId, delta){
+  var idx = _carrinho.findIndex(function(c){ return c.itemId === itemId; });
+  if(idx < 0) return;
+  _carrinho[idx].qtd += delta;
+  if(_carrinho[idx].qtd <= 0) _carrinho.splice(idx, 1);
+  atualizarBarra();
+  renderCarrinhoModal();
+  renderItens();
+  resetTimerInatividade();
+}
+
+function atualizarBarra(){
+  var barra = document.getElementById('barra-carrinho');
+  var totalItens = _carrinho.reduce(function(s,c){ return s + c.qtd; }, 0);
+  var totalValor = _carrinho.reduce(function(s,c){ return s + (c.preco * c.qtd); }, 0);
+
+  if(totalItens === 0){
+    barra.classList.remove('visivel');
+    return;
+  }
+  barra.classList.add('visivel');
+  document.getElementById('barra-resumo').textContent = totalItens + (totalItens === 1 ? ' item' : ' itens');
+  document.getElementById('barra-total').textContent = 'R$ ' + totalValor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function abrirCarrinho(){
+  renderCarrinhoModal();
+  document.getElementById('modal-carrinho').classList.add('aberto');
+  resetTimerInatividade();
+}
+function fecharCarrinho(){
+  document.getElementById('modal-carrinho').classList.remove('aberto');
+}
+
+function renderCarrinhoModal(){
+  var box = document.getElementById('cart-itens');
+  if(!_carrinho.length){
+    box.innerHTML = '<div class="cart-vazio">Carrinho vazio</div>';
+    document.getElementById('cart-total-val').textContent = 'R$ 0,00';
+    return;
+  }
+  box.innerHTML = _carrinho.map(function(c){
+    var foto = c.foto
+      ? '<img src="' + c.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\';">'
+      : '🍽️';
+    var subtotal = (c.preco * c.qtd).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    return '<div class="cart-item">' +
+      '<div class="foto-mini">' + foto + '</div>' +
+      '<div class="info">' +
+        '<div class="nome">' + escapar(c.nome) + '</div>' +
+        '<div class="preco">R$ ' + subtotal + '</div>' +
+      '</div>' +
+      '<div class="cart-qtd">' +
+        '<button onclick="alterarQtd(\'' + c.itemId + '\',-1)">−</button>' +
+        '<div class="n">' + c.qtd + '</div>' +
+        '<button onclick="alterarQtd(\'' + c.itemId + '\',1)">+</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  var total = _carrinho.reduce(function(s,c){ return s + (c.preco * c.qtd); }, 0);
+  document.getElementById('cart-total-val').textContent = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+// ─── Finalizar (placeholder pra próxima etapa) ───
+function finalizarPedido(){
+  if(!_carrinho.length){
+    alert('Adicione itens ao carrinho primeiro');
+    return;
+  }
+  // Por enquanto só mostra um resumo. Na próxima etapa: gera senha + imprime.
+  var total = _carrinho.reduce(function(s,c){ return s + (c.preco * c.qtd); }, 0);
+  var resumo = '✅ PEDIDO PRONTO PARA FINALIZAR\n\n';
+  _carrinho.forEach(function(c){
+    resumo += c.qtd + 'x ' + c.nome + ' — R$ ' + (c.preco * c.qtd).toFixed(2) + '\n';
+  });
+  resumo += '\nTOTAL: R$ ' + total.toFixed(2);
+  resumo += '\n\n(Próxima etapa vai gerar senha e imprimir)';
+  alert(resumo);
+}
+
+// ─── Tela inicial / fluxo ───
+function comecarPedido(){
+  document.getElementById('tela-inicial').classList.add('escondida');
+  setTimeout(function(){
+    document.getElementById('tela-inicial').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+  }, 400);
+  iniciarTimerInatividade();
+}
+
+function voltarTelaInicial(){
+  if(_carrinho.length){
+    if(!confirm('Cancelar o pedido? Os itens do carrinho serão perdidos.')) return;
+  }
+  _carrinho = [];
+  _catAtiva = '';
+  atualizarBarra();
+  fecharCarrinho();
+  document.getElementById('tela-inicial').style.display = 'flex';
+  setTimeout(function(){
+    document.getElementById('tela-inicial').classList.remove('escondida');
+  }, 30);
+  document.getElementById('app').style.display = 'none';
+  pararTimerInatividade();
+}
+
+// Volta pra tela inicial após 90s sem mexer
+function iniciarTimerInatividade(){
+  resetTimerInatividade();
+}
+function resetTimerInatividade(){
+  pararTimerInatividade();
+  _timerInatividade = setTimeout(function(){
+    voltarTelaInicial();
+  }, 90000); // 90s
+}
+function pararTimerInatividade(){
+  if(_timerInatividade){ clearTimeout(_timerInatividade); _timerInatividade = null; }
+}
+
+// Detecta toque em qualquer lugar pra resetar o timer
+document.addEventListener('touchstart', resetTimerInatividade, {passive:true});
+document.addEventListener('click', resetTimerInatividade);
+
+// Util
+function escapar(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+
+</body>
+</html>

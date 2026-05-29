@@ -7503,10 +7503,41 @@ function totemRenderCategorias(){
     box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;">Sem categorias. Crie a primeira abaixo.</div>';
     return;
   }
-  box.innerHTML = _totemCats.map(function(c){
-    return '<span class="totem-cat-chip">' + escapeHtml(c.nome||'') +
-      ' <span class="x" onclick="totemExcluirCategoria(\''+c.id+'\')">×</span></span>';
+  box.innerHTML = _totemCats.map(function(c, idx){
+    var ehPrimeiro = idx === 0;
+    var ehUltimo = idx === _totemCats.length - 1;
+    return '<div class="totem-cat-row">' +
+      '<div class="setas">' +
+        '<button onclick="totemMoverCategoria(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
+        '<button onclick="totemMoverCategoria(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+      '</div>' +
+      '<span class="nome">' + escapeHtml(c.nome||'') + '</span>' +
+      '<span class="del-x" onclick="totemExcluirCategoria(\'' + c.id + '\')">×</span>' +
+    '</div>';
   }).join('');
+}
+
+// Move uma categoria do totem pra cima (-1) ou pra baixo (+1)
+function totemMoverCategoria(id, dir){
+  var idx = _totemCats.findIndex(function(c){ return c.id === id; });
+  if(idx < 0) return;
+  var novo = idx + dir;
+  if(novo < 0 || novo >= _totemCats.length) return;
+  // Troca posições
+  var tmp = _totemCats[idx];
+  _totemCats[idx] = _totemCats[novo];
+  _totemCats[novo] = tmp;
+  // Atualiza visualmente na hora
+  totemRenderCategorias();
+  totemRenderItens();
+  // Salva o campo "ordem" em batch
+  var batch = fbDb.batch();
+  _totemCats.forEach(function(c, i){
+    batch.update(_refTotemBase().doc('data').collection('categorias').doc(c.id), { ordem: i });
+  });
+  batch.commit().catch(function(e){
+    showToast('Erro ao salvar ordem: ' + (e.message||e.code), '#f87171');
+  });
 }
 
 function totemCriarCategoria(){
@@ -7540,28 +7571,48 @@ function totemRenderItens(){
     if(!porCat[catId]) porCat[catId] = [];
     porCat[catId].push(it);
   });
+  // Ordena cada grupo pelo campo "ordem" (fallback: criadoEm)
+  Object.keys(porCat).forEach(function(k){
+    porCat[k].sort(function(a,b){
+      var oa = (typeof a.ordem === 'number') ? a.ordem : 999999;
+      var ob = (typeof b.ordem === 'number') ? b.ordem : 999999;
+      if(oa !== ob) return oa - ob;
+      return (a.criadoEm||0) - (b.criadoEm||0);
+    });
+  });
+
   var html = '';
   _totemCats.forEach(function(c){
     if(porCat[c.id]){
       html += '<div style="font-weight:700;font-size:0.82rem;color:var(--muted);margin-top:8px;margin-bottom:4px;">' + escapeHtml(c.nome) + '</div>';
-      porCat[c.id].forEach(function(it){ html += _totemRenderItemCard(it); });
+      porCat[c.id].forEach(function(it, idx){
+        html += _totemRenderItemCard(it, idx, porCat[c.id].length);
+      });
     }
   });
   if(porCat['_sem_']){
     html += '<div style="font-weight:700;font-size:0.82rem;color:var(--muted);margin-top:8px;margin-bottom:4px;">Sem categoria</div>';
-    porCat['_sem_'].forEach(function(it){ html += _totemRenderItemCard(it); });
+    porCat['_sem_'].forEach(function(it, idx){
+      html += _totemRenderItemCard(it, idx, porCat['_sem_'].length);
+    });
   }
   box.innerHTML = html;
 }
 
-function _totemRenderItemCard(it){
+function _totemRenderItemCard(it, idx, total){
   var foto = it.foto
     ? '<img src="' + it.foto + '" alt="" onerror="this.parentNode.textContent=\'🍽️\';">'
     : '🍽️';
   var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   var ativo = it.ativo !== false;
   var ngrupos = (it.gruposIds||[]).length;
+  var ehPrimeiro = idx === 0;
+  var ehUltimo = idx === total - 1;
   return '<div class="totem-item-card" style="' + (ativo?'':'opacity:0.5;') + '">' +
+    '<div class="setas-coluna">' +
+      '<button onclick="totemMoverItem(\'' + it.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
+      '<button onclick="totemMoverItem(\'' + it.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+    '</div>' +
     '<div class="foto">' + foto + '</div>' +
     '<div class="info">' +
       '<div class="nome">' + escapeHtml(it.nome||'') + '</div>' +
@@ -7569,10 +7620,48 @@ function _totemRenderItemCard(it){
       '<div class="meta">' + (ativo?'':'⚠ Inativo · ') + (ngrupos?(ngrupos + ' grupo(s) de adicionais'):'sem adicionais') + '</div>' +
     '</div>' +
     '<div class="acoes">' +
-      '<button class="btn-mini" onclick="totemEditarItem(\''+it.id+'\')">Editar</button>' +
-      '<button class="btn-mini del" onclick="totemExcluirItem(\''+it.id+'\')">×</button>' +
+      '<button class="btn-mini" onclick="totemEditarItem(\'' + it.id + '\')">Editar</button>' +
+      '<button class="btn-mini del" onclick="totemExcluirItem(\'' + it.id + '\')">×</button>' +
     '</div>' +
   '</div>';
+}
+
+// Move um item dentro da MESMA categoria
+function totemMoverItem(itemId, dir){
+  var it = _totemItens.find(function(x){ return x.id === itemId; });
+  if(!it) return;
+  var catId = it.categoriaId || '_sem_';
+
+  // Pega só itens da mesma categoria, ordenados
+  var irmaos = _totemItens
+    .filter(function(x){ return (x.categoriaId || '_sem_') === catId; })
+    .sort(function(a,b){
+      var oa = (typeof a.ordem === 'number') ? a.ordem : 999999;
+      var ob = (typeof b.ordem === 'number') ? b.ordem : 999999;
+      if(oa !== ob) return oa - ob;
+      return (a.criadoEm||0) - (b.criadoEm||0);
+    });
+
+  var idx = irmaos.findIndex(function(x){ return x.id === itemId; });
+  var novo = idx + dir;
+  if(novo < 0 || novo >= irmaos.length) return;
+  // Troca posições no array
+  var tmp = irmaos[idx];
+  irmaos[idx] = irmaos[novo];
+  irmaos[novo] = tmp;
+
+  // Salva nova ordem (campo "ordem")
+  var batch = fbDb.batch();
+  irmaos.forEach(function(x, i){
+    batch.update(_refTotemBase().doc('data').collection('itens').doc(x.id), { ordem: i });
+    // Atualiza local pra render imediato
+    var localIt = _totemItens.find(function(y){ return y.id === x.id; });
+    if(localIt) localIt.ordem = i;
+  });
+  totemRenderItens();
+  batch.commit().catch(function(e){
+    showToast('Erro ao salvar ordem: ' + (e.message||e.code), '#f87171');
+  });
 }
 
 function totemAbrirNovoItem(){ totemAbrirModalItem(null); }
@@ -7957,15 +8046,65 @@ function totemRenderCatsPrincipais(){
     box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Sem categorias no cardápio principal</div>';
     return;
   }
-  box.innerHTML = cats.map(function(c){
-    var ativa = _totemCatsPrincipais.indexOf(c.id) >= 0;
-    var n = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }).length : 0;
-    return '<div class="totem-cat-principal-row' + (ativa?' ativa':'') + '" onclick="totemToggleCatPrincipal(\''+c.id+'\')">' +
-      '<div class="check">' + (ativa ? '✓' : '') + '</div>' +
-      '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
-      '<div class="conta">' + n + ' itens</div>' +
-    '</div>';
-  }).join('');
+
+  // Separa em ATIVAS (na ordem de _totemCatsPrincipais) e INATIVAS
+  var ativas = [];
+  _totemCatsPrincipais.forEach(function(id){
+    var c = cats.find(function(x){ return x.id === id; });
+    if(c) ativas.push(c);
+  });
+  var inativas = cats.filter(function(c){
+    return _totemCatsPrincipais.indexOf(c.id) < 0;
+  });
+
+  var html = '';
+  if(ativas.length){
+    html += '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;margin-bottom:6px;">No totem (use ▲▼ para ordenar)</div>';
+    ativas.forEach(function(c, idx){
+      var n = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }).length : 0;
+      var ehPrimeiro = idx === 0;
+      var ehUltimo = idx === ativas.length - 1;
+      html += '<div class="totem-cat-principal-row ativa">' +
+        '<div class="setas-coluna">' +
+          '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
+          '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+        '</div>' +
+        '<div class="check" onclick="totemToggleCatPrincipal(\'' + c.id + '\')" style="cursor:pointer;">✓</div>' +
+        '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
+        '<div class="conta">' + n + ' itens</div>' +
+      '</div>';
+    });
+  }
+  if(inativas.length){
+    html += '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;margin:14px 0 6px;">Não estão no totem</div>';
+    inativas.forEach(function(c){
+      var n = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }).length : 0;
+      html += '<div class="totem-cat-principal-row" onclick="totemToggleCatPrincipal(\'' + c.id + '\')">' +
+        '<div class="check"></div>' +
+        '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
+        '<div class="conta">' + n + ' itens</div>' +
+      '</div>';
+    });
+  }
+  box.innerHTML = html;
+}
+
+// Move uma categoria do principal pra cima ou pra baixo dentro de _totemCatsPrincipais
+function totemMoverCatPrincipal(catId, dir){
+  var idx = _totemCatsPrincipais.indexOf(catId);
+  if(idx < 0) return;
+  var novo = idx + dir;
+  if(novo < 0 || novo >= _totemCatsPrincipais.length) return;
+  var tmp = _totemCatsPrincipais[idx];
+  _totemCatsPrincipais[idx] = _totemCatsPrincipais[novo];
+  _totemCatsPrincipais[novo] = tmp;
+  totemRenderCatsPrincipais();
+  _refTotemBase().doc('config').set({
+    categoriasPrincipais: _totemCatsPrincipais,
+    atualizadoEm: Date.now()
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code), '#f87171');
+  });
 }
 
 function totemToggleCatPrincipal(catId){
@@ -9478,6 +9617,28 @@ function toggleAdminUsuario(garcomId, novoValor){
 .totem-foto-up .preview img{width:100%;height:100%;object-fit:cover;}
 .totem-foto-up .lbl{font-size:0.84rem;color:var(--muted);}
 .op-grupo-chip{display:inline-flex;align-items:center;background:rgba(212,168,67,0.13);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:3px 8px;border-radius:6px;font-size:0.72rem;font-weight:600;}
+
+/* Setinhas pra ordenar */
+.seta-btn{
+  background:var(--bg);border:1px solid var(--border);
+  color:var(--accent);width:28px;height:24px;
+  border-radius:5px;cursor:pointer;font-family:inherit;
+  font-size:0.72rem;line-height:1;display:flex;align-items:center;justify-content:center;
+  padding:0;
+}
+.seta-btn:hover:not(:disabled){background:rgba(212,168,67,0.1);}
+.seta-btn:disabled{opacity:0.25;cursor:not-allowed;}
+.setas-coluna{display:flex;flex-direction:column;gap:3px;margin-right:8px;flex-shrink:0;}
+.setas{display:flex;flex-direction:column;gap:3px;margin-right:10px;flex-shrink:0;}
+
+/* Linha de categoria (lista vertical com setinhas) */
+.totem-cat-row{
+  display:flex;align-items:center;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;margin-bottom:5px;
+}
+.totem-cat-row .nome{flex:1;font-size:0.92rem;font-weight:600;}
+.totem-cat-row .del-x{cursor:pointer;color:#f87171;font-weight:800;padding:4px 8px;font-size:1.1rem;}
 </style>
 
 <style>

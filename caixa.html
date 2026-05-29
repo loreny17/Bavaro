@@ -313,8 +313,37 @@ var firebaseConfig = {
 var fbDb = null;
 
 var _params = new URLSearchParams(window.location.search);
-var _tenantId = _params.get('tenant') || 'tnt_molrfz1k_rznlgl';
-var _restauranteId = _params.get('rest') || 'default';
+// Resolução de tenant/restaurante (mesmo padrão do totem):
+// 1. Se veio na URL, USA e salva no localStorage (pro PWA lembrar)
+// 2. Senão, lê do localStorage
+// 3. Senão, usa o fallback
+function _resolverTenantRest(){
+  var urlTenant = _params.get('tenant');
+  var urlRest = _params.get('rest');
+  var STORAGE_KEY = 'bavaro_caixa_config';
+
+  if(urlTenant && urlRest){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({tenant: urlTenant, rest: urlRest}));
+    }catch(e){}
+    return {tenant: urlTenant, rest: urlRest};
+  }
+
+  try{
+    var salvo = localStorage.getItem(STORAGE_KEY);
+    if(salvo){
+      var obj = JSON.parse(salvo);
+      if(obj && obj.tenant && obj.rest){
+        return {tenant: obj.tenant, rest: obj.rest};
+      }
+    }
+  }catch(e){}
+
+  return {tenant: 'tnt_molrfz1k_rznlgl', rest: 'default'};
+}
+var _cfg = _resolverTenantRest();
+var _tenantId = _cfg.tenant;
+var _restauranteId = _cfg.rest;
 
 var _pedidos = [];        // pedidos aguardando_pagamento
 var _selecionadoId = null;

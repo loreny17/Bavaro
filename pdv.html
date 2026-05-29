@@ -7655,22 +7655,25 @@ function abrirAbaTotem(){
 
 // Preenche os links do totem/caixa do restaurante ativo
 function atualizarLinksTotem(){
-  var base = window.location.origin;
-  var rest = _restauranteAtivo || 'default';
-  var tenant = _tenantId || 'tnt_molrfz1k_rznlgl';
-  // Se for restaurante padrão, link curto (sem query). Se for outro, com query string
-  var linkTotem, linkCaixa;
-  if(rest === 'default'){
-    linkTotem = base + '/totem.html';
-    linkCaixa = base + '/caixa.html';
-  } else {
-    linkTotem = base + '/totem.html?rest=' + encodeURIComponent(rest);
-    linkCaixa = base + '/caixa.html?rest=' + encodeURIComponent(rest);
-  }
   var inputT = document.getElementById('totem-link-totem');
   var inputC = document.getElementById('totem-link-caixa');
-  if(inputT) inputT.value = linkTotem;
-  if(inputC) inputC.value = linkCaixa;
+  if(!inputT || !inputC) return;
+
+  // Garante que temos tenant + rest válidos
+  if(!_tenantId || !_restauranteAtivo){
+    inputT.value = '(aguardando login do restaurante...)';
+    inputC.value = '(aguardando login do restaurante...)';
+    return;
+  }
+
+  var base = window.location.origin;
+  var rest = _restauranteAtivo;
+  var tenant = _tenantId;
+  // SEMPRE inclui tenant e rest no link (pra funcionar em qualquer conta/restaurante)
+  var qs = '?tenant=' + encodeURIComponent(tenant) + '&rest=' + encodeURIComponent(rest);
+  inputT.value = base + '/totem.html' + qs;
+  inputC.value = base + '/caixa.html' + qs;
+
   // Nome do restaurante
   var nome = (_restaurantes||[]).find(function(r){ return r.id === rest; });
   var nomeTxt = nome ? (nome.nome || rest) : rest;

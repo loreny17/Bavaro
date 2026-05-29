@@ -181,6 +181,13 @@
     font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;
   }
   .btn-cancelar:hover{background:rgba(239,68,68,0.08);}
+  .btn-editar{
+    flex:1;padding:16px;
+    background:var(--surface2);border:1.5px solid var(--accent);
+    color:var(--accent);border-radius:11px;
+    font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;
+  }
+  .btn-editar:hover{background:rgba(212,168,67,0.08);}
   .btn-liberar{
     flex:2;padding:16px;
     background:var(--verde);border:none;
@@ -315,6 +322,13 @@ var _pagosHojeCount = 0;
 var _primeiraCarga = true;
 var _idsConhecidos = {};  // pra detectar pedidos novos (piscar)
 var _somDesbloqueado = false;
+
+// ── Cardápios (carregados sob demanda quando abre edição) ──
+var _cardapioCarregado = false;
+var _cardapioTotem = { itens:[], cats:[], grupos:[] };
+var _cardapioPrincipal = { itens:[], cats:[], grupos:[] };
+var _editandoPedidoId = null;
+var _editandoItens = []; // cópia local pra editar
 
 window.addEventListener('load', function(){
   // Registra o service worker (PWA)
@@ -480,6 +494,7 @@ function renderDetalhe(p){
       '</div>' +
       '<div class="btns-rodape">' +
         '<button class="btn-cancelar" onclick="cancelarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">Cancelar</button>' +
+        '<button class="btn-editar" onclick="abrirEdicaoPedido(\'' + p.id + '\')">✏️ Editar</button>' +
         '<button class="btn-liberar" id="btn-liberar" onclick="liberarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">✓ Pago — Liberar pra cozinha</button>' +
       '</div>' +
     '</div>';
@@ -620,6 +635,266 @@ function enriquecerItensComCategoria(itens){
       return item;
     });
   });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ✏️ EDIÇÃO DE PEDIDO
+// ════════════════════════════════════════════════════════════════
+
+// Carrega cardápio (totem + principal) — chamado uma vez na 1ª edição
+function carregarCardapioParaEdicao(){
+  if(_cardapioCarregado) return Promise.resolve();
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
+
+  var promessas = [];
+
+  // Totem
+  promessas.push(base.collection('cardapio_totem').doc('data').collection('categorias').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ arr.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); }); arr.sort(function(a,b){ return (a.ordem||0)-(b.ordem||0); }); _cardapioTotem.cats = arr; }));
+  promessas.push(base.collection('cardapio_totem').doc('data').collection('itens').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ var v = d.data(); if(v.ativo === false) return; arr.push(Object.assign({id:d.id, fonte:'totem'}, v)); }); _cardapioTotem.itens = arr; }));
+  promessas.push(base.collection('cardapio_totem').doc('data').collection('grupos_opcoes').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ arr.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); }); _cardapioTotem.grupos = arr; }));
+
+  // Principal
+  promessas.push(base.collection('cardapio').doc('data').collection('categorias').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ arr.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); }); _cardapioPrincipal.cats = arr; }));
+  promessas.push(base.collection('cardapio').doc('data').collection('itens').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ var v = d.data(); if(v.disponivel === false) return; arr.push(Object.assign({id:d.id, fonte:'principal'}, v)); }); _cardapioPrincipal.itens = arr; }));
+  promessas.push(base.collection('cardapio').doc('data').collection('grupos_opcoes').get()
+    .then(function(s){ var arr = []; s.forEach(function(d){ arr.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); }); _cardapioPrincipal.grupos = arr; }));
+
+  return Promise.all(promessas).then(function(){ _cardapioCarregado = true; });
+}
+
+function abrirEdicaoPedido(pedidoId){
+  var p = _pedidos.find(function(x){ return x.id === pedidoId; });
+  if(!p) return;
+  _editandoPedidoId = pedidoId;
+  // Cópia profunda dos itens pra editar sem afetar o original até salvar
+  _editandoItens = JSON.parse(JSON.stringify(p.itens || []));
+
+  // Mostra carregando se cardápio ainda não foi carregado
+  if(!_cardapioCarregado){
+    mostrarToast('Carregando cardápio...', '#d4a843');
+  }
+  carregarCardapioParaEdicao().then(function(){
+    renderModalEdicao(p);
+  }).catch(function(e){
+    mostrarToast('Erro ao carregar cardápio: ' + (e.message||e.code), '#f87171');
+  });
+}
+
+function renderModalEdicao(pedido){
+  var ex = document.getElementById('modal-edicao');
+  if(ex) ex.remove();
+
+  var senha = pedido.senha || '?';
+  var mod = document.createElement('div');
+  mod.id = 'modal-edicao';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:300;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:780px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">' +
+      '<div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.5rem;color:var(--accent);line-height:1;">#' + senha + '</div>' +
+        '<h2 style="flex:1;margin:0;font-size:1.2rem;">Editar pedido</h2>' +
+        '<button onclick="fecharEdicao()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:1.4rem;">×</button>' +
+      '</div>' +
+      // Corpo: lista de itens
+      '<div id="edit-itens-box" style="flex:1;overflow-y:auto;padding:14px 22px;"></div>' +
+      // Rodapé: adicionar item + salvar
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);">' +
+        '<button onclick="abrirSeletorAdicionarItem()" style="width:100%;padding:12px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;margin-bottom:10px;">+ Adicionar item</button>' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;">' +
+          '<span style="color:var(--muted);font-size:0.95rem;">Total</span>' +
+          '<span id="edit-total" style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;color:var(--accent);">R$ 0,00</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button onclick="fecharEdicao()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+          '<button onclick="salvarEdicaoPedido()" style="flex:2;padding:14px;background:var(--verde);border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">✓ Salvar alterações</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  renderEditItens();
+}
+
+function renderEditItens(){
+  var box = document.getElementById('edit-itens-box');
+  if(!box) return;
+  if(!_editandoItens.length){
+    box.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted);">Pedido sem itens. Use "+ Adicionar item" abaixo.</div>';
+    atualizarTotalEdicao();
+    return;
+  }
+  box.innerHTML = _editandoItens.map(function(it, idx){
+    var sub = (it.preco||0) * (it.qtd||1);
+    var subTxt = sub.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var precoUnitTxt = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var labelOpcoes = it.selecoesLabel
+      ? '<div style="font-size:0.78rem;color:var(--muted);margin-top:4px;">' + escapar(it.selecoesLabel) + '</div>'
+      : '';
+    var obs = it.obs || it.observacao || '';
+    return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;">' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">' +
+        // Controles de qtd
+        '<div style="display:flex;align-items:center;gap:6px;background:var(--surface2);border-radius:8px;padding:2px;">' +
+          '<button onclick="alterarQtdEdit(' + idx + ',-1)" style="width:30px;height:30px;background:transparent;border:none;color:var(--text);font-size:1.2rem;cursor:pointer;font-family:inherit;border-radius:6px;">−</button>' +
+          '<span style="min-width:24px;text-align:center;font-weight:700;">' + (it.qtd||1) + '</span>' +
+          '<button onclick="alterarQtdEdit(' + idx + ',1)" style="width:30px;height:30px;background:transparent;border:none;color:var(--text);font-size:1.2rem;cursor:pointer;font-family:inherit;border-radius:6px;">+</button>' +
+        '</div>' +
+        // Nome do item
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:600;font-size:0.95rem;">' + escapar(it.nome||'') + '</div>' +
+          '<div style="font-size:0.74rem;color:var(--muted);">R$ ' + precoUnitTxt + ' un.</div>' +
+          labelOpcoes +
+        '</div>' +
+        // Subtotal e remover
+        '<div style="text-align:right;">' +
+          '<div style="font-weight:700;color:var(--accent);">R$ ' + subTxt + '</div>' +
+          '<button onclick="removerItemEdit(' + idx + ')" style="background:transparent;border:none;color:#f87171;cursor:pointer;font-size:0.78rem;font-family:inherit;margin-top:2px;">🗑 Remover</button>' +
+        '</div>' +
+      '</div>' +
+      // Observação
+      '<input type="text" placeholder="Observação (ex: sem cebola)" value="' + escapar(obs) + '"' +
+        ' oninput="atualizarObsEdit(' + idx + ', this.value)"' +
+        ' style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 10px;font-family:inherit;font-size:0.84rem;box-sizing:border-box;">' +
+    '</div>';
+  }).join('');
+  atualizarTotalEdicao();
+}
+
+function alterarQtdEdit(idx, delta){
+  if(idx < 0 || idx >= _editandoItens.length) return;
+  _editandoItens[idx].qtd = Math.max(1, (_editandoItens[idx].qtd||1) + delta);
+  renderEditItens();
+}
+
+function removerItemEdit(idx){
+  if(idx < 0 || idx >= _editandoItens.length) return;
+  if(!confirm('Remover "' + (_editandoItens[idx].nome||'item') + '" do pedido?')) return;
+  _editandoItens.splice(idx, 1);
+  renderEditItens();
+}
+
+function atualizarObsEdit(idx, valor){
+  if(idx < 0 || idx >= _editandoItens.length) return;
+  _editandoItens[idx].obs = valor;
+  _editandoItens[idx].selecoesLabel = valor; // pra aparecer no detalhe e impressão
+}
+
+function atualizarTotalEdicao(){
+  var t = _editandoItens.reduce(function(s,it){ return s + (it.preco||0) * (it.qtd||1); }, 0);
+  var el = document.getElementById('edit-total');
+  if(el) el.textContent = 'R$ ' + t.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+// ── Adicionar item novo via seletor do cardápio ──
+function abrirSeletorAdicionarItem(){
+  var ex = document.getElementById('modal-seletor');
+  if(ex) ex.remove();
+
+  // Concatena todos itens (totem + principal)
+  var todos = _cardapioTotem.itens.concat(_cardapioPrincipal.itens);
+  if(!todos.length){
+    mostrarToast('Nenhum item disponível no cardápio', '#f87171');
+    return;
+  }
+
+  // Agrupa por categoria pra mostrar organizado
+  var catsMap = {};
+  _cardapioTotem.cats.forEach(function(c){ catsMap[c.id] = c; });
+  _cardapioPrincipal.cats.forEach(function(c){ catsMap[c.id] = c; });
+
+  var porCat = {};
+  todos.forEach(function(it){
+    var catId = it.categoriaId || it.categoria || '_sem_';
+    if(!porCat[catId]) porCat[catId] = [];
+    porCat[catId].push(it);
+  });
+
+  var html = '';
+  Object.keys(porCat).forEach(function(catId){
+    var nomeCat = (catsMap[catId] || {}).nome || 'Sem categoria';
+    html += '<div style="font-weight:700;font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 6px;">' + escapar(nomeCat) + '</div>';
+    porCat[catId].forEach(function(it){
+      var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      html += '<div onclick="adicionarItemAoPedido(\'' + it.id + '\',\'' + it.fonte + '\')" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:5px;cursor:pointer;display:flex;align-items:center;gap:10px;">' +
+        '<span style="flex:1;font-size:0.92rem;font-weight:600;">' + escapar(it.nome||'') + '</span>' +
+        '<span style="color:var(--accent);font-weight:700;font-size:0.92rem;">R$ ' + preco + '</span>' +
+        '<span style="background:var(--accent);color:#000;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;">+</span>' +
+      '</div>';
+    });
+  });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-seletor';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:400;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:560px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">' +
+      '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
+        '<h3 style="margin:0;font-size:1.1rem;">➕ Adicionar item ao pedido</h3>' +
+        '<button onclick="document.getElementById(\'modal-seletor\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:8px 20px 20px;">' + html + '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function adicionarItemAoPedido(itemId, fonte){
+  var lista = fonte === 'totem' ? _cardapioTotem.itens : _cardapioPrincipal.itens;
+  var it = lista.find(function(x){ return x.id === itemId; });
+  if(!it) return;
+  _editandoItens.push({
+    id: it.id,
+    fonte: it.fonte,
+    nome: it.nome,
+    preco: it.preco || 0,
+    precoBase: it.preco || 0,
+    qtd: 1,
+    foto: it.foto || '',
+    selecoes: {},
+    selecoesLabel: '',
+    gruposIds: it.gruposIds || []
+  });
+  document.getElementById('modal-seletor').remove();
+  renderEditItens();
+  mostrarToast('✓ ' + (it.nome||'item') + ' adicionado', '#22c55e');
+}
+
+function fecharEdicao(){
+  var m = document.getElementById('modal-edicao');
+  if(m) m.remove();
+  var s = document.getElementById('modal-seletor');
+  if(s) s.remove();
+  _editandoPedidoId = null;
+  _editandoItens = [];
+}
+
+function salvarEdicaoPedido(){
+  if(!_editandoPedidoId) return;
+  if(!_editandoItens.length){
+    if(!confirm('O pedido vai ficar SEM itens. Continuar?')) return;
+  }
+  var novoTotal = _editandoItens.reduce(function(s,it){ return s + (it.preco||0) * (it.qtd||1); }, 0);
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem').doc(_editandoPedidoId)
+    .update({
+      itens: _editandoItens,
+      total: novoTotal,
+      editadoEm: Date.now(),
+      editadoPorCaixa: true
+    })
+    .then(function(){
+      mostrarToast('✓ Pedido atualizado', '#22c55e');
+      fecharEdicao();
+    })
+    .catch(function(e){
+      mostrarToast('Erro: ' + (e.message||e.code), '#f87171');
+    });
 }
 
 function cancelarPedido(id, senha){

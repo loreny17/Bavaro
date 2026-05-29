@@ -1004,7 +1004,7 @@ function _gruposDoItem(item){
   var resultado = [];
   var jaIncluidos = {};
 
-  // 1. Grupos fixos do item (sempre aparecem)
+  // 1. Grupos fixos do item (sempre aparecem) — vinculados via item.gruposIds
   (item.gruposIds || []).forEach(function(gid){
     var g = _grupos.find(function(x){ return x.id === gid; });
     if(g && g.opcoes && g.opcoes.length && !jaIncluidos[gid]){
@@ -1013,9 +1013,26 @@ function _gruposDoItem(item){
     }
   });
 
+  // 1b. Grupos do CARDÁPIO PRINCIPAL que se aplicam ao item via "aplicaEm"
+  // (no principal, vincula-se grupos a categorias/itens — não só a gruposIds)
+  // Só faz pra itens importados do principal (it.fonte === 'principal')
+  if(item.fonte === 'principal'){
+    _grupos.forEach(function(g){
+      if(g.fonte !== 'principal') return;
+      if(jaIncluidos[g.id]) return;
+      if(!g.opcoes || !g.opcoes.length) return;
+      var aplica = g.aplicaEm || {};
+      var bate = false;
+      if(aplica.itens && aplica.itens.indexOf(item.id) >= 0) bate = true;
+      if(!bate && aplica.categorias && aplica.categorias.indexOf(item.categoriaId || item.categoria) >= 0) bate = true;
+      if(bate){
+        resultado.push(g);
+        jaIncluidos[g.id] = true;
+      }
+    });
+  }
+
   // 2. Grupos CONDICIONAIS — abertos pelas opções selecionadas
-  // (ex: cliente escolheu "Executivo" → adiciona "Sem ingrediente Executivo")
-  // Faz em loop pra suportar cadeias: opção abre grupo, opção desse grupo abre outro, etc
   var mudou = true;
   var seguranca = 0;
   while(mudou && seguranca++ < 10){
@@ -1062,7 +1079,7 @@ function _precoComExtras(item, selecoes){
     if(!g) return;
     (selecoes[gid]||[]).forEach(function(idx){
       var op = (g.opcoes||[])[idx];
-      if(op && op.preco) extras += op.preco;
+      extras += _precoOpcao(op);
     });
   });
   return base + extras;
@@ -1076,6 +1093,19 @@ function _gruposObrigatoriosFaltando(item){
     var sel = _selecoesTemp[g.id] || [];
     return sel.length === 0;
   });
+}
+
+// Normaliza diferenças entre grupos do TOTEM (tipo 'multipla') e do PRINCIPAL (tipo 'adicional')
+function _ehMultipla(g){
+  if(!g) return false;
+  return g.tipo === 'multipla' || g.tipo === 'adicional';
+}
+// Pega o preço extra de uma opção (totem usa "preco", principal usa "precoExtra")
+function _precoOpcao(op){
+  if(!op) return 0;
+  if(typeof op.precoExtra === 'number' && op.precoExtra) return op.precoExtra;
+  if(typeof op.preco === 'number') return op.preco;
+  return 0;
 }
 
 // Adiciona o item personalizado ao carrinho
@@ -1187,12 +1217,13 @@ function renderModalItem(){
   } else {
     boxGrupos.style.display = 'block';
     boxGrupos.innerHTML = grupos.map(function(g){
-      var ehUnica = g.tipo !== 'multipla';
+      var ehUnica = !_ehMultipla(g);
       var selDoGrupo = _selecoesTemp[g.id] || [];
       var opcoesHtml = (g.opcoes||[]).map(function(op, idx){
         var marcado = selDoGrupo.indexOf(idx) >= 0;
-        var precoTxt = op.preco
-          ? '<span class="op-preco">+R$ ' + (op.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) + '</span>'
+        var precoOp = _precoOpcao(op);
+        var precoTxt = precoOp
+          ? '<span class="op-preco">+R$ ' + precoOp.toLocaleString('pt-BR',{minimumFractionDigits:2}) + '</span>'
           : '';
         var icone = ehUnica
           ? '<div class="op-radio' + (marcado?' on':'') + '"></div>'
@@ -1247,7 +1278,7 @@ function atualizarTotalModal(){
 function selecionarOpcao(grupoId, idx){
   var g = _grupos.find(function(x){ return x.id === grupoId; });
   if(!g) return;
-  var ehUnica = g.tipo !== 'multipla';
+  var ehUnica = !_ehMultipla(g);
   if(!_selecoesTemp[grupoId]) _selecoesTemp[grupoId] = [];
   var atual = _selecoesTemp[grupoId];
   if(ehUnica){

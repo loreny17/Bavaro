@@ -476,6 +476,7 @@
     animation:girar 0.8s linear infinite;
   }
   @keyframes girar{to{transform:rotate(360deg);}}
+  @keyframes fadeInTela{from{opacity:0;}to{opacity:1;}}
   .carregando .txt{color:var(--muted);font-size:1rem;}
 
   /* ═══ Responsivo: tablet em retrato ═══ */
@@ -1314,20 +1315,119 @@ function renderCarrinhoModal(){
 }
 
 // ─── Finalizar (placeholder pra próxima etapa) ───
+// Finaliza o pedido: gera senha sequencial do dia + salva no Firestore + mostra na tela
 function finalizarPedido(){
   if(!_carrinho.length){
-    alert('Adicione itens ao carrinho primeiro');
+    mostrarAvisoTotem('Adicione itens ao carrinho primeiro');
     return;
   }
-  // Por enquanto só mostra um resumo. Na próxima etapa: gera senha + imprime.
+  // Trava o botão pra evitar duplo clique
+  var btn = document.querySelector('.btn-finalizar');
+  if(btn && btn.disabled) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
+
   var total = _carrinho.reduce(function(s,c){ return s + (c.preco * c.qtd); }, 0);
-  var resumo = '✅ PEDIDO PRONTO PARA FINALIZAR\n\n';
-  _carrinho.forEach(function(c){
-    resumo += c.qtd + 'x ' + c.nome + ' — R$ ' + (c.preco * c.qtd).toFixed(2) + '\n';
+  var hoje = _dataHoje();
+
+  // Gera senha sequencial via transação (atômico — sem duplicar nº)
+  var refSenha = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('senhas_totem').doc(hoje);
+
+  fbDb.runTransaction(function(tx){
+    return tx.get(refSenha).then(function(doc){
+      var nova = doc.exists ? ((doc.data().ultima || 0) + 1) : 1;
+      tx.set(refSenha, { ultima: nova, atualizadoEm: Date.now() });
+      return nova;
+    });
+  }).then(function(senha){
+    // Cria o pedido na coleção pedidos_totem
+    var pedido = {
+      senha: senha,
+      data: hoje,
+      itens: _carrinho.map(function(c){
+        return {
+          id: c.itemId,
+          fonte: c.fonte,
+          nome: c.nome,
+          preco: c.preco,
+          precoBase: c.precoBase || c.preco,
+          qtd: c.qtd,
+          foto: c.foto || '',
+          selecoes: c.selecoes || {},
+          selecoesLabel: c.selecoesLabel || '',
+          gruposIds: c.gruposIds || []
+        };
+      }),
+      total: total,
+      status: 'aguardando_pagamento',
+      criadoEm: Date.now(),
+      restauranteId: _restauranteId,
+      tenantId: _tenantId
+    };
+    return fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteId)
+      .collection('pedidos_totem').add(pedido)
+      .then(function(){ return senha; });
+  }).then(function(senha){
+    // Sucesso — limpa carrinho, mostra tela da senha
+    _carrinho = [];
+    _selecoesTemp = {};
+    _qtdTemp = 1;
+    atualizarBarra();
+    mostrarTelaSenha(senha, total);
+  }).catch(function(e){
+    console.error('[FINALIZAR]', e);
+    mostrarAvisoTotem('Erro ao enviar: ' + (e.message||e.code||'tente de novo'));
+    if(btn){ btn.disabled = false; btn.textContent = 'Finalizar Pedido'; }
   });
-  resumo += '\nTOTAL: R$ ' + total.toFixed(2);
-  resumo += '\n\n(Próxima etapa vai gerar senha e imprimir)';
-  alert(resumo);
+}
+
+function _dataHoje(){
+  var d = new Date();
+  var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+}
+
+// Mostra tela cheia com a senha e instruções
+function mostrarTelaSenha(senha, total){
+  // Remove modal anterior se existir
+  var ex = document.getElementById('tela-senha');
+  if(ex) ex.remove();
+
+  var totalTxt = total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  var tela = document.createElement('div');
+  tela.id = 'tela-senha';
+  tela.style.cssText = 'position:fixed;inset:0;z-index:500;background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;animation:fadeInTela 0.4s ease;';
+  tela.innerHTML =
+    '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
+    '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
+    '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:11rem;color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
+    '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
+    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 32px;text-align:center;max-width:520px;">' +
+      '<div style="font-size:1.4rem;font-weight:700;margin-bottom:6px;">Vá ao caixa pagar</div>' +
+      '<div style="font-size:1rem;color:var(--muted);">Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário</div>' +
+    '</div>' +
+    '<div style="margin-top:30px;font-size:0.86rem;color:var(--muted);">Voltando à tela inicial em <span id="contador-senha">10</span>s...</div>';
+  document.body.appendChild(tela);
+
+  // Vibra forte (3 toques) pra dar feedback de sucesso
+  try{ if(navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]); }catch(e){}
+
+  // Contador regressivo e volta pra tela inicial em 10s
+  var segs = 10;
+  var iv = setInterval(function(){
+    segs--;
+    var el = document.getElementById('contador-senha');
+    if(el) el.textContent = segs;
+    if(segs <= 0){
+      clearInterval(iv);
+      var t = document.getElementById('tela-senha');
+      if(t) t.remove();
+      voltarTelaInicial();
+    }
+  }, 1000);
 }
 
 // ─── Tela inicial / fluxo ───

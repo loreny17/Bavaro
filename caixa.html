@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bávaro — Caixa (Totem)</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  :root{
+    --bg:#0a0a0c;
+    --surface:#16161c;
+    --surface2:#1d1d24;
+    --border:rgba(255,255,255,0.08);
+    --text:#f5f5f7;
+    --muted:#8a8a93;
+    --accent:#d4a843;
+    --verde:#22c55e;
+    --vermelho:#ef4444;
+  }
+  html,body{height:100%;}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:'Inter',sans-serif;
+    overflow:hidden;
+  }
+  #app{height:100%;display:flex;flex-direction:column;}
+
+  /* Cabeçalho */
+  .topo{
+    display:flex;align-items:center;
+    padding:14px 22px;background:var(--surface);
+    border-bottom:1px solid var(--border);gap:14px;
+    flex-shrink:0;
+  }
+  .topo .logo{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1.8rem;color:var(--accent);letter-spacing:0.05em;line-height:1;
+  }
+  .topo .titulo{font-size:0.92rem;color:var(--muted);font-weight:600;}
+  .topo .stats{
+    margin-left:auto;display:flex;gap:18px;
+    font-size:0.82rem;color:var(--muted);
+  }
+  .topo .stats b{color:var(--text);font-size:1rem;}
+
+  /* Conteúdo: 2 colunas — fila à esquerda, detalhe à direita */
+  .corpo{flex:1;display:flex;overflow:hidden;}
+
+  /* FILA */
+  .fila{
+    width:340px;flex-shrink:0;
+    background:var(--surface);
+    border-right:1px solid var(--border);
+    overflow-y:auto;
+    padding:12px;
+  }
+  .fila::-webkit-scrollbar{width:8px;}
+  .fila::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  .fila h2{
+    font-size:0.78rem;color:var(--muted);font-weight:700;
+    text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;
+  }
+  .pedido-card{
+    background:var(--bg);
+    border:1.5px solid var(--border);
+    border-radius:12px;
+    padding:14px;
+    margin-bottom:8px;
+    cursor:pointer;
+    display:flex;align-items:center;gap:12px;
+    transition:all 0.15s;
+  }
+  .pedido-card:hover{border-color:var(--accent);}
+  .pedido-card.ativo{
+    border-color:var(--accent);
+    background:rgba(212,168,67,0.06);
+  }
+  .pedido-card .senha{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2.4rem;color:var(--accent);letter-spacing:0.02em;line-height:1;
+    min-width:60px;text-align:center;
+  }
+  .pedido-card .info{flex:1;min-width:0;}
+  .pedido-card .qtd-itens{font-size:0.82rem;color:var(--muted);}
+  .pedido-card .total{
+    color:var(--accent);font-weight:700;font-size:1.05rem;
+  }
+  .pedido-card .tempo{
+    font-size:0.72rem;color:var(--muted);margin-top:2px;
+  }
+  .pedido-card .tempo.atrasado{color:var(--vermelho);font-weight:700;}
+
+  .fila-vazia{
+    text-align:center;padding:60px 20px;color:var(--muted);
+  }
+  .fila-vazia .ico{font-size:4rem;margin-bottom:14px;}
+  .fila-vazia .titulo{font-size:1.05rem;font-weight:600;margin-bottom:4px;}
+  .fila-vazia .desc{font-size:0.86rem;}
+
+  /* DETALHE */
+  .detalhe{
+    flex:1;display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+  .detalhe-cab{
+    padding:20px 26px;
+    border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:18px;
+    flex-shrink:0;
+  }
+  .detalhe-cab .senha-grande{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:4rem;color:var(--accent);letter-spacing:0.02em;line-height:1;
+  }
+  .detalhe-cab .info{flex:1;}
+  .detalhe-cab .lbl{font-size:0.78rem;color:var(--muted);}
+  .detalhe-cab .hora{font-size:1rem;font-weight:600;}
+
+  .detalhe-itens{
+    flex:1;overflow-y:auto;
+    padding:18px 26px;
+  }
+  .detalhe-itens::-webkit-scrollbar{width:8px;}
+  .detalhe-itens::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  .item-linha{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:14px 16px;
+    margin-bottom:8px;
+    display:flex;align-items:flex-start;gap:14px;
+  }
+  .item-linha .qtd-x{
+    background:var(--accent);color:#000;
+    font-weight:800;font-size:0.9rem;
+    padding:4px 10px;border-radius:7px;
+    flex-shrink:0;
+  }
+  .item-linha .nome{
+    flex:1;font-weight:600;font-size:1rem;
+  }
+  .item-linha .selecoes{
+    font-size:0.78rem;color:var(--muted);margin-top:3px;
+    line-height:1.35;
+  }
+  .item-linha .preco{
+    font-weight:700;color:var(--accent);
+    font-size:1rem;white-space:nowrap;
+  }
+
+  .detalhe-rodape{
+    padding:18px 26px;
+    border-top:1px solid var(--border);
+    background:rgba(0,0,0,0.2);
+    flex-shrink:0;
+  }
+  .total-linha{
+    display:flex;justify-content:space-between;align-items:baseline;
+    margin-bottom:16px;
+  }
+  .total-lbl{font-size:1rem;color:var(--muted);}
+  .total-val{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:2.4rem;color:var(--accent);letter-spacing:0.02em;
+  }
+  .btns-rodape{display:flex;gap:10px;}
+  .btn-cancelar{
+    flex:1;padding:16px;
+    background:transparent;border:1.5px solid var(--vermelho);
+    color:var(--vermelho);border-radius:11px;
+    font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;
+  }
+  .btn-cancelar:hover{background:rgba(239,68,68,0.08);}
+  .btn-liberar{
+    flex:2;padding:16px;
+    background:var(--verde);border:none;
+    color:#fff;border-radius:11px;
+    font-weight:800;font-size:1.05rem;cursor:pointer;font-family:inherit;
+  }
+  .btn-liberar:hover{filter:brightness(1.1);}
+  .btn-liberar:disabled{opacity:0.5;cursor:not-allowed;}
+
+  .vazio-detalhe{
+    flex:1;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;color:var(--muted);text-align:center;
+    padding:20px;
+  }
+  .vazio-detalhe .ico{font-size:5rem;margin-bottom:16px;opacity:0.4;}
+  .vazio-detalhe .titulo{font-size:1.2rem;font-weight:600;margin-bottom:6px;}
+
+  /* Toast */
+  .toast{
+    position:fixed;bottom:30px;left:50%;transform:translateX(-50%);
+    padding:14px 26px;border-radius:12px;
+    font-weight:700;font-size:0.95rem;z-index:9999;
+    box-shadow:0 6px 20px rgba(0,0,0,0.5);
+    display:none;
+  }
+
+  /* Loading */
+  .carregando{
+    position:fixed;inset:0;z-index:90;
+    background:var(--bg);
+    display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;
+  }
+  .carregando.escondido{display:none;}
+  .spinner{
+    width:50px;height:50px;border:4px solid var(--border);
+    border-top-color:var(--accent);border-radius:50%;
+    animation:girar 0.8s linear infinite;
+  }
+  @keyframes girar{to{transform:rotate(360deg);}}
+
+  /* Pedido novo: piscar */
+  @keyframes pulseNovo{
+    0%,100%{box-shadow:0 0 0 0 rgba(212,168,67,0.5);}
+    50%{box-shadow:0 0 0 8px rgba(212,168,67,0);}
+  }
+  .pedido-card.novo{
+    animation:pulseNovo 1.5s ease infinite;
+    border-color:var(--accent);
+  }
+
+  /* Responsivo (tablet em retrato/celular) */
+  @media(max-width:700px){
+    .corpo{flex-direction:column;}
+    .fila{width:100%;max-height:40%;}
+    .detalhe{flex:1;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div class="carregando" id="carregando">
+  <div class="spinner"></div>
+  <div style="color:var(--muted);">Carregando caixa...</div>
+</div>
+
+<div id="app" style="display:none;">
+  <!-- Cabeçalho -->
+  <div class="topo">
+    <div class="logo">BÁVARO</div>
+    <div class="titulo">Caixa — Totem</div>
+    <div class="stats">
+      <div>Aguardando: <b id="stat-aguardando">0</b></div>
+      <div>Pagos hoje: <b id="stat-pagos">0</b></div>
+    </div>
+  </div>
+
+  <!-- Corpo: fila + detalhe -->
+  <div class="corpo">
+    <!-- FILA -->
+    <div class="fila">
+      <h2 id="fila-titulo">Pedidos aguardando pagamento</h2>
+      <div id="fila-lista">
+        <div class="fila-vazia">
+          <div class="ico">⏳</div>
+          <div class="titulo">Sem pedidos</div>
+          <div class="desc">Quando um cliente finalizar no totem, aparecerá aqui.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DETALHE -->
+    <div class="detalhe" id="detalhe">
+      <div class="vazio-detalhe">
+        <div class="ico">👈</div>
+        <div class="titulo">Selecione um pedido na lista</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  BÁVARO CAIXA — Tela do operador do caixa do totem
+// ════════════════════════════════════════════════════════════════
+
+var firebaseConfig = {
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.appspot.com",
+  messagingSenderId: "1071289891873",
+  appId: "1:1071289891873:web:bavaro-app"
+};
+var fbDb = null;
+
+var _params = new URLSearchParams(window.location.search);
+var _tenantId = _params.get('tenant') || 'tnt_molrfz1k_rznlgl';
+var _restauranteId = _params.get('rest') || 'default';
+
+var _pedidos = [];        // pedidos aguardando_pagamento
+var _selecionadoId = null;
+var _pagosHojeCount = 0;
+var _primeiraCarga = true;
+var _idsConhecidos = {};  // pra detectar pedidos novos (piscar)
+var _somDesbloqueado = false;
+
+window.addEventListener('load', function(){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.firestore();
+    iniciar();
+  }catch(e){
+    document.getElementById('carregando').textContent = 'Erro: ' + e.message;
+  }
+});
+
+function iniciar(){
+  document.getElementById('carregando').classList.add('escondido');
+  document.getElementById('app').style.display = 'flex';
+  escutarPedidos();
+  contarPagosHoje();
+  // Desbloqueia áudio no primeiro toque (mobile policy)
+  document.addEventListener('click', function() {
+    _somDesbloqueado = true;
+  }, { once: true });
+  // Atualiza o "tempo" dos cards a cada 30s
+  setInterval(renderFila, 30000);
+}
+
+// Listener em tempo real dos pedidos aguardando pagamento
+function escutarPedidos(){
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem')
+    .where('status','==','aguardando_pagamento')
+    .onSnapshot(function(snap){
+      _pedidos = [];
+      var idsNovos = {};
+      snap.forEach(function(d){
+        var p = Object.assign({id:d.id}, d.data());
+        _pedidos.push(p);
+        idsNovos[p.id] = true;
+      });
+      // Ordena por criadoEm (mais antigos primeiro — fifo)
+      _pedidos.sort(function(a,b){ return (a.criadoEm||0) - (b.criadoEm||0); });
+
+      // Detecta pedidos NOVOS (chegaram agora, não estavam antes)
+      if(!_primeiraCarga){
+        var novos = _pedidos.filter(function(p){ return !_idsConhecidos[p.id]; });
+        if(novos.length){
+          // Toca som de alerta
+          tocarSomNovo();
+          mostrarToast('🔔 Novo pedido: senha #' + novos[0].senha, '#d4a843');
+        }
+      }
+      _idsConhecidos = idsNovos;
+      _primeiraCarga = false;
+
+      renderFila();
+      // Atualiza detalhe se o selecionado ainda está na lista
+      if(_selecionadoId){
+        var ainda = _pedidos.find(function(p){ return p.id === _selecionadoId; });
+        if(ainda) renderDetalhe(ainda);
+        else { _selecionadoId = null; renderDetalheVazio(); }
+      }
+    }, function(e){
+      console.error('[CAIXA] erro:', e);
+      mostrarToast('Erro de conexão: ' + (e.message||e.code), '#f87171');
+    });
+}
+
+// Conta pedidos pagos hoje (informativo)
+function contarPagosHoje(){
+  var hoje = _dataHoje();
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem')
+    .where('data','==', hoje)
+    .where('status','==','pago')
+    .onSnapshot(function(snap){
+      _pagosHojeCount = snap.size;
+      document.getElementById('stat-pagos').textContent = _pagosHojeCount;
+    }, function(e){ console.warn('[CAIXA] pagos hoje:', e.code); });
+}
+
+function renderFila(){
+  var box = document.getElementById('fila-lista');
+  document.getElementById('stat-aguardando').textContent = _pedidos.length;
+
+  if(!_pedidos.length){
+    box.innerHTML = '<div class="fila-vazia">' +
+      '<div class="ico">⏳</div>' +
+      '<div class="titulo">Sem pedidos</div>' +
+      '<div class="desc">Quando um cliente finalizar no totem, aparecerá aqui.</div>' +
+    '</div>';
+    return;
+  }
+
+  box.innerHTML = _pedidos.map(function(p){
+    var qtdItens = (p.itens||[]).reduce(function(s,i){ return s + (i.qtd||1); }, 0);
+    var total = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var minutos = Math.floor((Date.now() - (p.criadoEm||Date.now())) / 60000);
+    var tempoTxt, tempoCls = '';
+    if(minutos === 0) tempoTxt = 'agora';
+    else if(minutos === 1) tempoTxt = 'há 1 min';
+    else tempoTxt = 'há ' + minutos + ' min';
+    if(minutos >= 5) tempoCls = ' atrasado';
+    var clsNovo = (!_idsConhecidos[p.id] || (Date.now() - (p.criadoEm||0)) < 8000) ? ' novo' : '';
+    var clsAtivo = (p.id === _selecionadoId) ? ' ativo' : '';
+    return '<div class="pedido-card' + clsAtivo + clsNovo + '" onclick="selecionarPedido(\'' + p.id + '\')">' +
+      '<div class="senha">#' + (p.senha||'?') + '</div>' +
+      '<div class="info">' +
+        '<div class="qtd-itens">' + qtdItens + (qtdItens === 1 ? ' item' : ' itens') + '</div>' +
+        '<div class="total">R$ ' + total + '</div>' +
+        '<div class="tempo' + tempoCls + '">' + tempoTxt + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function selecionarPedido(id){
+  _selecionadoId = id;
+  var p = _pedidos.find(function(x){ return x.id === id; });
+  if(p) renderDetalhe(p);
+  renderFila(); // pra atualizar o "ativo"
+}
+
+function renderDetalhe(p){
+  var hora = new Date(p.criadoEm||Date.now()).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+
+  var itensHtml = (p.itens||[]).map(function(it){
+    var sub = (it.preco||0) * (it.qtd||1);
+    var subTxt = sub.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var labelOpcoes = it.selecoesLabel
+      ? '<div class="selecoes">' + escapar(it.selecoesLabel) + '</div>'
+      : '';
+    return '<div class="item-linha">' +
+      '<div class="qtd-x">' + (it.qtd||1) + 'x</div>' +
+      '<div style="flex:1;">' +
+        '<div class="nome">' + escapar(it.nome||'') + '</div>' +
+        labelOpcoes +
+      '</div>' +
+      '<div class="preco">R$ ' + subTxt + '</div>' +
+    '</div>';
+  }).join('');
+
+  var totalTxt = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  document.getElementById('detalhe').innerHTML =
+    '<div class="detalhe-cab">' +
+      '<div class="senha-grande">#' + (p.senha||'?') + '</div>' +
+      '<div class="info">' +
+        '<div class="lbl">Pedido recebido às</div>' +
+        '<div class="hora">' + hora + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="detalhe-itens">' + itensHtml + '</div>' +
+    '<div class="detalhe-rodape">' +
+      '<div class="total-linha">' +
+        '<span class="total-lbl">Total a receber</span>' +
+        '<span class="total-val">R$ ' + totalTxt + '</span>' +
+      '</div>' +
+      '<div class="btns-rodape">' +
+        '<button class="btn-cancelar" onclick="cancelarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">Cancelar</button>' +
+        '<button class="btn-liberar" id="btn-liberar" onclick="liberarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">✓ Pago — Liberar pra cozinha</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function renderDetalheVazio(){
+  document.getElementById('detalhe').innerHTML =
+    '<div class="vazio-detalhe">' +
+      '<div class="ico">👈</div>' +
+      '<div class="titulo">Selecione um pedido na lista</div>' +
+    '</div>';
+}
+
+// LIBERA o pedido: marca como "pago" + cria doc em "pedidos" pro PDV imprimir
+function liberarPedido(id, senha){
+  var p = _pedidos.find(function(x){ return x.id === id; });
+  if(!p) return;
+  if(!confirm('Confirma o recebimento do pagamento da senha #' + senha + '?\n\nO pedido vai pra cozinha imprimir.')) return;
+
+  var btn = document.getElementById('btn-liberar');
+  if(btn){ btn.disabled = true; btn.textContent = 'Liberando...'; }
+
+  // 1. Cria um doc na coleção "pedidos" — o PDV vai escutar e disparar a impressão
+  var pedidoImpressao = {
+    garcom: 'Totem',
+    mesa: null,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId,
+    contaId: null,
+    tipoConta: 'totem',
+    cliente: 'Totem #' + senha,
+    senhaTotem: senha,
+    status: 'preparo',
+    criadoEm: Date.now(),
+    itens: (p.itens||[]).map(function(it){
+      return {
+        id: it.id,
+        nome: it.nome,
+        preco: it.preco,
+        precoBase: it.precoBase || it.preco,
+        qtd: it.qtd,
+        obs: it.selecoesLabel || '',
+        selecoes: [],
+        cozinhaCriadoEm: Date.now()
+      };
+    }),
+    total: p.total||0,
+    imprimir: true,
+    origemTotem: true,
+    pedidoTotemId: id
+  };
+
+  fbDb.collection('pedidos').add(pedidoImpressao)
+    .then(function(){
+      // 2. Marca pedido_totem como pago
+      return fbDb.collection('tenants').doc(_tenantId)
+        .collection('restaurantes').doc(_restauranteId)
+        .collection('pedidos_totem').doc(id)
+        .update({ status:'pago', pagoEm: Date.now() });
+    })
+    .then(function(){
+      mostrarToast('✓ Senha #' + senha + ' liberada pra cozinha!', '#22c55e');
+      _selecionadoId = null;
+      renderDetalheVazio();
+    })
+    .catch(function(e){
+      console.error('[CAIXA] liberar:', e);
+      mostrarToast('Erro ao liberar: ' + (e.message||e.code), '#f87171');
+      if(btn){ btn.disabled = false; btn.textContent = '✓ Pago — Liberar pra cozinha'; }
+    });
+}
+
+function cancelarPedido(id, senha){
+  if(!confirm('CANCELAR a senha #' + senha + '?\n\nO pedido será apagado e o cliente vai precisar fazer outro.')) return;
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem').doc(id)
+    .update({ status:'cancelado', canceladoEm: Date.now() })
+    .then(function(){
+      mostrarToast('Senha #' + senha + ' cancelada', '#f87171');
+      _selecionadoId = null;
+      renderDetalheVazio();
+    })
+    .catch(function(e){
+      mostrarToast('Erro: ' + (e.message||e.code), '#f87171');
+    });
+}
+
+// Som de alerta quando chega pedido novo (Web Audio — 2 bips)
+function tocarSomNovo(){
+  if(!_somDesbloqueado) return;
+  try{
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    var ctx = new AC();
+    function bip(t, freq){
+      var osc = ctx.createOscillator();
+      var g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0, ctx.currentTime + t);
+      g.gain.linearRampToValueAtTime(0.3, ctx.currentTime + t + 0.02);
+      g.gain.linearRampToValueAtTime(0, ctx.currentTime + t + 0.18);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime + t + 0.2);
+    }
+    bip(0, 880);
+    bip(0.22, 1175);
+  }catch(e){}
+}
+
+function mostrarToast(msg, cor){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = cor || '#16161c';
+  t.style.color = '#fff';
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.style.display = 'none'; }, 3500);
+}
+
+function _dataHoje(){
+  var d = new Date();
+  var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+}
+
+function escapar(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+
+</body>
+</html>

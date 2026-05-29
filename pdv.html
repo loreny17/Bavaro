@@ -4403,7 +4403,18 @@ function gerarCupomPedido(pedido, modelo){
   // ─── MESA OU COMANDA EM DESTAQUE (estilo personalizado) ───
   s += _resetarEstilo();
   s += linha('=', L) + '\n';
-  if(pedido.tipoConta === 'avulsa' && pedido.cliente){
+  // Pedido do TOTEM: destaca a senha gigante (cozinha precisa pra chamar o cliente)
+  if(pedido.origemTotem && pedido.senhaTotem){
+    s += escposCenter();
+    s += escposBold(true);
+    s += 'SENHA\n';
+    s += escposSize('extra'); // 4x altura e largura
+    s += '#' + pedido.senhaTotem + '\n';
+    s += escposSize('normal');
+    s += escposBold(false);
+    s += escposLeft();
+    s += linha('-', L) + '\n';
+  } else if(pedido.tipoConta === 'avulsa' && pedido.cliente){
     s += _aplicarEstilo(estCab);
     s += 'COMANDA\n';
     s += (pedido.cliente||'').toUpperCase() + '\n';
@@ -4709,18 +4720,30 @@ function iniciarListenerImpressao(){
       snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
     });
   // Listener: imprime novos pedidos automaticamente
+  console.log('[PDV] Iniciando listener de pedidos para restaurante:', _restauranteAtivo.id);
   fbDb.collection('pedidos')
     .where('restauranteId','==', _restauranteAtivo.id)
     .onSnapshot(function(snap){
       snap.docChanges().forEach(function(ch){
         if(ch.type === 'added'){
           var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
-          if(_ultimosPedidosImpressos[pedido.id]) return;
-          if(pedido.impresso) { _ultimosPedidosImpressos[pedido.id] = true; return; }
+          console.log('[PDV] Pedido recebido:', pedido.id, 'origemTotem:', !!pedido.origemTotem, 'cliente:', pedido.cliente);
+          if(_ultimosPedidosImpressos[pedido.id]) {
+            console.log('[PDV] já processado, ignorando');
+            return;
+          }
+          if(pedido.impresso) {
+            console.log('[PDV] já marcado como impresso, ignorando');
+            _ultimosPedidosImpressos[pedido.id] = true;
+            return;
+          }
           _ultimosPedidosImpressos[pedido.id] = true;
+          console.log('[PDV] disparando imprimirPedidoAutomatico...');
           imprimirPedidoAutomatico(pedido);
         }
       });
+    }, function(err){
+      console.error('[PDV] erro no listener:', err);
     });
 }
 
@@ -4795,6 +4818,7 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
 }
 
 function imprimirPedidoAutomatico(pedido){
+  console.log('[IMPRIMIR] início — modelos:', _modelos.length, 'impressoras:', _impressoras.length);
   // MODO TESTE: pedidos marcados como teste NÃO imprimem
   if(pedido && pedido.teste === true){
     console.log('[IMPRESSAO] pedido de teste — impressão ignorada:', pedido.id);
@@ -4805,12 +4829,21 @@ function imprimirPedidoAutomatico(pedido){
     console.log('[IMPRESSAO] pedido marcado como "não imprimir" pelo garçom:', pedido.id);
     return;
   }
-  if(!_modelos.length || !_impressoras.length) return;
+  if(!_modelos.length || !_impressoras.length){
+    console.warn('[IMPRIMIR] ❌ sem modelos OU sem impressoras — não imprimirá');
+    return;
+  }
+  var modelosPedido = _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido'; });
+  console.log('[IMPRIMIR] modelos tipo "pedido":', modelosPedido.length);
   // SÓ usa modelos do tipo "pedido" (não fechamento)
-  _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido'; }).forEach(function(modelo){
+  modelosPedido.forEach(function(modelo){
     var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
-    if(!imp) return;
+    if(!imp){
+      console.warn('[IMPRIMIR] modelo', modelo.nome, '— impressora não encontrada (id:', modelo.impressoraId, ')');
+      return;
+    }
     var cupom = gerarCupomPedido(pedido, modelo);
+    console.log('[IMPRIMIR] modelo', modelo.nome, '— cupom:', cupom ? (cupom.length + ' bytes') : 'VAZIO (sem itens correspondentes ao filtro)');
     if(cupom){
       enviarParaImpressora(imp, cupom);
     }
@@ -4819,13 +4852,16 @@ function imprimirPedidoAutomatico(pedido){
   // ── CUPOM CLIENTE DO TOTEM (só pra pedidos do totem) ──
   // Imprime o ticket com a senha pro cliente esperar ser chamado.
   if(pedido && pedido.origemTotem){
-    _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; }).forEach(function(modelo){
+    var modelosCupom = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; });
+    console.log('[CUPOM-CLIENTE] modelos cupom_cliente:', modelosCupom.length);
+    modelosCupom.forEach(function(modelo){
       var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
       if(!imp){
-        console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome);
+        console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome, 'id:', modelo.impressoraId);
         return;
       }
       var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
+      console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
       if(cupom) enviarParaImpressora(imp, cupom);
     });
   }

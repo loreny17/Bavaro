@@ -708,6 +708,7 @@ var _restauranteId = _params.get('rest') || 'default';
 var _totemItens = [];        // itens do cardapio_totem
 var _totemCats = [];         // categorias do cardapio_totem
 var _catsPrincipaisIds = []; // ids das categorias do principal escolhidas
+var _itensExcluidos = [];    // ids de itens do principal que NÃO entram no totem
 var _itensPrincipal = [];    // itens do principal que entram (filtrados pelas cats)
 var _catsPrincipal = [];     // categorias do principal (pra ter o nome)
 
@@ -749,11 +750,12 @@ function carregarTudo(){
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
-  // 1. Config do totem (categorias do principal escolhidas)
+  // 1. Config do totem (categorias do principal escolhidas + itens excluídos)
   var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
     if(doc.exists){
       var d = doc.data();
       _catsPrincipaisIds = d.categoriasPrincipais || [];
+      _itensExcluidos = d.itensExcluidos || [];
     }
   }).catch(function(e){ console.warn('config:', e); });
 
@@ -821,8 +823,11 @@ function montarCardapio(){
   });
 
   // Filtra itens do principal que estão nas categorias selecionadas
+  // E que NÃO estão na lista de excluídos
   var itensPrincFiltrados = _itensPrincipal.filter(function(it){
-    return _catsPrincipaisIds.indexOf(it.categoria) >= 0;
+    if(_catsPrincipaisIds.indexOf(it.categoria) < 0) return false;
+    if(_itensExcluidos.indexOf(it.id) >= 0) return false;
+    return true;
   });
 
   // Junta as categorias (próprias do totem primeiro, depois do principal)

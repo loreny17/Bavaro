@@ -7573,6 +7573,7 @@ var _totemCats = [];           // categorias próprias [{id, nome, ordem}]
 var _totemItens = [];          // itens próprios
 var _totemGrupos = [];         // grupos de adicionais próprios
 var _totemCatsPrincipais = []; // ids de categorias do principal escolhidas
+var _totemItensExcluidos = []; // ids de itens do principal que NÃO devem aparecer no totem
 var _totemAbaAtiva = 'comidas';
 var _totemFotoSelecionada = null; // base64 da foto sendo subida
 var _unsubTotemCats = null, _unsubTotemItens = null;
@@ -7623,8 +7624,14 @@ function totemEscutarDados(){
 
   _unsubTotemConfig = _refTotemBase().doc('config')
     .onSnapshot(function(doc){
-      if(doc.exists){ _totemCatsPrincipais = doc.data().categoriasPrincipais || []; }
-      else { _totemCatsPrincipais = []; }
+      if(doc.exists){
+        var d = doc.data();
+        _totemCatsPrincipais = d.categoriasPrincipais || [];
+        _totemItensExcluidos = d.itensExcluidos || [];
+      } else {
+        _totemCatsPrincipais = [];
+        _totemItensExcluidos = [];
+      }
       totemRenderCatsPrincipais();
     }, function(e){ console.warn('[TOTEM] config erro:', e.code); });
 }
@@ -8208,17 +8215,43 @@ function totemRenderCatsPrincipais(){
   if(ativas.length){
     html += '<div style="font-size:0.78rem;color:var(--muted);font-weight:700;margin-bottom:6px;">No totem (use ▲▼ para ordenar)</div>';
     ativas.forEach(function(c, idx){
-      var n = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }).length : 0;
+      var itensCat = (typeof _itens !== 'undefined') ? _itens.filter(function(i){ return i.categoria === c.id; }) : [];
+      var nTotal = itensCat.length;
+      var nExcluidos = itensCat.filter(function(i){ return _totemItensExcluidos.indexOf(i.id) >= 0; }).length;
+      var nMostrados = nTotal - nExcluidos;
       var ehPrimeiro = idx === 0;
       var ehUltimo = idx === ativas.length - 1;
-      html += '<div class="totem-cat-principal-row ativa">' +
-        '<div class="setas-coluna">' +
-          '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
-          '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+      var contaTxt = nExcluidos > 0
+        ? nMostrados + ' de ' + nTotal + ' itens'
+        : nTotal + ' itens';
+      html += '<div class="totem-cat-principal-wrap">' +
+        '<div class="totem-cat-principal-row ativa">' +
+          '<div class="setas-coluna">' +
+            '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
+            '<button onclick="totemMoverCatPrincipal(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+          '</div>' +
+          '<div class="check" onclick="totemToggleCatPrincipal(\'' + c.id + '\')" style="cursor:pointer;">✓</div>' +
+          '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
+          '<div class="conta">' + contaTxt + '</div>' +
+          (nTotal > 0
+            ? '<button class="totem-cat-expand" onclick="totemToggleExpandirCat(\'' + c.id + '\')" title="Ver itens">▾</button>'
+            : '') +
         '</div>' +
-        '<div class="check" onclick="totemToggleCatPrincipal(\'' + c.id + '\')" style="cursor:pointer;">✓</div>' +
-        '<div class="nome">' + escapeHtml(c.nome||'') + '</div>' +
-        '<div class="conta">' + n + ' itens</div>' +
+        // Lista de itens (escondida por padrão, mostrada ao expandir)
+        '<div class="totem-cat-itens" id="totem-cat-itens-' + c.id + '" style="display:none;">' +
+          itensCat.map(function(it){
+            var excluido = _totemItensExcluidos.indexOf(it.id) >= 0;
+            var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+            return '<div class="totem-item-row' + (excluido?' excluido':'') + '" onclick="totemToggleItemExcluido(\'' + it.id + '\')">' +
+              '<div class="check-item">' + (excluido ? '' : '✓') + '</div>' +
+              '<div class="info">' +
+                '<div class="nome">' + escapeHtml(it.nome||'') + '</div>' +
+                '<div class="preco">R$ ' + preco + '</div>' +
+              '</div>' +
+              '<div class="status">' + (excluido ? 'Oculto no totem' : 'No totem') + '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
       '</div>';
     });
   }
@@ -8248,6 +8281,7 @@ function totemMoverCatPrincipal(catId, dir){
   totemRenderCatsPrincipais();
   _refTotemBase().doc('config').set({
     categoriasPrincipais: _totemCatsPrincipais,
+    itensExcluidos: _totemItensExcluidos,
     atualizadoEm: Date.now()
   }).catch(function(e){
     showToast('Erro: ' + (e.message||e.code), '#f87171');
@@ -8260,6 +8294,41 @@ function totemToggleCatPrincipal(catId){
   else _totemCatsPrincipais.push(catId);
   _refTotemBase().doc('config').set({
     categoriasPrincipais: _totemCatsPrincipais,
+    itensExcluidos: _totemItensExcluidos,
+    atualizadoEm: Date.now()
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code),'#f87171');
+  });
+}
+
+// Expande/recolhe a lista de itens de uma categoria do principal
+function totemToggleExpandirCat(catId){
+  var box = document.getElementById('totem-cat-itens-' + catId);
+  if(!box) return;
+  var aberto = box.style.display !== 'none';
+  // Fecha todos os outros pra evitar lista enorme
+  document.querySelectorAll('.totem-cat-itens').forEach(function(el){
+    el.style.display = 'none';
+  });
+  document.querySelectorAll('.totem-cat-expand').forEach(function(b){
+    b.classList.remove('aberto');
+  });
+  if(!aberto){
+    box.style.display = 'block';
+    // Marca o botão como aberto
+    var btn = box.previousElementSibling && box.previousElementSibling.querySelector('.totem-cat-expand');
+    if(btn) btn.classList.add('aberto');
+  }
+}
+
+// Liga/desliga um item da lista de excluídos do totem
+function totemToggleItemExcluido(itemId){
+  var idx = _totemItensExcluidos.indexOf(itemId);
+  if(idx >= 0) _totemItensExcluidos.splice(idx, 1);
+  else _totemItensExcluidos.push(itemId);
+  _refTotemBase().doc('config').set({
+    categoriasPrincipais: _totemCatsPrincipais,
+    itensExcluidos: _totemItensExcluidos,
     atualizadoEm: Date.now()
   }).catch(function(e){
     showToast('Erro: ' + (e.message||e.code),'#f87171');
@@ -9758,6 +9827,21 @@ function toggleAdminUsuario(garcomId, novoValor){
 .totem-cat-principal-row.ativa .check{background:var(--accent);color:#000;border-color:var(--accent);}
 .totem-cat-principal-row .nome{flex:1;font-weight:600;}
 .totem-cat-principal-row .conta{font-size:0.74rem;color:var(--muted);}
+.totem-cat-expand{background:var(--bg);border:1px solid var(--border);color:var(--accent);width:30px;height:28px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:0.9rem;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;transition:transform 0.2s;}
+.totem-cat-expand:hover{background:rgba(212,168,67,0.1);}
+.totem-cat-expand.aberto{transform:rotate(180deg);background:rgba(212,168,67,0.15);}
+.totem-cat-principal-wrap{margin-bottom:6px;}
+.totem-cat-itens{margin-top:5px;margin-left:30px;padding:6px 8px;background:var(--bg);border-radius:8px;border:1px solid var(--border);}
+.totem-item-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background 0.12s;}
+.totem-item-row:hover{background:var(--surface2);}
+.totem-item-row .check-item{width:18px;height:18px;border-radius:4px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;font-size:0.7rem;color:#000;}
+.totem-item-row:not(.excluido) .check-item{background:var(--accent);border-color:var(--accent);}
+.totem-item-row .info{flex:1;min-width:0;}
+.totem-item-row .info .nome{font-size:0.84rem;font-weight:600;}
+.totem-item-row .info .preco{font-size:0.72rem;color:var(--accent);}
+.totem-item-row .status{font-size:0.7rem;color:var(--muted);}
+.totem-item-row.excluido .info .nome{text-decoration:line-through;color:var(--muted);}
+.totem-item-row.excluido .status{color:#f87171;}
 .totem-grupo-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;}
 .totem-grupo-card .topo{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .totem-grupo-card .nome{font-weight:700;font-size:0.95rem;}

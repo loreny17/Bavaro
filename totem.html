@@ -359,6 +359,39 @@
     font-size:2rem;color:var(--accent);letter-spacing:0.02em;
   }
   .mi-add{width:100%;padding:18px;font-size:1.1rem;}
+  .mi-add.desabilitado{
+    background:var(--surface2)!important;
+    color:var(--muted)!important;
+    cursor:not-allowed;
+  }
+
+  /* Tag de "obrigatório" no grupo */
+  .grupo-obrigatorio-tag{
+    background:rgba(239,68,68,0.15);color:#f87171;
+    font-size:0.66rem;font-weight:800;
+    padding:3px 8px;border-radius:5px;
+    margin-left:8px;letter-spacing:0.04em;
+    text-transform:uppercase;vertical-align:middle;
+  }
+
+  /* Grupo destacado quando faltando seleção obrigatória */
+  .grupo-box.faltando{
+    animation:tremer 0.4s ease;
+  }
+  .grupo-box.faltando .grupo-nome{
+    color:var(--vermelho);
+  }
+  .grupo-box.faltando .grupo-opcoes{
+    border:2px solid var(--vermelho);
+    border-radius:12px;
+    padding:6px;
+    background:rgba(239,68,68,0.05);
+  }
+  @keyframes tremer{
+    0%,100%{transform:translateX(0);}
+    25%{transform:translateX(-6px);}
+    75%{transform:translateX(6px);}
+  }
 
   /* Label de opções no carrinho */
   .cart-item .sel-label{
@@ -810,13 +843,43 @@ function _precoComExtras(item, selecoes){
   return base + extras;
 }
 
+// Lista de grupos obrigatórios SEM seleção (pra bloquear o botão)
+function _gruposObrigatoriosFaltando(item){
+  var grupos = _gruposDoItem(item);
+  return grupos.filter(function(g){
+    if(!g.obrigatorio) return false;
+    var sel = _selecoesTemp[g.id] || [];
+    return sel.length === 0;
+  });
+}
+
 // Adiciona o item personalizado ao carrinho
 function confirmarAdicionarAoCarrinho(){
   if(!_itemAberto) return;
   var it = _itemAberto;
-  // Valida: grupos de escolha ÚNICA precisam ter algo selecionado (se obrigatório? por enquanto não obriga)
-  var grupos = _gruposDoItem(it);
 
+  // Valida grupos obrigatórios
+  var faltando = _gruposObrigatoriosFaltando(it);
+  if(faltando.length){
+    // Destaca os grupos faltando + aviso
+    document.querySelectorAll('.grupo-box').forEach(function(el){
+      el.classList.remove('faltando');
+    });
+    faltando.forEach(function(g){
+      var el = document.querySelector('.grupo-box[data-gid="' + g.id + '"]');
+      if(el){
+        el.classList.add('faltando');
+        // Scroll até o primeiro faltando
+        if(g === faltando[0]) el.scrollIntoView({behavior:'smooth', block:'center'});
+      }
+    });
+    // Aviso temporário
+    var nomes = faltando.map(function(g){ return g.nome; }).join(', ');
+    mostrarAvisoTotem('Escolha: ' + nomes);
+    return;
+  }
+
+  var grupos = _gruposDoItem(it);
   // Monta a lista legível de opções
   var labelSelecoes = [];
   grupos.forEach(function(g){
@@ -830,8 +893,6 @@ function confirmarAdicionarAoCarrinho(){
 
   var precoUnit = _precoComExtras(it, _selecoesTemp);
 
-  // Cada combinação vira uma linha nova no carrinho (sem agrupar com outros itens iguais
-  // que podem ter opções diferentes)
   _carrinho.push({
     itemId: it.id,
     fonte: it.fonte,
@@ -840,7 +901,7 @@ function confirmarAdicionarAoCarrinho(){
     precoBase: it.preco || 0,
     foto: it.foto || '',
     qtd: _qtdTemp,
-    selecoes: _selecoesTemp,  // {grupoId: [idxOpcao,...]}
+    selecoes: _selecoesTemp,
     selecoesLabel: labelSelecoes.join(' · '),
     gruposIds: it.gruposIds || []
   });
@@ -850,6 +911,21 @@ function confirmarAdicionarAoCarrinho(){
   renderItens();
   try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
   resetTimerInatividade();
+}
+
+// Mostra um aviso flutuante (toast) no totem
+function mostrarAvisoTotem(msg){
+  var t = document.getElementById('aviso-totem');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'aviso-totem';
+    t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--vermelho);color:#fff;padding:14px 26px;border-radius:12px;font-weight:700;font-size:1rem;z-index:9999;box-shadow:0 6px 20px rgba(0,0,0,0.5);';
+    document.body.appendChild(t);
+  }
+  t.textContent = '⚠️ ' + msg;
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.style.display = 'none'; }, 3500);
 }
 
 // ─── Modal de personalização do item ───
@@ -903,9 +979,12 @@ function renderModalItem(){
         '</div>';
       }).join('');
       var subtitulo = ehUnica ? 'Escolha 1 opção' : 'Pode escolher várias';
-      return '<div class="grupo-box">' +
+      var badgeObr = g.obrigatorio
+        ? '<span class="grupo-obrigatorio-tag">Obrigatório</span>'
+        : '';
+      return '<div class="grupo-box" data-gid="' + g.id + '">' +
         '<div class="grupo-cab">' +
-          '<div class="grupo-nome">' + escapar(g.nome||'') + '</div>' +
+          '<div class="grupo-nome">' + escapar(g.nome||'') + badgeObr + '</div>' +
           '<div class="grupo-sub">' + subtitulo + '</div>' +
         '</div>' +
         '<div class="grupo-opcoes">' + opcoesHtml + '</div>' +
@@ -915,6 +994,19 @@ function renderModalItem(){
 
   // Quantidade
   document.getElementById('mi-qtd').textContent = _qtdTemp;
+
+  // Atualiza estado do botão "Adicionar" baseado em grupos obrigatórios
+  var faltando = _gruposObrigatoriosFaltando(_itemAberto);
+  var btn = document.querySelector('.mi-add');
+  if(btn){
+    if(faltando.length){
+      btn.classList.add('desabilitado');
+      btn.textContent = 'Faça as escolhas obrigatórias ↑';
+    } else {
+      btn.classList.remove('desabilitado');
+      btn.textContent = 'Adicionar ao pedido →';
+    }
+  }
 
   // Total (preço * qtd)
   atualizarTotalModal();

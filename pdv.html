@@ -3613,11 +3613,19 @@ function renderModelos(){
     var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
     var nomeImp = imp ? imp.nome : '(impressora removida)';
     var tipo = m.tipo || 'pedido';
-    var tipoBadge = tipo === 'fechamento'
-      ? '<span style="background:rgba(74,222,128,0.15);color:#4ade80;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🏁 FECHAMENTO</span>'
-      : '<span style="background:rgba(212,168,67,0.15);color:var(--accent);border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">📝 PEDIDO</span>';
+    var tipoBadge;
+    if(tipo === 'fechamento'){
+      tipoBadge = '<span style="background:rgba(74,222,128,0.15);color:#4ade80;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🏁 FECHAMENTO</span>';
+    } else if(tipo === 'cupom_cliente'){
+      tipoBadge = '<span style="background:rgba(168,85,247,0.15);color:#c084fc;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🎫 CUPOM CLIENTE</span>';
+    } else {
+      tipoBadge = '<span style="background:rgba(212,168,67,0.15);color:var(--accent);border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">📝 PEDIDO</span>';
+    }
     var qtd = m.filtro === 'item' ? (m.itens||[]).length : (m.categorias||[]).length;
-    var tipoTxt = tipo === 'fechamento' ? 'Imprime no fechamento da mesa' : (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias');
+    var tipoTxt;
+    if(tipo === 'fechamento') tipoTxt = 'Imprime no fechamento da mesa';
+    else if(tipo === 'cupom_cliente') tipoTxt = 'Ticket com senha do totem';
+    else tipoTxt = (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias');
     var card = document.createElement('div');
     card.className = 'imp-card';
     card.innerHTML =
@@ -3793,14 +3801,12 @@ function atualizarTipoModelo(){
   // Bloco do número do pedido: só faz sentido pra modelos de pedido (cozinha/bar)
   var blocoNumPed = document.getElementById('mod-num-pedido-mostrar');
   var blocoNumPedWrap = blocoNumPed ? blocoNumPed.closest('.cfg-bloco') : null;
-  // Modelo de fechamento NÃO precisa de filtro de categoria/item (sempre pega tudo)
-  if(tipo === 'fechamento'){
+  // Fechamento e Cupom Cliente NÃO precisam de filtro de categoria/item (pegam tudo)
+  if(tipo === 'fechamento' || tipo === 'cupom_cliente'){
     if(blocoFiltro) blocoFiltro.style.display = 'none';
     document.getElementById('mod-filtro-cat').style.display = 'none';
     document.getElementById('mod-filtro-itens').style.display = 'none';
-    // Reimpressão só faz sentido pra modelos de pedido (cozinha/bar)
     if(blocoReimp) blocoReimp.style.display = 'none';
-    // Número do pedido também só pra pedido
     if(blocoNumPedWrap) blocoNumPedWrap.style.display = 'none';
   } else {
     if(blocoFiltro) blocoFiltro.style.display = '';
@@ -4018,9 +4024,10 @@ function salvarModelo(){
     estiloReimpressao: estilos.estiloReimpressao,
     atualizadoEm: Date.now()
   };
-  if(tipo === 'fechamento'){
-    // Fechamento não tem filtro - imprime sempre tudo
+  if(tipo === 'fechamento' || tipo === 'cupom_cliente'){
+    // Fechamento e Cupom Cliente não têm filtro - imprimem sempre o pedido inteiro
     dados.categorias = [];
+    dados.categoriasTotem = [];
     dados.itens = [];
     dados.filtro = 'categoria'; // mantém compatibilidade
   } else if(filtro === 'categoria'){
@@ -4659,6 +4666,74 @@ function iniciarListenerImpressao(){
     });
 }
 
+// ─── CUPOM CLIENTE DO TOTEM (sai no caixa quando libera o pedido) ───
+// Imprime um ticket com a senha gigante pro cliente esperar ser chamado.
+function gerarCupomClienteTotem(pedido, modelo, imp){
+  var L = (imp && imp.largura) || 48;
+  var senha = pedido.senhaTotem || '?';
+  var s = escposInit();
+
+  // ── Cabeçalho ──
+  s += escposCenter();
+  s += escposBold(true) + escposLarge(true);
+  s += 'BAVARO\n';
+  s += escposLarge(false) + escposBold(false);
+  s += linha('=', L) + '\n';
+
+  // ── SENHA GIGANTE ──
+  s += '\n';
+  s += escposBold(true);
+  s += escposSize('extra'); // 4x altura e largura
+  s += 'SENHA\n';
+  s += '#' + senha + '\n';
+  s += escposSize('normal');
+  s += escposBold(false);
+  s += '\n';
+
+  s += linha('-', L) + '\n';
+
+  // ── Instrução pro cliente ──
+  s += escposBold(true) + escposSize('alto');
+  s += 'AGUARDE SER CHAMADO\n';
+  s += escposSize('normal') + escposBold(false);
+  s += 'no painel\n';
+  s += linha('-', L) + '\n';
+
+  // ── Itens ──
+  s += escposLeft();
+  (pedido.itens||[]).forEach(function(it){
+    var qtd = (it.qtd||1) + 'x';
+    var nome = String(it.nome||'').substring(0, L - qtd.length - 1);
+    s += qtd + ' ' + nome + '\n';
+    // Mostra opções (sem cebola, +bacon, etc) se houver
+    if(it.obs){
+      var obs = String(it.obs).substring(0, L - 4);
+      s += '   ' + obs + '\n';
+    }
+  });
+  s += linha('-', L) + '\n';
+
+  // ── Total ──
+  var totalTxt = 'R$ ' + (pedido.total||0).toFixed(2).replace('.', ',');
+  s += escposBold(true) + escposSize('largo');
+  s += 'TOTAL ' + totalTxt + '\n';
+  s += escposSize('normal') + escposBold(false);
+
+  s += linha('=', L) + '\n';
+
+  // ── Rodapé ──
+  s += escposCenter();
+  var agora = new Date();
+  var dataHora = agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  s += dataHora + '\n';
+  s += 'Obrigado pela preferencia!\n';
+
+  s += '\n\n\n';
+  if(_configImp && _configImp.cortePapel) s += escposCut();
+  return s;
+}
+
 function imprimirPedidoAutomatico(pedido){
   // MODO TESTE: pedidos marcados como teste NÃO imprimem
   if(pedido && pedido.teste === true){
@@ -4680,6 +4755,20 @@ function imprimirPedidoAutomatico(pedido){
       enviarParaImpressora(imp, cupom);
     }
   });
+
+  // ── CUPOM CLIENTE DO TOTEM (só pra pedidos do totem) ──
+  // Imprime o ticket com a senha pro cliente esperar ser chamado.
+  if(pedido && pedido.origemTotem){
+    _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; }).forEach(function(modelo){
+      var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+      if(!imp){
+        console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome);
+        return;
+      }
+      var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
+      if(cupom) enviarParaImpressora(imp, cupom);
+    });
+  }
 
   // ── ITENS AVULSOS com impressora forçada ──
   // Agrupa os itens avulsos por impressora escolhida e imprime cada grupo.
@@ -8987,17 +9076,21 @@ function toggleAdminUsuario(garcomId, novoValor){
       </div>
       <div class="f-grupo">
         <label class="f-label">Tipo do Modelo *</label>
-        <div style="display:flex;gap:8px;">
-          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
             <input type="radio" name="mod-tipo" value="pedido" checked onchange="atualizarTipoModelo()">
             <span style="font-size:0.82rem;font-weight:600;">📝 Pedido</span>
           </label>
-          <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
             <input type="radio" name="mod-tipo" value="fechamento" onchange="atualizarTipoModelo()">
             <span style="font-size:0.82rem;font-weight:600;">🏁 Fechamento</span>
           </label>
+          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="cupom_cliente" onchange="atualizarTipoModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">🎫 Cupom Cliente</span>
+          </label>
         </div>
-        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa.</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa. 🎫 Cupom Cliente = ticket com senha do totem (sai no caixa pro cliente).</div>
       </div>
       <div class="f-grupo">
         <label class="f-label">Impressora *</label>

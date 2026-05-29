@@ -17,6 +17,11 @@
     --accent:#d4a843;
     --verde:#22c55e;
     --vermelho:#ef4444;
+    /* Variáveis de layout (configuráveis pelo painel secreto) */
+    --lateral-width:140px;
+    --colunas:2;
+    --foto-ratio:16/10;
+    --item-radius:11px;
   }
   html,body{height:100%;overflow:hidden;}
   body{
@@ -67,7 +72,7 @@
 
   /* ── MENU LATERAL ESQUERDO ── */
   .lateral{
-    width:140px;flex-shrink:0;
+    width:var(--lateral-width);flex-shrink:0;
     background:var(--surface);
     border-right:1px solid var(--border);
     display:flex;flex-direction:column;
@@ -161,13 +166,13 @@
   .conteudo::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
   .grade{
     display:grid;
-    grid-template-columns:repeat(2, 1fr);
+    grid-template-columns:repeat(var(--colunas), 1fr);
     gap:10px;
   }
   .item{
     background:var(--surface);
     border:1px solid var(--border);
-    border-radius:11px;
+    border-radius:var(--item-radius);
     overflow:hidden;
     cursor:pointer;
     transition:transform 0.15s, border-color 0.15s;
@@ -176,7 +181,7 @@
   }
   .item:active{transform:scale(0.97);border-color:var(--accent);}
   .item .foto{
-    width:100%;aspect-ratio:16/10;
+    width:100%;aspect-ratio:var(--foto-ratio);
     background:linear-gradient(135deg,#1d1d24,#13131a);
     display:flex;align-items:center;justify-content:center;
     font-size:1.8rem;color:#3a3a45;
@@ -211,7 +216,7 @@
 
   /* ═══ BARRA INFERIOR (CARRINHO) ═══ */
   .barra-carrinho{
-    position:fixed;left:140px;right:0;bottom:0;z-index:50;
+    position:fixed;left:var(--lateral-width);right:0;bottom:0;z-index:50;
     background:linear-gradient(180deg,#16161c,#0e0e12);
     border-top:1px solid var(--border);
     padding:11px 18px;
@@ -495,6 +500,7 @@
   <div class="ti-sub">Restaurante</div>
   <div class="ti-bater">TOQUE PARA INICIAR</div>
   <div class="ti-instrucao">Faça seu pedido por aqui 👆</div>
+  <div id="ti-versao" style="position:absolute;bottom:14px;right:18px;font-size:0.7rem;color:rgba(255,255,255,0.25);">v.—</div>
 </div>
 
 <!-- Loading -->
@@ -509,7 +515,7 @@
   <!-- ── Menu lateral esquerdo ── -->
   <div class="lateral">
     <div class="lateral-topo">
-      <div class="logo">BÁVARO</div>
+      <div class="logo" onclick="contarToqueLogo()">BÁVARO</div>
       <div class="sub">Faça seu pedido</div>
     </div>
     <div class="lateral-cats" id="cats"></div>
@@ -579,6 +585,68 @@
   </div>
 </div>
 
+<!-- Modal de configuração de layout (escondido — 5 toques no BÁVARO) -->
+<div class="modal-bg" id="modal-config" onclick="if(event.target===this)fecharConfig()">
+  <div class="modal-cart">
+    <div class="modal-cab">
+      <h2>⚙️ Configurar Layout</h2>
+      <button class="modal-fechar" onclick="fecharConfig()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">Largura do menu lateral</div>
+        <input type="range" id="cfg-lateral" min="100" max="220" step="5" oninput="aplicarCfgPreview()">
+        <div class="cfg-val"><span id="cfg-lateral-val">140</span> px</div>
+      </div>
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">Itens por linha</div>
+        <div class="cfg-opcoes" id="cfg-colunas-grupo">
+          <button class="cfg-op" data-val="2">2</button>
+          <button class="cfg-op" data-val="3">3</button>
+          <button class="cfg-op" data-val="4">4</button>
+        </div>
+      </div>
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">Altura da foto (item)</div>
+        <div class="cfg-opcoes" id="cfg-foto-grupo">
+          <button class="cfg-op" data-val="16/8">Baixa</button>
+          <button class="cfg-op" data-val="16/10">Média</button>
+          <button class="cfg-op" data-val="4/3">Alta</button>
+          <button class="cfg-op" data-val="1/1">Quadrada</button>
+        </div>
+      </div>
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">Cantos arredondados (cards)</div>
+        <input type="range" id="cfg-radius" min="0" max="24" step="1" oninput="aplicarCfgPreview()">
+        <div class="cfg-val"><span id="cfg-radius-val">11</span> px</div>
+      </div>
+      <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
+        Versão: <span id="cfg-versao">—</span><br>
+        URL: <span id="cfg-url">—</span>
+      </div>
+    </div>
+    <div class="cart-rodape" style="display:flex;gap:8px;">
+      <button onclick="restaurarPadrao()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Restaurar padrão</button>
+      <button onclick="salvarConfig()" class="btn-finalizar" style="flex:1.5;">Aplicar e salvar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.cfg-grupo{margin-bottom:18px;}
+.cfg-titulo{font-weight:700;font-size:0.92rem;margin-bottom:8px;}
+.cfg-val{font-size:0.8rem;color:var(--muted);text-align:right;margin-top:4px;}
+.cfg-grupo input[type=range]{width:100%;accent-color:var(--accent);}
+.cfg-opcoes{display:flex;gap:8px;}
+.cfg-op{
+  flex:1;padding:12px 8px;
+  background:var(--surface2);border:1.5px solid var(--border);
+  color:var(--text);border-radius:10px;
+  font-weight:700;font-size:0.92rem;cursor:pointer;font-family:inherit;
+}
+.cfg-op.ativo{background:var(--accent);border-color:var(--accent);color:#000;}
+</style>
+
 <!-- Modal carrinho -->
 <div class="modal-bg" id="modal-carrinho" onclick="if(event.target===this)fecharCarrinho()">
   <div class="modal-cart">
@@ -645,6 +713,7 @@ var _qtdTemp = 1;
 
 // ─── Inicialização ───
 window.addEventListener('load', function(){
+  carregarCfgLayout();
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
@@ -1312,6 +1381,140 @@ document.addEventListener('touchstart', resetTimerInatividade, {passive:true});
 document.addEventListener('click', resetTimerInatividade);
 
 // Util
+// ════════════════════════════════════════════════════════════════
+//  ⚙️ PAINEL DE CONFIGURAÇÃO DE LAYOUT (5 toques no BÁVARO)
+// ════════════════════════════════════════════════════════════════
+var _VERSAO_TOTEM = '2026-05-29-01:30 (config-layout)';
+var _toquesLogo = 0;
+var _ultimoToqueLogo = 0;
+var _CFG_KEY = 'totem_layout_cfg';
+var _CFG_PADRAO = {
+  lateral: 140,
+  colunas: 2,
+  fotoRatio: '16/10',
+  radius: 11
+};
+
+// Carrega config do localStorage (chamado quando totem inicia)
+function carregarCfgLayout(){
+  try{
+    var raw = localStorage.getItem(_CFG_KEY);
+    var cfg = raw ? JSON.parse(raw) : _CFG_PADRAO;
+    aplicarCfg(cfg);
+  }catch(e){
+    aplicarCfg(_CFG_PADRAO);
+  }
+  // Mostra a versão na tela inicial
+  setTimeout(function(){
+    var v = document.getElementById('ti-versao');
+    if(v) v.textContent = 'v.' + _VERSAO_TOTEM;
+  }, 50);
+}
+
+// Aplica config nas variáveis CSS (sem salvar)
+function aplicarCfg(cfg){
+  var r = document.documentElement.style;
+  r.setProperty('--lateral-width', cfg.lateral + 'px');
+  r.setProperty('--colunas', cfg.colunas);
+  r.setProperty('--foto-ratio', cfg.fotoRatio);
+  r.setProperty('--item-radius', cfg.radius + 'px');
+}
+
+// Conta toques no logo BÁVARO — 5 em sequência abre o painel
+function contarToqueLogo(){
+  var agora = Date.now();
+  if(agora - _ultimoToqueLogo > 1500) _toquesLogo = 0;
+  _ultimoToqueLogo = agora;
+  _toquesLogo++;
+  if(_toquesLogo >= 5){
+    _toquesLogo = 0;
+    abrirConfig();
+  }
+}
+
+function abrirConfig(){
+  // Lê config atual
+  var cfg = _CFG_PADRAO;
+  try{
+    var raw = localStorage.getItem(_CFG_KEY);
+    if(raw) cfg = JSON.parse(raw);
+  }catch(e){}
+
+  // Preenche os controles
+  document.getElementById('cfg-lateral').value = cfg.lateral;
+  document.getElementById('cfg-lateral-val').textContent = cfg.lateral;
+  document.getElementById('cfg-radius').value = cfg.radius;
+  document.getElementById('cfg-radius-val').textContent = cfg.radius;
+  // Botões de colunas
+  document.querySelectorAll('#cfg-colunas-grupo .cfg-op').forEach(function(b){
+    b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === cfg.colunas);
+    b.onclick = function(){
+      document.querySelectorAll('#cfg-colunas-grupo .cfg-op').forEach(function(x){ x.classList.remove('ativo'); });
+      b.classList.add('ativo');
+      aplicarCfgPreview();
+    };
+  });
+  // Botões de foto
+  document.querySelectorAll('#cfg-foto-grupo .cfg-op').forEach(function(b){
+    b.classList.toggle('ativo', b.getAttribute('data-val') === cfg.fotoRatio);
+    b.onclick = function(){
+      document.querySelectorAll('#cfg-foto-grupo .cfg-op').forEach(function(x){ x.classList.remove('ativo'); });
+      b.classList.add('ativo');
+      aplicarCfgPreview();
+    };
+  });
+
+  document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
+  document.getElementById('cfg-url').textContent = window.location.pathname;
+
+  document.getElementById('modal-config').classList.add('aberto');
+}
+
+function fecharConfig(){
+  // Ao fechar sem salvar, restaura do localStorage (cancela preview)
+  carregarCfgLayout();
+  document.getElementById('modal-config').classList.remove('aberto');
+}
+
+// Pega valores atuais dos controles
+function _lerCfgDoModal(){
+  var lat = parseInt(document.getElementById('cfg-lateral').value) || 140;
+  var rad = parseInt(document.getElementById('cfg-radius').value) || 11;
+  var colBtn = document.querySelector('#cfg-colunas-grupo .cfg-op.ativo');
+  var fotoBtn = document.querySelector('#cfg-foto-grupo .cfg-op.ativo');
+  return {
+    lateral: lat,
+    colunas: colBtn ? parseInt(colBtn.getAttribute('data-val')) : 2,
+    fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
+    radius: rad
+  };
+}
+
+// Preview ao vivo (sem salvar)
+function aplicarCfgPreview(){
+  var cfg = _lerCfgDoModal();
+  document.getElementById('cfg-lateral-val').textContent = cfg.lateral;
+  document.getElementById('cfg-radius-val').textContent = cfg.radius;
+  aplicarCfg(cfg);
+}
+
+function salvarConfig(){
+  var cfg = _lerCfgDoModal();
+  try{
+    localStorage.setItem(_CFG_KEY, JSON.stringify(cfg));
+  }catch(e){}
+  aplicarCfg(cfg);
+  document.getElementById('modal-config').classList.remove('aberto');
+}
+
+function restaurarPadrao(){
+  if(!confirm('Restaurar configuração padrão?')) return;
+  try{ localStorage.removeItem(_CFG_KEY); }catch(e){}
+  aplicarCfg(_CFG_PADRAO);
+  // Re-preenche o modal com padrão
+  abrirConfig();
+}
+
 function escapar(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

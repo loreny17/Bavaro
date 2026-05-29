@@ -956,6 +956,80 @@ function _dataHoje(){
 function escapar(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ════════════════════════════════════════════════════════
+//  PULL-TO-REFRESH
+// ════════════════════════════════════════════════════════
+// ─── Pull-to-refresh (estilo Chrome) ───
+// Adiciona um indicador que aparece quando o usuário puxa a tela pra baixo
+(function(){
+  var inicioY = 0, atualY = 0, puxando = false;
+  var THRESHOLD = 80; // px pra disparar refresh
+  var ind = null;
+
+  function criarIndicador(){
+    if(ind) return ind;
+    ind = document.createElement('div');
+    ind.id = 'pull-refresh-ind';
+    ind.style.cssText = 'position:fixed;top:-60px;left:50%;transform:translateX(-50%);width:46px;height:46px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:99999;transition:top 0.2s ease,transform 0.2s ease;pointer-events:none;';
+    ind.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d4a843" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>';
+    document.body.appendChild(ind);
+    return ind;
+  }
+
+  function noTopo(){
+    // Considera no topo se o documento (ou um container scrollavel ativo) está em scroll 0
+    return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+  }
+
+  document.addEventListener('touchstart', function(e){
+    if(!noTopo()) return;
+    inicioY = e.touches[0].clientY;
+    puxando = true;
+  }, {passive:true});
+
+  document.addEventListener('touchmove', function(e){
+    if(!puxando) return;
+    atualY = e.touches[0].clientY;
+    var delta = atualY - inicioY;
+    if(delta <= 0){ puxando = false; if(ind) ind.style.top = '-60px'; return; }
+    if(!noTopo()){ puxando = false; if(ind) ind.style.top = '-60px'; return; }
+    criarIndicador();
+    // Move o indicador conforme o puxão (com resistência)
+    var progresso = Math.min(delta / THRESHOLD, 1.5);
+    var topo = -60 + progresso * 90;
+    ind.style.top = topo + 'px';
+    var rot = progresso * 360;
+    var svg = ind.querySelector('svg');
+    if(svg) svg.style.transform = 'rotate(' + rot + 'deg)';
+    ind.style.transform = 'translateX(-50%) scale(' + Math.min(progresso, 1) + ')';
+  }, {passive:true});
+
+  document.addEventListener('touchend', function(e){
+    if(!puxando) return;
+    var delta = atualY - inicioY;
+    puxando = false;
+    if(delta >= THRESHOLD){
+      // Dispara refresh!
+      if(ind){
+        ind.style.top = '20px';
+        var svg = ind.querySelector('svg');
+        if(svg){
+          svg.style.animation = 'pullSpin 0.8s linear infinite';
+        }
+      }
+      setTimeout(function(){ location.reload(); }, 150);
+    } else {
+      if(ind) ind.style.top = '-60px';
+    }
+  }, {passive:true});
+
+  // Adiciona o keyframe da rotação
+  var st = document.createElement('style');
+  st.textContent = '@keyframes pullSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+  document.head.appendChild(st);
+})();
+
 </script>
 
 </body>

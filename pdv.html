@@ -4307,6 +4307,63 @@ function _agruparItens(itens, tipo){
 }
 
 function pad(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return s + new Array(n-s.length+1).join(' '); }
+
+// Quebra um texto longo em várias linhas pra caber na impressora.
+// Quebra preferencialmente em espaços; se a palavra for maior que larguraMax, corta.
+function _quebrarLinha(texto, larguraMax){
+  texto = String(texto||'');
+  if(!texto) return [];
+  var linhas = [];
+  var atual = '';
+  texto.split(' ').forEach(function(palavra){
+    if(!atual.length){
+      // primeira palavra da linha
+      if(palavra.length <= larguraMax){ atual = palavra; }
+      else {
+        // palavra gigante: quebra em pedaços
+        while(palavra.length > larguraMax){ linhas.push(palavra.substring(0, larguraMax)); palavra = palavra.substring(larguraMax); }
+        atual = palavra;
+      }
+    } else if((atual + ' ' + palavra).length <= larguraMax){
+      atual += ' ' + palavra;
+    } else {
+      linhas.push(atual);
+      if(palavra.length <= larguraMax){ atual = palavra; }
+      else {
+        while(palavra.length > larguraMax){ linhas.push(palavra.substring(0, larguraMax)); palavra = palavra.substring(larguraMax); }
+        atual = palavra;
+      }
+    }
+  });
+  if(atual) linhas.push(atual);
+  return linhas;
+}
+
+// Formata o "obs" de um item pra impressão.
+// Se o obs vier do totem (com "·" separador), gera uma linha por opção com "* " na frente.
+// Se for obs livre, devolve só uma linha (com quebra automática).
+function _formatarObsImpressao(obs, larguraMax, indent){
+  if(!obs) return '';
+  indent = indent || '   ';
+  // Separa por "·" (vindo do totem) ou por "; " (estilo antigo)
+  var partes = String(obs).split(/\s*·\s*|\s*;\s*/).filter(function(p){ return p.trim(); });
+  if(partes.length <= 1){
+    // Sem separador — uma única observação livre
+    var linhas = _quebrarLinha(obs, larguraMax - indent.length);
+    return linhas.map(function(l){ return indent + l; }).join('\n');
+  }
+  // Várias seleções — uma por linha com "* "
+  var saida = [];
+  var prefixo = '* ';
+  partes.forEach(function(p){
+    var ls = _quebrarLinha(p.trim(), larguraMax - indent.length - prefixo.length);
+    ls.forEach(function(l, idx){
+      if(idx === 0) saida.push(indent + prefixo + l);
+      else saida.push(indent + '  ' + l); // continuação alinhada
+    });
+  });
+  return saida.join('\n');
+}
 function padR(s, n){ s = String(s||''); if(s.length>=n) return s.substring(0,n); return new Array(n-s.length+1).join(' ') + s; }
 function linha(c, n){ return new Array(n+1).join(c||'-'); }
 function quebrarLinha(texto, largura){
@@ -4454,7 +4511,8 @@ function gerarCupomPedido(pedido, modelo){
     if(c.imprimirObs && it.obs){
       s += _aplicarEstilo(estAdc);
       var indentO = estAdc.indentar !== false ? '  ' : '';
-      s += indentO + '** ' + it.obs + '\n';
+      var obsForm = _formatarObsImpressao(it.obs, L, indentO);
+      if(obsForm) s += obsForm + '\n';
       s += _resetarEstilo();
     }
   });
@@ -4703,12 +4761,14 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   s += escposLeft();
   (pedido.itens||[]).forEach(function(it){
     var qtd = (it.qtd||1) + 'x';
-    var nome = String(it.nome||'').substring(0, L - qtd.length - 1);
-    s += qtd + ' ' + nome + '\n';
-    // Mostra opções (sem cebola, +bacon, etc) se houver
+    // Nome: quebra em várias linhas se muito longo
+    var linhasNome = _quebrarLinha(String(it.nome||''), L - qtd.length - 1);
+    s += qtd + ' ' + (linhasNome[0]||'') + '\n';
+    for(var k=1;k<linhasNome.length;k++) s += '   ' + linhasNome[k] + '\n';
+    // Opções (sem cebola, +bacon, etc) — uma por linha com "* "
     if(it.obs){
-      var obs = String(it.obs).substring(0, L - 4);
-      s += '   ' + obs + '\n';
+      var obsForm = _formatarObsImpressao(it.obs, L, '   ');
+      if(obsForm) s += obsForm + '\n';
     }
   });
   s += linha('-', L) + '\n';
@@ -5458,8 +5518,8 @@ function gerarCupomReimpressao(pedido, modelo, motivo){
       if(c.imprimirObs && it.obs){
         s += _aplicarEstilo(estAdc);
         var indentO = estAdc.indentar !== false ? '   ' : '';
-        var obsLin = quebrarLinha(indentO + '** ' + it.obs, L);
-        obsLin.forEach(function(ln){ s += ln + '\n'; });
+        var obsForm2 = _formatarObsImpressao(it.obs, L, indentO);
+        if(obsForm2) s += obsForm2 + '\n';
         s += _resetarEstilo();
       }
       if(modelo.mostrarPrecos !== false && c.imprimirPrecos){
@@ -7588,8 +7648,57 @@ function _refTotemBase(){
 // Abre a aba (chamado pelo showTab)
 function abrirAbaTotem(){
   if(!_restauranteAtivo) return;
+  atualizarLinksTotem();
   totemEscutarDados();
   totemMostrarAba(_totemAbaAtiva);
+}
+
+// Preenche os links do totem/caixa do restaurante ativo
+function atualizarLinksTotem(){
+  var base = window.location.origin;
+  var rest = _restauranteAtivo || 'default';
+  var tenant = _tenantId || 'tnt_molrfz1k_rznlgl';
+  // Se for restaurante padrão, link curto (sem query). Se for outro, com query string
+  var linkTotem, linkCaixa;
+  if(rest === 'default'){
+    linkTotem = base + '/totem.html';
+    linkCaixa = base + '/caixa.html';
+  } else {
+    linkTotem = base + '/totem.html?rest=' + encodeURIComponent(rest);
+    linkCaixa = base + '/caixa.html?rest=' + encodeURIComponent(rest);
+  }
+  var inputT = document.getElementById('totem-link-totem');
+  var inputC = document.getElementById('totem-link-caixa');
+  if(inputT) inputT.value = linkTotem;
+  if(inputC) inputC.value = linkCaixa;
+  // Nome do restaurante
+  var nome = (_restaurantes||[]).find(function(r){ return r.id === rest; });
+  var nomeTxt = nome ? (nome.nome || rest) : rest;
+  var lblRest = document.getElementById('totem-links-rest-nome');
+  if(lblRest) lblRest.textContent = nomeTxt;
+}
+
+function copiarLinkTotem(qual){
+  var el = document.getElementById('totem-link-' + qual);
+  if(!el) return;
+  el.select();
+  el.setSelectionRange(0, 99999);
+  try{
+    // API moderna (preferida)
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(el.value).then(function(){
+        showToast('✓ Link copiado!', '#22c55e');
+      }).catch(function(){
+        document.execCommand('copy');
+        showToast('✓ Link copiado!', '#22c55e');
+      });
+    } else {
+      document.execCommand('copy');
+      showToast('✓ Link copiado!', '#22c55e');
+    }
+  }catch(e){
+    showToast('Selecione e copie manualmente', '#f7a34f');
+  }
 }
 
 // Listeners do Firestore
@@ -9745,6 +9854,27 @@ function toggleAdminUsuario(garcomId, novoValor){
       📱 Cardápio do Totem
     </div>
     <div style="font-size:0.8rem;color:var(--muted);">Cardápio que aparece no tablet de autoatendimento</div>
+  </div>
+
+  <!-- Box de links do restaurante atual -->
+  <div id="totem-links-box" style="background:linear-gradient(135deg,rgba(212,168,67,0.08),rgba(212,168,67,0.02));border:1px solid rgba(212,168,67,0.3);border-radius:12px;padding:14px;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:0.88rem;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+      🔗 Links deste restaurante
+      <span id="totem-links-rest-nome" style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:0.72rem;"></span>
+    </div>
+    <div style="display:grid;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">
+        <span style="font-size:0.74rem;color:var(--muted);min-width:60px;">📱 Totem:</span>
+        <input id="totem-link-totem" readonly style="flex:1;background:transparent;border:none;color:var(--accent);font-family:'Courier New',monospace;font-size:0.82rem;cursor:text;outline:none;" onclick="this.select()">
+        <button onclick="copiarLinkTotem('totem')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:0.74rem;cursor:pointer;font-family:inherit;">Copiar</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">
+        <span style="font-size:0.74rem;color:var(--muted);min-width:60px;">💰 Caixa:</span>
+        <input id="totem-link-caixa" readonly style="flex:1;background:transparent;border:none;color:var(--accent);font-family:'Courier New',monospace;font-size:0.82rem;cursor:text;outline:none;" onclick="this.select()">
+        <button onclick="copiarLinkTotem('caixa')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:0.74rem;cursor:pointer;font-family:inherit;">Copiar</button>
+      </div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">💡 Use esses links no tablet do totem/caixa. Cada restaurante tem seus próprios pedidos e cardápio.</div>
   </div>
 
   <!-- Sub-abas -->

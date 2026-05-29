@@ -2066,6 +2066,31 @@ function fmtDataBR(iso){if(!iso)return'—';var p=iso.split('-');return p.length
 function nomesMeses(){return['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];}
 function getVF(id){var k=vfKey();if(!vfData[k])vfData[k]={};if(!vfData[k][id])vfData[k][id]={vales:[],faltas:[]};return vfData[k][id];}
 
+// Conta faltas considerando parciais. Retorna {inteiras, horasParciais, texto}
+// - inteiras = quantas faltas de dia inteiro (sem campo "horas")
+// - horasParciais = soma de horas das faltas parciais
+// - texto = formatado para PDF/UI: "2 faltas + 5h" ou "2 faltas" ou "5h" ou "0"
+function _contarFaltas(faltas){
+  var arr = faltas || [];
+  var inteiras = 0, horasParciais = 0;
+  arr.forEach(function(fa){
+    if(fa.horas && parseFloat(fa.horas) > 0) horasParciais += parseFloat(fa.horas);
+    else inteiras++;
+  });
+  var partes = [];
+  if(inteiras) partes.push(inteiras + (inteiras === 1 ? ' falta' : ' faltas'));
+  if(horasParciais){
+    // Formata horas: se inteiro, sem vírgula. Senão, mostra decimal.
+    var hTxt = (horasParciais % 1 === 0) ? horasParciais : horasParciais.toFixed(1).replace('.', ',');
+    partes.push(hTxt + 'h parciais');
+  }
+  return {
+    inteiras: inteiras,
+    horasParciais: horasParciais,
+    texto: partes.length ? partes.join(' + ') : '0'
+  };
+}
+
 // ═══ STORAGE BAR ═══
 function atualizarStorageBar(){
   if(!navigator.storage||!navigator.storage.estimate)return;
@@ -3002,9 +3027,10 @@ function _jspdfDesligamento(f, dataSaida){
   y += 36;
 
   // ─── Totais do mês ───
+  var contFaltas_desl = _contarFaltas(faltas);
   y = _jspdfTotaisBox(doc,y,[
     {label:'TOTAL VALES',valor:'R$ '+totV.toFixed(2).replace('.',','),cor:_COR.verde},
-    {label:'FALTAS',valor:String(faltas.length),cor:_COR.vermelho},
+    {label:'FALTAS',valor:contFaltas_desl.texto,cor:_COR.vermelho},
     {label:'FERIADOS',valor:String(feriados.length),cor:_COR.amarelo}
   ]);
 
@@ -3033,8 +3059,9 @@ function _jspdfDesligamento(f, dataSaida){
         var pp=fa.data.split('-');
         var dt=new Date(fa.data+'T12:00:00');
         var dia=['Dom','Seg','Ter','Qua','Qui','Sex','Sab'][dt.getDay()];
+        var marca = fa.horas ? ' [parcial '+fa.horas+'h]' : '';
         return [
-          {text:pp[2]+'/'+pp[1]+'/'+pp[0]+' ('+dia+')',cor:_COR.vermelho},
+          {text:pp[2]+'/'+pp[1]+'/'+pp[0]+' ('+dia+')'+marca,cor:_COR.vermelho},
           {text:fa.desc||'-',cor:_COR.textoMudo}
         ];
       })
@@ -5421,9 +5448,10 @@ function renderVFFuncSelecionado(){
   }).join('');
   var fChips = (d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}).map(function(fa){
     var ehAtestado = fa.atestado;
-    var icone = ehAtestado ? '📋' : '❌';
+    var ehParcial = !!fa.horas;
+    var icone = ehAtestado ? '📋' : (ehParcial ? '⏱' : '❌');
     var classeExtra = ehAtestado ? ' atestado' : '';
-    var infoExtra = ehAtestado ? ' (atestado)' : '';
+    var infoExtra = ehAtestado ? ' (atestado)' : (ehParcial ? ' · '+fa.horas+'h' : '');
     return '<div class="vfc-chip vfc-chip-falta'+classeExtra+'">'
       +'<span class="vfc-chip-val">'+icone+'</span>'
       +'<span class="vfc-chip-meta">'+chipDataDia(fa.data)+(fa.desc?' · '+fa.desc:'')+infoExtra+'</span>'
@@ -5474,6 +5502,8 @@ function renderVFFuncSelecionado(){
     '<div id="falta-form-'+f.id+'" style="display:none;margin-bottom:8px;">'+
       '<div class="add-grid"><div><label style="font-size:0.62rem">Data da falta</label><input type="date" id="falta-data-'+f.id+'"></div>'+
       '<div><label style="font-size:0.62rem">Motivo</label><input type="text" id="falta-desc-'+f.id+'" placeholder="opcional"></div></div>'+
+      '<div style="margin-top:6px;"><label style="font-size:0.62rem">Horas faltadas (deixe vazio se faltou o dia inteiro)</label>'+
+      '<input type="number" id="falta-horas-'+f.id+'" min="0.5" max="23" step="0.5" placeholder="ex: 5 (faltou 5h)" style="font-family:inherit;"></div>'+
       '<label class="atestado-toggle"><input type="checkbox" id="falta-atestado-'+f.id+'"><span>📋 Falta com atestado</span><span class="atestado-info">(não sai no PDF da contabilidade)</span></label>'+
       '<button class="add-submit falta-btn" onclick="adicionarFalta('+f.id+')">+ Registrar Falta</button>'+
     '</div>'+
@@ -5547,15 +5577,29 @@ function adicionarVale(funcId){
 function adicionarFalta(funcId){
   var dI=document.getElementById('falta-data-'+funcId),dsI=document.getElementById('falta-desc-'+funcId);
   var atI=document.getElementById('falta-atestado-'+funcId);
+  var hI=document.getElementById('falta-horas-'+funcId);
   if(!dI.value){showToast('⚠️ Informe a data!','#f7a34f');return;}
+  // Horas: opcional. Se preenchido, vira falta parcial.
+  var horas = 0;
+  if(hI && hI.value){
+    horas = parseFloat(hI.value)||0;
+    if(horas < 0 || horas > 23){ showToast('⚠️ Horas deve ser entre 0,5 e 23','#f7a34f'); return; }
+  }
   var d=getVF(funcId);
-  if(d.faltas.some(function(fa){return fa.data===dI.value;})){showToast('⚠️ Já existe falta nessa data!','#f7a34f');return;}
+  // Falta INTEIRA do dia: não pode repetir. Parcial: pode (cliente pode lançar 2x 2h no mesmo dia)
+  if(horas === 0 && d.faltas.some(function(fa){return fa.data===dI.value && !fa.horas;})){
+    showToast('⚠️ Já existe falta inteira nessa data!','#f7a34f');return;
+  }
   var atestado = atI ? atI.checked : false;
-  d.faltas.push({id:'f'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():'',atestado:atestado});
+  var nova = {id:'f'+Date.now(),data:dI.value,desc:dsI?dsI.value.trim():'',atestado:atestado};
+  if(horas > 0) nova.horas = horas;
+  d.faltas.push(nova);
   saveVF().then(function(){
-    dI.value='';if(dsI)dsI.value='';if(atI)atI.checked=false;
+    dI.value='';if(dsI)dsI.value='';if(atI)atI.checked=false;if(hI)hI.value='';
     renderVF();
-    showToast(atestado?'📋 Atestado registrado!':'❌ Falta registrada!',atestado?'#4a9ef7':'#f75a5a');
+    var msg = atestado ? '📋 Atestado registrado!'
+      : (horas > 0 ? '⏱ Falta parcial de ' + horas + 'h registrada!' : '❌ Falta registrada!');
+    showToast(msg, atestado?'#4a9ef7':(horas>0?'#f7a34f':'#f75a5a'));
   });
 }
 function adicionarFeriado(funcId){
@@ -5809,17 +5853,19 @@ function _buildPaginaValesIndividual(f, k, mesNome, hoje, pgLabel){
   var vales=d?(d.vales||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var faltas=d?(d.faltas||[]).slice().sort(function(a,b){return a.data.localeCompare(b.data);}):[];
   var totV=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-  var totF=faltas.length;
-  var fStr=totF===0?'—':totF+' — '+faltas.map(function(fa){
+  var contagem = _contarFaltas(faltas);
+  var totF = contagem.inteiras + (contagem.horasParciais > 0 ? 1 : 0); // só pra detectar se há algo
+  var fStr=faltas.length===0?'—':contagem.texto+' — '+faltas.map(function(fa){
     var p=fa.data.split('-');
     var dt=new Date(fa.data+'T12:00:00');
     var sab=dt.getDay()===6?' (Sáb)':'';
-    return p[2]+'/'+p[1]+sab;
+    var marca=fa.horas?' ['+fa.horas+'h]':'';
+    return p[2]+'/'+p[1]+sab+marca;
   }).join(', ');
   var tr='<tr>'
     +'<td style="white-space:nowrap">'+f.nome+'</td>'
     +'<td style="text-align:right;white-space:nowrap;color:#4ade80;font-weight:600">R$ '+totV.toFixed(2).replace('.',',')+'</td>'
-    +'<td style="color:'+(totF>0?'#f87171':'#9ca3af')+'">'+fStr+'</td>'
+    +'<td style="color:'+(faltas.length>0?'#f87171':'#9ca3af')+'">'+fStr+'</td>'
     +'</tr>';
   return '<div class="pagina">'
     +'<div class="header" style="background:linear-gradient(135deg,#1e3a5f,#0f2744);padding:10px 14px;">'
@@ -5837,7 +5883,7 @@ function _buildPaginaValesIndividual(f, k, mesNome, hoje, pgLabel){
     +'<tfoot style="background:#0d2b1a;border-top:2px solid #4ade80"><tr>'
     +'<td style="padding:10px 12px;font-weight:700;color:#4ade80">TOTAL</td>'
     +'<td style="padding:10px 12px;text-align:right;font-weight:700;color:#4ade80">R$ '+totV.toFixed(2).replace('.',',')+'</td>'
-    +'<td style="padding:10px 12px;font-weight:700;color:#f87171">'+totF+' falta'+(totF!==1?'s':'')+'</td>'
+    +'<td style="padding:10px 12px;font-weight:700;color:#f87171">'+contagem.texto+'</td>'
     +'</tr></tfoot>'
     +'</table>'
     +'<div class="footer">'+pgLabel+' • Gerado em '+hoje+' • Gestão Bávaro</div>'
@@ -6224,9 +6270,18 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
     var faltas=(d.faltas||[]).filter(function(fa){return !fa.atestado;});
     var feriados=d.feriados||[];
     if(tv>0){ listaVales.push({f:f,total:tv,qtd:qtdV}); totalVales+=tv; }
-    if(faltas.length){ listaFaltas.push({f:f,faltas:faltas}); totalFaltas+=faltas.length; }
+    if(faltas.length){
+      var c = _contarFaltas(faltas);
+      listaFaltas.push({f:f, faltas:faltas, contagem:c});
+      totalFaltas += c.inteiras;
+      // Soma horas parciais num contador separado
+      if(!window._totHorasParciais) window._totHorasParciais = 0;
+    }
     if(feriados.length){ listaFeriados.push({f:f,feriados:feriados}); totalFeriados+=feriados.length; }
   });
+  // Recalcula horas parciais totais
+  var totHorasParciais = 0;
+  listaFaltas.forEach(function(item){ totHorasParciais += item.contagem.horasParciais; });
   // Ordenar do MENOR pro maior (conforme pedido)
   listaVales.sort(function(a,b){return a.total - b.total;});
   listaFaltas.sort(function(a,b){return a.faltas.length - b.faltas.length;});
@@ -6234,9 +6289,14 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
 
   // Totais compactos no topo (3 chips em uma linha)
   var y = 46;
+  var faltasTxtTotal = String(totalFaltas);
+  if(totHorasParciais > 0){
+    var hTxt = (totHorasParciais % 1 === 0) ? totHorasParciais : totHorasParciais.toFixed(1).replace('.', ',');
+    faltasTxtTotal += ' + ' + hTxt + 'h';
+  }
   y = _jspdfMiniTotais(doc, y, [
     {label:'VALES',  valor:'R$ '+totalVales.toFixed(2).replace('.',','), cor:_COR.verde},
-    {label:'FALTAS', valor:String(totalFaltas), cor:_COR.vermelho},
+    {label:'FALTAS', valor:faltasTxtTotal, cor:_COR.vermelho},
     {label:'FERIADOS', valor:String(totalFeriados), cor:_COR.amarelo}
   ]);
 
@@ -6263,19 +6323,20 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
           var p=fa.data.split('-');
           var dt=new Date(fa.data+'T12:00:00');
           var sab=dt.getDay()===6?' (Sab)':'';
-          return p[2]+'/'+p[1]+sab;
+          var marca = fa.horas ? ' ['+fa.horas+'h]' : '';
+          return p[2]+'/'+p[1]+sab+marca;
         }).join(', ');
         return [
           {text:item.f.nome, cor:_COR.textoClaro, bold:true},
-          {text:String(item.faltas.length), cor:_COR.vermelho, bold:true},
+          {text:item.contagem.texto, cor:_COR.vermelho, bold:true},
           {text:datas, cor:_COR.vermelho}
         ];
       })
     : [[{text:'Nenhuma falta neste periodo', cor:_COR.textoSuave}]];
   y = _jspdfTabela(doc, y, [
-    {header:'FUNCIONARIO', width:60, align:'left'},
-    {header:'QTD', width:16, align:'center'},
-    {header:'DATAS', width:110, align:'left'}
+    {header:'FUNCIONARIO', width:55, align:'left'},
+    {header:'QTD', width:30, align:'center'},
+    {header:'DATAS', width:101, align:'left'}
   ], linhasF, _COR.vermelho);
 
   // ─── SEÇÃO 3: FERIADOS ───

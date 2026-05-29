@@ -487,20 +487,99 @@ function liberarPedido(id, senha){
   var btn = document.getElementById('btn-liberar');
   if(btn){ btn.disabled = true; btn.textContent = 'Liberando...'; }
 
-  // 1. Cria um doc na coleção "pedidos" — o PDV vai escutar e disparar a impressão
-  var pedidoImpressao = {
-    garcom: 'Totem',
-    mesa: null,
-    restauranteId: _restauranteId,
-    tenantId: _tenantId,
-    contaId: null,
-    tipoConta: 'totem',
-    cliente: 'Totem #' + senha,
-    senhaTotem: senha,
-    status: 'preparo',
-    criadoEm: Date.now(),
-    itens: (p.itens||[]).map(function(it){
-      return {
+  // 1. ENRIQUECE cada item com sua categoria (necessário pro modelo de impressão filtrar).
+  // Os itens vêm com {id, fonte (totem|principal), ...}. Precisamos buscar a categoria
+  // de cada um conforme a fonte.
+  enriquecerItensComCategoria(p.itens || []).then(function(itensEnriquecidos){
+    // 2. Cria um doc na coleção "pedidos" — o PDV escuta e dispara impressão automática
+    var pedidoImpressao = {
+      garcom: 'Totem',
+      mesa: null,
+      restauranteId: _restauranteId,
+      tenantId: _tenantId,
+      contaId: null,
+      tipoConta: 'totem',
+      cliente: 'Totem #' + senha,
+      senhaTotem: senha,
+      status: 'preparo',
+      criadoEm: Date.now(),
+      itens: itensEnriquecidos,
+      total: p.total||0,
+      imprimir: true,
+      origemTotem: true,
+      pedidoTotemId: id
+    };
+
+    return fbDb.collection('pedidos').add(pedidoImpressao);
+  })
+  .then(function(){
+    // 3. Marca pedido_totem como pago
+    return fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteId)
+      .collection('pedidos_totem').doc(id)
+      .update({ status:'pago', pagoEm: Date.now() });
+  })
+  .then(function(){
+    mostrarToast('✓ Senha #' + senha + ' liberada pra cozinha!', '#22c55e');
+    _selecionadoId = null;
+    renderDetalheVazio();
+  })
+  .catch(function(e){
+    console.error('[CAIXA] liberar:', e);
+    mostrarToast('Erro ao liberar: ' + (e.message||e.code), '#f87171');
+    if(btn){ btn.disabled = false; btn.textContent = '✓ Pago — Liberar pra cozinha'; }
+  });
+}
+
+// Busca a categoria de cada item conforme sua fonte (totem ou principal)
+// e retorna a lista pronta pra criar em "pedidos"
+function enriquecerItensComCategoria(itens){
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
+
+  // Separa por fonte
+  var idsTotem = [];
+  var idsPrincipal = [];
+  itens.forEach(function(it){
+    if(it.fonte === 'totem') idsTotem.push(it.id);
+    else idsPrincipal.push(it.id);
+  });
+
+  // Busca em paralelo os 2 cardápios (só os itens necessários)
+  var promessas = [];
+  var mapaItensTotem = {};
+  var mapaItensPrincipal = {};
+
+  if(idsTotem.length){
+    promessas.push(
+      base.collection('cardapio_totem').doc('data').collection('itens').get()
+        .then(function(snap){
+          snap.forEach(function(d){
+            if(idsTotem.indexOf(d.id) >= 0){
+              mapaItensTotem[d.id] = d.data();
+            }
+          });
+        })
+        .catch(function(e){ console.warn('[CAIXA] cardapio_totem itens:', e.code); })
+    );
+  }
+  if(idsPrincipal.length){
+    promessas.push(
+      base.collection('cardapio').doc('data').collection('itens').get()
+        .then(function(snap){
+          snap.forEach(function(d){
+            if(idsPrincipal.indexOf(d.id) >= 0){
+              mapaItensPrincipal[d.id] = d.data();
+            }
+          });
+        })
+        .catch(function(e){ console.warn('[CAIXA] cardapio itens:', e.code); })
+    );
+  }
+
+  return Promise.all(promessas).then(function(){
+    return itens.map(function(it){
+      var item = {
         id: it.id,
         nome: it.nome,
         preco: it.preco,
@@ -510,31 +589,22 @@ function liberarPedido(id, senha){
         selecoes: [],
         cozinhaCriadoEm: Date.now()
       };
-    }),
-    total: p.total||0,
-    imprimir: true,
-    origemTotem: true,
-    pedidoTotemId: id
-  };
-
-  fbDb.collection('pedidos').add(pedidoImpressao)
-    .then(function(){
-      // 2. Marca pedido_totem como pago
-      return fbDb.collection('tenants').doc(_tenantId)
-        .collection('restaurantes').doc(_restauranteId)
-        .collection('pedidos_totem').doc(id)
-        .update({ status:'pago', pagoEm: Date.now() });
-    })
-    .then(function(){
-      mostrarToast('✓ Senha #' + senha + ' liberada pra cozinha!', '#22c55e');
-      _selecionadoId = null;
-      renderDetalheVazio();
-    })
-    .catch(function(e){
-      console.error('[CAIXA] liberar:', e);
-      mostrarToast('Erro ao liberar: ' + (e.message||e.code), '#f87171');
-      if(btn){ btn.disabled = false; btn.textContent = '✓ Pago — Liberar pra cozinha'; }
+      // Marca origem + categorias pra o filtro do PDV funcionar
+      if(it.fonte === 'totem'){
+        item.origemTotem = true;
+        var def = mapaItensTotem[it.id];
+        if(def){
+          item.categoriaTotemId = def.categoriaId || '';
+        }
+      } else {
+        var def2 = mapaItensPrincipal[it.id];
+        if(def2){
+          item.categoriaPrincipalId = def2.categoria || '';
+        }
+      }
+      return item;
     });
+  });
 }
 
 function cancelarPedido(id, senha){

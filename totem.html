@@ -709,6 +709,7 @@ var _totemItens = [];        // itens do cardapio_totem
 var _totemCats = [];         // categorias do cardapio_totem
 var _catsPrincipaisIds = []; // ids das categorias do principal escolhidas
 var _itensExcluidos = [];    // ids de itens do principal que NÃO entram no totem
+var _semCaixa = false;       // Se true: pedido vai direto pra cozinha (sem aplicativo caixa)
 var _itensPrincipal = [];    // itens do principal que entram (filtrados pelas cats)
 var _catsPrincipal = [];     // categorias do principal (pra ter o nome)
 
@@ -750,12 +751,13 @@ function carregarTudo(){
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
-  // 1. Config do totem (categorias do principal escolhidas + itens excluídos)
+  // 1. Config do totem (categorias do principal escolhidas + itens excluídos + modo sem caixa)
   var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
     if(doc.exists){
       var d = doc.data();
       _catsPrincipaisIds = d.categoriasPrincipais || [];
       _itensExcluidos = d.itensExcluidos || [];
+      _semCaixa = d.semCaixa === true;
     }
   }).catch(function(e){ console.warn('config:', e); });
 
@@ -1411,22 +1413,74 @@ function finalizarPedido(){
     };
   });
 
-  // UMA ÚNICA transação: incrementa contador + cria pedido
-  // Isso é 1 round-trip em vez de 2 (mais rápido)
+  // Se modo "sem caixa" ativo, prepara também os itens enriquecidos pra criar em "pedidos"
+  // (esse é o doc que o PDV escuta pra imprimir na cozinha)
+  var refPedidoImpressao = null;
+  var itensEnriquecidos = null;
+  if(_semCaixa){
+    refPedidoImpressao = fbDb.collection('pedidos').doc();
+    // Enriquece com categoria pro filtro do PDV (cozinha/bar/etc)
+    itensEnriquecidos = _carrinho.map(function(c){
+      var item = {
+        id: c.itemId,
+        nome: c.nome,
+        preco: c.preco,
+        precoBase: c.precoBase || c.preco,
+        qtd: c.qtd,
+        obs: c.selecoesLabel || '',
+        selecoes: [],
+        cozinhaCriadoEm: Date.now()
+      };
+      // Acha o item original pra pegar a categoria
+      var itDef = (window._cardapioItens || []).find(function(x){ return x.id === c.itemId && x.fonte === c.fonte; });
+      if(c.fonte === 'totem'){
+        item.origemTotem = true;
+        if(itDef) item.categoriaTotemId = itDef.categoriaId || itDef.categoria || '';
+      } else {
+        if(itDef) item.categoriaPrincipalId = itDef.categoriaId || itDef.categoria || '';
+      }
+      return item;
+    });
+  }
+
+  // UMA ÚNICA transação: incrementa contador + cria pedido (+ pedido pra impressão se modo sem caixa)
   fbDb.runTransaction(function(tx){
     return tx.get(refSenha).then(function(doc){
       var nova = doc.exists ? ((doc.data().ultima || 0) + 1) : 1;
       tx.set(refSenha, { ultima: nova, atualizadoEm: Date.now() });
+      // pedidos_totem: sempre cria
       tx.set(refPedido, {
         senha: nova,
         data: hoje,
         itens: itensSalvar,
         total: total,
-        status: 'aguardando_pagamento',
+        // Em modo sem caixa, marca como pago direto (não passa pelo caixa)
+        status: _semCaixa ? 'pago' : 'aguardando_pagamento',
         criadoEm: Date.now(),
+        pagoEm: _semCaixa ? Date.now() : null,
         restauranteId: _restauranteId,
         tenantId: _tenantId
       });
+      // pedidos (pra PDV escutar e imprimir): só em modo sem caixa
+      if(refPedidoImpressao){
+        tx.set(refPedidoImpressao, {
+          garcom: 'Totem',
+          mesa: null,
+          restauranteId: _restauranteId,
+          tenantId: _tenantId,
+          contaId: null,
+          tipoConta: 'totem',
+          cliente: 'Totem #' + nova,
+          senhaTotem: nova,
+          status: 'preparo',
+          criadoEm: Date.now(),
+          itens: itensEnriquecidos,
+          total: total,
+          imprimir: true,
+          origemTotem: true,
+          pedidoTotemId: refPedido.id
+        });
+      }
       return nova;
     });
   }).then(function(senha){
@@ -1505,6 +1559,15 @@ function comecarPedido(){
     document.getElementById('tela-inicial').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
   }, 400);
+  // Garante que a primeira categoria já apareça com seus itens
+  // (caso contrário a tela aparece vazia até o cliente clicar em outra cat)
+  _catAtiva = '';
+  _historicoCategoria = [];
+  try{
+    renderCategorias(); // isso seta _catAtiva pra primeira e desenha o menu lateral
+    renderItens();      // desenha a grade da categoria ativa
+    atualizarBotaoVoltar();
+  }catch(e){ console.warn('[TOTEM] render inicial:', e); }
   iniciarTimerInatividade();
 }
 

@@ -7634,6 +7634,7 @@ var _totemItens = [];          // itens próprios
 var _totemGrupos = [];         // grupos de adicionais próprios
 var _totemCatsPrincipais = []; // ids de categorias do principal escolhidas
 var _totemItensExcluidos = []; // ids de itens do principal que NÃO devem aparecer no totem
+var _totemSemCaixa = false;    // Se true: totem manda direto pra cozinha (sem aplicativo caixa)
 var _totemAbaAtiva = 'comidas';
 var _totemFotoSelecionada = null; // base64 da foto sendo subida
 var _unsubTotemCats = null, _unsubTotemItens = null;
@@ -7718,14 +7719,30 @@ function totemEscutarDados(){
   if(_unsubTotemGrupos) _unsubTotemGrupos();
   if(_unsubTotemConfig) _unsubTotemConfig();
 
+  // Valida antes de criar listeners
+  if(!_tenantId){
+    showToast('⚠️ Tenant não carregado', '#f87171');
+    return;
+  }
+  if(!_restauranteAtivo || !_restauranteAtivo.id){
+    showToast('⚠️ Restaurante ativo inválido — recarregue (F5)', '#f87171');
+    console.error('[TOTEM] _restauranteAtivo:', _restauranteAtivo);
+    return;
+  }
+  console.log('[TOTEM] escutando:', _tenantId, '/', _restauranteAtivo.id);
+
   _unsubTotemCats = _refTotemBase().doc('data').collection('categorias')
     .onSnapshot(function(snap){
       _totemCats = [];
       snap.forEach(function(d){ _totemCats.push(Object.assign({id:d.id}, d.data())); });
       _totemCats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
+      console.log('[TOTEM] cats snapshot:', _totemCats.length);
       totemRenderCategorias();
       totemRenderItens();
-    }, function(e){ console.warn('[TOTEM] cats erro:', e.code); });
+    }, function(e){
+      console.error('[TOTEM] cats erro:', e);
+      showToast('Erro ao ler categorias: ' + (e.code||e.message), '#f87171');
+    });
 
   _unsubTotemItens = _refTotemBase().doc('data').collection('itens')
     .onSnapshot(function(snap){
@@ -7747,11 +7764,14 @@ function totemEscutarDados(){
         var d = doc.data();
         _totemCatsPrincipais = d.categoriasPrincipais || [];
         _totemItensExcluidos = d.itensExcluidos || [];
+        _totemSemCaixa = d.semCaixa === true;
       } else {
         _totemCatsPrincipais = [];
         _totemItensExcluidos = [];
+        _totemSemCaixa = false;
       }
       totemRenderCatsPrincipais();
+      atualizarToggleSemCaixa();
     }, function(e){ console.warn('[TOTEM] config erro:', e.code); });
 }
 
@@ -7817,10 +7837,22 @@ function totemCriarCategoria(){
   var inp = document.getElementById('totem-nova-cat');
   var nome = (inp.value||'').trim();
   if(!nome){ inp.focus(); return; }
+  if(!_restauranteAtivo || !_restauranteAtivo.id){
+    showToast('⚠️ Restaurante não carregado — recarregue (F5)', '#f87171');
+    return;
+  }
+  console.log('[TOTEM] criando categoria em:', _tenantId, '/', _restauranteAtivo.id);
   _refTotemBase().doc('data').collection('categorias').add({
     nome: nome, ordem: _totemCats.length, criadoEm: Date.now()
-  }).then(function(){ inp.value=''; showToast('✓ Categoria criada','#4ade80'); })
-    .catch(function(e){ showToast('Erro: ' + (e.message||e.code),'#f87171'); });
+  }).then(function(ref){
+    console.log('[TOTEM] categoria criada com id:', ref.id);
+    inp.value='';
+    showToast('✓ Categoria criada','#4ade80');
+  })
+    .catch(function(e){
+      console.error('[TOTEM] erro criar categoria:', e);
+      showToast('Erro: ' + (e.message||e.code),'#f87171');
+    });
 }
 
 function totemExcluirCategoria(id){
@@ -8401,6 +8433,7 @@ function totemMoverCatPrincipal(catId, dir){
   _refTotemBase().doc('config').set({
     categoriasPrincipais: _totemCatsPrincipais,
     itensExcluidos: _totemItensExcluidos,
+    semCaixa: _totemSemCaixa,
     atualizadoEm: Date.now()
   }).catch(function(e){
     showToast('Erro: ' + (e.message||e.code), '#f87171');
@@ -8414,6 +8447,7 @@ function totemToggleCatPrincipal(catId){
   _refTotemBase().doc('config').set({
     categoriasPrincipais: _totemCatsPrincipais,
     itensExcluidos: _totemItensExcluidos,
+    semCaixa: _totemSemCaixa,
     atualizadoEm: Date.now()
   }).catch(function(e){
     showToast('Erro: ' + (e.message||e.code),'#f87171');
@@ -8448,9 +8482,34 @@ function totemToggleItemExcluido(itemId){
   _refTotemBase().doc('config').set({
     categoriasPrincipais: _totemCatsPrincipais,
     itensExcluidos: _totemItensExcluidos,
+    semCaixa: _totemSemCaixa,
     atualizadoEm: Date.now()
   }).catch(function(e){
     showToast('Erro: ' + (e.message||e.code),'#f87171');
+  });
+}
+
+// Atualiza o checkbox visualmente baseado em _totemSemCaixa
+function atualizarToggleSemCaixa(){
+  var chk = document.getElementById('toggle-sem-caixa');
+  if(chk) chk.checked = !!_totemSemCaixa;
+}
+
+// Liga/desliga modo "sem caixa" (impressão direta na cozinha)
+function totemToggleSemCaixa(){
+  var chk = document.getElementById('toggle-sem-caixa');
+  if(!chk) return;
+  _totemSemCaixa = chk.checked;
+  _refTotemBase().doc('config').set({
+    categoriasPrincipais: _totemCatsPrincipais,
+    itensExcluidos: _totemItensExcluidos,
+    semCaixa: _totemSemCaixa,
+    atualizadoEm: Date.now()
+  }, {merge:true}).then(function(){
+    showToast(_totemSemCaixa ? '⚡ Modo direto pra cozinha ATIVADO' : '✓ Modo direto desativado', _totemSemCaixa ? '#c084fc' : '#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code),'#f87171');
+    chk.checked = !chk.checked; // reverte visual
   });
 }
 
@@ -9885,6 +9944,19 @@ function toggleAdminUsuario(garcomId, novoValor){
       </div>
     </div>
     <div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">💡 Use esses links no tablet do totem/caixa. Cada restaurante tem seus próprios pedidos e cardápio.</div>
+  </div>
+
+  <!-- Toggle: imprimir direto na cozinha (sem caixa) -->
+  <div style="background:linear-gradient(135deg,rgba(168,85,247,0.06),rgba(168,85,247,0.02));border:1px solid rgba(168,85,247,0.3);border-radius:12px;padding:14px;margin-bottom:16px;">
+    <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;">
+      <input type="checkbox" id="toggle-sem-caixa" onchange="totemToggleSemCaixa()" style="margin-top:3px;width:18px;height:18px;cursor:pointer;accent-color:#c084fc;">
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:0.92rem;color:#c084fc;margin-bottom:4px;">⚡ Imprimir direto na cozinha (sem caixa)</div>
+        <div style="font-size:0.78rem;color:var(--muted);line-height:1.5;">
+          Quando ativo, o totem manda o pedido <b>direto pra cozinha</b> assim que o cliente finaliza (não precisa do aplicativo caixa). Ideal pra restaurantes onde o cliente paga na maquininha depois.
+        </div>
+      </div>
+    </label>
   </div>
 
   <!-- Sub-abas -->

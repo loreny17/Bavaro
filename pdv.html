@@ -1604,6 +1604,9 @@ function _atualizarLabelPrecoPorKg(ativo){
   }
 }
 
+// Estado local da ordem dos grupos selecionados no item atual (atualizado pelas setinhas)
+var _itemGruposOrdem = []; // array de IDs na ordem desejada
+
 function renderItemGruposCheckboxes(gruposIdsSelecionados){
   var wrap = document.getElementById('item-grupos-lista');
   if(!wrap) return;
@@ -1611,22 +1614,89 @@ function renderItemGruposCheckboxes(gruposIdsSelecionados){
     wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;border:1px dashed var(--border2);">Nenhum grupo cadastrado. Crie na aba "🎛️ Grupos".</div>';
     return;
   }
+  // Inicializa _itemGruposOrdem com os IDs selecionados (na ordem que vieram)
+  _itemGruposOrdem = (gruposIdsSelecionados || []).slice();
+  _renderItemGruposLista();
+}
+
+function _renderItemGruposLista(){
+  var wrap = document.getElementById('item-grupos-lista');
+  if(!wrap) return;
   wrap.innerHTML = '';
-  _grupos.forEach(function(g){
-    var chk = gruposIdsSelecionados.indexOf(g.id) !== -1;
-    var label = document.createElement('label');
-    label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid '+(chk?'var(--accent)':'var(--border2)')+';border-radius:9px;cursor:pointer;transition:border-color 0.15s;';
-    label.innerHTML =
-      '<input type="checkbox" data-grupo-id="'+g.id+'" '+(chk?'checked':'')+' style="margin:0;width:18px;height:18px;accent-color:var(--accent);">'+
-      '<div style="flex:1;">'+
-        '<div style="font-size:0.86rem;font-weight:600;">'+(g.tipo==='opcao'?'🔘':'☑️')+' '+escapeHtml(g.nome)+'</div>'+
-        '<div style="font-size:0.7rem;color:var(--muted);">'+(g.opcoes||[]).length+' opções'+(g.obrigatorio?' • obrigatório':'')+'</div>'+
-      '</div>';
-    label.addEventListener('change', function(e){
-      label.style.borderColor = e.target.checked ? 'var(--accent)' : 'var(--border2)';
+
+  // ── Grupos SELECIONADOS (na ordem definida) — com setinhas ▲▼ ──
+  if(_itemGruposOrdem.length){
+    var tituloSel = document.createElement('div');
+    tituloSel.style.cssText = 'font-size:0.7rem;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;';
+    tituloSel.textContent = 'No item — ordem que aparece pro cliente';
+    wrap.appendChild(tituloSel);
+
+    _itemGruposOrdem.forEach(function(gid, idx){
+      var g = _grupos.find(function(x){ return x.id === gid; });
+      if(!g) return; // grupo foi deletado
+      var ehPrimeiro = idx === 0;
+      var ehUltimo = idx === _itemGruposOrdem.length - 1;
+      var label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px;background:var(--surface2);border:1px solid var(--accent);border-radius:9px;cursor:pointer;margin-bottom:6px;';
+      label.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:2px;">' +
+          '<button type="button" onclick="moverGrupoNoItem(\'' + gid + '\',-1)" ' + (ehPrimeiro?'disabled':'') + ' style="background:var(--bg);border:1px solid var(--border);color:var(--accent);width:24px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehPrimeiro?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
+          '<button type="button" onclick="moverGrupoNoItem(\'' + gid + '\',1)" ' + (ehUltimo?'disabled':'') + ' style="background:var(--bg);border:1px solid var(--border);color:var(--accent);width:24px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehUltimo?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
+        '</div>' +
+        '<input type="checkbox" data-grupo-id="'+g.id+'" checked style="margin:0;width:18px;height:18px;accent-color:var(--accent);">' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:0.86rem;font-weight:600;">' + (g.tipo==='opcao'?'🔘':'☑️') + ' ' + escapeHtml(g.nome) + '</div>' +
+          '<div style="font-size:0.7rem;color:var(--muted);">' + (g.opcoes||[]).length + ' opções' + (g.obrigatorio?' • obrigatório':'') + '</div>' +
+        '</div>';
+      // Desmarcar = remove do array de ordem
+      label.querySelector('input').addEventListener('change', function(e){
+        if(!e.target.checked){
+          _itemGruposOrdem = _itemGruposOrdem.filter(function(id){ return id !== gid; });
+          _renderItemGruposLista();
+        }
+      });
+      wrap.appendChild(label);
     });
-    wrap.appendChild(label);
-  });
+  }
+
+  // ── Grupos NÃO selecionados (sem setinhas, só checkbox pra adicionar) ──
+  var naoSelecionados = _grupos.filter(function(g){ return _itemGruposOrdem.indexOf(g.id) < 0; });
+  if(naoSelecionados.length){
+    if(_itemGruposOrdem.length){
+      var tituloDisp = document.createElement('div');
+      tituloDisp.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;';
+      tituloDisp.textContent = 'Disponíveis';
+      wrap.appendChild(tituloDisp);
+    }
+    naoSelecionados.forEach(function(g){
+      var label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;cursor:pointer;margin-bottom:6px;';
+      label.innerHTML =
+        '<input type="checkbox" data-grupo-id="'+g.id+'" style="margin:0;width:18px;height:18px;accent-color:var(--accent);">' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:0.86rem;font-weight:600;">' + (g.tipo==='opcao'?'🔘':'☑️') + ' ' + escapeHtml(g.nome) + '</div>' +
+          '<div style="font-size:0.7rem;color:var(--muted);">' + (g.opcoes||[]).length + ' opções' + (g.obrigatorio?' • obrigatório':'') + '</div>' +
+        '</div>';
+      label.querySelector('input').addEventListener('change', function(e){
+        if(e.target.checked){
+          if(_itemGruposOrdem.indexOf(g.id) < 0) _itemGruposOrdem.push(g.id);
+          _renderItemGruposLista();
+        }
+      });
+      wrap.appendChild(label);
+    });
+  }
+}
+
+function moverGrupoNoItem(gid, dir){
+  var idx = _itemGruposOrdem.indexOf(gid);
+  if(idx < 0) return;
+  var novo = idx + dir;
+  if(novo < 0 || novo >= _itemGruposOrdem.length) return;
+  var tmp = _itemGruposOrdem[idx];
+  _itemGruposOrdem[idx] = _itemGruposOrdem[novo];
+  _itemGruposOrdem[novo] = tmp;
+  _renderItemGruposLista();
 }
 function fecharModalItem(){
   document.getElementById('modal-item').classList.remove('show');
@@ -1689,10 +1759,9 @@ function salvarItem(){
   var foto = _fotoSelecionadaBase64;
   if(foto === null && _itemEditando) foto = _itemEditando.foto || '';
   if(foto === null) foto = '';
-  // Coleta gruposIds selecionados
-  var gruposIds = [];
-  var checkboxes = document.querySelectorAll('#item-grupos-lista input[type="checkbox"]:checked');
-  checkboxes.forEach(function(cb){ gruposIds.push(cb.getAttribute('data-grupo-id')); });
+  // Coleta gruposIds selecionados PRESERVANDO A ORDEM definida pelas setinhas
+  // (_itemGruposOrdem é mantido pela UI de reordenação)
+  var gruposIds = (_itemGruposOrdem || []).slice();
   // Tipo de venda: por unidade (padrão) ou por kg (buffet)
   var ehKg = document.getElementById('item-por-kg-toggle').classList.contains('active');
   var dados = {
@@ -2769,15 +2838,30 @@ function renderGrupoOpcoes(){
   var wrap = document.getElementById('grupo-opcoes-lista');
   wrap.innerHTML = '';
   _grupoOpcoesTemp.forEach(function(op, idx){
+    var ehPrimeiro = idx === 0;
+    var ehUltimo = idx === _grupoOpcoesTemp.length - 1;
     var row = document.createElement('div');
     row.className = 'grupo-opcao-row';
     row.innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<button onclick="moverOpcaoGrupo('+idx+',-1)" ' + (ehPrimeiro?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehPrimeiro?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
+        '<button onclick="moverOpcaoGrupo('+idx+',1)" ' + (ehUltimo?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehUltimo?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
+      '</div>' +
       '<input type="text" placeholder="Nome da opção" value="'+escapeHtml(op.nome||'')+'" oninput="setOpcaoNome('+idx+',this.value)">'+
       '<span class="grupo-opcao-prefix">+R$</span>'+
       '<input type="number" step="0.01" min="0" placeholder="0,00" value="'+(op.precoExtra||0)+'" oninput="setOpcaoPreco('+idx+',this.value)">'+
       '<button class="grupo-opcao-del" onclick="removerOpcaoGrupo('+idx+')">×</button>';
     wrap.appendChild(row);
   });
+}
+
+function moverOpcaoGrupo(idx, dir){
+  var novo = idx + dir;
+  if(novo < 0 || novo >= _grupoOpcoesTemp.length) return;
+  var tmp = _grupoOpcoesTemp[idx];
+  _grupoOpcoesTemp[idx] = _grupoOpcoesTemp[novo];
+  _grupoOpcoesTemp[novo] = tmp;
+  renderGrupoOpcoes();
 }
 
 function setOpcaoNome(idx, val){ _grupoOpcoesTemp[idx].nome = val; }
@@ -8269,21 +8353,14 @@ function totemAbrirModalItem(item){
       return '<option value="' + c.id + '"' + (c.id === item.categoriaId ? ' selected' : '') + '>' + escapeHtml(c.nome) + '</option>';
     }).join('');
 
-  // Checkboxes de grupos
+  // Checkboxes de grupos — renderiza VAZIO aqui, popula dinamicamente após criar o modal
+  // (assim consegue setar a ordem com setinhas ▲▼)
   var gruposHtml = '';
   if(!_totemGrupos.length){
     gruposHtml = '<div style="color:var(--muted);font-size:0.8rem;">Nenhum grupo cadastrado. Crie na sub-aba "Grupos de Adicionais".</div>';
-  } else {
-    var idsItem = item.gruposIds || [];
-    gruposHtml = _totemGrupos.map(function(g){
-      var marcado = idsItem.indexOf(g.id) >= 0;
-      return '<label style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
-        '<input type="checkbox" data-grupo-id="' + g.id + '"' + (marcado?' checked':'') + ' style="width:16px;height:16px;cursor:pointer;">' +
-        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span>' +
-        '<span style="font-size:0.7rem;color:var(--muted);background:var(--surface);padding:2px 6px;border-radius:5px;">' + (g.tipo === 'multipla' ? 'Múltipla' : 'Única') + '</span>' +
-      '</label>';
-    }).join('');
   }
+  // Estado da ordem dos grupos NESTE item (será mantido pelas setinhas)
+  window._totemItemGruposOrdem = (item.gruposIds || []).slice();
 
   // Preview da foto atual
   var fotoPreviewHtml = item.foto
@@ -8332,7 +8409,89 @@ function totemAbrirModalItem(item){
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
+  // Renderiza a lista de grupos com setinhas (só se tiver grupos cadastrados)
+  if(_totemGrupos.length){ _renderTotemItemGruposLista(); }
   setTimeout(function(){ var n = document.getElementById('ti-nome'); if(n) n.focus(); }, 200);
+}
+
+// Renderiza a lista de grupos vinculados ao item do TOTEM com setinhas ▲▼
+function _renderTotemItemGruposLista(){
+  var wrap = document.getElementById('ti-grupos');
+  if(!wrap) return;
+  var ordem = window._totemItemGruposOrdem || [];
+  wrap.innerHTML = '';
+
+  // Selecionados — com setinhas
+  if(ordem.length){
+    var tituloSel = document.createElement('div');
+    tituloSel.style.cssText = 'font-size:0.7rem;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;';
+    tituloSel.textContent = 'No item — ordem que aparece pro cliente';
+    wrap.appendChild(tituloSel);
+
+    ordem.forEach(function(gid, idx){
+      var g = _totemGrupos.find(function(x){ return x.id === gid; });
+      if(!g) return;
+      var ehPrimeiro = idx === 0;
+      var ehUltimo = idx === ordem.length - 1;
+      var label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--accent);border-radius:8px;margin-bottom:6px;cursor:pointer;';
+      label.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:2px;">' +
+          '<button type="button" onclick="totemMoverGrupoNoItem(\'' + gid + '\',-1)" ' + (ehPrimeiro?'disabled':'') + ' style="background:var(--surface);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehPrimeiro?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
+          '<button type="button" onclick="totemMoverGrupoNoItem(\'' + gid + '\',1)" ' + (ehUltimo?'disabled':'') + ' style="background:var(--surface);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (ehUltimo?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
+        '</div>' +
+        '<input type="checkbox" data-grupo-id="' + gid + '" checked style="width:16px;height:16px;cursor:pointer;">' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span>' +
+        '<span style="font-size:0.7rem;color:var(--muted);background:var(--surface);padding:2px 6px;border-radius:5px;">' + (g.tipo === 'multipla' ? 'Múltipla' : 'Única') + '</span>';
+      label.querySelector('input').addEventListener('change', function(e){
+        if(!e.target.checked){
+          window._totemItemGruposOrdem = (window._totemItemGruposOrdem||[]).filter(function(id){ return id !== gid; });
+          _renderTotemItemGruposLista();
+        }
+      });
+      wrap.appendChild(label);
+    });
+  }
+
+  // Não selecionados
+  var disponiveis = _totemGrupos.filter(function(g){ return ordem.indexOf(g.id) < 0; });
+  if(disponiveis.length){
+    if(ordem.length){
+      var tituloDisp = document.createElement('div');
+      tituloDisp.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;';
+      tituloDisp.textContent = 'Disponíveis';
+      wrap.appendChild(tituloDisp);
+    }
+    disponiveis.forEach(function(g){
+      var label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;';
+      label.innerHTML =
+        '<input type="checkbox" data-grupo-id="' + g.id + '" style="width:16px;height:16px;cursor:pointer;">' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span>' +
+        '<span style="font-size:0.7rem;color:var(--muted);background:var(--surface);padding:2px 6px;border-radius:5px;">' + (g.tipo === 'multipla' ? 'Múltipla' : 'Única') + '</span>';
+      label.querySelector('input').addEventListener('change', function(e){
+        if(e.target.checked){
+          if(!window._totemItemGruposOrdem) window._totemItemGruposOrdem = [];
+          if(window._totemItemGruposOrdem.indexOf(g.id) < 0) window._totemItemGruposOrdem.push(g.id);
+          _renderTotemItemGruposLista();
+        }
+      });
+      wrap.appendChild(label);
+    });
+  }
+}
+
+function totemMoverGrupoNoItem(gid, dir){
+  if(!window._totemItemGruposOrdem) return;
+  var ordem = window._totemItemGruposOrdem;
+  var idx = ordem.indexOf(gid);
+  if(idx < 0) return;
+  var novo = idx + dir;
+  if(novo < 0 || novo >= ordem.length) return;
+  var tmp = ordem[idx];
+  ordem[idx] = ordem[novo];
+  ordem[novo] = tmp;
+  _renderTotemItemGruposLista();
 }
 
 // Foto escolhida — redimensiona e converte pra base64
@@ -8370,11 +8529,8 @@ function totemSalvarItem(id, fotoAtual){
   var catId = document.getElementById('ti-cat').value;
   var ativo = document.getElementById('ti-ativo').checked;
 
-  // Coleta grupos marcados
-  var gruposIds = [];
-  document.querySelectorAll('#ti-grupos input[type=checkbox]:checked').forEach(function(cb){
-    gruposIds.push(cb.getAttribute('data-grupo-id'));
-  });
+  // Coleta grupos marcados PRESERVANDO A ORDEM (mantida pelas setinhas ▲▼)
+  var gruposIds = (window._totemItemGruposOrdem || []).slice();
 
   if(!nome){ showToast('Digite o nome', '#f7a34f'); return; }
   if(isNaN(preco) || preco < 0){ showToast('Preço inválido', '#f7a34f'); return; }
@@ -8542,8 +8698,12 @@ function totemRenderOpcoesNoModal(){
       : '';
 
     return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;">' +
-      // Linha 1: nome + preço + remover
+      // Linha 1: setinhas + nome + preço + remover
       '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<div style="display:flex;flex-direction:column;gap:2px;">' +
+          '<button onclick="totemMoverOpcao(' + idx + ',-1)" ' + (idx===0?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===0?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
+          '<button onclick="totemMoverOpcao(' + idx + ',1)" ' + (idx===ops.length-1?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===ops.length-1?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
+        '</div>' +
         '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(o.nome||'') + '</span>' +
         '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
         '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
@@ -8573,6 +8733,18 @@ function totemAddOpcao(){
 function totemRemoverOpcao(idx){
   if(!window._totemOpcoesEditando) return;
   window._totemOpcoesEditando.splice(idx, 1);
+  totemRenderOpcoesNoModal();
+}
+
+// Move uma opção pra cima ou pra baixo na lista (afeta a ordem no totem)
+function totemMoverOpcao(idx, dir){
+  if(!window._totemOpcoesEditando) return;
+  var ops = window._totemOpcoesEditando;
+  var novo = idx + dir;
+  if(novo < 0 || novo >= ops.length) return;
+  var tmp = ops[idx];
+  ops[idx] = ops[novo];
+  ops[novo] = tmp;
   totemRenderOpcoesNoModal();
 }
 

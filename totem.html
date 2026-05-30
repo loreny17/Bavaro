@@ -687,7 +687,13 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <!-- QR Code (leve, sem dependências) -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<!-- QR Code: tenta cdnjs (já liberado nas regras), com fallback jsdelivr -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+  if(typeof QRCode === 'undefined'){
+    document.write('<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>');
+  }
+</script>
 
 <script>
 // ════════════════════════════════════════════════════════════════
@@ -789,18 +795,36 @@ window.addEventListener('load', function(){
 // Gera um QR Code que aponta pra própria URL do totem com ?qr=1
 // Cliente escaneia com o celular e abre o cardápio direto no celular dele
 function gerarQRTelaInicial(){
-  if(typeof QRCode === 'undefined') return; // lib não carregou
+  if(typeof QRCode === 'undefined'){
+    // tenta de novo daqui a 1s (CDN pode estar lento)
+    setTimeout(gerarQRTelaInicial, 1000);
+    return;
+  }
   var base = window.location.origin;
   var url = base + '/totem.html?tenant=' + encodeURIComponent(_tenantId) +
     '&rest=' + encodeURIComponent(_restauranteId) + '&qr=1';
+  // qrcodejs gera em um elemento DIV (não canvas)
   var canvas = document.getElementById('ti-qr-canvas');
   if(!canvas) return;
-  QRCode.toCanvas(canvas, url, { width: 110, margin: 1, color: { dark: '#000', light: '#fff' } },
-    function(err){
-      if(err){ console.warn('[QR] erro gerar:', err); return; }
-      var box = document.getElementById('ti-qr-box');
-      if(box) box.style.display = 'flex';
+  // Substitui o <canvas> por um <div> (lib usa div)
+  var div = document.createElement('div');
+  div.id = 'ti-qr-canvas';
+  div.style.cssText = 'display:block;';
+  canvas.parentNode.replaceChild(div, canvas);
+  try{
+    new QRCode(div, {
+      text: url,
+      width: 110,
+      height: 110,
+      colorDark: '#000',
+      colorLight: '#fff',
+      correctLevel: QRCode.CorrectLevel.M
     });
+    var box = document.getElementById('ti-qr-box');
+    if(box) box.style.display = 'flex';
+  }catch(e){
+    console.warn('[QR] erro gerar:', e);
+  }
 }
 
 function mostrarErro(msg){

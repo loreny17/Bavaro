@@ -892,7 +892,14 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
 <!-- QR Code (leve) -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<!-- QR Code: tenta cdnjs (já liberado nas regras), com fallback jsdelivr -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+  // Fallback: se a lib não carregou, tenta CDN alternativo
+  if(typeof QRCode === 'undefined'){
+    document.write('<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>');
+  }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsrsasign@10.9.0/lib/jsrsasign-all-min.js"></script>
 <script>
@@ -7895,7 +7902,7 @@ function abrirModalQRTotem(){
       '<button onclick="document.getElementById(\'modal-qr-totem\').remove()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.08);border:none;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;color:#666;">×</button>' +
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;letter-spacing:0.05em;color:#1a1a1a;margin-bottom:4px;">' + escapeHtml(nomeRest.toUpperCase()) + '</div>' +
       '<div style="font-size:0.92rem;color:#666;margin-bottom:18px;">Faça seu pedido pelo celular</div>' +
-      '<canvas id="qr-modal-canvas" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #eee;border-radius:8px;"></canvas>' +
+      '<div id="qr-modal-canvas" style="display:flex;justify-content:center;padding:8px;background:#fff;border:1px solid #eee;border-radius:8px;"></div>' +
       '<div style="font-size:0.78rem;color:#666;margin-top:14px;line-height:1.4;">📱 Escaneie com a câmera do celular pra pedir sem precisar do totem</div>' +
       '<div style="display:flex;gap:8px;margin-top:18px;">' +
         '<button onclick="imprimirQRTotem()" style="flex:1;padding:12px;background:#d4a843;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">🖨️ Imprimir</button>' +
@@ -7905,21 +7912,34 @@ function abrirModalQRTotem(){
     '</div>';
   document.body.appendChild(mod);
 
-  // Gera o QR grande
+  // Gera o QR grande (qrcodejs usa div, não canvas)
   setTimeout(function(){
-    var canvas = document.getElementById('qr-modal-canvas');
-    if(canvas){
-      QRCode.toCanvas(canvas, url, { width: 320, margin: 2 }, function(err){
-        if(err){ console.warn('[QR] erro:', err); }
-      });
+    var div = document.getElementById('qr-modal-canvas');
+    if(div){
+      try{
+        new QRCode(div, {
+          text: url,
+          width: 300,
+          height: 300,
+          colorDark: '#000',
+          colorLight: '#fff',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }catch(e){ console.warn('[QR] erro:', e); }
     }
   }, 50);
 }
 
 function imprimirQRTotem(){
-  var canvas = document.getElementById('qr-modal-canvas');
-  if(!canvas) return;
-  var dataUrl = canvas.toDataURL('image/png');
+  var div = document.getElementById('qr-modal-canvas');
+  if(!div) return;
+  // qrcodejs cria um <img> dentro do div com a imagem do QR
+  var img = div.querySelector('img');
+  var canvas = div.querySelector('canvas');
+  var dataUrl = '';
+  if(img) dataUrl = img.src;
+  else if(canvas) dataUrl = canvas.toDataURL('image/png');
+  if(!dataUrl){ showToast('QR ainda gerando, tente de novo', '#f7a34f'); return; }
   var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'Restaurante';
   var w = window.open('', '_blank');
   w.document.write(
@@ -7935,12 +7955,18 @@ function imprimirQRTotem(){
 }
 
 function baixarQRTotem(){
-  var canvas = document.getElementById('qr-modal-canvas');
-  if(!canvas) return;
+  var div = document.getElementById('qr-modal-canvas');
+  if(!div) return;
+  var img = div.querySelector('img');
+  var canvas = div.querySelector('canvas');
+  var dataUrl = '';
+  if(img) dataUrl = img.src;
+  else if(canvas) dataUrl = canvas.toDataURL('image/png');
+  if(!dataUrl){ showToast('QR ainda gerando, tente de novo', '#f7a34f'); return; }
   var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'restaurante';
   var link = document.createElement('a');
   link.download = 'qr-totem-' + nomeRest.toLowerCase().replace(/[^a-z0-9]/g,'_') + '.png';
-  link.href = canvas.toDataURL('image/png');
+  link.href = dataUrl;
   link.click();
 }
 

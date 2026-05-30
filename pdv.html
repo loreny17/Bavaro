@@ -8175,6 +8175,66 @@ function totemRenderCategorias(){
   }).join('');
 }
 
+// Abre modal pra editar nome + emoji da categoria do totem
+function totemEditarCategoria(id){
+  var cat = _totemCats.find(function(c){ return c.id === id; });
+  if(!cat) return;
+  var ex = document.getElementById('modal-edit-cat-totem');
+  if(ex) ex.remove();
+
+  var emojisSugeridos = ['🍽️','🍔','🍕','🍝','🥗','🥪','🌮','🌯','🍣','🍜','🍛','🍲','🍱','🥘','🥩','🍖','🍗','🥓','🦐','🐟','🍤','🦀','🥚','🍳','🥞','🧇','🥐','🥖','🍞','🧀','🥯','🍰','🎂','🧁','🍪','🍩','🍦','🍨','🍧','🍭','🍫','🍬','🍮','🍯','🥧','🍵','☕','🥤','🧋','🍹','🍸','🍺','🍻','🍷','🥂','🍶','🥃','🧊','🍎','🍌','🍇','🍓','🍒','🥝','🍑','🍍','🥭','🥥','🍉','🍋','🍊','🥑','🥕','🌽','🥦','🍅'];
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-edit-cat-totem';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;">' +
+      '<div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
+        '<h3 style="margin:0;font-size:1.05rem;">✏️ Editar categoria</h3>' +
+        '<button onclick="document.getElementById(\'modal-edit-cat-totem\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px;">' +
+        '<label style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Nome</label>' +
+        '<input type="text" id="edit-cat-nome" value="' + escapeHtml(cat.nome||'') + '" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;font-size:0.95rem;margin-bottom:14px;">' +
+        '<label style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Emoji</label>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<input type="text" id="edit-cat-emoji" value="' + escapeHtml(cat.emoji || '🍽️') + '" maxlength="4" style="width:64px;padding:11px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;font-size:1.4rem;text-align:center;">' +
+          '<div style="font-size:0.72rem;color:var(--muted);flex:1;">Toque num emoji abaixo ou cole direto no campo</div>' +
+        '</div>' +
+        '<div style="background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;max-height:220px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:4px;">' +
+          emojisSugeridos.map(function(e){
+            return '<button onclick="document.getElementById(\'edit-cat-emoji\').value=\'' + e + '\'" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:1.2rem;cursor:pointer;line-height:1;min-width:38px;">' + e + '</button>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'modal-edit-cat-totem\').remove()" style="flex:1;padding:11px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button onclick="totemSalvarCategoriaEdit(\'' + id + '\')" style="flex:1.5;padding:11px;background:var(--accent);border:none;color:#000;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ document.getElementById('edit-cat-nome').focus(); }, 100);
+}
+
+function totemSalvarCategoriaEdit(id){
+  var nome = (document.getElementById('edit-cat-nome').value||'').trim();
+  var emoji = (document.getElementById('edit-cat-emoji').value||'').trim();
+  if(!nome){ showToast('Digite o nome', '#f7a34f'); return; }
+  if(!emoji) emoji = '🍽️';
+  _refTotemBase().doc('data').collection('categorias').doc(id).update({
+    nome: nome,
+    emoji: emoji,
+    atualizadoEm: Date.now()
+  }).then(function(){
+    var m = document.getElementById('modal-edit-cat-totem');
+    if(m) m.remove();
+    showToast('✓ Categoria atualizada', '#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code), '#f87171');
+  });
+}
+
 // Move uma categoria do totem pra cima (-1) ou pra baixo (+1)
 function totemMoverCategoria(id, dir){
   var idx = _totemCats.findIndex(function(c){ return c.id === id; });
@@ -8391,6 +8451,8 @@ function totemAbrirModalItem(item){
           '<input type="text" id="ti-nome" value="' + escapeHtml(item.nome||'') + '" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Preço (R$)</label>' +
           '<input type="number" id="ti-preco" value="' + (item.preco||0) + '" step="0.01" min="0" inputmode="decimal" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Descrição <span style="color:var(--muted);font-size:0.72rem;">(o que vem no prato, ingredientes, etc — opcional)</span></label>' +
+          '<textarea id="ti-descricao" rows="3" maxlength="300" placeholder="Ex: Arroz, feijão, bife à milanesa, batata frita e salada" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;resize:vertical;">' + escapeHtml(item.descricao||'') + '</textarea></div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Categoria</label>' +
           '<select id="ti-cat" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;">' + opcoesCat + '</select></div>' +
         // Grupos de adicionais
@@ -8528,6 +8590,7 @@ function totemSalvarItem(id, fotoAtual){
   var preco = parseFloat(document.getElementById('ti-preco').value);
   var catId = document.getElementById('ti-cat').value;
   var ativo = document.getElementById('ti-ativo').checked;
+  var descricao = (document.getElementById('ti-descricao').value||'').trim();
 
   // Coleta grupos marcados PRESERVANDO A ORDEM (mantida pelas setinhas ▲▼)
   var gruposIds = (window._totemItemGruposOrdem || []).slice();
@@ -8542,6 +8605,7 @@ function totemSalvarItem(id, fotoAtual){
     nome: nome,
     preco: preco,
     categoriaId: catId,
+    descricao: descricao,
     foto: foto,
     ativo: ativo,
     gruposIds: gruposIds,

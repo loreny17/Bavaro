@@ -710,6 +710,17 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
   <!-- Painel Garçons -->
   <div id="painel-garcons" style="display:none;padding:14px;padding-bottom:120px;">
+    <!-- Config de mesas -->
+    <div style="background:linear-gradient(135deg,rgba(212,168,67,0.06),rgba(212,168,67,0.02));border:1px solid rgba(212,168,67,0.3);border-radius:12px;padding:14px;margin-bottom:18px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:6px;">🪑 MESAS DO SALÃO</div>
+      <div style="font-size:0.74rem;color:var(--muted);margin-bottom:12px;">Quantas mesas o restaurante tem. Aparece pros garçons no app deles.</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <label style="font-size:0.84rem;color:var(--text);flex:1;">Total de mesas:</label>
+        <input type="number" id="cfg-total-mesas" min="1" max="999" value="99" style="width:90px;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1rem;text-align:center;">
+        <button onclick="salvarTotalMesas()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.88rem;">Salvar</button>
+      </div>
+    </div>
+
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
       <div style="flex:1;">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.06em;">EQUIPE</div>
@@ -1983,6 +1994,7 @@ function showTab(tab) {
   } else if(tab === 'garcons') {
     if(painelG) painelG.style.display = 'block';
     carregarGarconsPDV();
+    carregarTotalMesas();
   } else if(tab === 'impressao') {
     if(painelI) painelI.style.display = 'block';
     abrirAbaImpressao();
@@ -3136,6 +3148,44 @@ function publicarListaGarcons(){
     garconsAtualizadoEm: Date.now()
   }, {merge:true}).catch(function(e){ console.warn('publicarGarcons:', e); });
 }
+// ════════════════════════════════════════
+//  CONFIG DAS MESAS (total no salão)
+// ════════════════════════════════════════
+function carregarTotalMesas(){
+  if(!_restauranteAtivo || !_restauranteAtivo.id) return;
+  var inp = document.getElementById('cfg-total-mesas');
+  if(!inp) return;
+  fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).get().then(function(doc){
+    if(doc.exists){
+      var d = doc.data();
+      inp.value = d.totalMesas || 99;
+    } else {
+      inp.value = 99;
+    }
+  }).catch(function(e){ console.warn('carregarTotalMesas:', e); });
+}
+
+function salvarTotalMesas(){
+  if(!_restauranteAtivo || !_restauranteAtivo.id){
+    showToast('Aguarde o restaurante carregar', '#f7a34f');
+    return;
+  }
+  var inp = document.getElementById('cfg-total-mesas');
+  var n = parseInt(inp.value);
+  if(isNaN(n) || n < 1 || n > 999){
+    showToast('Quantidade inválida (1-999)', '#f87171');
+    return;
+  }
+  fbDb.collection('restaurantes_publicos').doc(_restauranteAtivo.id).set({
+    totalMesas: n,
+    totalMesasAtualizadoEm: Date.now()
+  }, {merge:true}).then(function(){
+    showToast('✓ ' + n + ' mesas salvas', '#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code), '#f87171');
+  });
+}
+
 // ════════════════════════════════════════
 //  REORDENAR CATEGORIAS (drag & drop)
 // ════════════════════════════════════════

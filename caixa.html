@@ -230,6 +230,30 @@
   @keyframes girar{to{transform:rotate(360deg);}}
 
   /* Pedido novo: piscar */
+  /* Botões de forma de pagamento e recibo */
+  .opt-pagto, .opt-recibo {
+    padding: 14px 8px;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    color: var(--text);
+    border-radius: 9px;
+    font-weight: 600;
+    font-size: 0.92rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .opt-pagto:hover, .opt-recibo:hover {
+    border-color: var(--accent);
+    background: rgba(212, 168, 67, 0.05);
+  }
+  .opt-pagto.selecionado, .opt-recibo.selecionado {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 800;
+  }
+  @keyframes fadeInTela{from{opacity:0;}to{opacity:1;}}
   @keyframes pulseNovo{
     0%,100%{box-shadow:0 0 0 0 rgba(212,168,67,0.5);}
     50%{box-shadow:0 0 0 8px rgba(212,168,67,0);}
@@ -358,6 +382,8 @@ var _cardapioTotem = { itens:[], cats:[], grupos:[] };
 var _cardapioPrincipal = { itens:[], cats:[], grupos:[] };
 var _editandoPedidoId = null;
 var _editandoItens = []; // cópia local pra editar
+var _pagtoSelecionado = ''; // 'dinheiro'|'pix'|'debito'|'credito'
+var _reciboSelecionado = false; // se cliente quer o recibo impresso
 
 window.addEventListener('load', function(){
   // Registra o service worker (PWA)
@@ -541,14 +567,92 @@ function renderDetalheVazio(){
 function liberarPedido(id, senha){
   var p = _pedidos.find(function(x){ return x.id === id; });
   if(!p) return;
-  if(!confirm('Confirma o recebimento do pagamento da senha #' + senha + '?\n\nO pedido vai pra cozinha imprimir.')) return;
+  // Abre modal pra escolher forma de pagamento e se quer recibo
+  abrirModalLiberar(p);
+}
 
-  var btn = document.getElementById('btn-liberar');
+function abrirModalLiberar(pedido){
+  var ex = document.getElementById('modal-liberar');
+  if(ex) ex.remove();
+
+  var senha = pedido.senha || '?';
+  var totalTxt = (pedido.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-liberar';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:400;display:flex;align-items:center;justify-content:center;padding:14px;animation:fadeInTela 0.2s ease;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;overflow:hidden;">' +
+      // Cabeçalho
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.4rem;color:var(--accent);line-height:1;">#' + senha + '</div>' +
+        '<div style="flex:1;">' +
+          '<h2 style="margin:0;font-size:1.1rem;">Confirmar pagamento</h2>' +
+          '<div style="font-size:0.84rem;color:var(--muted);margin-top:2px;">Total: <b style="color:var(--accent);">R$ ' + totalTxt + '</b></div>' +
+        '</div>' +
+        '<button onclick="fecharModalLiberar()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      // Corpo
+      '<div style="padding:18px 22px;">' +
+        '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Forma de pagamento</div>' +
+        '<div id="opts-pagto" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">' +
+          '<button class="opt-pagto" data-pagto="dinheiro" onclick="selPagto(\'dinheiro\')">💵 Dinheiro</button>' +
+          '<button class="opt-pagto" data-pagto="pix" onclick="selPagto(\'pix\')">📱 Pix</button>' +
+          '<button class="opt-pagto" data-pagto="debito" onclick="selPagto(\'debito\')">💳 Débito</button>' +
+          '<button class="opt-pagto" data-pagto="credito" onclick="selPagto(\'credito\')">💳 Crédito</button>' +
+        '</div>' +
+        '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Cliente quer recibo?</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          '<button class="opt-recibo" data-recibo="nao" onclick="selRecibo(false)">Não</button>' +
+          '<button class="opt-recibo" data-recibo="sim" onclick="selRecibo(true)">🧾 Sim, imprime</button>' +
+        '</div>' +
+      '</div>' +
+      // Rodapé
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">' +
+        '<button onclick="fecharModalLiberar()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+        '<button id="btn-confirmar-liberar" onclick="confirmarLiberar(\'' + pedido.id + '\',' + senha + ')" style="flex:2;padding:14px;background:var(--verde);border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;">✓ Liberar pra cozinha</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+
+  // Pré-seleciona "não" no recibo (o mais comum)
+  _pagtoSelecionado = '';
+  _reciboSelecionado = false;
+  setTimeout(function(){ selRecibo(false); }, 50);
+}
+
+function selPagto(forma){
+  _pagtoSelecionado = forma;
+  document.querySelectorAll('.opt-pagto').forEach(function(b){
+    b.classList.toggle('selecionado', b.getAttribute('data-pagto') === forma);
+  });
+}
+
+function selRecibo(quer){
+  _reciboSelecionado = !!quer;
+  document.querySelectorAll('.opt-recibo').forEach(function(b){
+    b.classList.toggle('selecionado', b.getAttribute('data-recibo') === (quer ? 'sim' : 'nao'));
+  });
+}
+
+function fecharModalLiberar(){
+  var m = document.getElementById('modal-liberar');
+  if(m) m.remove();
+}
+
+function confirmarLiberar(id, senha){
+  var p = _pedidos.find(function(x){ return x.id === id; });
+  if(!p) return;
+  // Forma de pagamento é opcional, mas se o caixa quer recibo precisa selecionar
+  if(_reciboSelecionado && !_pagtoSelecionado){
+    mostrarToast('Selecione a forma de pagamento pra emitir o recibo', '#f87171');
+    return;
+  }
+
+  var btn = document.getElementById('btn-confirmar-liberar');
   if(btn){ btn.disabled = true; btn.textContent = 'Liberando...'; }
 
-  // 1. ENRIQUECE cada item com sua categoria (necessário pro modelo de impressão filtrar).
-  // Os itens vêm com {id, fonte (totem|principal), ...}. Precisamos buscar a categoria
-  // de cada um conforme a fonte.
+  // 1. ENRIQUECE cada item com sua categoria
   enriquecerItensComCategoria(p.itens || []).then(function(itensEnriquecidos){
     // 2. Cria um doc na coleção "pedidos" — o PDV escuta e dispara impressão automática
     var pedidoImpressao = {
@@ -566,27 +670,36 @@ function liberarPedido(id, senha){
       total: p.total||0,
       imprimir: true,
       origemTotem: true,
-      pedidoTotemId: id
+      pedidoTotemId: id,
+      // Novos campos: forma de pagamento + recibo
+      formaPagamento: _pagtoSelecionado || '',
+      imprimirRecibo: !!_reciboSelecionado
     };
 
     return fbDb.collection('pedidos').add(pedidoImpressao);
   })
   .then(function(){
-    // 3. Marca pedido_totem como pago
+    // 3. Marca pedido_totem como pago (com forma de pagamento)
     return fbDb.collection('tenants').doc(_tenantId)
       .collection('restaurantes').doc(_restauranteId)
       .collection('pedidos_totem').doc(id)
-      .update({ status:'pago', pagoEm: Date.now() });
+      .update({
+        status:'pago',
+        pagoEm: Date.now(),
+        formaPagamento: _pagtoSelecionado || '',
+        reciboImpresso: !!_reciboSelecionado
+      });
   })
   .then(function(){
-    mostrarToast('✓ Senha #' + senha + ' liberada pra cozinha!', '#22c55e');
+    mostrarToast('✓ Senha #' + senha + ' liberada!', '#22c55e');
     _selecionadoId = null;
     renderDetalheVazio();
+    fecharModalLiberar();
   })
   .catch(function(e){
     console.error('[CAIXA] liberar:', e);
     mostrarToast('Erro ao liberar: ' + (e.message||e.code), '#f87171');
-    if(btn){ btn.disabled = false; btn.textContent = '✓ Pago — Liberar pra cozinha'; }
+    if(btn){ btn.disabled = false; btn.textContent = '✓ Liberar pra cozinha'; }
   });
 }
 

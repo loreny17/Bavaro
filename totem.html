@@ -510,6 +510,11 @@
   <div class="ti-sub">Restaurante</div>
   <div class="ti-bater">TOQUE PARA INICIAR</div>
   <div class="ti-instrucao">Faça seu pedido por aqui 👆</div>
+  <!-- QR Code pra cliente pedir pelo celular dele -->
+  <div id="ti-qr-box" onclick="event.stopPropagation();" style="position:absolute;bottom:60px;left:18px;background:#fff;border-radius:12px;padding:10px;display:none;flex-direction:column;align-items:center;gap:4px;box-shadow:0 4px 18px rgba(0,0,0,0.4);">
+    <canvas id="ti-qr-canvas" style="display:block;"></canvas>
+    <div style="font-size:0.66rem;color:#333;font-weight:700;letter-spacing:0.04em;text-align:center;line-height:1.2;">PEÇA PELO<br>SEU CELULAR</div>
+  </div>
   <div id="ti-diag" style="position:absolute;bottom:36px;left:0;right:0;text-align:center;font-size:0.68rem;color:rgba(255,255,255,0.35);font-family:monospace;line-height:1.6;"></div>
   <div id="ti-versao" style="position:absolute;bottom:14px;right:18px;font-size:0.7rem;color:rgba(255,255,255,0.25);">v.—</div>
 </div>
@@ -681,6 +686,8 @@
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- QR Code (leve, sem dependências) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
 <script>
 // ════════════════════════════════════════════════════════════════
@@ -702,6 +709,9 @@ var fbDb = null;
 
 // Tenant/restaurante (via URL ou padrão)
 var _params = new URLSearchParams(window.location.search);
+// MODO QR: cliente está usando o próprio celular (não totem físico).
+// Comportamento diferente: sem timer de inatividade, senha sem contador, botão "Fazer outro pedido".
+var _modoQR = _params.get('qr') === '1';
 // Resolução de tenant/restaurante:
 // 1. Se veio na URL (?tenant=X&rest=Y), USA e salva no localStorage (pro PWA lembrar)
 // 2. Senão, lê do localStorage (PWA instalado abre sem query string)
@@ -769,10 +779,29 @@ window.addEventListener('load', function(){
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
     carregarTudo();
+    // Gera o QR Code da tela inicial (só no modo totem; no modo QR não mostra)
+    if(!_modoQR){ gerarQRTelaInicial(); }
   }catch(e){
     mostrarErro('Erro ao iniciar: ' + e.message);
   }
 });
+
+// Gera um QR Code que aponta pra própria URL do totem com ?qr=1
+// Cliente escaneia com o celular e abre o cardápio direto no celular dele
+function gerarQRTelaInicial(){
+  if(typeof QRCode === 'undefined') return; // lib não carregou
+  var base = window.location.origin;
+  var url = base + '/totem.html?tenant=' + encodeURIComponent(_tenantId) +
+    '&rest=' + encodeURIComponent(_restauranteId) + '&qr=1';
+  var canvas = document.getElementById('ti-qr-canvas');
+  if(!canvas) return;
+  QRCode.toCanvas(canvas, url, { width: 110, margin: 1, color: { dark: '#000', light: '#fff' } },
+    function(err){
+      if(err){ console.warn('[QR] erro gerar:', err); return; }
+      var box = document.getElementById('ti-qr-box');
+      if(box) box.style.display = 'flex';
+    });
+}
 
 function mostrarErro(msg){
   document.getElementById('carregando-txt').textContent = msg;
@@ -918,6 +947,17 @@ function montarCardapio(){
   renderItens();
   atualizarBarra();
   atualizarBotaoVoltar();
+
+  // Em modo QR: pula a tela "TOQUE PARA INICIAR" e abre direto o cardápio
+  // (cliente já abriu o link pelo QR, não precisa tocar de novo)
+  if(_modoQR){
+    var tela = document.getElementById('tela-inicial');
+    if(tela){
+      tela.classList.add('escondida');
+      tela.style.display = 'none';
+    }
+    document.getElementById('app').style.display = 'flex';
+  }
 }
 
 // Renderiza as abas de categoria
@@ -1560,35 +1600,81 @@ function mostrarTelaSenha(senha, total){
 
   var tela = document.createElement('div');
   tela.id = 'tela-senha';
-  tela.style.cssText = 'position:fixed;inset:0;z-index:500;background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;animation:fadeInTela 0.4s ease;';
+  tela.style.cssText = 'position:fixed;inset:0;z-index:500;background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;animation:fadeInTela 0.4s ease;overflow-y:auto;';
+
+  // Em modo QR (celular): sem contador, botão "Fazer outro pedido" + "Sair"
+  // Em modo Totem: contador 10s + botão "Concluir atendimento"
+  var botaoHtml, contadorHtml;
+  if(_modoQR){
+    botaoHtml =
+      '<div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap;justify-content:center;">' +
+        '<button onclick="fazerOutroPedido()" style="background:var(--accent);color:#000;border:none;border-radius:14px;padding:16px 28px;font-family:inherit;font-weight:800;font-size:1rem;cursor:pointer;box-shadow:0 6px 20px rgba(212,168,67,0.3);">+ Fazer outro pedido</button>' +
+      '</div>';
+    contadorHtml = ''; // sem contador no QR
+  } else {
+    botaoHtml = '<button onclick="concluirAtendimento()" style="margin-top:28px;background:var(--accent);color:#000;border:none;border-radius:14px;padding:18px 48px;font-family:inherit;font-weight:800;font-size:1.15rem;cursor:pointer;box-shadow:0 6px 20px rgba(212,168,67,0.3);">✓ Concluir atendimento</button>';
+    contadorHtml = '<div style="margin-top:18px;font-size:0.86rem;color:var(--muted);">Volta sozinha em <span id="contador-senha">10</span>s...</div>';
+  }
+
+  // Texto principal (no QR fica diferente — cliente não vai ao caixa, pediu sozinho)
+  var instrucaoTitulo, instrucaoSub;
+  if(_modoQR){
+    instrucaoTitulo = 'Pedido recebido!';
+    instrucaoSub = 'Quando chamarmos sua senha <b style="color:var(--accent);">#' + senha + '</b>, retire no balcão';
+  } else {
+    instrucaoTitulo = 'Vá ao caixa pagar';
+    instrucaoSub = 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
+  }
+
   tela.innerHTML =
     '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
     '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
-    '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:11rem;color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
+    '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
     '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
-    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 32px;text-align:center;max-width:520px;">' +
-      '<div style="font-size:1.4rem;font-weight:700;margin-bottom:6px;">Vá ao caixa pagar</div>' +
-      '<div style="font-size:1rem;color:var(--muted);">Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário</div>' +
+    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
+      '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + instrucaoTitulo + '</div>' +
+      '<div style="font-size:0.96rem;color:var(--muted);">' + instrucaoSub + '</div>' +
     '</div>' +
-    '<button onclick="concluirAtendimento()" style="margin-top:28px;background:var(--accent);color:#000;border:none;border-radius:14px;padding:18px 48px;font-family:inherit;font-weight:800;font-size:1.15rem;cursor:pointer;box-shadow:0 6px 20px rgba(212,168,67,0.3);">✓ Concluir atendimento</button>' +
-    '<div style="margin-top:18px;font-size:0.86rem;color:var(--muted);">Volta sozinha em <span id="contador-senha">10</span>s...</div>';
+    botaoHtml +
+    contadorHtml;
   document.body.appendChild(tela);
 
   // Vibra forte (3 toques) pra dar feedback de sucesso
   try{ if(navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]); }catch(e){}
 
-  // Contador regressivo e volta pra tela inicial em 10s
-  var segs = 10;
-  if(window._intervalSenha) clearInterval(window._intervalSenha);
-  window._intervalSenha = setInterval(function(){
-    segs--;
-    var el = document.getElementById('contador-senha');
-    if(el) el.textContent = segs;
-    if(segs <= 0){
-      clearInterval(window._intervalSenha);
-      concluirAtendimento();
-    }
-  }, 1000);
+  // Contador regressivo: SÓ no modo totem (não no QR)
+  if(!_modoQR){
+    var segs = 10;
+    if(window._intervalSenha) clearInterval(window._intervalSenha);
+    window._intervalSenha = setInterval(function(){
+      segs--;
+      var el = document.getElementById('contador-senha');
+      if(el) el.textContent = segs;
+      if(segs <= 0){
+        clearInterval(window._intervalSenha);
+        concluirAtendimento();
+      }
+    }, 1000);
+  }
+}
+
+// Botão do modo QR: cliente quer fazer outro pedido (mantém estado mas volta pro cardápio)
+function fazerOutroPedido(){
+  var t = document.getElementById('tela-senha');
+  if(t) t.remove();
+  // Carrinho já está vazio (foi limpo ao finalizar). Vai direto pro cardápio.
+  _carrinho = [];
+  _catAtiva = '';
+  _historicoCategoria = [];
+  _busca = '';
+  var b = document.getElementById('busca'); if(b) b.value = '';
+  var btnFin = document.querySelector('.btn-finalizar');
+  if(btnFin){ btnFin.disabled = false; btnFin.textContent = 'Finalizar Pedido'; }
+  atualizarBarra();
+  atualizarBotaoVoltar();
+  try{ renderCategorias(); renderItens(); }catch(e){}
+  // No QR já está em modo "começou pedido" — só garantir que o app está visível
+  document.getElementById('app').style.display = 'flex';
 }
 
 // Chamado pelo botão OU quando o contador chega a 0
@@ -1650,9 +1736,11 @@ function voltarTelaInicial(){
 
 // Volta pra tela inicial após 90s sem mexer
 function iniciarTimerInatividade(){
+  if(_modoQR) return; // modo QR (celular): cliente toma seu tempo
   resetTimerInatividade();
 }
 function resetTimerInatividade(){
+  if(_modoQR) return; // modo QR: ignora
   pararTimerInatividade();
   _timerInatividade = setTimeout(function(){
     voltarTelaInicial();

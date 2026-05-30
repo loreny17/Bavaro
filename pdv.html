@@ -891,6 +891,8 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<!-- QR Code (leve) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsrsasign@10.9.0/lib/jsrsasign-all-min.js"></script>
 <script>
@@ -4775,6 +4777,97 @@ function iniciarListenerImpressao(){
 
 // ─── CUPOM CLIENTE DO TOTEM (sai no caixa quando libera o pedido) ───
 // Imprime um ticket com a senha gigante pro cliente esperar ser chamado.
+// Mapa de forma de pagamento (pra exibir bonito no recibo)
+function _nomeFormaPagamento(forma){
+  var mapa = {
+    'dinheiro': 'Dinheiro',
+    'pix': 'Pix',
+    'debito': 'Cartão Débito',
+    'credito': 'Cartão Crédito'
+  };
+  return mapa[forma] || forma || '—';
+}
+
+// RECIBO CLIENTE (não fiscal) — usado quando o cliente pede ao caixa
+// Sai na mesma impressora do "cupom_cliente" (ou define um modelo próprio "recibo_cliente")
+function gerarReciboCliente(pedido, modelo, imp){
+  var L = (imp && imp.largura) || 48;
+  var senha = pedido.senhaTotem || '?';
+  var s = escposInit();
+
+  // Título (usa o mesmo título configurado do cupom cliente, ou padrão)
+  var tituloTopo = (modelo && modelo.tituloCupomCliente) || 'BAVARO';
+
+  // ── Cabeçalho ──
+  s += escposCenter();
+  s += escposBold(true) + escposLarge(true);
+  s += tituloTopo + '\n';
+  s += escposLarge(false) + escposBold(false);
+  s += 'Recibo do Pedido\n';
+  s += linha('=', L) + '\n';
+
+  // ── Senha + data ──
+  s += escposLeft();
+  s += escposBold(true);
+  s += 'SENHA: #' + senha + '\n';
+  s += escposBold(false);
+  var agora = new Date();
+  var dataHora = agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  s += 'Data: ' + dataHora + '\n';
+  s += linha('-', L) + '\n';
+
+  // ── Itens (com valor unitário e subtotal) ──
+  var subtotal = 0;
+  (pedido.itens||[]).forEach(function(it){
+    var qtd = (it.qtd||1);
+    var preco = it.preco||0;
+    var sub = preco * qtd;
+    subtotal += sub;
+    var nome = String(it.nome||'');
+    // Linha 1: qtd + nome (quebra se muito longo)
+    var prefixo = qtd + 'x ';
+    var nomeMaxLen = L - prefixo.length - 9; // 9 chars pra preço alinhado à direita
+    var linhasNome = _quebrarLinha(nome, nomeMaxLen);
+    var subTxt = sub.toFixed(2).replace('.', ',');
+    var espacos = Math.max(1, L - (prefixo + linhasNome[0]).length - subTxt.length);
+    s += prefixo + linhasNome[0] + new Array(espacos+1).join(' ') + subTxt + '\n';
+    for(var k=1; k<linhasNome.length; k++){
+      s += '   ' + linhasNome[k] + '\n';
+    }
+    // Opções/obs
+    if(it.obs){
+      var obsForm = _formatarObsImpressao(it.obs, L, '   ');
+      if(obsForm) s += obsForm + '\n';
+    }
+  });
+  s += linha('-', L) + '\n';
+
+  // ── Subtotal + Total ──
+  var total = pedido.total || subtotal;
+  var totalTxt = 'R$ ' + total.toFixed(2).replace('.', ',');
+  s += escposBold(true) + escposSize('largo');
+  s += 'TOTAL ' + totalTxt + '\n';
+  s += escposSize('normal') + escposBold(false);
+
+  // ── Forma de pagamento ──
+  if(pedido.formaPagamento){
+    s += linha('-', L) + '\n';
+    s += 'Pago em: ' + _nomeFormaPagamento(pedido.formaPagamento) + '\n';
+  }
+
+  s += linha('=', L) + '\n';
+
+  // ── Rodapé com aviso ──
+  s += escposCenter();
+  s += '*** NAO E DOCUMENTO FISCAL ***\n';
+  s += 'Obrigado pela preferencia!\n';
+
+  s += '\n\n\n';
+  if(_configImp && _configImp.cortePapel) s += escposCut();
+  return s;
+}
+
 function gerarCupomClienteTotem(pedido, modelo, imp){
   var L = (imp && imp.largura) || 48;
   var senha = pedido.senhaTotem || '?';
@@ -4899,6 +4992,21 @@ function imprimirPedidoAutomatico(pedido){
       console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
       if(cupom) enviarParaImpressora(imp, cupom);
     });
+
+    // ── RECIBO CLIENTE (só se foi solicitado no caixa) ──
+    // Sai na MESMA impressora do cupom cliente. Cliente leva como recibo não-fiscal.
+    if(pedido.imprimirRecibo){
+      console.log('[RECIBO] cliente pediu recibo — gerando...');
+      modelosCupom.forEach(function(modelo){
+        var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+        if(!imp) return;
+        var recibo = gerarReciboCliente(pedido, modelo, imp);
+        if(recibo){
+          console.log('[RECIBO] enviando pra', imp.nome);
+          enviarParaImpressora(imp, recibo);
+        }
+      });
+    }
   }
 
   // ── ITENS AVULSOS com impressora forçada ──
@@ -7760,6 +7868,82 @@ function atualizarLinksTotem(){
   if(lblRest) lblRest.textContent = nomeTxt;
 }
 
+// Abre modal mostrando o QR Code grande do totem do restaurante atual
+function abrirModalQRTotem(){
+  if(!_tenantId || !_restauranteAtivo || !_restauranteAtivo.id){
+    showToast('Aguarde o restaurante carregar', '#f7a34f');
+    return;
+  }
+  if(typeof QRCode === 'undefined'){
+    showToast('Lib QR Code não carregou — recarregue o PDV (F5)', '#f87171');
+    return;
+  }
+  var ex = document.getElementById('modal-qr-totem');
+  if(ex) ex.remove();
+
+  var base = window.location.origin;
+  var url = base + '/totem.html?tenant=' + encodeURIComponent(_tenantId) +
+    '&rest=' + encodeURIComponent(_restauranteAtivo.id) + '&qr=1';
+  var nomeRest = _restauranteAtivo.nome || _restauranteAtivo.id;
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-qr-totem';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:#fff;color:#000;border-radius:16px;max-width:420px;width:100%;padding:28px;text-align:center;position:relative;">' +
+      '<button onclick="document.getElementById(\'modal-qr-totem\').remove()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.08);border:none;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;color:#666;">×</button>' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;letter-spacing:0.05em;color:#1a1a1a;margin-bottom:4px;">' + escapeHtml(nomeRest.toUpperCase()) + '</div>' +
+      '<div style="font-size:0.92rem;color:#666;margin-bottom:18px;">Faça seu pedido pelo celular</div>' +
+      '<canvas id="qr-modal-canvas" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #eee;border-radius:8px;"></canvas>' +
+      '<div style="font-size:0.78rem;color:#666;margin-top:14px;line-height:1.4;">📱 Escaneie com a câmera do celular pra pedir sem precisar do totem</div>' +
+      '<div style="display:flex;gap:8px;margin-top:18px;">' +
+        '<button onclick="imprimirQRTotem()" style="flex:1;padding:12px;background:#d4a843;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">🖨️ Imprimir</button>' +
+        '<button onclick="baixarQRTotem()" style="flex:1;padding:12px;background:#1a1a1a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">⬇ Baixar imagem</button>' +
+      '</div>' +
+      '<div style="font-size:0.7rem;color:#999;margin-top:14px;word-break:break-all;font-family:monospace;">' + escapeHtml(url) + '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+
+  // Gera o QR grande
+  setTimeout(function(){
+    var canvas = document.getElementById('qr-modal-canvas');
+    if(canvas){
+      QRCode.toCanvas(canvas, url, { width: 320, margin: 2 }, function(err){
+        if(err){ console.warn('[QR] erro:', err); }
+      });
+    }
+  }, 50);
+}
+
+function imprimirQRTotem(){
+  var canvas = document.getElementById('qr-modal-canvas');
+  if(!canvas) return;
+  var dataUrl = canvas.toDataURL('image/png');
+  var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'Restaurante';
+  var w = window.open('', '_blank');
+  w.document.write(
+    '<html><head><title>QR Code - ' + nomeRest + '</title>' +
+    '<style>body{font-family:sans-serif;text-align:center;padding:40px;}h1{font-size:36px;margin-bottom:8px;}p{color:#666;margin-bottom:24px;}img{max-width:400px;height:auto;}</style>' +
+    '</head><body>' +
+    '<h1>' + escapeHtml(nomeRest.toUpperCase()) + '</h1>' +
+    '<p>📱 Escaneie com a câmera do celular pra fazer seu pedido</p>' +
+    '<img src="' + dataUrl + '" alt="QR Code">' +
+    '<script>window.onload=function(){window.print();}<\/script>' +
+    '</body></html>'
+  );
+}
+
+function baixarQRTotem(){
+  var canvas = document.getElementById('qr-modal-canvas');
+  if(!canvas) return;
+  var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'restaurante';
+  var link = document.createElement('a');
+  link.download = 'qr-totem-' + nomeRest.toLowerCase().replace(/[^a-z0-9]/g,'_') + '.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
 function copiarLinkTotem(qual){
   var el = document.getElementById('totem-link-' + qual);
   if(!el) return;
@@ -10040,7 +10224,10 @@ function toggleAdminUsuario(garcomId, novoValor){
         <button onclick="copiarLinkTotem('caixa')" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:0.74rem;cursor:pointer;font-family:inherit;">Copiar</button>
       </div>
     </div>
-    <div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">💡 Use esses links no tablet do totem/caixa. Cada restaurante tem seus próprios pedidos e cardápio.</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <div style="font-size:0.72rem;color:var(--muted);flex:1;">💡 Use esses links no tablet do totem/caixa. Cada restaurante tem seus próprios pedidos e cardápio.</div>
+      <button onclick="abrirModalQRTotem()" style="background:var(--surface2);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:6px 12px;font-weight:700;font-size:0.78rem;cursor:pointer;font-family:inherit;white-space:nowrap;">📱 Gerar QR Code</button>
+    </div>
   </div>
 
   <!-- Toggle: imprimir direto na cozinha (sem caixa) -->

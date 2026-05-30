@@ -2379,97 +2379,94 @@ function verContaPDV(id){
   var agora = Date.now();
   var mesaNum = c.mesa;
 
-  // 1. Recria pedido com flag impresso=true (não vai imprimir automaticamente)
-  var itensPedido = (c.itens||[]).map(function(it){
+  // Pré-monta dados dos itens (compartilhados entre pedido e conta)
+  var itensBase = (c.itens||[]).map(function(it){
     return {
       id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
       selecoes: it.selecoes || [],
       precoBase: it.precoBase || it.preco,
       extras: it.extras || 0,
-      status: 'ativo',  // ⚠️ FORÇA ATIVO — itens voltam como NÃO pagos
+      status: 'ativo',
       canceladoEm: null,
       canceladoPor: null,
       motivoCancelamento: null,
-      pagamentoId: null,  // ⚠️ ZERA pagamento individual
-      divisao: null       // ⚠️ ZERA divisão (volta inteiro)
+      pagamentoId: null,
+      divisao: null
     };
   });
   var totalCalc = (c.itens||[])
     .filter(function(it){ return it.status !== 'cancelado'; })
     .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
-  var pedidoData = {
-    garcom: c.garcom || 'Restaurado',
+
+  console.log('[RESTAURAR] mesa', mesaNum, '— itens:', itensBase.length, '— subtotal:', totalCalc);
+
+  // 1. PRIMEIRO cria a conta_mesa (precisamos do contaId pro pedido)
+  var contaMesaData = {
     mesa: mesaNum,
     restauranteId: c.restauranteId,
     tenantId: c.tenantId || null,
-    status: 'entregue',          // já foi consumido
-    criadoEm: c.abertaEm || agora,
+    garcomPrincipal: c.garcom || 'Restaurado',
+    status: 'aberta',
+    abertaEm: c.abertaEm || agora,
     atualizadoEm: agora,
-    itens: itensPedido,
-    total: c.subtotal || totalCalc,
-    impresso: true,              // ⚠️ EVITA REIMPRESSÃO
-    restaurado: true,
-    contaOrigem: c.id
+    tipoConta: c.tipoConta || 'mesa',
+    cliente: c.cliente || null,
+    itens: itensBase.slice(), // copia (vai adicionar pedidoId/itemKey depois)
+    pagamentos: [],
+    subtotal: c.subtotal || totalCalc,
+    taxa10: 0,
+    total: 0,
+    pagoTotal: 0,
+    restante: 0,
+    restaurada: true,
+    contaOriginalId: c.id
   };
 
-  fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
-    // 2. Recria conta_mesa ZERADA de pagamentos, com itens ATIVOS
-    var contaMesaData = {
+  fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){
+    var contaId = refConta.id;
+    console.log('[RESTAURAR] conta_mesa criada:', contaId);
+
+    // 2. AGORA cria o pedido JÁ com contaId (essencial: garçom escuta where contaId)
+    var pedidoData = {
+      garcom: c.garcom || 'Restaurado',
       mesa: mesaNum,
       restauranteId: c.restauranteId,
       tenantId: c.tenantId || null,
-      garcomPrincipal: c.garcom || 'Restaurado',
-      status: 'aberta',
-      abertaEm: c.abertaEm || agora,
+      contaId: contaId,            // ⚠️ JÁ COM O ID
+      status: 'entregue',
+      criadoEm: c.abertaEm || agora,
       atualizadoEm: agora,
-      tipoConta: c.tipoConta || 'mesa',
-      cliente: c.cliente || null,
-      // Itens VOLTAM ATIVOS (não pagos, não divididos)
-      itens: (c.itens||[]).map(function(it){
-        var copia = {
-          id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
-          selecoes: it.selecoes || [],
-          precoBase: it.precoBase || it.preco,
-          extras: it.extras || 0,
-          status: 'ativo',     // ⚠️ ATIVO
-          pagamentoId: null,   // ⚠️ ZERADO
-          divisao: null,       // ⚠️ ZERADO
-          pedidoId: refPed.id
-        };
-        // Gera itemKey novo
-        copia.itemKey = refPed.id + '_' + Math.random().toString(36).substring(2,8);
-        return copia;
-      }),
-      pagamentos: [],           // ⚠️ PAGAMENTOS ZERADOS
-      subtotal: c.subtotal || totalCalc,
-      taxa10: 0,                // recalcula quando precisar
-      total: 0,
-      pagoTotal: 0,             // ⚠️ NADA PAGO
-      restante: 0,
-      restaurada: true,
-      contaOriginalId: c.id
+      itens: itensBase.slice(),
+      total: c.subtotal || totalCalc,
+      impresso: true,
+      restaurado: true,
+      contaOrigem: c.id
     };
-    return fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){
-      // Atualiza o pedido com o contaId correto
-      return fbDb.collection('pedidos').doc(refPed.id).update({
-        contaId: refConta.id
-      }).then(function(){
-        // Atualiza itens da conta_mesa com contaId pra consistência
-        var itensComContaId = contaMesaData.itens.map(function(it){
-          return Object.assign({}, it, { contaId: refConta.id });
+    return fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
+      console.log('[RESTAURAR] pedido criado:', refPed.id);
+      // 3. Atualiza itens da conta_mesa com pedidoId + contaId + itemKey
+      var itensCompletos = itensBase.map(function(it){
+        return Object.assign({}, it, {
+          contaId: contaId,
+          pedidoId: refPed.id,
+          itemKey: refPed.id + '_' + Math.random().toString(36).substring(2,8)
         });
-        return fbDb.collection('contas_mesa').doc(refConta.id).update({
-          itens: itensComContaId
-        });
+      });
+      return fbDb.collection('contas_mesa').doc(contaId).update({
+        itens: itensCompletos
       });
     });
   }).then(function(){
-    // 3. Remove a conta_fechada (sai do histórico)
+    // 4. Remove a conta_fechada (sai do histórico)
+    console.log('[RESTAURAR] apagando conta_fechada:', c.id);
     return fbDb.collection('contas_fechadas').doc(c.id).delete();
   }).then(function(){
-    showToast('✅ Mesa ' + c.mesa + ' restaurada (NÃO paga, sem reimprimir)','#4ade80');
+    showToast('✅ Mesa ' + c.mesa + ' restaurada (' + itensBase.length + ' itens, NÃO paga)','#4ade80');
     carregarHistoricoPDV();
-  }).catch(function(e){ showToast('❌ ' + e.message,'#f87171'); });
+  }).catch(function(e){
+    console.error('[RESTAURAR] erro:', e);
+    showToast('❌ ' + e.message,'#f87171');
+  });
 }
 // ════════════════════════════════════════
 //  GRUPOS DE OPÇÕES (PDV)

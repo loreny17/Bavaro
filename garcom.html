@@ -655,6 +655,9 @@ header{
     <button class="aba-btn" id="aba-comandas-btn" onclick="trocarAba('comandas')">
       <span style="font-size:1.05rem;">📝</span> Comandas
     </button>
+    <button class="aba-btn" id="aba-rapidos-btn" onclick="trocarAba('rapidos')">
+      <span style="font-size:1.05rem;">⚡</span> Rápidos <span id="badge-rapidos" style="display:none;background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:0.7rem;font-weight:800;margin-left:2px;">0</span>
+    </button>
   </div>
   <div class="mesa-search" id="mesa-search-bar">
     <div style="display:flex;gap:8px;align-items:center;">
@@ -675,8 +678,12 @@ header{
   </div>
   <div class="mesas-grid" id="mesas-grid"></div>
   <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
+  <div class="comandas-lista" id="rapidos-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
   <button id="btn-nova-comanda" onclick="abrirNovaComanda()" style="display:none;position:fixed;bottom:20px;right:20px;background:var(--accent);color:#000;border:none;border-radius:50px;padding:14px 22px;font-family:inherit;font-weight:700;font-size:0.9rem;box-shadow:0 4px 16px rgba(212,168,67,0.4);cursor:pointer;z-index:50;display:none;align-items:center;gap:8px;">
     <span style="font-size:1.2rem;">+</span> Nova Comanda
+  </button>
+  <button id="btn-novo-rapido" onclick="abrirNovoPedidoRapido()" style="display:none;position:fixed;bottom:20px;right:20px;background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000;border:none;border-radius:50px;padding:14px 22px;font-family:inherit;font-weight:800;font-size:0.95rem;box-shadow:0 4px 16px rgba(245,158,11,0.5);cursor:pointer;z-index:50;align-items:center;gap:8px;">
+    <span style="font-size:1.2rem;">⚡</span> Novo Pedido Rápido
   </button>
 
   <!-- Menu Lateral -->
@@ -1571,6 +1578,7 @@ var _mesasOcupadas = {}; // {num: {contaId, garcom, abertaEm, count, total}}
 var _contasMesaCache = {}; // {num: contaCompleta}
 var _ultimoContaIdEscutado = null; // último contaId que está sendo escutado em escutarMeusPedidos
 var _comandasAvulsas = []; // [{id, cliente, ...contaCompleta}]
+var _pedidosRapidos = []; // [{id, cliente?, itens, ...}] — cliente ainda sem mesa
 var _abaAtual = 'mesas';
 
 // Carrega/escuta configuração de mesas (sync com PDV)
@@ -1603,12 +1611,19 @@ function trocarAba(aba){
   _abaAtual = aba;
   document.getElementById('aba-mesas-btn').classList.toggle('active', aba==='mesas');
   document.getElementById('aba-comandas-btn').classList.toggle('active', aba==='comandas');
+  var abaRapBtn = document.getElementById('aba-rapidos-btn');
+  if(abaRapBtn) abaRapBtn.classList.toggle('active', aba==='rapidos');
   document.getElementById('mesa-search-bar').style.display = aba==='mesas' ? '' : 'none';
   document.getElementById('comanda-search-bar').style.display = aba==='comandas' ? '' : 'none';
   document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
   document.getElementById('comandas-lista').style.display = aba==='comandas' ? '' : 'none';
+  var rapLista = document.getElementById('rapidos-lista');
+  if(rapLista) rapLista.style.display = aba==='rapidos' ? '' : 'none';
   document.getElementById('btn-nova-comanda').style.display = aba==='comandas' ? 'flex' : 'none';
+  var btnRap = document.getElementById('btn-novo-rapido');
+  if(btnRap) btnRap.style.display = aba==='rapidos' ? 'flex' : 'none';
   if(aba==='comandas') renderComandas();
+  if(aba==='rapidos') renderRapidos();
 }
 
 // ═══════════════════════════════════════════════
@@ -3158,10 +3173,16 @@ function escutarMesasOcupadas(){
     _mesasOcupadas = {};
     _contasMesaCache = {};
     _comandasAvulsas = [];
+    _pedidosRapidos = [];
     snap.forEach(function(doc){
       var d = doc.data();
       var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
-      // Se for comanda avulsa
+      // Pedido rápido (cliente sem mesa ainda)
+      if(d.tipoConta === 'rapido'){
+        _pedidosRapidos.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
+        return;
+      }
+      // Comanda avulsa
       if(d.tipoConta === 'avulsa'){
         _comandasAvulsas.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
         return;
@@ -3193,6 +3214,8 @@ function escutarMesasOcupadas(){
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
     if(_abaAtual === 'comandas') renderComandas();
+    if(_abaAtual === 'rapidos') renderRapidos();
+    atualizarBadgeRapidos();
     // Se o garçom está dentro de uma mesa e o contaId mudou (ex: cache atualizou após abrir mesa),
     // refaz o listener de pedidos pra apontar pra conta correta.
     if(_mesaAtiva !== null && _mesaAtiva !== undefined){
@@ -6450,6 +6473,174 @@ function renderComandas(){
     '</div>';
   });
   lista.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+// ⚡ PEDIDO RÁPIDO (cliente sem mesa ainda)
+// ═══════════════════════════════════════════════
+function atualizarBadgeRapidos(){
+  var badge = document.getElementById('badge-rapidos');
+  if(!badge) return;
+  var n = (_pedidosRapidos||[]).length;
+  if(n > 0){
+    badge.style.display = 'inline-block';
+    badge.textContent = n;
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function abrirNovoPedidoRapido(){
+  var nome = prompt('Identificador do cliente (opcional):\n\nEx: "João", "moça blusa azul", "balcão 1"\n\nDeixe vazio se preferir.');
+  if(nome === null) return; // cancelou
+  nome = (nome||'').trim();
+
+  // Cria nova conta tipo "rapido" SEM itens (garçom adiciona em seguida)
+  fbDb.collection('contas_mesa').add({
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    tipoConta: 'rapido',
+    cliente: nome || null,
+    mesa: null,
+    status: 'aberta',
+    itens: [],
+    pagamentos: [],
+    subtotal: 0,
+    taxa10: 0,
+    total: 0,
+    pagoTotal: 0,
+    restante: 0,
+    garcomPrincipal: _nomeGarcom,
+    abertaEm: Date.now(),
+    abertaPor: _nomeGarcom,
+    teste: _modoTeste ? true : false
+  }).then(function(refConta){
+    showToast('⚡ Pedido rápido aberto — adicione os itens', '#fbbf24');
+    // Abre direto o menu deste pedido pra adicionar itens
+    setTimeout(function(){ abrirMenuRapido(refConta.id); }, 400);
+  }).catch(function(e){
+    showToast('❌ '+e.message, '#f87171');
+  });
+}
+
+function renderRapidos(){
+  var lista = document.getElementById('rapidos-lista');
+  if(!lista) return;
+  if(!_pedidosRapidos.length){
+    lista.innerHTML =
+      '<div style="text-align:center;padding:40px 20px;color:var(--muted);">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">⚡</div>' +
+        '<div style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:6px;">Nenhum pedido rápido</div>' +
+        '<div style="font-size:0.84rem;line-height:1.5;">Cliente pediu mas ainda não escolheu a mesa?<br>Use o botão amarelo abaixo pra lançar agora.</div>' +
+      '</div>';
+    return;
+  }
+  // Ordena por hora (mais recente primeiro)
+  var ordenados = _pedidosRapidos.slice().sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
+  lista.innerHTML = ordenados.map(function(c){
+    var hora = c.abertaEm ? new Date(c.abertaEm).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
+    var totalTxt = (c.subtotal||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var qtdItens = c._itensAbertosCount || 0;
+    var itensResumo = (c.itens||[])
+      .filter(function(i){ return i.status !== 'cancelado'; })
+      .slice(0, 3)
+      .map(function(it){ return (it.qtd||1)+'x '+it.nome; })
+      .join(', ');
+    if((c.itens||[]).length > 3) itensResumo += '...';
+    var idLabel = c.cliente ? esc(c.cliente) : '<span style="color:var(--muted);font-style:italic;">sem identificação</span>';
+
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #fbbf24;border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      // Topo
+      '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">' +
+        '<div style="font-size:1.4rem;line-height:1;">⚡</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:700;font-size:1rem;color:var(--text);margin-bottom:2px;">' + idLabel + '</div>' +
+          '<div style="font-size:0.78rem;color:var(--muted);">Aberto às ' + hora + ' • ' + qtdItens + ' ' + (qtdItens===1?'item':'itens') + '</div>' +
+        '</div>' +
+        '<div style="text-align:right;">' +
+          '<div style="font-weight:800;color:var(--accent);font-size:1.05rem;">R$ ' + totalTxt + '</div>' +
+        '</div>' +
+      '</div>' +
+      // Itens resumo
+      (itensResumo ? '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;line-height:1.4;">' + esc(itensResumo) + '</div>' : '') +
+      // Botões
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '<button onclick="abrirMenuRapido(\'' + c.id + '\')" style="flex:1;min-width:90px;padding:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.84rem;">📝 Ver / Adicionar</button>' +
+        '<button onclick="vincularRapidoAMesa(\'' + c.id + '\')" style="flex:2;min-width:130px;padding:10px;background:linear-gradient(135deg,#4ade80,#22c55e);color:#000;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">🪑 Vincular à Mesa</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// Abre o menu de gestão do pedido rápido (mesmo da comanda avulsa)
+function abrirMenuRapido(id){
+  // Reutiliza o menu da comanda avulsa — tem todas as ações que precisamos
+  // (adicionar itens, ver itens, cancelar, etc)
+  if(typeof abrirMenuComanda === 'function'){
+    abrirMenuComanda(id);
+  }
+}
+
+function vincularRapidoAMesa(rapidoId){
+  var r = _pedidosRapidos.find(function(x){ return x.id === rapidoId; });
+  if(!r){ showToast('Pedido rápido não encontrado','#f87171'); return; }
+  if(!(r.itens||[]).length){
+    showToast('⚠️ Adicione itens antes de vincular','#f7a34f');
+    return;
+  }
+  var mesaStr = prompt('Vincular à mesa número:\n\n(Cliente sentou em qual mesa?)');
+  if(!mesaStr) return;
+  var mesaNum = parseInt(mesaStr);
+  if(isNaN(mesaNum) || mesaNum < 1){
+    showToast('Número de mesa inválido','#f87171');
+    return;
+  }
+  // Verifica se a mesa já tem conta aberta
+  var contaMesaExistente = _contasMesaCache[String(mesaNum)] || _mesasOcupadas[String(mesaNum)];
+  var msg = 'Vincular pedido rápido' + (r.cliente ? ' de "' + r.cliente + '"' : '') + ' à mesa ' + mesaNum + '?';
+  if(contaMesaExistente){
+    msg += '\n\n⚠️ A mesa ' + mesaNum + ' já tem uma conta aberta. Os itens serão mesclados.';
+  }
+  if(!confirm(msg)) return;
+
+  // Estratégia: transforma a conta_rapido em conta_mesa
+  // (ou mescla se já existir conta_mesa pra esse número)
+  if(contaMesaExistente && contaMesaExistente.contaId){
+    // Mescla: pega contaId existente, copia itens do rápido pra lá, apaga rápido
+    var contaIdAlvo = contaMesaExistente.contaId;
+    fbDb.collection('contas_mesa').doc(contaIdAlvo).get().then(function(doc){
+      if(!doc.exists) throw new Error('Conta da mesa ' + mesaNum + ' sumiu');
+      var contaAlvo = doc.data();
+      var itensCombinados = (contaAlvo.itens||[]).concat(r.itens||[]);
+      var subtotalNovo = itensCombinados
+        .filter(function(i){ return i.status !== 'cancelado'; })
+        .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+      return fbDb.collection('contas_mesa').doc(contaIdAlvo).update({
+        itens: itensCombinados,
+        subtotal: subtotalNovo,
+        atualizadoEm: Date.now()
+      });
+    }).then(function(){
+      // Apaga o pedido rápido (já mesclado)
+      return fbDb.collection('contas_mesa').doc(rapidoId).delete();
+    }).then(function(){
+      showToast('✓ Vinculado à mesa ' + mesaNum, '#22c55e');
+    }).catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+  } else {
+    // Sem conta existente: só atualiza o tipoConta + mesa
+    fbDb.collection('contas_mesa').doc(rapidoId).update({
+      tipoConta: 'mesa',
+      mesa: mesaNum,
+      cliente: null,
+      atualizadoEm: Date.now()
+    }).then(function(){
+      showToast('✓ Vinculado à mesa ' + mesaNum, '#22c55e');
+    }).catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+  }
 }
 
 function abrirNovaComanda(){

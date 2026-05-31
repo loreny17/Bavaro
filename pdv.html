@@ -2380,6 +2380,7 @@ function verContaPDV(id){
   var mesaNum = c.mesa;
 
   // Pré-monta dados dos itens (compartilhados entre pedido e conta)
+  // ⚠️ ZERA TODOS os campos que indicam pagamento/divisão
   var itensBase = (c.itens||[]).map(function(it){
     return {
       id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
@@ -2391,7 +2392,12 @@ function verContaPDV(id){
       canceladoPor: null,
       motivoCancelamento: null,
       pagamentoId: null,
-      divisao: null
+      divisao: null,
+      valorAbatido: 0,         // zera abatimento (item volta pelo valor cheio)
+      pagoEm: null,
+      pagoPor: null,
+      tipoVenda: it.tipoVenda || 'unidade',
+      peso: it.peso || null
     };
   });
   var totalCalc = (c.itens||[])
@@ -2399,6 +2405,8 @@ function verContaPDV(id){
     .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
 
   console.log('[RESTAURAR] mesa', mesaNum, '— itens:', itensBase.length, '— subtotal:', totalCalc);
+  console.log('[RESTAURAR] PRIMEIRO ITEM original c.itens[0]:', JSON.parse(JSON.stringify((c.itens||[])[0]||{})));
+  console.log('[RESTAURAR] PRIMEIRO ITEM no itensBase:', JSON.parse(JSON.stringify(itensBase[0]||{})));
 
   // 1. PRIMEIRO cria a conta_mesa (precisamos do contaId pro pedido)
   var contaMesaData = {
@@ -2407,7 +2415,7 @@ function verContaPDV(id){
     tenantId: c.tenantId || null,
     garcomPrincipal: c.garcom || 'Restaurado',
     status: 'aberta',
-    abertaEm: c.abertaEm || agora,
+    abertaEm: agora,             // ⚠️ NOVA abertura (não a antiga) pra "Ver pedidos" não pegar pedidos velhos
     atualizadoEm: agora,
     tipoConta: c.tipoConta || 'mesa',
     cliente: c.cliente || null,
@@ -2434,7 +2442,7 @@ function verContaPDV(id){
       tenantId: c.tenantId || null,
       contaId: contaId,            // ⚠️ JÁ COM O ID
       status: 'entregue',
-      criadoEm: c.abertaEm || agora,
+      criadoEm: agora,           // ⚠️ AGORA
       atualizadoEm: agora,
       itens: itensBase.slice(),
       total: c.subtotal || totalCalc,

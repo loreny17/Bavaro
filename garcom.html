@@ -12831,7 +12831,7 @@ function verContaDetalhe(c){
 
 function restaurarConta(){
   if(!_contaDetalheAtual) return;
-  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nA mesa voltará a aparecer no mapa com TODOS os itens e pagamentos preservados exatamente como estavam.\nNADA será reimpresso.')) return;
+  if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nIsso vai reabrir a mesa com os itens, ZERANDO os pagamentos (mesa volta como NÃO paga).\nNão reimprimirá na cozinha.')) return;
   var c = _contaDetalheAtual;
   var mesaNum = parseInt(c.mesa) || c.mesa;
   if(!(c.itens||[]).length){
@@ -12839,101 +12839,98 @@ function restaurarConta(){
     return;
   }
   var agora = Date.now();
-  // 1. Recria pedido com flag impresso=true (não vai imprimir automaticamente no PDV)
-  // IMPORTANTE: incluímos TODOS os itens (inclusive pagos e cancelados) pra que
-  // a tela "Ver pedidos da mesa" mostre o histórico completo.
-  // O pedido restaurado é só um registro — o que importa de fato é a conta_mesa.
-  var itensPedido = (c.itens||[]).map(function(it){
+
+  // Pré-monta itens ZERANDO TODOS os campos de pagamento/divisão/abatimento
+  var itensBase = (c.itens||[]).map(function(it){
     return {
       id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
       selecoes: it.selecoes || [],
       precoBase: it.precoBase || it.preco,
       extras: it.extras || 0,
-      status: it.status || 'ativo',
-      // Preserva info de cancelamento se houver
-      canceladoEm: it.canceladoEm || null,
-      canceladoPor: it.canceladoPor || null,
-      motivoCancelamento: it.motivoCancelamento || null,
-      // Preserva info de pagamento se já foi pago
-      pagamentoId: it.pagamentoId || null,
-      // Preserva divisão se houver
-      divisao: it.divisao || null
+      status: 'ativo',           // ⚠️ FORÇA ATIVO — itens voltam como NÃO pagos
+      canceladoEm: null,
+      canceladoPor: null,
+      motivoCancelamento: null,
+      pagamentoId: null,         // ⚠️ ZERA pagamento individual
+      divisao: null,             // ⚠️ ZERA divisão (volta inteiro)
+      valorAbatido: 0,           // ⚠️ ZERA abatimento (volta valor cheio)
+      pagoEm: null,
+      pagoPor: null,
+      tipoVenda: it.tipoVenda || 'unidade',
+      peso: it.peso || null
     };
   });
   var totalCalc = (c.itens||[])
     .filter(function(it){ return it.status !== 'cancelado'; })
     .reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
-  var pedidoData = {
-    garcom: c.garcom || _nomeGarcom,
+
+  console.log('[RESTAURAR-GARCOM] mesa', mesaNum, '— itens:', itensBase.length);
+
+  // 1. PRIMEIRO cria a conta_mesa (precisamos do contaId pro pedido)
+  var contaMesaData = {
     mesa: mesaNum,
     restauranteId: c.restauranteId || _restauranteId,
     tenantId: c.tenantId || _tenantId,
-    status: 'entregue',          // já foi consumido na origem
-    criadoEm: c.abertaEm || agora,
+    garcomPrincipal: c.garcom || _nomeGarcom,
+    status: 'aberta',
+    abertaEm: c.abertaEm || agora,
     atualizadoEm: agora,
-    itens: itensPedido,
-    total: c.subtotal || totalCalc,
-    impresso: true,              // ⚠️ EVITA REIMPRESSÃO no PDV
-    restaurado: true,
-    contaOrigem: c.id
+    tipoConta: c.tipoConta || 'mesa',
+    cliente: c.cliente || null,
+    itens: itensBase.slice(),
+    pagamentos: [],              // ⚠️ PAGAMENTOS ZERADOS
+    subtotal: c.subtotal || totalCalc,
+    taxa10: 0,
+    total: 0,
+    pagoTotal: 0,                // ⚠️ NADA PAGO
+    restante: 0,
+    restaurada: true,
+    contaOriginalId: c.id
   };
-  // 2. Cria conta_mesa com status 'aberta' preservando TUDO (itens, pagamentos, status individuais)
-  fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
-    // Recria a conta_mesa com tudo preservado exatamente como estava
-    var contaMesaData = {
+
+  fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){
+    var contaId = refConta.id;
+    console.log('[RESTAURAR-GARCOM] conta_mesa criada:', contaId);
+
+    // 2. AGORA cria o pedido JÁ com contaId
+    var pedidoData = {
+      garcom: c.garcom || _nomeGarcom,
       mesa: mesaNum,
       restauranteId: c.restauranteId || _restauranteId,
       tenantId: c.tenantId || _tenantId,
-      garcomPrincipal: c.garcom || _nomeGarcom,
-      status: 'aberta',
-      abertaEm: c.abertaEm || agora,
+      contaId: contaId,
+      status: 'entregue',
+      criadoEm: c.abertaEm || agora,
       atualizadoEm: agora,
-      tipoConta: c.tipoConta || 'mesa',
-      // Cliente da comanda avulsa (se for o caso)
-      cliente: c.cliente || null,
-      // Itens preservados COM seus status (pago/cancelado/ativo) e contaId atualizado
-      itens: (c.itens||[]).map(function(it){
-        var copia = Object.assign({}, it);
-        // Atualiza pedidoId pra apontar pro novo pedido (caso o original tenha sido apagado)
-        copia.pedidoId = refPed.id;
-        // Garante que tem itemKey (criar se faltar)
-        if(!copia.itemKey){
-          copia.itemKey = refPed.id + '_' + Math.random().toString(36).substring(2,8);
-        }
-        return copia;
-      }),
-      pagamentos: c.pagamentos || [],
-      subtotal: c.subtotal || 0,
-      taxa10: c.taxa10 || 0,
-      total: c.total || 0,
-      pagoTotal: c.pagoTotal || 0,
-      restante: c.restante || 0,
-      restaurada: true,
-      contaOriginalId: c.id
+      itens: itensBase.slice(),
+      total: c.subtotal || totalCalc,
+      impresso: true,
+      restaurado: true,
+      contaOrigem: c.id
     };
-    // IMPORTANTE: precisamos atualizar contaId nos itens também pra apontar pra nova conta
-    return fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){
-      // Atualiza o pedido com o contaId correto (assim "Ver pedidos da mesa" filtra certo)
-      return fbDb.collection('pedidos').doc(refPed.id).update({
-        contaId: refConta.id
-      }).then(function(){
-        // Atualiza também os itens da conta_mesa com o contaId pra ficar consistente
-        var itensComContaId = contaMesaData.itens.map(function(it){
-          return Object.assign({}, it, { contaId: refConta.id });
+    return fbDb.collection('pedidos').add(pedidoData).then(function(refPed){
+      console.log('[RESTAURAR-GARCOM] pedido criado:', refPed.id);
+      // 3. Atualiza itens da conta com pedidoId + contaId + itemKey
+      var itensCompletos = itensBase.map(function(it){
+        return Object.assign({}, it, {
+          contaId: contaId,
+          pedidoId: refPed.id,
+          itemKey: refPed.id + '_' + Math.random().toString(36).substring(2,8)
         });
-        return fbDb.collection('contas_mesa').doc(refConta.id).update({
-          itens: itensComContaId
-        });
+      });
+      return fbDb.collection('contas_mesa').doc(contaId).update({
+        itens: itensCompletos
       });
     });
   }).then(function(){
-    // 3. Remove a conta_fechada (sai do histórico)
+    // 4. Remove a conta_fechada
     return fbDb.collection('contas_fechadas').doc(c.id).delete();
   }).then(function(){
-    showToast('✅ Mesa ' + c.mesa + ' restaurada (sem reimprimir)','#4ade80');
+    showToast('✅ Mesa ' + c.mesa + ' restaurada (' + itensBase.length + ' itens, NÃO paga)','#4ade80');
     document.getElementById('modal-conta-detalhe').classList.remove('show');
     document.getElementById('modal-historico').classList.remove('show');
   }).catch(function(e){
+    console.error('[RESTAURAR-GARCOM] erro:', e);
     showToast('❌ ' + e.message,'#f87171');
   });
 }

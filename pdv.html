@@ -4711,9 +4711,32 @@ function renderModeloCategorias(selecionadas, selecionadasTotem){
   if(!wrapT) return;
   // Carrega categorias do totem (variável global _totemCats — populada quando entra na aba totem)
   var catsTotem = (typeof _totemCats !== 'undefined') ? _totemCats : [];
+
+  // Pega categorias do principal que foram TRAZIDAS pro totem (configuradas em _totemCatsPrincipais)
+  // _totemCatsPrincipais é um array de IDs de categorias do principal
+  var idsPrincTrazidas = (typeof _totemCatsPrincipais !== 'undefined') ? _totemCatsPrincipais : [];
+  var catsPrincTrazidas = _categorias.filter(function(c){
+    return idsPrincTrazidas.indexOf(c.id) >= 0;
+  }).map(function(c){
+    return Object.assign({}, c, { _origem: 'principal' });
+  });
+
+  // Função pra combinar e renderizar
+  var renderCombinado = function(catsNativasTotem){
+    var nativasMarcadas = catsNativasTotem.map(function(c){
+      return Object.assign({}, c, { _origem: 'totem' });
+    });
+    // Combina: primeiro as do principal trazidas, depois as nativas do totem
+    var combinadas = catsPrincTrazidas.concat(nativasMarcadas);
+    _renderModeloCatsTotemUI(wrapT, combinadas, selecionadasTotem||[]);
+  };
+
   // Se ainda não carregou, busca do Firestore agora
   if(!catsTotem.length){
-    wrapT.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Carregando categorias do totem...</div>';
+    // Se também não tem categorias trazidas do principal, mostra "carregando"
+    if(!catsPrincTrazidas.length){
+      wrapT.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Carregando categorias do totem...</div>';
+    }
     _refTotemBase().doc('data').collection('categorias').get()
       .then(function(snap){
         var arr = [];
@@ -4721,19 +4744,20 @@ function renderModeloCategorias(selecionadas, selecionadasTotem){
         arr.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
         // Atualiza variável global se ela existe
         if(typeof _totemCats !== 'undefined') _totemCats = arr;
-        _renderModeloCatsTotemUI(wrapT, arr, selecionadasTotem||[]);
+        renderCombinado(arr);
       })
       .catch(function(e){
-        wrapT.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Erro ao carregar.</div>';
+        // Mesmo com erro, mostra as do principal trazidas (se houver)
+        renderCombinado([]);
       });
   } else {
-    _renderModeloCatsTotemUI(wrapT, catsTotem, selecionadasTotem||[]);
+    renderCombinado(catsTotem);
   }
 }
 
 function _renderModeloCatsTotemUI(wrapT, cats, selecionadas){
   if(!cats.length){
-    wrapT.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Nenhuma categoria criada no totem.</div>';
+    wrapT.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Nenhuma categoria disponível no totem.</div>';
     return;
   }
   wrapT.innerHTML = '';
@@ -4741,8 +4765,12 @@ function _renderModeloCatsTotemUI(wrapT, cats, selecionadas){
     var marc = selecionadas.indexOf(c.id) >= 0;
     var lbl = document.createElement('label');
     lbl.className = 'mod-cat-row' + (marc?' selected':'');
+    // Badge de origem: do principal (trazida) ou nativa do totem
+    var badgeOrigem = c._origem === 'principal'
+      ? '<span style="font-size:0.62rem;background:rgba(74,222,128,0.15);color:#4ade80;padding:1px 6px;border-radius:5px;margin-left:6px;font-weight:600;">📋 do principal</span>'
+      : '<span style="font-size:0.62rem;background:rgba(168,85,247,0.15);color:#c084fc;padding:1px 6px;border-radius:5px;margin-left:6px;font-weight:600;">📱 do totem</span>';
     lbl.innerHTML = '<input type="checkbox" data-cat-totem-id="'+c.id+'" '+(marc?'checked':'')+'>'+
-      '<span>'+escapeHtml(c.emoji||'📱')+' '+escapeHtml(c.nome||'')+'</span>';
+      '<span>'+escapeHtml(c.emoji||'📂')+' '+escapeHtml(c.nome||'')+badgeOrigem+'</span>';
     lbl.querySelector('input').addEventListener('change', function(e){
       lbl.classList.toggle('selected', e.target.checked);
     });

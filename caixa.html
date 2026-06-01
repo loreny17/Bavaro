@@ -288,6 +288,7 @@
       <div>Aguardando: <b id="stat-aguardando">0</b></div>
       <div>Pagos hoje: <b id="stat-pagos">0</b></div>
     </div>
+    <button onclick="abrirHistorico()" style="margin-left:12px;background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">📋 Histórico</button>
   </div>
 
   <!-- Corpo: fila + detalhe -->
@@ -1099,6 +1100,285 @@ function escapar(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ════════════════════════════════════════
+//  HISTÓRICO DO DIA
+// ════════════════════════════════════════
+var _historicoUnsub = null;
+var _historicoData = null;
+var _historicoPedidos = [];
+var _historicoBusca = '';
+
+function abrirHistorico(){
+  var ex = document.getElementById('modal-historico');
+  if(ex) ex.remove();
+  var hoje = _dataHoje();
+  _historicoData = hoje;
+  _historicoBusca = '';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-historico';
+  mod.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;animation:fadeInTela 0.2s ease;';
+  mod.innerHTML =
+    '<div style="padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:10px;">' +
+      '<button onclick="fecharHistorico()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:1.3rem;font-family:inherit;">‹</button>' +
+      '<div style="flex:1;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.05em;line-height:1;">HISTÓRICO</div>' +
+        '<div style="font-size:0.78rem;color:var(--muted);" id="hist-data-lbl">' + _formatarDataLbl(hoje) + '</div>' +
+      '</div>' +
+      '<input type="date" id="hist-data-inp" value="' + hoje + '" onchange="trocarDataHistorico(this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:0.86rem;">' +
+    '</div>' +
+    '<div id="hist-resumo" style="padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--border);">' +
+      '<div style="text-align:center;color:var(--muted);font-size:0.86rem;">Carregando...</div>' +
+    '</div>' +
+    '<div style="padding:10px 18px;background:var(--surface);border-bottom:1px solid var(--border);">' +
+      '<input type="text" id="hist-busca" placeholder="🔍 Buscar por senha (ex: 42)" oninput="filtrarHistorico(this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:11px 14px;font-family:inherit;font-size:0.96rem;box-sizing:border-box;">' +
+    '</div>' +
+    '<div id="hist-lista" style="flex:1;overflow-y:auto;padding:10px 14px 30px;">' +
+      '<div style="text-align:center;color:var(--muted);padding:30px;">Carregando pedidos...</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  escutarHistorico(hoje);
+}
+
+function fecharHistorico(){
+  if(_historicoUnsub){ _historicoUnsub(); _historicoUnsub = null; }
+  var m = document.getElementById('modal-historico');
+  if(m) m.remove();
+}
+
+function trocarDataHistorico(data){
+  _historicoData = data;
+  var lbl = document.getElementById('hist-data-lbl');
+  if(lbl) lbl.textContent = _formatarDataLbl(data);
+  escutarHistorico(data);
+}
+
+function filtrarHistorico(termo){
+  _historicoBusca = (termo||'').trim().toLowerCase();
+  renderHistoricoLista();
+}
+
+function _formatarDataLbl(dataIso){
+  try{
+    var partes = dataIso.split('-');
+    var d = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    var diff = Math.round((hoje - d) / 86400000);
+    var sufixo = '';
+    if(diff === 0) sufixo = ' (Hoje)';
+    else if(diff === 1) sufixo = ' (Ontem)';
+    else {
+      var dias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+      sufixo = ' (' + dias[d.getDay()] + ')';
+    }
+    return d.toLocaleDateString('pt-BR') + sufixo;
+  }catch(e){ return dataIso; }
+}
+
+function escutarHistorico(data){
+  if(_historicoUnsub) _historicoUnsub();
+  _historicoPedidos = [];
+  var refBase = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem');
+  _historicoUnsub = refBase.where('data','==',data)
+    .onSnapshot(function(snap){
+      _historicoPedidos = [];
+      snap.forEach(function(d){ _historicoPedidos.push(Object.assign({id:d.id}, d.data())); });
+      _historicoPedidos.sort(function(a,b){
+        return (b.pagoEm || b.criadoEm || 0) - (a.pagoEm || a.criadoEm || 0);
+      });
+      atualizarResumoHistorico();
+      renderHistoricoLista();
+    }, function(e){
+      console.error('[HIST] erro:', e);
+      var lista = document.getElementById('hist-lista');
+      if(lista) lista.innerHTML = '<div style="text-align:center;color:#f87171;padding:30px;">Erro: ' + (e.code||e.message) + '</div>';
+    });
+}
+
+function atualizarResumoHistorico(){
+  var resumo = document.getElementById('hist-resumo');
+  if(!resumo) return;
+  var pagos = _historicoPedidos.filter(function(p){ return p.status === 'pago'; });
+  var cancelados = _historicoPedidos.filter(function(p){ return p.status === 'cancelado'; });
+  var totalGeral = pagos.reduce(function(s,p){ return s + (p.total||0); }, 0);
+  var porForma = { dinheiro:0, pix:0, debito:0, credito:0, '':0 };
+  pagos.forEach(function(p){
+    var f = p.formaPagamento || '';
+    if(porForma[f] === undefined) porForma[f] = 0;
+    porForma[f] += p.total||0;
+  });
+  var fmt = function(v){ return 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+  resumo.innerHTML =
+    '<div style="display:flex;align-items:baseline;gap:14px;margin-bottom:10px;">' +
+      '<div style="flex:1;">' +
+        '<div style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">Faturado no dia</div>' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.9rem;color:var(--accent);line-height:1.1;">' + fmt(totalGeral) + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-size:1.1rem;font-weight:700;">' + pagos.length + '</div>' +
+        '<div style="font-size:0.72rem;color:var(--muted);">pedidos pagos</div>' +
+        (cancelados.length ? '<div style="font-size:0.72rem;color:#f87171;margin-top:2px;">' + cancelados.length + ' cancelado' + (cancelados.length>1?'s':'') + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.82rem;">' +
+      '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>💵 Dinheiro</span><b>' + fmt(porForma.dinheiro) + '</b></div>' +
+      '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>📱 Pix</span><b>' + fmt(porForma.pix) + '</b></div>' +
+      '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>💳 Débito</span><b>' + fmt(porForma.debito) + '</b></div>' +
+      '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>💳 Crédito</span><b>' + fmt(porForma.credito) + '</b></div>' +
+      (porForma[''] > 0 ? '<div style="grid-column:span 2;background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;color:var(--muted);"><span>Sem forma de pagamento</span><b>' + fmt(porForma['']) + '</b></div>' : '') +
+    '</div>';
+}
+
+function renderHistoricoLista(){
+  var lista = document.getElementById('hist-lista');
+  if(!lista) return;
+  var filtrados = _historicoPedidos;
+  if(_historicoBusca){
+    filtrados = _historicoPedidos.filter(function(p){
+      return String(p.senha || '').indexOf(_historicoBusca) >= 0;
+    });
+  }
+  if(!filtrados.length){
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px 20px;">' +
+      (_historicoBusca ? 'Nenhuma senha #' + _historicoBusca + ' encontrada nesse dia' : 'Nenhum pedido nesse dia') +
+    '</div>';
+    return;
+  }
+  lista.innerHTML = filtrados.map(function(p){
+    var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) :
+               (p.criadoEm ? new Date(p.criadoEm).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '');
+    var totalTxt = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var corBorda, statusLbl, statusCor;
+    if(p.status === 'pago'){
+      corBorda = 'var(--verde)';
+      statusLbl = '✓ Pago';
+      statusCor = 'var(--verde)';
+    } else if(p.status === 'cancelado'){
+      corBorda = '#f87171';
+      statusLbl = '✕ Cancelado';
+      statusCor = '#f87171';
+    } else {
+      corBorda = 'var(--accent)';
+      statusLbl = '⏳ Aguardando';
+      statusCor = 'var(--accent)';
+    }
+    var formaLbl = '';
+    if(p.formaPagamento){
+      var nomes = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito' };
+      formaLbl = '<span style="font-size:0.74rem;color:var(--muted);margin-left:8px;">• ' + (nomes[p.formaPagamento] || p.formaPagamento) + '</span>';
+    }
+    var itensResumo = (p.itens||[]).map(function(it){ return (it.qtd||1) + 'x ' + it.nome; }).join(', ');
+    if(itensResumo.length > 80) itensResumo = itensResumo.substring(0, 80) + '...';
+
+    return '<div onclick="abrirDetalheHistorico(\'' + p.id + '\')" style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ' + corBorda + ';border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;color:var(--accent);line-height:1;">#' + (p.senha||'?') + '</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:0.78rem;color:' + statusCor + ';font-weight:700;">' + statusLbl + formaLbl + '</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">' + hora + '</div>' +
+        '</div>' +
+        '<div style="font-weight:700;color:var(--accent);font-size:1.05rem;">R$ ' + totalTxt + '</div>' +
+      '</div>' +
+      '<div style="font-size:0.78rem;color:var(--muted);line-height:1.3;">' + escapar(itensResumo) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function abrirDetalheHistorico(pedidoId){
+  var p = _historicoPedidos.find(function(x){ return x.id === pedidoId; });
+  if(!p) return;
+  var ex = document.getElementById('modal-hist-detalhe');
+  if(ex) ex.remove();
+  var totalTxt = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleString('pt-BR') :
+             (p.criadoEm ? new Date(p.criadoEm).toLocaleString('pt-BR') : '');
+  var nomesPagto = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito' };
+  var itensHtml = (p.itens||[]).map(function(it){
+    var sub = ((it.preco||0) * (it.qtd||1)).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var opcoes = it.selecoesLabel ? '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + escapar(it.selecoesLabel) + '</div>' : '';
+    return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><div><b>' + (it.qtd||1) + 'x</b> ' + escapar(it.nome||'') + opcoes + '</div><div style="font-weight:600;color:var(--accent);">R$ ' + sub + '</div></div>';
+  }).join('');
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-hist-detalhe';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:400;display:flex;align-items:center;justify-content:center;padding:14px;animation:fadeInTela 0.2s ease;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;">' +
+      '<div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.4rem;color:var(--accent);line-height:1;">#' + (p.senha||'?') + '</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:700;font-size:1rem;">Pedido</div>' +
+          '<div style="font-size:0.78rem;color:var(--muted);">' + hora + '</div>' +
+          (p.formaPagamento ? '<div style="font-size:0.8rem;color:var(--accent);margin-top:2px;">' + (nomesPagto[p.formaPagamento] || p.formaPagamento) + '</div>' : '') +
+        '</div>' +
+        '<button onclick="document.getElementById(\'modal-hist-detalhe\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow-y:auto;padding:14px 22px;">' +
+        itensHtml +
+        '<div style="display:flex;justify-content:space-between;padding:12px 0 0;font-size:1.1rem;font-weight:800;"><span>TOTAL</span><span style="color:var(--accent);">R$ ' + totalTxt + '</span></div>' +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;flex-wrap:wrap;">' +
+        (p.status === 'pago' ?
+          '<button onclick="reimprimirRecibo(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--accent);color:#000;border:none;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🧾 Reimprimir Recibo</button>' +
+          '<button onclick="reimprimirCozinha(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🍳 Reimprimir Cozinha</button>' :
+          '<div style="flex:1;text-align:center;color:var(--muted);padding:8px;font-size:0.84rem;">Reimpressão disponível só pra pedidos pagos</div>'
+        ) +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function reimprimirRecibo(pedidoId){
+  var p = _historicoPedidos.find(function(x){ return x.id === pedidoId; });
+  if(!p) return;
+  _disparoReimpressao(p, 'recibo');
+}
+
+function reimprimirCozinha(pedidoId){
+  var p = _historicoPedidos.find(function(x){ return x.id === pedidoId; });
+  if(!p) return;
+  _disparoReimpressao(p, 'cozinha');
+}
+
+function _disparoReimpressao(p, tipo){
+  if(!confirm('Reimprimir ' + (tipo==='recibo'?'recibo':'cupom da cozinha') + ' da senha #' + p.senha + '?')) return;
+  enriquecerItensComCategoria(p.itens||[]).then(function(itensEnriquecidos){
+    var pedidoImpressao = {
+      garcom: 'Totem (reimpressão)',
+      mesa: null,
+      restauranteId: _restauranteId,
+      tenantId: _tenantId,
+      contaId: null,
+      tipoConta: 'totem',
+      cliente: 'Totem #' + p.senha,
+      senhaTotem: p.senha,
+      status: 'preparo',
+      criadoEm: Date.now(),
+      itens: itensEnriquecidos,
+      total: p.total||0,
+      origemTotem: true,
+      pedidoTotemId: p.id,
+      formaPagamento: p.formaPagamento || '',
+      reimpressao: true,
+      tipoReimpressao: tipo
+    };
+    if(tipo === 'recibo'){
+      pedidoImpressao.imprimir = false; // não imprime cozinha
+      pedidoImpressao.imprimirRecibo = true;
+    } else {
+      pedidoImpressao.imprimir = true; // imprime cozinha
+      pedidoImpressao.imprimirRecibo = false;
+    }
+    return fbDb.collection('pedidos').add(pedidoImpressao);
+  }).then(function(){
+    mostrarToast('✓ Reimpressão enviada', '#22c55e');
+  }).catch(function(e){
+    mostrarToast('Erro: ' + (e.message||e.code), '#f87171');
+  });
+}
 
 </script>
 

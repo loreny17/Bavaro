@@ -672,9 +672,12 @@
         URL: <span id="cfg-url">—</span>
       </div>
     </div>
-    <div class="cart-rodape" style="display:flex;gap:8px;">
-      <button onclick="restaurarPadrao()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Restaurar padrão</button>
-      <button onclick="salvarConfig()" class="btn-finalizar" style="flex:1.5;">Aplicar e salvar</button>
+    <div class="cart-rodape" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;">
+        <button onclick="restaurarPadrao()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Restaurar padrão</button>
+        <button onclick="salvarConfig()" class="btn-finalizar" style="flex:1.5;">Aplicar e salvar</button>
+      </div>
+      <button onclick="publicarLayoutPraTodos()" style="padding:13px;background:rgba(74,222,128,0.15);border:1px solid #4ade80;color:#4ade80;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">📤 Definir como padrão pra clientes (QR Code)</button>
     </div>
   </div>
 </div>
@@ -2145,18 +2148,44 @@ var _CFG_PADRAO = {
 };
 
 // Carrega config do localStorage (chamado quando totem inicia)
-// EXCEÇÃO: no modo QR (cliente escaneou pelo celular), ignora localStorage
-// e sempre usa o padrão — pra todos os clientes verem o mesmo layout
+// EXCEÇÃO: no modo QR (cliente escaneou pelo celular), busca o layout publicado
+// pelo dono do restaurante (Firestore) em vez do localStorage
 function carregarCfgLayout(){
-  // Modo QR: força padrão (não usa localStorage do dispositivo do cliente)
+  // Mostra a versão na tela inicial (sempre)
+  setTimeout(function(){
+    var v = document.getElementById('ti-versao');
+    if(v) v.textContent = 'v.' + _VERSAO_TOTEM;
+  }, 50);
+
+  // Modo QR: aplica padrão IMEDIATAMENTE, e depois sobrescreve com o publicado no Firestore
+  // (assim a tela já aparece com algo enquanto carrega; se o Firestore tiver, atualiza)
   if(_modoQR){
     aplicarCfg(_CFG_PADRAO);
-    setTimeout(function(){
-      var v = document.getElementById('ti-versao');
-      if(v) v.textContent = 'v.' + _VERSAO_TOTEM;
-    }, 50);
+    // Busca layout publicado pelo dono — assim que tiver _tenantId e _restauranteId
+    var tentarBuscar = function(){
+      if(!_tenantId || !_restauranteId){
+        setTimeout(tentarBuscar, 300);
+        return;
+      }
+      fbDb.collection('tenants').doc(_tenantId)
+        .collection('restaurantes').doc(_restauranteId)
+        .collection('cardapio_totem').doc('config').get()
+        .then(function(doc){
+          if(doc.exists){
+            var d = doc.data();
+            if(d.layoutQR){
+              console.log('[TOTEM-QR] Aplicando layout publicado:', d.layoutQR);
+              aplicarCfg(d.layoutQR);
+            }
+          }
+        })
+        .catch(function(e){ console.warn('[TOTEM-QR] erro buscar layout:', e); });
+    };
+    tentarBuscar();
     return;
   }
+
+  // Modo normal (totem do estabelecimento): usa localStorage
   try{
     var raw = localStorage.getItem(_CFG_KEY);
     var cfg = raw ? JSON.parse(raw) : _CFG_PADRAO;
@@ -2164,11 +2193,33 @@ function carregarCfgLayout(){
   }catch(e){
     aplicarCfg(_CFG_PADRAO);
   }
-  // Mostra a versão na tela inicial
-  setTimeout(function(){
-    var v = document.getElementById('ti-versao');
-    if(v) v.textContent = 'v.' + _VERSAO_TOTEM;
-  }, 50);
+}
+
+// Publica o layout atual como padrão pra todos os clientes que entrarem via QR Code
+function publicarLayoutPraTodos(){
+  // Pega config atual do localStorage (que tá no localStorage E aplicada na tela)
+  var cfg = _CFG_PADRAO;
+  try{
+    var raw = localStorage.getItem(_CFG_KEY);
+    if(raw) cfg = JSON.parse(raw);
+  }catch(e){}
+
+  if(!_tenantId || !_restauranteId){
+    alert('Aguarde o totem carregar antes de publicar.');
+    return;
+  }
+
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('cardapio_totem').doc('config')
+    .set({ layoutQR: cfg, layoutQRAtualizadoEm: Date.now() }, {merge: true})
+    .then(function(){
+      alert('✅ Layout publicado!\n\nAgora todos os clientes que escanearem o QR Code verão exatamente esse layout:\n\n• Lateral: ' + cfg.lateral + 'px\n• Colunas: ' + cfg.colunas + '\n• Foto: ' + cfg.fotoRatio + '\n• Cantos: ' + cfg.radius + 'px');
+    })
+    .catch(function(e){
+      alert('❌ Erro ao publicar: ' + e.message);
+      console.error(e);
+    });
 }
 
 // Aplica config nas variáveis CSS (sem salvar)

@@ -5179,12 +5179,46 @@ function filtrarItensPorModelo(itens, modelo){
 }
 
 // ─── ENVIAR PARA IMPRESSORA ───
+// Remove acentos pra impressora térmica (que geralmente usa CP850, não UTF-8)
+// Substitui caracteres latinos comuns. Bytes de controle (<0x20) e binários (>=0x80) ficam intactos.
+function removerAcentosImpressao(texto){
+  if(!texto) return texto;
+  var mapa = {
+    // Maiúsculas
+    'Á':'A','À':'A','Â':'A','Ã':'A','Ä':'A',
+    'É':'E','È':'E','Ê':'E','Ë':'E',
+    'Í':'I','Ì':'I','Î':'I','Ï':'I',
+    'Ó':'O','Ò':'O','Ô':'O','Õ':'O','Ö':'O',
+    'Ú':'U','Ù':'U','Û':'U','Ü':'U',
+    'Ç':'C','Ñ':'N',
+    // Minúsculas
+    'á':'a','à':'a','â':'a','ã':'a','ä':'a',
+    'é':'e','è':'e','ê':'e','ë':'e',
+    'í':'i','ì':'i','î':'i','ï':'i',
+    'ó':'o','ò':'o','ô':'o','õ':'o','ö':'o',
+    'ú':'u','ù':'u','û':'u','ü':'u',
+    'ç':'c','ñ':'n',
+    // Símbolos
+    'º':'o','ª':'a','°':'o'
+  };
+  var resultado = '';
+  for(var i=0; i<texto.length; i++){
+    var ch = texto.charAt(i);
+    resultado += (mapa[ch] !== undefined) ? mapa[ch] : ch;
+  }
+  return resultado;
+}
+
 function enviarParaImpressora(imp, conteudo){
   if(!_qzPronto){
     showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
     return Promise.reject('desconectado');
   }
   if(!conteudo){ return Promise.reject('Sem conteúdo'); }
+
+  // 🔤 Remove acentos do conteúdo antes de mandar pra térmica
+  // (impressoras ESC/POS usam CP850, não UTF-8 — acentos viram lixo)
+  conteudo = removerAcentosImpressao(conteudo);
 
   // ─── MODO ELECTRON (app desktop) ───
   if(_modoImpressao === 'electron'){
@@ -8626,25 +8660,139 @@ function abrirModalQRTotem(){
   }, 50);
 }
 
-// ESC/POS QR Code (formato nativo da impressora térmica)
-// Modelo 2 (mais comum) — Comandos: GS ( k
+// Gera bytes ESC/POS pra imprimir um QR Code como IMAGEM RASTER
+// (compatível com TODA impressora térmica, mesmo as que não suportam QR nativo)
+function escposQRCodeRaster(texto, tamanhoModulo){
+  tamanhoModulo = tamanhoModulo || 6; // multiplicador de pixel (6 = QR de bom tamanho na 80mm)
+  if(typeof QRCode === 'undefined'){
+    console.warn('Lib QRCode não carregou');
+    return '';
+  }
+  // 1. Cria QR como canvas usando qrcodejs num div temporário oculto
+  var divTemp = document.createElement('div');
+  divTemp.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
+  document.body.appendChild(divTemp);
+  try{
+    new QRCode(divTemp, {
+      text: texto,
+      width: 256,
+      height: 256,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }catch(e){
+    document.body.removeChild(divTemp);
+    console.error('Erro gerar QR canvas:', e);
+    return '';
+  }
+  // 2. Pega o canvas ou table renderizado
+  var canvas = divTemp.querySelector('canvas');
+  var img = divTemp.querySelector('img');
+  var matrixPx = null;
+  if(canvas){
+    var ctx = canvas.getContext('2d');
+    var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    matrixPx = { w: canvas.width, h: canvas.height, data: imgData.data };
+  } else if(img && img.complete && img.naturalWidth > 0){
+    // Caso seja img, desenha num canvas pra ler pixels
+    var cv2 = document.createElement('canvas');
+    cv2.width = img.naturalWidth;
+    cv2.height = img.naturalHeight;
+    cv2.getContext('2d').drawImage(img, 0, 0);
+    var d2 = cv2.getContext('2d').getImageData(0, 0, cv2.width, cv2.height);
+    matrixPx = { w: cv2.width, h: cv2.height, data: d2.data };
+  }
+  document.body.removeChild(divTemp);
+  if(!matrixPx){
+    console.warn('Não conseguiu extrair pixels do QR');
+    return '';
+  }
+  // 3. Detecta tamanho real da matriz (qrcodejs adiciona margem branca)
+  //    Procura primeira/última linha/coluna com pixel preto
+  var w = matrixPx.w, h = matrixPx.h, data = matrixPx.data;
+  function isBlack(x, y){
+    var idx = (y*w + x) * 4;
+    return data[idx] < 128; // R do pixel
+  }
+  var minX=w, minY=h, maxX=0, maxY=0;
+  for(var y=0; y<h; y++){
+    for(var x=0; x<w; x++){
+      if(isBlack(x,y)){
+        if(x<minX) minX=x;
+        if(y<minY) minY=y;
+        if(x>maxX) maxX=x;
+        if(y>maxY) maxY=y;
+      }
+    }
+  }
+  if(minX > maxX){ return ''; } // sem pixels pretos
+  // 4. Calcula o tamanho dos "módulos" (cada quadradinho do QR)
+  //    qrcodejs sempre desenha módulos quadrados de tamanho igual
+  //    Vamos varrer a primeira linha pra detectar o tamanho do módulo
+  var moduloDetect = 1;
+  for(var x=minX; x<=maxX; x++){
+    if(!isBlack(x, minY)) break;
+    moduloDetect++;
+  }
+  // 5. Quantos módulos tem o QR (largura/altura em módulos)
+  var totalMods = Math.round((maxX - minX + 1) / moduloDetect);
+  // 6. Monta a matriz binária do QR (true = preto)
+  var matrix = [];
+  for(var my=0; my<totalMods; my++){
+    matrix.push([]);
+    var pxY = minY + Math.floor((my + 0.5) * moduloDetect);
+    for(var mx=0; mx<totalMods; mx++){
+      var pxX = minX + Math.floor((mx + 0.5) * moduloDetect);
+      matrix[my].push(isBlack(pxX, pxY));
+    }
+  }
+  // 7. Renderiza essa matriz EXPANDIDA por `tamanhoModulo` em raster ESC/POS
+  //    Comando: GS v 0 m xL xH yL yH d1...dN
+  //    m = 0 (densidade normal)
+  //    xL/xH = largura em bytes (cada byte = 8 pixels)
+  //    yL/yH = altura em pixels
+  var pixelsPorLinha = totalMods * tamanhoModulo;
+  // Largura precisa ser múltipla de 8 pra ESC/POS raster
+  var bytesPorLinha = Math.ceil(pixelsPorLinha / 8);
+  var larguraTotal = bytesPorLinha * 8;
+  var altura = totalMods * tamanhoModulo;
+  var xL = bytesPorLinha & 0xff;
+  var xH = (bytesPorLinha >> 8) & 0xff;
+  var yL = altura & 0xff;
+  var yH = (altura >> 8) & 0xff;
+  var saida = '';
+  // Centraliza o QR
+  saida += escposCenter();
+  // Cabeçalho do comando GS v 0
+  saida += GS + 'v' + '0' + String.fromCharCode(0) +
+           String.fromCharCode(xL) + String.fromCharCode(xH) +
+           String.fromCharCode(yL) + String.fromCharCode(yH);
+  // Pixels
+  for(var py=0; py<altura; py++){
+    var moduloY = Math.floor(py / tamanhoModulo);
+    for(var bx=0; bx<bytesPorLinha; bx++){
+      var byte = 0;
+      for(var bit=0; bit<8; bit++){
+        var px = bx*8 + bit;
+        if(px < pixelsPorLinha){
+          var moduloX = Math.floor(px / tamanhoModulo);
+          if(matrix[moduloY] && matrix[moduloY][moduloX]){
+            byte |= (1 << (7 - bit));
+          }
+        }
+      }
+      saida += String.fromCharCode(byte);
+    }
+  }
+  saida += escposLeft();
+  return saida;
+}
+
+// ESC/POS QR Code nativo (mantido por compatibilidade — mas a impressora pode não suportar)
 function escposQRCode(texto, tamanho){
-  tamanho = tamanho || 8; // 1-16, tamanho do módulo (8 = bom em térmica 80mm)
-  var bytes = '';
-  // Selecionar modelo 2
-  bytes += GS + '(k' + String.fromCharCode(4) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(65) + String.fromCharCode(50) + String.fromCharCode(0);
-  // Definir tamanho do módulo
-  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(67) + String.fromCharCode(tamanho);
-  // Nível de correção de erro (H = 51 = ~30%)
-  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(69) + String.fromCharCode(51);
-  // Armazenar dados no buffer
-  var len = texto.length + 3;
-  var pL = len & 0xff;
-  var pH = (len >> 8) & 0xff;
-  bytes += GS + '(k' + String.fromCharCode(pL) + String.fromCharCode(pH) + String.fromCharCode(49) + String.fromCharCode(80) + String.fromCharCode(48) + texto;
-  // Imprimir o QR Code
-  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(81) + String.fromCharCode(48);
-  return bytes;
+  // Usa o raster (bitmap) em vez do comando QR nativo, pra funcionar em qualquer impressora
+  return escposQRCodeRaster(texto, 6);
 }
 
 // Imprime QR Code na impressora térmica (ESC/POS nativo)

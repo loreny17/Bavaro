@@ -8708,9 +8708,16 @@ function totemAbrirModalItem(item){
           '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:8px;">Grupos de adicionais (sem cebola, + bacon, etc)</label>' +
           '<div id="ti-grupos">' + gruposHtml + '</div>' +
         '</div>' +
-        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;">' +
           '<input type="checkbox" id="ti-ativo"' + (item.ativo !== false ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
           '<span style="font-size:0.88rem;">Item ativo (aparece no totem)</span>' +
+        '</label>' +
+        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.25);border-radius:9px;padding:10px;">' +
+          '<input type="checkbox" id="ti-modo-wizard"' + (item.modoWizard ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:#c084fc;">' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:0.88rem;font-weight:700;color:#c084fc;">✨ Modo Wizard (passo a passo)</div>' +
+            '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Cliente vê <b>uma escolha por vez</b> em tela cheia com fotos grandes. Ideal pra "Monte Seu Prato" com várias etapas.</div>' +
+          '</div>' +
         '</label>' +
       '</div>' +
       '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
@@ -8838,6 +8845,7 @@ function totemSalvarItem(id, fotoAtual){
   var preco = parseFloat(document.getElementById('ti-preco').value);
   var catId = document.getElementById('ti-cat').value;
   var ativo = document.getElementById('ti-ativo').checked;
+  var modoWizard = !!(document.getElementById('ti-modo-wizard') && document.getElementById('ti-modo-wizard').checked);
   var descricao = (document.getElementById('ti-descricao').value||'').trim();
 
   // Coleta grupos marcados PRESERVANDO A ORDEM (mantida pelas setinhas ▲▼)
@@ -8856,6 +8864,7 @@ function totemSalvarItem(id, fotoAtual){
     descricao: descricao,
     foto: foto,
     ativo: ativo,
+    modoWizard: modoWizard,
     gruposIds: gruposIds,
     atualizadoEm: Date.now()
   };
@@ -8923,11 +8932,12 @@ function totemAbrirModalGrupo(grupo){
   grupo = grupo || { nome:'', tipo:'unica', opcoes:[] };
   // Guardamos qual grupo está sendo editado (pra excluí-lo do select de "abrir grupos")
   window._totemGrupoEditandoId = ehEdicao ? grupo.id : null;
-  // Guardamos as opções num estado pra editar (com abreGrupos garantido)
+  // Guardamos as opções num estado pra editar (com abreGrupos e foto garantidos)
   window._totemOpcoesEditando = (grupo.opcoes||[]).map(function(o){
     return {
       nome: o.nome || '',
       preco: o.preco || 0,
+      foto: o.foto || '',
       abreGrupos: (o.abreGrupos || []).slice()
     };
   });
@@ -9009,17 +9019,25 @@ function totemRenderOpcoesNoModal(){
       ? '<select onchange="totemVincularGrupo(' + idx + ',this.value);this.value=\'\';" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:0.76rem;font-family:inherit;">' + opcoesSelect + '</select>'
       : '';
 
+    var fotoMini = o.foto
+      ? '<img src="' + o.foto + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;" onclick="totemEscolherFotoOpcao(' + idx + ')">'
+      : '<div onclick="totemEscolherFotoOpcao(' + idx + ')" style="width:42px;height:42px;background:var(--surface2);border:1px dashed var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;" title="Adicionar foto">📷</div>';
+    var btnRemoveFoto = o.foto ? '<button onclick="totemRemoverFotoOpcao(' + idx + ')" style="background:transparent;border:none;color:#f87171;font-size:0.7rem;cursor:pointer;padding:2px 4px;">remover foto</button>' : '';
+
     return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;">' +
-      // Linha 1: setinhas + nome + preço + remover
+      // Linha 1: setinhas + foto + nome + preço + remover
       '<div style="display:flex;align-items:center;gap:8px;">' +
         '<div style="display:flex;flex-direction:column;gap:2px;">' +
           '<button onclick="totemMoverOpcao(' + idx + ',-1)" ' + (idx===0?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===0?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
           '<button onclick="totemMoverOpcao(' + idx + ',1)" ' + (idx===ops.length-1?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===ops.length-1?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
         '</div>' +
+        fotoMini +
         '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(o.nome||'') + '</span>' +
         '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
         '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
       '</div>' +
+      // Linha extra: botão de remover foto se tiver
+      (btnRemoveFoto ? '<div style="margin-top:4px;text-align:right;">' + btnRemoveFoto + '</div>' : '') +
       // Linha 2: grupos que esta opção "abre"
       '<div style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;">' +
         '<span style="font-size:0.7rem;color:var(--muted);">Ao escolher, abre:</span>' +
@@ -9030,12 +9048,52 @@ function totemRenderOpcoesNoModal(){
   }).join('');
 }
 
+// Abre seletor de arquivo pra opção, redimensiona e salva em base64
+function totemEscolherFotoOpcao(idx){
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e){
+    var f = e.target.files[0];
+    if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var img = new Image();
+      img.onload = function(){
+        // Redimensiona pra max 320x320 (fotos das opções são menores que dos itens)
+        var canvas = document.createElement('canvas');
+        var max = 320;
+        var w = img.width, h = img.height;
+        if(w > h){ if(w > max){ h = h * (max/w); w = max; } }
+        else { if(h > max){ w = w * (max/h); h = max; } }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var base64 = canvas.toDataURL('image/jpeg', 0.78);
+        if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
+        if(window._totemOpcoesEditando[idx]){
+          window._totemOpcoesEditando[idx].foto = base64;
+          totemRenderOpcoesNoModal();
+        }
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  };
+  input.click();
+}
+
+function totemRemoverFotoOpcao(idx){
+  if(!window._totemOpcoesEditando || !window._totemOpcoesEditando[idx]) return;
+  window._totemOpcoesEditando[idx].foto = '';
+  totemRenderOpcoesNoModal();
+}
+
 function totemAddOpcao(){
   var nome = (document.getElementById('tg-op-nome').value||'').trim();
   var preco = parseFloat(document.getElementById('tg-op-preco').value) || 0;
   if(!nome){ document.getElementById('tg-op-nome').focus(); return; }
   if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
-  window._totemOpcoesEditando.push({ nome:nome, preco:preco, abreGrupos:[] });
+  window._totemOpcoesEditando.push({ nome:nome, preco:preco, foto:'', abreGrupos:[] });
   document.getElementById('tg-op-nome').value = '';
   document.getElementById('tg-op-preco').value = '';
   totemRenderOpcoesNoModal();

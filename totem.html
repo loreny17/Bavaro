@@ -1304,6 +1304,11 @@ function mostrarAvisoTotem(msg){
 
 // ─── Modal de personalização do item ───
 function abrirModalItem(){
+  // Se item tem modoWizard ligado E tem grupos, abre wizard
+  if(_itemAberto && _itemAberto.modoWizard && _gruposDoItem(_itemAberto).length > 0){
+    abrirWizardItem();
+    return;
+  }
   renderModalItem();
   document.getElementById('modal-item').classList.add('aberto');
 }
@@ -1312,6 +1317,229 @@ function fecharModalItem(){
   _itemAberto = null;
   _selecoesTemp = {};
   _qtdTemp = 1;
+}
+
+// ════════════════════════════════════════════════
+// ✨ MODO WIZARD — passo a passo (Monte Seu Prato)
+// ════════════════════════════════════════════════
+var _wizPassoAtual = 0;
+var _wizGrupos = [];
+
+function abrirWizardItem(){
+  _wizGrupos = _gruposDoItem(_itemAberto);
+  _wizPassoAtual = 0;
+  _selecoesTemp = {};
+  _qtdTemp = 1;
+  // Limpa modal anterior
+  var ex = document.getElementById('wizard-overlay');
+  if(ex) ex.remove();
+  // Cria overlay fullscreen
+  var ov = document.createElement('div');
+  ov.id = 'wizard-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:600;background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);display:flex;flex-direction:column;animation:fadeInTela 0.3s ease;';
+  document.body.appendChild(ov);
+  renderWizardPasso();
+}
+
+function fecharWizard(){
+  var ov = document.getElementById('wizard-overlay');
+  if(ov) ov.remove();
+  _itemAberto = null;
+  _selecoesTemp = {};
+  _qtdTemp = 1;
+  _wizGrupos = [];
+}
+
+function renderWizardPasso(){
+  var ov = document.getElementById('wizard-overlay');
+  if(!ov) return;
+  var it = _itemAberto;
+  var totalPassos = _wizGrupos.length + 1; // grupos + tela final de revisão
+  var ehFinal = _wizPassoAtual >= _wizGrupos.length;
+
+  if(ehFinal){
+    renderWizardRevisao();
+    return;
+  }
+
+  var grupo = _wizGrupos[_wizPassoAtual];
+  var ehMultipla = grupo.tipo === 'multipla';
+  var selecaoAtual = _selecoesTemp[grupo.id] || (ehMultipla ? [] : null);
+
+  // Indicador de progresso (●●○○)
+  var dots = '';
+  for(var i=0; i<totalPassos; i++){
+    var ativa = i === _wizPassoAtual;
+    var passada = i < _wizPassoAtual;
+    var cor = ativa ? 'var(--accent)' : (passada ? 'var(--accent)' : 'rgba(255,255,255,0.25)');
+    var tam = ativa ? '10px' : '8px';
+    dots += '<div style="width:'+tam+';height:'+tam+';border-radius:50%;background:'+cor+';transition:all 0.2s;"></div>';
+  }
+
+  var opcoesHtml = (grupo.opcoes||[]).map(function(o, idx){
+    var selecionado = ehMultipla
+      ? (selecaoAtual||[]).indexOf(idx) >= 0
+      : selecaoAtual === idx;
+    var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
+    var foto = o.foto
+      ? '<img src="'+o.foto+'" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">'
+      : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:4rem;background:rgba(255,255,255,0.04);border-radius:14px;">🍽️</div>';
+    return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:3px solid '+(selecionado?'var(--accent)':'transparent')+';border-radius:16px;padding:10px;cursor:pointer;transition:all 0.2s;position:relative;">' +
+      (selecionado ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent);color:#000;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;z-index:2;">✓</div>' : '') +
+      '<div style="width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:14px;margin-bottom:10px;">' + foto + '</div>' +
+      '<div style="font-weight:700;font-size:1.05rem;text-align:center;color:var(--text);line-height:1.2;">' + escapar(o.nome||'') + '</div>' +
+      (precoTxt ? '<div style="text-align:center;color:var(--accent);font-weight:700;font-size:0.95rem;margin-top:4px;">'+precoTxt+'</div>' : '') +
+    '</div>';
+  }).join('');
+
+  // Botão voltar (esquerda) + título passo (centro) + fechar (direita)
+  var podeAvancarMultipla = ehMultipla && (selecaoAtual||[]).length > 0;
+  ov.innerHTML =
+    // Header
+    '<div style="padding:18px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,0.08);">' +
+      '<button onclick="' + (_wizPassoAtual === 0 ? 'fecharWizard()' : 'wizardVoltar()') + '" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:42px;height:42px;border-radius:50%;cursor:pointer;font-size:1.4rem;font-family:inherit;">' + (_wizPassoAtual === 0 ? '×' : '‹') + '</button>' +
+      '<div style="flex:1;text-align:center;">' +
+        '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Passo ' + (_wizPassoAtual+1) + ' de ' + totalPassos + '</div>' +
+        '<div style="display:flex;gap:6px;justify-content:center;margin-top:8px;align-items:center;">' + dots + '</div>' +
+      '</div>' +
+      '<div style="width:42px;"></div>' +
+    '</div>' +
+    // Conteúdo
+    '<div style="flex:1;overflow-y:auto;padding:18px 22px 100px;">' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.2rem;color:var(--accent);letter-spacing:0.05em;line-height:1.1;text-align:center;margin-bottom:6px;">' + escapar(grupo.nome||'') + '</div>' +
+      '<div style="text-align:center;color:var(--muted);font-size:0.92rem;margin-bottom:24px;">' +
+        (ehMultipla ? 'Escolha quantas quiser' : 'Escolha 1') +
+        (grupo.obrigatorio ? ' • <span style="color:#f87171;">obrigatório</span>' : '') +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;">' + opcoesHtml + '</div>' +
+    '</div>' +
+    // Footer (botão próximo só em múltipla)
+    (ehMultipla
+      ? '<div style="padding:16px 22px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.4);">' +
+          '<button onclick="wizardAvancar()" ' + (!podeAvancarMultipla && grupo.obrigatorio ? 'disabled' : '') + ' style="width:100%;padding:18px;background:var(--accent);color:#000;border:none;border-radius:14px;font-family:inherit;font-weight:800;font-size:1.1rem;cursor:pointer;' + (!podeAvancarMultipla && grupo.obrigatorio ? 'opacity:0.4;cursor:not-allowed;' : '') + '">' +
+            (podeAvancarMultipla ? 'Próximo →' : (grupo.obrigatorio ? 'Selecione ao menos 1' : 'Pular →')) +
+          '</button>' +
+        '</div>'
+      : '');
+}
+
+function wizardEscolher(idx){
+  var grupo = _wizGrupos[_wizPassoAtual];
+  if(!grupo) return;
+  if(grupo.tipo === 'multipla'){
+    var atual = _selecoesTemp[grupo.id] || [];
+    var pos = atual.indexOf(idx);
+    if(pos >= 0) atual.splice(pos, 1); else atual.push(idx);
+    _selecoesTemp[grupo.id] = atual;
+    renderWizardPasso(); // re-renderiza pra atualizar visual
+  } else {
+    // Única: seleciona e AVANÇA automaticamente
+    _selecoesTemp[grupo.id] = idx;
+    try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
+    setTimeout(wizardAvancar, 250);
+  }
+}
+
+function wizardAvancar(){
+  var grupo = _wizGrupos[_wizPassoAtual];
+  // Valida obrigatório
+  if(grupo && grupo.obrigatorio){
+    var sel = _selecoesTemp[grupo.id];
+    var temSelecao = grupo.tipo === 'multipla' ? (sel && sel.length > 0) : (sel != null);
+    if(!temSelecao) return;
+  }
+  _wizPassoAtual++;
+  renderWizardPasso();
+}
+
+function wizardVoltar(){
+  if(_wizPassoAtual <= 0){ fecharWizard(); return; }
+  _wizPassoAtual--;
+  renderWizardPasso();
+}
+
+function renderWizardRevisao(){
+  var ov = document.getElementById('wizard-overlay');
+  if(!ov) return;
+  var it = _itemAberto;
+  var totalPassos = _wizGrupos.length + 1;
+
+  // Monta resumo das escolhas
+  var precoTotal = it.preco || 0;
+  var resumoHtml = _wizGrupos.map(function(grupo){
+    var sel = _selecoesTemp[grupo.id];
+    var escolhas;
+    if(grupo.tipo === 'multipla'){
+      escolhas = (sel||[]).map(function(idx){ return grupo.opcoes[idx]; }).filter(Boolean);
+    } else {
+      escolhas = (sel != null && grupo.opcoes[sel]) ? [grupo.opcoes[sel]] : [];
+    }
+    if(!escolhas.length){
+      return '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08);"><b>' + escapar(grupo.nome) + ':</b> <span style="color:var(--muted);">(nada)</span></div>';
+    }
+    return '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08);">' +
+      '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">' + escapar(grupo.nome) + '</div>' +
+      escolhas.map(function(o){
+        precoTotal += (o.preco || 0);
+        return '<div style="display:flex;justify-content:space-between;font-weight:600;font-size:1rem;">' +
+          '<span>• ' + escapar(o.nome) + '</span>' +
+          (o.preco ? '<span style="color:var(--accent);">+R$ ' + o.preco.toLocaleString('pt-BR',{minimumFractionDigits:2}) + '</span>' : '') +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }).join('');
+
+  // Dots — última passada
+  var dots = '';
+  for(var i=0; i<totalPassos; i++){
+    dots += '<div style="width:8px;height:8px;border-radius:50%;background:var(--accent);"></div>';
+  }
+
+  ov.innerHTML =
+    // Header
+    '<div style="padding:18px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,0.08);">' +
+      '<button onclick="wizardVoltar()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:42px;height:42px;border-radius:50%;cursor:pointer;font-size:1.4rem;font-family:inherit;">‹</button>' +
+      '<div style="flex:1;text-align:center;">' +
+        '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Confira seu pedido</div>' +
+        '<div style="display:flex;gap:6px;justify-content:center;margin-top:8px;">' + dots + '</div>' +
+      '</div>' +
+      '<div style="width:42px;"></div>' +
+    '</div>' +
+    // Conteúdo
+    '<div style="flex:1;overflow-y:auto;padding:18px 22px 24px;">' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.6rem;color:var(--text);text-align:center;line-height:1.1;margin-bottom:24px;">' + escapar(it.nome) + '</div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;">' +
+        resumoHtml +
+      '</div>' +
+      '<div style="margin-top:24px;display:flex;align-items:center;justify-content:center;gap:18px;">' +
+        '<div style="font-size:0.86rem;color:var(--muted);">Quantidade:</div>' +
+        '<button onclick="wizardQtd(-1)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);width:42px;height:42px;border-radius:50%;font-size:1.4rem;cursor:pointer;">−</button>' +
+        '<div id="wiz-qtd" style="font-family:\'Bebas Neue\',sans-serif;font-size:2.2rem;color:var(--accent);min-width:40px;text-align:center;">' + _qtdTemp + '</div>' +
+        '<button onclick="wizardQtd(1)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);width:42px;height:42px;border-radius:50%;font-size:1.4rem;cursor:pointer;">+</button>' +
+      '</div>' +
+    '</div>' +
+    // Footer com total + adicionar
+    '<div style="padding:16px 22px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.4);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+        '<div style="font-size:0.92rem;color:var(--muted);">Total</div>' +
+        '<div id="wiz-total" style="font-family:\'Bebas Neue\',sans-serif;font-size:1.8rem;color:var(--accent);">R$ ' + (precoTotal * _qtdTemp).toLocaleString('pt-BR', {minimumFractionDigits:2}) + '</div>' +
+      '</div>' +
+      '<button onclick="wizardAdicionar()" style="width:100%;padding:18px;background:var(--accent);color:#000;border:none;border-radius:14px;font-family:inherit;font-weight:800;font-size:1.15rem;cursor:pointer;">✓ Adicionar ao carrinho</button>' +
+    '</div>';
+}
+
+function wizardQtd(delta){
+  _qtdTemp = Math.max(1, _qtdTemp + delta);
+  renderWizardRevisao();
+}
+
+function wizardAdicionar(){
+  // Reusa a lógica de adicionar ao carrinho do modal normal
+  // Monta selecoesLabel a partir de _selecoesTemp
+  if(typeof adicionarAoCarrinho === 'function'){
+    adicionarAoCarrinho();
+  }
+  fecharWizard();
 }
 
 function renderModalItem(){

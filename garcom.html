@@ -8003,17 +8003,39 @@ function renderItens(){
 // Renderiza UM card de item dentro do grid (reaproveitável)
 function _renderCardItem(it, grid){
   var qtdNoCarrinho = _carrinho.filter(function(c){ return c.id===it.id; }).reduce(function(acc,c){ return acc+c.qtd; },0);
+  // Detecta status (pausado / estoque esgotado)
+  var pausado = it.pausado === true;
+  var ctrlEstoque = it.controlarEstoque === true;
+  var qtdEstoque = (typeof it.estoque === 'number') ? it.estoque : null;
+  var esgotadoEstoque = ctrlEstoque && qtdEstoque !== null && qtdEstoque <= 0;
+  var estoqueBaixo = ctrlEstoque && qtdEstoque !== null && qtdEstoque > 0 && qtdEstoque <= 3;
+  var bloqueado = pausado || esgotadoEstoque;
+
   var card = document.createElement('div');
-  card.className = 'item-card';
+  card.className = 'item-card' + (bloqueado ? ' item-bloqueado' : '');
+  if(bloqueado){
+    card.style.opacity = '0.5';
+    card.style.position = 'relative';
+  }
   var fotoHtml = it.foto
     ? '<div class="item-foto"><img src="'+it.foto+'" alt="'+it.nome+'" loading="lazy" onerror="this.parentNode.innerHTML=\'🍽️\'"></div>'
     : '<div class="item-foto">🍽️</div>';
-  var badge = qtdNoCarrinho > 0
+  var badge = qtdNoCarrinho > 0 && !bloqueado
     ? '<div class="item-add-badge" style="position:absolute;bottom:6px;right:6px;">'+qtdNoCarrinho+'</div>'
     : '';
+  // Badge de status (esgotado / pausado / baixo)
+  var statusBadge = '';
+  if(bloqueado){
+    var lbl = pausado ? '⏸️ PAUSADO' : '✕ ESGOTADO';
+    var bgCor = pausado ? '#fbbf24' : '#f87171';
+    var corTxt = pausado ? '#000' : '#fff';
+    statusBadge = '<div style="position:absolute;top:8px;left:8px;right:8px;background:' + bgCor + ';color:' + corTxt + ';font-size:0.7rem;font-weight:800;padding:4px 8px;border-radius:6px;text-align:center;letter-spacing:0.05em;z-index:5;">' + lbl + '</div>';
+  } else if(estoqueBaixo){
+    statusBadge = '<div style="position:absolute;top:6px;right:6px;background:#fb923c;color:#000;font-size:0.66rem;font-weight:700;padding:2px 6px;border-radius:5px;z-index:5;">Restam ' + qtdEstoque + '</div>';
+  }
   var ehKg = it.tipoVenda === 'kg';
   var sufixoPreco = ehKg ? '<span style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
-  card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+'</div>'+
+  card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+statusBadge+'</div>'+
     '<div class="item-info">'+
       '<div class="item-nome">'+esc(it.nome)+'</div>'+
       (it.desc ? '<div class="item-desc">'+esc(it.desc)+'</div>' : '')+
@@ -8021,10 +8043,15 @@ function _renderCardItem(it, grid){
     '</div>';
   card.onclick = (function(item){ return function(){
     if(_swipeItemDisparou){ _swipeItemDisparou = false; return; }
+    // Bloqueia clique se pausado/esgotado
+    if(bloqueado){
+      showToast(pausado ? '⏸️ Item pausado' : '✕ Item esgotado', '#f87171');
+      return;
+    }
     abrirModalItem(item);
   }; })(it);
   grid.appendChild(card);
-  if(!ehKg){
+  if(!ehKg && !bloqueado){
     anexarSwipeItemCardapio(card, it);
     anexarLongPressItem(card, it);
   }
@@ -8628,6 +8655,8 @@ function executarCancelamentoPedidoInteiro(pedidoId){
   var itensAtualizados = ped.itens.map(function(it){
     if(it.status !== 'cancelado' && it.status !== 'pago'){
       nomesCancelados.push((it.qtd||1)+'x '+(it.nome||''));
+      // Devolve estoque (se item tinha controle)
+      devolverEstoque(it.id, it.qtd || 1);
       return Object.assign({}, it, {
         status: 'cancelado',
         canceladoEm: agora,
@@ -8819,6 +8848,8 @@ function executarCancelamento(pedidoId, idx){
 
   var item = ped.itens[idx];
   var agora = Date.now();
+  // Devolve estoque (se item tinha controle)
+  devolverEstoque(item.id, item.qtd || 1);
   // Marca o item como CANCELADO (não deleta)
   var itensAtualizados = ped.itens.map(function(it, i){
     if(i === idx){
@@ -10179,6 +10210,66 @@ function _iniciarVigiaFila(){
   _atualizarAvisoFila();
 }
 
+// ═══════════════════════════════════════════════
+// 📦 ESTOQUE INTELIGENTE
+// ═══════════════════════════════════════════════
+// Decrementa estoque dos itens do carrinho (chamado após enviar pedido pra cozinha)
+// Usa Firestore transaction pra ser atômico (evita race condition)
+function decrementarEstoque(itensCarrinho, pedidoId){
+  if(!itensCarrinho || !itensCarrinho.length) return;
+  itensCarrinho.forEach(function(it){
+    // Só decrementa se o item tinha controlarEstoque ligado
+    var itDef = (_itens || []).find(function(x){ return x.id === it.id; });
+    if(!itDef || itDef.controlarEstoque !== true) return;
+    var qtdRetirar = it.qtd || 1;
+    var refItem = fbDb.collection('tenants').doc(_tenantId)
+      .collection('restaurantes').doc(_restauranteId)
+      .collection('cardapio').doc('data').collection('itens').doc(it.id);
+    fbDb.runTransaction(function(t){
+      return t.get(refItem).then(function(doc){
+        if(!doc.exists) return;
+        var atual = doc.data().estoque || 0;
+        var novo = Math.max(0, atual - qtdRetirar);
+        var update = { estoque: novo, atualizadoEm: Date.now() };
+        // Auto-pausa quando chegar a 0
+        if(novo === 0) update.pausado = true;
+        t.update(refItem, update);
+      });
+    }).then(function(){
+      console.log('[ESTOQUE] ' + it.nome + ' decrementado em ' + qtdRetirar);
+    }).catch(function(e){
+      console.warn('[ESTOQUE] Falha decrementar ' + it.nome + ':', e);
+    });
+  });
+}
+
+// Devolve estoque (cancelar item, cancelar pedido, etc)
+function devolverEstoque(itemId, qtd){
+  if(!itemId || !qtd) return;
+  var itDef = (_itens || []).find(function(x){ return x.id === itemId; });
+  if(!itDef || itDef.controlarEstoque !== true) return;
+  var refItem = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('cardapio').doc('data').collection('itens').doc(itemId);
+  fbDb.runTransaction(function(t){
+    return t.get(refItem).then(function(doc){
+      if(!doc.exists) return;
+      var atual = doc.data().estoque || 0;
+      var novo = atual + qtd;
+      var update = { estoque: novo, atualizadoEm: Date.now() };
+      // Se estava auto-pausado por estoque zero, despausa
+      if(doc.data().pausado === true && atual === 0 && novo > 0){
+        update.pausado = false;
+      }
+      t.update(refItem, update);
+    });
+  }).then(function(){
+    console.log('[ESTOQUE] ' + itemId + ' devolvido +' + qtd);
+  }).catch(function(e){
+    console.warn('[ESTOQUE] Falha devolver ' + itemId + ':', e);
+  });
+}
+
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
   var btn = document.getElementById('btn-enviar-pedido');
@@ -10288,6 +10379,8 @@ function enviarPedido(){
   }).then(function(ref){
     console.log('[ENVIAR-PEDIDO] ✓ pedido criado:', ref.id);
     var pedidoId = ref.id;
+    // ⚡ Decrementa estoque dos itens que têm controle (em background, fire-and-forget)
+    decrementarEstoque(carrinhoBackup, pedidoId);
     // 2. Adiciona itens na conta da mesa (com status: aberto)
     var itensConta = itensPedido.map(function(it){
       var item = {

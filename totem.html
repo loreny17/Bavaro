@@ -1092,17 +1092,26 @@ function renderItens(){
     grade.innerHTML = '';
     return;
   }
+  // Filtro base: remove itens pausados e itens com estoque esgotado
+  var _filtroDisponivel = function(it){
+    if(it.pausado === true) return false; // pausado: some do totem
+    if(it.controlarEstoque === true && typeof it.estoque === 'number' && it.estoque <= 0) return false; // esgotado: some
+    if(it.ativo === false) return false; // ativo: campo antigo
+    return true;
+  };
   // Se tem busca, filtra em TODAS as categorias
   var itens;
   if(_busca){
     var b = _busca.toLowerCase();
     itens = window._cardapioItens.filter(function(it){
-      return (it.nome||'').toLowerCase().indexOf(b) >= 0 ||
-             (it.descricao||'').toLowerCase().indexOf(b) >= 0;
+      return _filtroDisponivel(it) && (
+        (it.nome||'').toLowerCase().indexOf(b) >= 0 ||
+        (it.descricao||'').toLowerCase().indexOf(b) >= 0
+      );
     });
   } else {
     itens = window._cardapioItens.filter(function(it){
-      return it.categoriaId === _catAtiva;
+      return _filtroDisponivel(it) && it.categoriaId === _catAtiva;
     });
   }
   if(!itens.length){
@@ -1120,8 +1129,14 @@ function renderItens(){
     var preco = (it.preco||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
     var qtdNoCart = _carrinho.filter(function(c){ return c.itemId === it.id; }).reduce(function(s,c){ return s + c.qtd; }, 0);
     var badge = qtdNoCart > 0 ? '<div class="badge-cart">' + qtdNoCart + '</div>' : '';
+    // Aviso "Últimas X unidades" quando estoque ≤ 3
+    var avisoEstoque = '';
+    if(it.controlarEstoque === true && typeof it.estoque === 'number' && it.estoque > 0 && it.estoque <= 3){
+      avisoEstoque = '<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#fb923c,#ea580c);color:#fff;font-size:0.7rem;font-weight:800;padding:3px 8px;border-radius:6px;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,0.3);">🔥 Últimas ' + it.estoque + '</div>';
+    }
     return '<div class="item" onclick="adicionarItem(\'' + it.id + '\',\'' + it.fonte + '\')">' +
       badge +
+      avisoEstoque +
       '<div class="foto">' + fotoHtml + '</div>' +
       '<div class="info">' +
         '<div class="nome">' + escapar(it.nome||'') + '</div>' +

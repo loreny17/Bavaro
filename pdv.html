@@ -809,6 +809,25 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
           <div class="f-toggle-switch"></div>
         </div>
       </div>
+      <div class="f-grupo">
+        <div class="f-toggle" id="item-pausado-toggle" onclick="this.classList.toggle('active')" style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.3);">
+          <span class="f-toggle-label" style="color:#fbbf24;">⏸️ Pausado temporariamente</span>
+          <div class="f-toggle-switch"></div>
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Quando pausado, o garçom vê o item como esgotado (não consegue adicionar) e some do totem. Use pra itens que acabaram.</div>
+      </div>
+      <div class="f-grupo" style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.2);border-radius:10px;padding:12px;">
+        <div class="f-toggle" id="item-ctrl-estoque-toggle" onclick="toggleControlarEstoque()">
+          <span class="f-toggle-label" style="color:#c084fc;">📦 Controlar estoque (inteligente)</span>
+          <div class="f-toggle-switch"></div>
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin:6px 0 10px;line-height:1.4;">Decrementa automaticamente quando o pedido vai pra cozinha. Devolve se cancelar/editar.</div>
+        <div id="item-estoque-bloco" style="display:none;">
+          <label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Quantidade em estoque agora</label>
+          <input type="number" id="item-estoque" min="0" step="1" value="0" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1rem;box-sizing:border-box;">
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Alerta automático quando ≤ 3 unidades. Auto-pausa quando chegar a 0.</div>
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="f-btn danger" id="btn-excluir" onclick="excluirItem()" style="display:none;flex:0 0 auto;padding:11px 14px;">Excluir</button>
@@ -1520,13 +1539,38 @@ function renderItens(){
         +'</div>'
       +'</div>';
     }
-    return '<div class="item-card '+(i.disponivel?'':'indisponivel')+'" onclick="editarItem(\''+i.id+'\')" style="position:relative;">'
+    // Status do item: pausado, sem estoque, estoque baixo
+    var pausado = i.pausado === true;
+    var ctrlEstoque = i.controlarEstoque === true;
+    var qtdEstoque = (typeof i.estoque === 'number') ? i.estoque : null;
+    var esgotadoEstoque = ctrlEstoque && qtdEstoque !== null && qtdEstoque <= 0;
+    var estoqueBaixo = ctrlEstoque && qtdEstoque !== null && qtdEstoque > 0 && qtdEstoque <= 3;
+    var indisponivel = !i.disponivel || pausado || esgotadoEstoque;
+
+    var badgeStatus = '';
+    if(pausado){
+      badgeStatus = '<div style="position:absolute;top:8px;right:8px;background:#fbbf24;color:#000;font-size:0.62rem;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:0.05em;z-index:2;">⏸️ PAUSADO</div>';
+    } else if(esgotadoEstoque){
+      badgeStatus = '<div style="position:absolute;top:8px;right:8px;background:#f87171;color:#fff;font-size:0.62rem;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:0.05em;z-index:2;">✕ ESGOTADO</div>';
+    } else if(estoqueBaixo){
+      badgeStatus = '<div style="position:absolute;top:8px;right:8px;background:#fb923c;color:#000;font-size:0.62rem;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:0.05em;z-index:2;">⚠️ ' + qtdEstoque + ' rest.</div>';
+    } else if(!i.disponivel){
+      badgeStatus = '<div style="position:absolute;top:8px;right:8px;background:#f87171;color:#fff;font-size:0.62rem;font-weight:700;padding:2px 7px;border-radius:6px;letter-spacing:0.05em;z-index:2;">INDISPONÍVEL</div>';
+    }
+
+    // Botão rápido de pausar/despausar (canto inferior esquerdo)
+    var btnPausa = '<button onclick="event.stopPropagation();togglePausarItem(\'' + i.id + '\',' + (pausado?'false':'true') + ')" style="position:absolute;bottom:8px;right:8px;background:' + (pausado?'rgba(74,222,128,0.2)':'rgba(251,191,36,0.2)') + ';border:1px solid ' + (pausado?'#4ade80':'#fbbf24') + ';color:' + (pausado?'#4ade80':'#fbbf24') + ';border-radius:6px;padding:3px 8px;font-size:0.7rem;font-weight:700;cursor:pointer;z-index:3;font-family:inherit;">' + (pausado?'▶️ Despausar':'⏸️ Pausar') + '</button>';
+
+    return '<div class="item-card '+(indisponivel?'indisponivel':'')+'" onclick="editarItem(\''+i.id+'\')" style="position:relative;">'
+      +badgeStatus
       +'<div class="item-foto">'+fotoHtml+'</div>'
       +'<div class="item-info">'
         +'<div class="item-nome">'+escapeHtml(i.nome)+'</div>'
         +(i.descricao ? '<div class="item-desc">'+escapeHtml(i.descricao)+'</div>' : '')
         +'<div class="item-preco">R$ '+formatarPreco(i.preco)+sufixoPreco+'</div>'
+        +(ctrlEstoque && qtdEstoque !== null ? '<div style="font-size:0.7rem;color:'+(esgotadoEstoque?'#f87171':estoqueBaixo?'#fb923c':'var(--muted)')+';margin-top:4px;">📦 Estoque: ' + qtdEstoque + '</div>' : '')
       +'</div>'
+      +btnPausa
     +'</div>';
   }).join('');
   grid.innerHTML = headerItensHtml + itensHtml;
@@ -1554,6 +1598,10 @@ function abrirModalItem(){
   document.getElementById('item-descricao').value = '';
   document.getElementById('item-codigo').value = '';
   document.getElementById('item-disponivel-toggle').classList.add('active');
+  document.getElementById('item-pausado-toggle').classList.remove('active');
+  document.getElementById('item-ctrl-estoque-toggle').classList.remove('active');
+  document.getElementById('item-estoque-bloco').style.display = 'none';
+  document.getElementById('item-estoque').value = 0;
   document.getElementById('item-por-kg-toggle').classList.remove('active');
   _atualizarLabelPrecoPorKg(false);
   resetFotoUp();
@@ -1574,6 +1622,11 @@ function editarItem(id){
   document.getElementById('item-descricao').value = i.descricao || '';
   document.getElementById('item-codigo').value = i.codigo || '';
   document.getElementById('item-disponivel-toggle').classList.toggle('active', i.disponivel !== false);
+  document.getElementById('item-pausado-toggle').classList.toggle('active', i.pausado === true);
+  var temCtrlEst = i.controlarEstoque === true;
+  document.getElementById('item-ctrl-estoque-toggle').classList.toggle('active', temCtrlEst);
+  document.getElementById('item-estoque-bloco').style.display = temCtrlEst ? 'block' : 'none';
+  document.getElementById('item-estoque').value = (typeof i.estoque === 'number') ? i.estoque : 0;
   // Buffet por kg
   var ehKg = i.tipoVenda === 'kg';
   document.getElementById('item-por-kg-toggle').classList.toggle('active', ehKg);
@@ -1755,6 +1808,48 @@ function selecionarFotoItem(input){
   input.value = '';
 }
 
+// Mostra/esconde campo de quantidade quando toggle de estoque é clicado
+function toggleControlarEstoque(){
+  var tog = document.getElementById('item-ctrl-estoque-toggle');
+  tog.classList.toggle('active');
+  var bloco = document.getElementById('item-estoque-bloco');
+  if(bloco) bloco.style.display = tog.classList.contains('active') ? 'block' : 'none';
+}
+
+// Pausa/despausa item rapidamente (sem abrir modal de edição)
+function togglePausarItem(itemId, novoEstado){
+  if(!itemId) return;
+  fbColCardapio('itens').doc(itemId).update({
+    pausado: novoEstado,
+    atualizadoEm: Date.now()
+  }).then(function(){
+    showToast(novoEstado ? '⏸️ Item pausado' : '▶️ Item disponível', novoEstado ? '#fbbf24' : '#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + e.message, '#f87171');
+  });
+}
+
+// Repõe estoque do item (modal simples com input)
+function reporEstoqueItem(itemId, fonte){
+  var qtdStr = prompt('Adicionar quanto ao estoque?\n\nDica: digite só o número que está chegando.');
+  if(!qtdStr) return;
+  var qtd = parseInt(qtdStr);
+  if(isNaN(qtd) || qtd <= 0){ showToast('Quantidade inválida', '#f7a34f'); return; }
+  var ref = (fonte === 'totem') ? _refTotemBase().doc('data').collection('itens').doc(itemId) : fbColCardapio('itens').doc(itemId);
+  ref.get().then(function(doc){
+    if(!doc.exists){ showToast('Item não encontrado', '#f87171'); return; }
+    var atual = doc.data().estoque || 0;
+    return ref.update({
+      estoque: atual + qtd,
+      atualizadoEm: Date.now()
+    });
+  }).then(function(){
+    showToast('📦 Estoque +' + qtd, '#4ade80');
+  }).catch(function(e){
+    showToast('Erro: ' + e.message, '#f87171');
+  });
+}
+
 function salvarItem(){
   var nome = document.getElementById('item-nome').value.trim();
   var precoStr = document.getElementById('item-preco').value.trim().replace(',', '.');
@@ -1763,6 +1858,10 @@ function salvarItem(){
   var descricao = document.getElementById('item-descricao').value.trim();
   var codigo = document.getElementById('item-codigo').value.trim();
   var disponivel = document.getElementById('item-disponivel-toggle').classList.contains('active');
+  var pausado = document.getElementById('item-pausado-toggle').classList.contains('active');
+  var controlarEstoque = document.getElementById('item-ctrl-estoque-toggle').classList.contains('active');
+  var estoque = parseInt(document.getElementById('item-estoque').value) || 0;
+  if(estoque < 0) estoque = 0;
   if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
   if(isNaN(preco) || preco < 0){ showToast('⚠️ Preço inválido','#f7a34f'); return; }
   if(!categoria){ showToast('⚠️ Selecione uma categoria','#f7a34f'); return; }
@@ -1778,6 +1877,9 @@ function salvarItem(){
   var dados = {
     nome:nome, preco:preco, categoria:categoria, descricao:descricao,
     codigo:codigo, foto:foto, disponivel:disponivel,
+    pausado: pausado,
+    controlarEstoque: controlarEstoque,
+    estoque: controlarEstoque ? estoque : null,
     gruposIds: gruposIds,
     tipoVenda: ehKg ? 'kg' : 'unidade',
     palavrasVoz: (function(){ var p = document.getElementById('item-palavras-voz'); return p ? p.value.trim() : ''; })(),
@@ -8899,6 +9001,27 @@ function totemAbrirModalItem(item){
             '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Cliente vê <b>uma escolha por vez</b> em tela cheia com fotos grandes. Ideal pra "Monte Seu Prato" com várias etapas.</div>' +
           '</div>' +
         '</label>' +
+        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.3);border-radius:9px;padding:10px;margin-top:8px;">' +
+          '<input type="checkbox" id="ti-pausado"' + (item.pausado ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:#fbbf24;">' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:0.88rem;font-weight:700;color:#fbbf24;">⏸️ Pausar temporariamente</div>' +
+            '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Quando pausado, o item <b>some do totem</b> e fica esgotado no garçom. Use pra quando o item acabar.</div>' +
+          '</div>' +
+        '</label>' +
+        '<div style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.2);border-radius:9px;padding:10px;margin-top:8px;">' +
+          '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">' +
+            '<input type="checkbox" id="ti-ctrl-estoque" onchange="document.getElementById(\'ti-estoque-bloco\').style.display=this.checked?\'block\':\'none\'"' + (item.controlarEstoque ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:#c084fc;">' +
+            '<div style="flex:1;">' +
+              '<div style="font-size:0.88rem;font-weight:700;color:#c084fc;">📦 Controlar estoque</div>' +
+              '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Decrementa automaticamente ao mandar pra cozinha. Devolve se cancelar/editar.</div>' +
+            '</div>' +
+          '</label>' +
+          '<div id="ti-estoque-bloco" style="display:' + (item.controlarEstoque ? 'block' : 'none') + ';margin-top:8px;padding-top:8px;border-top:1px dashed rgba(168,85,247,0.2);">' +
+            '<label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Quantidade em estoque agora</label>' +
+            '<input type="number" id="ti-estoque" min="0" step="1" value="' + (typeof item.estoque === 'number' ? item.estoque : 0) + '" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.95rem;box-sizing:border-box;">' +
+            '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Alerta quando ≤ 3. Auto-pausa quando chegar a 0.</div>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
       '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
         '<button onclick="document.getElementById(\'modal-totem-item\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
@@ -9026,6 +9149,10 @@ function totemSalvarItem(id, fotoAtual){
   var catId = document.getElementById('ti-cat').value;
   var ativo = document.getElementById('ti-ativo').checked;
   var modoWizard = !!(document.getElementById('ti-modo-wizard') && document.getElementById('ti-modo-wizard').checked);
+  var pausado = !!(document.getElementById('ti-pausado') && document.getElementById('ti-pausado').checked);
+  var controlarEstoque = !!(document.getElementById('ti-ctrl-estoque') && document.getElementById('ti-ctrl-estoque').checked);
+  var estoque = parseInt(document.getElementById('ti-estoque') ? document.getElementById('ti-estoque').value : 0) || 0;
+  if(estoque < 0) estoque = 0;
   var descricao = (document.getElementById('ti-descricao').value||'').trim();
 
   // Coleta grupos marcados PRESERVANDO A ORDEM (mantida pelas setinhas ▲▼)
@@ -9045,6 +9172,9 @@ function totemSalvarItem(id, fotoAtual){
     foto: foto,
     ativo: ativo,
     modoWizard: modoWizard,
+    pausado: pausado,
+    controlarEstoque: controlarEstoque,
+    estoque: controlarEstoque ? estoque : null,
     gruposIds: gruposIds,
     atualizadoEm: Date.now()
   };

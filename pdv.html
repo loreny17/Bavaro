@@ -8223,6 +8223,8 @@ function abrirModalQRTotem(){
   var base = window.location.origin;
   var url = base + '/totem.html?tenant=' + encodeURIComponent(_tenantId) +
     '&rest=' + encodeURIComponent(_restauranteAtivo.id) + '&qr=1';
+  // Guarda a URL global pra função de impressão usar
+  window._qrTotemUrlAtual = url;
   var nomeRest = _restauranteAtivo.nome || _restauranteAtivo.id;
 
   var mod = document.createElement('div');
@@ -8236,9 +8238,10 @@ function abrirModalQRTotem(){
       '<div style="font-size:0.92rem;color:#666;margin-bottom:18px;">Faça seu pedido pelo celular</div>' +
       '<div id="qr-modal-canvas" style="display:flex;justify-content:center;padding:8px;background:#fff;border:1px solid #eee;border-radius:8px;"></div>' +
       '<div style="font-size:0.78rem;color:#666;margin-top:14px;line-height:1.4;">📱 Escaneie com a câmera do celular pra pedir sem precisar do totem</div>' +
-      '<div style="display:flex;gap:8px;margin-top:18px;">' +
-        '<button onclick="imprimirQRTotem()" style="flex:1;padding:12px;background:#d4a843;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">🖨️ Imprimir</button>' +
-        '<button onclick="baixarQRTotem()" style="flex:1;padding:12px;background:#1a1a1a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">⬇ Baixar imagem</button>' +
+      '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;">' +
+        '<button onclick="imprimirQRTermica()" style="flex:1;min-width:140px;padding:12px;background:#d4a843;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">🖨️ Imprimir Térmica</button>' +
+        '<button onclick="imprimirQRTotem()" style="flex:1;min-width:120px;padding:12px;background:#f5f5f5;color:#333;border:1px solid #ddd;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.86rem;">📄 Imprimir A4</button>' +
+        '<button onclick="baixarQRTotem()" style="flex:1;min-width:120px;padding:12px;background:#1a1a1a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">⬇ Baixar</button>' +
       '</div>' +
       '<div style="font-size:0.7rem;color:#999;margin-top:14px;word-break:break-all;font-family:monospace;">' + escapeHtml(url) + '</div>' +
     '</div>';
@@ -8260,6 +8263,95 @@ function abrirModalQRTotem(){
       }catch(e){ console.warn('[QR] erro:', e); }
     }
   }, 50);
+}
+
+// ESC/POS QR Code (formato nativo da impressora térmica)
+// Modelo 2 (mais comum) — Comandos: GS ( k
+function escposQRCode(texto, tamanho){
+  tamanho = tamanho || 8; // 1-16, tamanho do módulo (8 = bom em térmica 80mm)
+  var bytes = '';
+  // Selecionar modelo 2
+  bytes += GS + '(k' + String.fromCharCode(4) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(65) + String.fromCharCode(50) + String.fromCharCode(0);
+  // Definir tamanho do módulo
+  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(67) + String.fromCharCode(tamanho);
+  // Nível de correção de erro (H = 51 = ~30%)
+  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(69) + String.fromCharCode(51);
+  // Armazenar dados no buffer
+  var len = texto.length + 3;
+  var pL = len & 0xff;
+  var pH = (len >> 8) & 0xff;
+  bytes += GS + '(k' + String.fromCharCode(pL) + String.fromCharCode(pH) + String.fromCharCode(49) + String.fromCharCode(80) + String.fromCharCode(48) + texto;
+  // Imprimir o QR Code
+  bytes += GS + '(k' + String.fromCharCode(3) + String.fromCharCode(0) + String.fromCharCode(49) + String.fromCharCode(81) + String.fromCharCode(48);
+  return bytes;
+}
+
+// Imprime QR Code na impressora térmica (ESC/POS nativo)
+function imprimirQRTermica(){
+  var url = window._qrTotemUrlAtual;
+  if(!url){ showToast('URL do QR não encontrada','#f87171'); return; }
+  if(!_impressoras || !_impressoras.length){
+    showToast('Cadastre uma impressora primeiro em "Impressoras"', '#f7a34f', 5000);
+    return;
+  }
+
+  // Se só uma impressora, usa direto. Se mais, mostra seletor.
+  if(_impressoras.length === 1){
+    _executarImpressaoQR(_impressoras[0], url);
+    return;
+  }
+
+  // Cria menu de seleção
+  var ex = document.getElementById('modal-pick-impressora-qr');
+  if(ex) ex.remove();
+  var pickMod = document.createElement('div');
+  pickMod.id = 'modal-pick-impressora-qr';
+  pickMod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  pickMod.onclick = function(e){ if(e.target === pickMod) pickMod.remove(); };
+  var btns = _impressoras.map(function(imp){
+    var emoji = imp.tipo === 'rede' ? '🌐' : '🔌';
+    return '<button onclick="_executarImpressaoQR(' + JSON.stringify(imp).replace(/"/g,'&quot;') + ', window._qrTotemUrlAtual);document.getElementById(\'modal-pick-impressora-qr\').remove()" style="width:100%;padding:14px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;cursor:pointer;font-family:inherit;text-align:left;margin-bottom:8px;font-size:0.92rem;">' + emoji + ' <b>' + escapeHtml(imp.nome) + '</b><div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + (imp.tipo === 'rede' ? imp.ip + ':' + (imp.porta||9100) : imp.nomeWindows||'USB') + '</div></button>';
+  }).join('');
+  pickMod.innerHTML =
+    '<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;padding:18px;">' +
+      '<div style="font-weight:700;font-size:1rem;margin-bottom:12px;display:flex;align-items:center;gap:8px;">🖨️ Qual impressora?</div>' +
+      btns +
+      '<button onclick="document.getElementById(\'modal-pick-impressora-qr\').remove()" style="width:100%;padding:10px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;font-family:inherit;margin-top:6px;">Cancelar</button>' +
+    '</div>';
+  document.body.appendChild(pickMod);
+}
+
+function _executarImpressaoQR(imp, url){
+  if(!url){ showToast('URL inválida','#f87171'); return; }
+  var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'Restaurante';
+
+  // Monta o cupom: cabeçalho + QR + rodapé
+  var conteudo = '';
+  conteudo += escposInit();
+  conteudo += escposCenter();
+  conteudo += escposBold(true);
+  conteudo += escposLarge(true);
+  conteudo += nomeRest.toUpperCase() + '\n';
+  conteudo += escposLarge(false);
+  conteudo += escposBold(false);
+  conteudo += '\n';
+  conteudo += 'Faça seu pedido pelo celular\n';
+  conteudo += '\n';
+  conteudo += escposQRCode(url, 8);
+  conteudo += '\n';
+  conteudo += escposBold(true);
+  conteudo += 'ESCANEIE O QR CODE\n';
+  conteudo += escposBold(false);
+  conteudo += '\n';
+  conteudo += '--------------------------------\n';
+  conteudo += '\n\n\n';
+  conteudo += escposCut();
+
+  enviarParaImpressora(imp, conteudo).then(function(){
+    // Já dá feedback na própria função
+  }).catch(function(e){
+    console.error('Erro impressão QR:', e);
+  });
 }
 
 function imprimirQRTotem(){

@@ -5495,6 +5495,45 @@ function removerAcentosImpressao(texto){
   return resultado;
 }
 
+// Sanitiza o conteúdo ESC/POS preservando blocos binários de imagem (GS v 0)
+// Detecta o comando "GS v 0" (1D 76 30), lê o cabeçalho com tamanho, pula os bytes
+// da imagem, e sanitiza só o restante. Suporta vários blocos no mesmo conteúdo.
+function _sanitizarConteudoImpressao(conteudo){
+  if(!conteudo) return conteudo;
+  var GS_CHAR = String.fromCharCode(0x1D); // GS
+  var resultado = '';
+  var i = 0;
+  var len = conteudo.length;
+  while(i < len){
+    var ch = conteudo.charAt(i);
+    // Detecta início de imagem raster: GS v 0 m xL xH yL yH (8 bytes de header)
+    if(ch === GS_CHAR && i + 7 < len &&
+       conteudo.charAt(i+1) === 'v' &&
+       conteudo.charAt(i+2) === '0'){
+      // Tamanho da imagem (em bytes) = bytesPorLinha * altura
+      // Header: GS(1) v(1) 0(1) m(1) xL(1) xH(1) yL(1) yH(1) = 8 bytes
+      var xL = conteudo.charCodeAt(i+4);
+      var xH = conteudo.charCodeAt(i+5);
+      var yL = conteudo.charCodeAt(i+6);
+      var yH = conteudo.charCodeAt(i+7);
+      var bytesPorLinha = xL + (xH << 8);
+      var altura = yL + (yH << 8);
+      var bytesImagem = bytesPorLinha * altura;
+      // Copia o bloco completo (header 8 + dados) sem sanitizar
+      var fimBloco = i + 8 + bytesImagem;
+      if(fimBloco <= len){
+        resultado += conteudo.substring(i, fimBloco);
+        i = fimBloco;
+        continue;
+      }
+    }
+    // Texto normal: aplica remoção de acentos caractere por caractere
+    resultado += removerAcentosImpressao(ch);
+    i++;
+  }
+  return resultado;
+}
+
 function enviarParaImpressora(imp, conteudo){
   if(!_qzPronto){
     showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
@@ -5502,9 +5541,11 @@ function enviarParaImpressora(imp, conteudo){
   }
   if(!conteudo){ return Promise.reject('Sem conteúdo'); }
 
-  // 🔤 Remove acentos do conteúdo antes de mandar pra térmica
-  // (impressoras ESC/POS usam CP850, não UTF-8 — acentos viram lixo)
-  conteudo = removerAcentosImpressao(conteudo);
+  // 🔤 Remove acentos do conteúdo, mas PRESERVA bytes binários de imagens raster (GS v 0)
+  // Impressoras ESC/POS usam CP850, não UTF-8 — acentos no texto viram lixo,
+  // mas bytes de imagem têm valores 0-255 que podem coincidir com chars acentuados Unicode
+  // e seriam corrompidos pela sanitização cega.
+  conteudo = _sanitizarConteudoImpressao(conteudo);
 
   // ─── MODO ELECTRON (app desktop) ───
   if(_modoImpressao === 'electron'){
@@ -9304,6 +9345,7 @@ function totemEscutarDados(){
         if(chkQR2) chkQR2.checked = true;
       }
       totemRenderCatsPrincipais();
+      totemRenderCategorias();   // ← também re-renderiza a lista de categorias do totem
       atualizarToggleSemCaixa();
     }, function(e){ console.warn('[TOTEM] config erro:', e.code); });
 }
@@ -9370,24 +9412,59 @@ function totemMostrarAba(aba){
 function totemRenderCategorias(){
   var box = document.getElementById('totem-categorias-lista');
   if(!box) return;
-  if(!_totemCats.length){
-    box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;">Sem categorias. Crie a primeira abaixo.</div>';
+
+  // Pega categorias do principal que foram TRAZIDAS pro totem
+  var idsPrincTrazidas = _totemCatsPrincipais || [];
+  var catsPrincTrazidas = (_categorias||[]).filter(function(c){
+    return idsPrincTrazidas.indexOf(c.id) >= 0;
+  });
+  // Mantém a ordem que está em _totemCatsPrincipais (não a ordem geral do cardápio)
+  catsPrincTrazidas.sort(function(a,b){
+    return idsPrincTrazidas.indexOf(a.id) - idsPrincTrazidas.indexOf(b.id);
+  });
+
+  if(!_totemCats.length && !catsPrincTrazidas.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;">Sem categorias. Crie a primeira abaixo ou traga do cardápio principal na aba "Trazer do Principal".</div>';
     return;
   }
-  box.innerHTML = _totemCats.map(function(c, idx){
-    var ehPrimeiro = idx === 0;
-    var ehUltimo = idx === _totemCats.length - 1;
-    var emoji = c.emoji || '🍽️';
-    return '<div class="totem-cat-row">' +
-      '<div class="setas">' +
-        '<button onclick="event.stopPropagation();totemMoverCategoria(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
-        '<button onclick="event.stopPropagation();totemMoverCategoria(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
-      '</div>' +
-      '<span class="emoji-cat" onclick="totemEditarCategoria(\'' + c.id + '\')" style="font-size:1.4rem;margin-right:8px;cursor:pointer;" title="Editar">' + emoji + '</span>' +
-      '<span class="nome" onclick="totemEditarCategoria(\'' + c.id + '\')" style="cursor:pointer;" title="Editar">' + escapeHtml(c.nome||'') + '</span>' +
-      '<span class="del-x" onclick="event.stopPropagation();totemExcluirCategoria(\'' + c.id + '\')">×</span>' +
-    '</div>';
-  }).join('');
+
+  var html = '';
+
+  // Categorias TRAZIDAS DO PRINCIPAL (read-only — link visual pra "Trazer do Principal")
+  if(catsPrincTrazidas.length){
+    html += '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:4px 0 6px;">📋 Trazidas do cardápio principal</div>';
+    html += catsPrincTrazidas.map(function(c){
+      var emoji = c.emoji || '📂';
+      return '<div class="totem-cat-row" style="opacity:0.85;background:rgba(74,222,128,0.05);border-left:3px solid #4ade80;">' +
+        '<span class="emoji-cat" style="font-size:1.4rem;margin-right:8px;">' + emoji + '</span>' +
+        '<span class="nome" style="flex:1;">' + escapeHtml(c.nome||'') + ' <span style="font-size:0.66rem;color:#4ade80;font-weight:700;margin-left:6px;">📋 PRINCIPAL</span></span>' +
+        '<button onclick="totemMostrarAba(\'cats\')" title="Configurar em \'Trazer do Principal\'" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:0.72rem;">configurar</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Categorias NATIVAS DO TOTEM (editáveis)
+  if(_totemCats.length){
+    if(catsPrincTrazidas.length){
+      html += '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;">📱 Criadas no totem</div>';
+    }
+    html += _totemCats.map(function(c, idx){
+      var ehPrimeiro = idx === 0;
+      var ehUltimo = idx === _totemCats.length - 1;
+      var emoji = c.emoji || '🍽️';
+      return '<div class="totem-cat-row">' +
+        '<div class="setas">' +
+          '<button onclick="event.stopPropagation();totemMoverCategoria(\'' + c.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
+          '<button onclick="event.stopPropagation();totemMoverCategoria(\'' + c.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
+        '</div>' +
+        '<span class="emoji-cat" onclick="totemEditarCategoria(\'' + c.id + '\')" style="font-size:1.4rem;margin-right:8px;cursor:pointer;" title="Editar">' + emoji + '</span>' +
+        '<span class="nome" onclick="totemEditarCategoria(\'' + c.id + '\')" style="cursor:pointer;flex:1;" title="Editar">' + escapeHtml(c.nome||'') + '</span>' +
+        '<span class="del-x" onclick="event.stopPropagation();totemExcluirCategoria(\'' + c.id + '\')">×</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  box.innerHTML = html;
 }
 
 // Abre modal pra editar nome + emoji da categoria do totem

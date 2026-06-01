@@ -8253,9 +8253,9 @@ function abrirModalQRTotem(){
           text: url,
           width: 300,
           height: 300,
-          colorDark: '#d4a843',
-          colorLight: '#0a0a0c',
-          correctLevel: QRCode.CorrectLevel.H
+          colorDark: '#000',
+          colorLight: '#fff',
+          correctLevel: QRCode.CorrectLevel.M
         });
       }catch(e){ console.warn('[QR] erro:', e); }
     }
@@ -8265,25 +8265,56 @@ function abrirModalQRTotem(){
 function imprimirQRTotem(){
   var div = document.getElementById('qr-modal-canvas');
   if(!div) return;
-  // qrcodejs cria um <img> dentro do div com a imagem do QR
+  // qrcodejs cria <img> OU <canvas> OU <table> dentro do div, dependendo do navegador
   var img = div.querySelector('img');
   var canvas = div.querySelector('canvas');
+  var table = div.querySelector('table');
   var dataUrl = '';
-  if(img) dataUrl = img.src;
-  else if(canvas) dataUrl = canvas.toDataURL('image/png');
-  if(!dataUrl){ showToast('QR ainda gerando, tente de novo', '#f7a34f'); return; }
+  if(img && img.src) dataUrl = img.src;
+  else if(canvas) {
+    try { dataUrl = canvas.toDataURL('image/png'); } catch(e){}
+  }
+
+  if(!dataUrl && !table){
+    showToast('QR ainda gerando, tente de novo em 1 segundo', '#f7a34f');
+    return;
+  }
   var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'Restaurante';
   var w = window.open('', '_blank');
+  if(!w){
+    showToast('Permita pop-ups pra imprimir', '#f7a34f');
+    return;
+  }
+
+  // Conteúdo do QR: prefere imagem (dataUrl), senão usa o HTML do <table> direto
+  var qrHtml;
+  if(dataUrl){
+    qrHtml = '<img src="' + dataUrl + '" alt="QR Code">';
+  } else {
+    var tableClone = table.cloneNode(true);
+    tableClone.style.cssText = 'border-collapse:collapse;margin:0 auto;';
+    qrHtml = tableClone.outerHTML;
+  }
+
+  w.document.open();
   w.document.write(
-    '<html><head><title>QR Code - ' + nomeRest + '</title>' +
-    '<style>body{font-family:sans-serif;text-align:center;padding:40px;}h1{font-size:36px;margin-bottom:8px;}p{color:#666;margin-bottom:24px;}img{max-width:400px;height:auto;}</style>' +
+    '<!DOCTYPE html><html><head><title>QR Code - ' + nomeRest + '</title>' +
+    '<style>' +
+      'body{font-family:sans-serif;text-align:center;padding:40px;margin:0;}' +
+      'h1{font-size:36px;margin:0 0 8px;}' +
+      'p{color:#666;margin-bottom:24px;font-size:16px;}' +
+      'img{max-width:400px;height:auto;display:block;margin:0 auto;}' +
+      'table{margin:0 auto;}' +
+      '@media print { body{padding:20px;} }' +
+    '</style>' +
     '</head><body>' +
     '<h1>' + escapeHtml(nomeRest.toUpperCase()) + '</h1>' +
     '<p>📱 Escaneie com a câmera do celular pra fazer seu pedido</p>' +
-    '<img src="' + dataUrl + '" alt="QR Code">' +
-    '<script>window.onload=function(){window.print();}<\/script>' +
+    qrHtml +
+    '<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>' +
     '</body></html>'
   );
+  w.document.close();
 }
 
 function baixarQRTotem(){
@@ -8383,10 +8414,15 @@ function totemEscutarDados(){
         var inpSub = document.getElementById('cfg-subtitulo-inicial');
         if(inpTit && document.activeElement !== inpTit) inpTit.value = d.tituloInicial || '';
         if(inpSub && document.activeElement !== inpSub) inpSub.value = d.subtituloInicial || '';
+        // Preenche toggle de mostrar QR (default: true)
+        var chkQR = document.getElementById('cfg-mostrar-qr');
+        if(chkQR) chkQR.checked = d.mostrarQR !== false;
       } else {
         _totemCatsPrincipais = [];
         _totemItensExcluidos = [];
         _totemSemCaixa = false;
+        var chkQR2 = document.getElementById('cfg-mostrar-qr');
+        if(chkQR2) chkQR2.checked = true;
       }
       totemRenderCatsPrincipais();
       atualizarToggleSemCaixa();
@@ -8411,6 +8447,21 @@ function salvarIdentidadeTotem(){
   }, {merge:true}).then(function(){
     showToast('✓ Identidade salva — recarregue o totem pra ver', '#4ade80');
   }).catch(function(e){
+    showToast('Erro: ' + (e.message||e.code), '#f87171');
+  });
+}
+
+// Toggle: mostrar/esconder QR Code na tela inicial do totem
+function toggleMostrarQR(){
+  var chk = document.getElementById('cfg-mostrar-qr');
+  var mostrar = chk.checked;
+  _refTotemBase().doc('config').set({
+    mostrarQR: mostrar,
+    atualizadoEm: Date.now()
+  }, {merge:true}).then(function(){
+    showToast(mostrar ? '✓ QR ativado no totem' : '✓ QR ocultado do totem', '#4ade80');
+  }).catch(function(e){
+    chk.checked = !mostrar; // reverte UI em erro
     showToast('Erro: ' + (e.message||e.code), '#f87171');
   });
 }
@@ -10850,6 +10901,10 @@ function toggleAdminUsuario(garcomId, novoValor){
       </div>
       <button onclick="salvarIdentidadeTotem()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;align-self:flex-end;">Salvar</button>
     </div>
+    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-top:12px;padding-top:10px;border-top:1px dashed rgba(212,168,67,0.2);">
+      <input type="checkbox" id="cfg-mostrar-qr" onchange="toggleMostrarQR()" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent);margin-top:2px;">
+      <span style="flex:1;font-size:0.86rem;"><b>📱 Mostrar QR Code na tela inicial do totem</b><div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Aparece no canto superior pra cliente pedir pelo celular. Desligue se não quiser.</div></span>
+    </label>
   </div>
 
   <!-- Toggle: imprimir direto na cozinha (sem caixa) -->

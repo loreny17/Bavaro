@@ -5550,9 +5550,16 @@ function enviarParaImpressora(imp, conteudo){
   // ─── MODO ELECTRON (app desktop) ───
   if(_modoImpressao === 'electron'){
     var url = window.__BAVARO_DESKTOP__.printerApiUrl + '/print';
+    // Converte conteúdo pra base64 (preserva bytes binários da logo/QR exatamente)
+    var bytesBinE = '';
+    for(var iE=0; iE<conteudo.length; iE++){
+      bytesBinE += String.fromCharCode(conteudo.charCodeAt(iE) & 0xFF);
+    }
+    var conteudoB64E = btoa(bytesBinE);
     var payload = {
       tipo: imp.tipo || 'usb',
-      conteudo: conteudo,
+      conteudo: conteudo,              // mantém pra compatibilidade
+      conteudoBase64: conteudoB64E,    // versão segura pra bytes binários (logo/QR)
       nomeWindows: imp.nomeWindows,
       ip: imp.ip,
       porta: imp.porta || 9100
@@ -5580,7 +5587,15 @@ function enviarParaImpressora(imp, conteudo){
   } else {
     config = qz.configs.create(imp.ip + ':' + (imp.porta||9100));
   }
-  var data = [{ type:'raw', format:'plain', data: conteudo }];
+  // Converte cada byte exato pra base64 (preserva bytes binários da logo/QR)
+  // Se mandasse com format:'plain', o QZ converteria a string em UTF-8 e bytes ≥128
+  // virariam 2 bytes — desincronizaria o protocolo ESC/POS e a impressora trava.
+  var bytesBin = '';
+  for(var iB=0; iB<conteudo.length; iB++){
+    bytesBin += String.fromCharCode(conteudo.charCodeAt(iB) & 0xFF);
+  }
+  var conteudoB64 = btoa(bytesBin);
+  var data = [{ type:'raw', format:'base64', data: conteudoB64 }];
   return qz.print(config, data).then(function(){
     showToast('🖨️ Impresso em '+imp.nome,'#4ade80');
   }).catch(function(e){

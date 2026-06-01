@@ -486,6 +486,33 @@
   }
   @keyframes girar{to{transform:rotate(360deg);}}
   @keyframes fadeInTela{from{opacity:0;}to{opacity:1;}}
+  /* Animações do wizard (passo a passo) */
+  @keyframes wizSlideInRight{
+    from { opacity: 0; transform: translateX(40px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes wizSlideInLeft{
+    from { opacity: 0; transform: translateX(-40px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes wizSlideOutLeft{
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(-40px); }
+  }
+  @keyframes wizSlideOutRight{
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+  }
+  .wiz-anim-in-right { animation: wizSlideInRight 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+  .wiz-anim-in-left { animation: wizSlideInLeft 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+  .wiz-anim-out-left { animation: wizSlideOutLeft 0.22s cubic-bezier(0.55, 0, 0.68, 0.06) forwards; }
+  .wiz-anim-out-right { animation: wizSlideOutRight 0.22s cubic-bezier(0.55, 0, 0.68, 0.06) forwards; }
+  /* Confirmação ao tocar (escolha única avança) */
+  @keyframes wizPulseGreen{
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.04); box-shadow: 0 0 0 8px rgba(74, 222, 128, 0.3); }
+  }
+  .wiz-card-confirmado { animation: wizPulseGreen 0.25s ease-out; }
   .carregando .txt{color:var(--muted);font-size:1rem;}
 
   /* ═══ Responsivo: tablet em retrato ═══ */
@@ -1324,6 +1351,7 @@ function fecharModalItem(){
 // ════════════════════════════════════════════════
 var _wizPassoAtual = 0;
 var _wizGrupos = [];
+var _wizDirecao = 'forward'; // 'forward' ou 'back' — pra animação
 
 function abrirWizardItem(){
   _wizGrupos = _gruposDoItem(_itemAberto);
@@ -1422,8 +1450,8 @@ function renderWizardPasso(){
       '</div>' +
       '<div style="width:42px;"></div>' +
     '</div>' +
-    // Conteúdo
-    '<div style="flex:1;overflow-y:auto;padding:18px 22px 100px;">' +
+    // Conteúdo (com animação de slide)
+    '<div class="' + (_wizDirecao === 'back' ? 'wiz-anim-in-left' : 'wiz-anim-in-right') + '" style="flex:1;overflow-y:auto;padding:18px 22px 100px;">' +
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.2rem;color:var(--accent);letter-spacing:0.05em;line-height:1.1;text-align:center;margin-bottom:6px;">' + escapar(grupo.nome||'') + '</div>' +
       '<div style="text-align:center;color:var(--muted);font-size:0.92rem;margin-bottom:24px;">' +
         (ehMultipla ? 'Escolha quantas quiser' : 'Escolha 1') +
@@ -1454,7 +1482,13 @@ function wizardEscolher(idx){
     // Única: salva como ARRAY com 1 item (compatível com o resto do sistema)
     _selecoesTemp[grupo.id] = [idx];
     try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
-    setTimeout(wizardAvancar, 250);
+    // Pulse verde no card escolhido antes de avançar
+    var ov = document.getElementById('wizard-overlay');
+    if(ov){
+      var cards = ov.querySelectorAll('[onclick*="wizardEscolher"]');
+      if(cards[idx]) cards[idx].classList.add('wiz-card-confirmado');
+    }
+    setTimeout(wizardAvancar, 280);
   }
 }
 
@@ -1465,12 +1499,14 @@ function wizardAvancar(){
     var sel = _selecoesTemp[grupo.id] || [];
     if(!sel.length) return;
   }
+  _wizDirecao = 'forward';
   _wizPassoAtual++;
   renderWizardPasso();
 }
 
 function wizardVoltar(){
   if(_wizPassoAtual <= 0){ fecharWizard(); return; }
+  _wizDirecao = 'back';
   _wizPassoAtual--;
   renderWizardPasso();
 }
@@ -1517,8 +1553,8 @@ function renderWizardRevisao(){
       '</div>' +
       '<div style="width:42px;"></div>' +
     '</div>' +
-    // Conteúdo
-    '<div style="flex:1;overflow-y:auto;padding:18px 22px 24px;">' +
+    // Conteúdo (com animação de slide)
+    '<div class="' + (_wizDirecao === 'back' ? 'wiz-anim-in-left' : 'wiz-anim-in-right') + '" style="flex:1;overflow-y:auto;padding:18px 22px 24px;">' +
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:2.6rem;color:var(--text);text-align:center;line-height:1.1;margin-bottom:24px;">' + escapar(it.nome) + '</div>' +
       '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;">' +
         resumoHtml +

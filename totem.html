@@ -1318,6 +1318,7 @@ function confirmarAdicionarAoCarrinho(){
     qtd: _qtdTemp,
     selecoes: _selecoesTemp,
     selecoesLabel: labelSelecoes.join(' · '),
+    observacao: (_obsTemp || '').trim(),
     gruposIds: it.gruposIds || []
   });
 
@@ -1366,12 +1367,14 @@ function fecharModalItem(){
 var _wizPassoAtual = 0;
 var _wizGrupos = [];
 var _wizDirecao = 'forward'; // 'forward' ou 'back' — pra animação
+var _obsTemp = ''; // observação livre do cliente (digitada no wizard)
 
 function abrirWizardItem(){
   _wizGrupos = _gruposDoItem(_itemAberto);
   _wizPassoAtual = 0;
   _selecoesTemp = {};
   _qtdTemp = 1;
+  _obsTemp = '';
   // Limpa modal anterior
   var ex = document.getElementById('wizard-overlay');
   if(ex) ex.remove();
@@ -1389,6 +1392,7 @@ function fecharWizard(){
   _itemAberto = null;
   _selecoesTemp = {};
   _qtdTemp = 1;
+  _obsTemp = '';
   _wizGrupos = [];
 }
 
@@ -1573,6 +1577,11 @@ function renderWizardRevisao(){
       '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;">' +
         resumoHtml +
       '</div>' +
+      // Campo de observação (opcional)
+      '<div style="margin-top:18px;">' +
+        '<label style="display:block;font-size:0.84rem;color:var(--muted);margin-bottom:6px;font-weight:600;">💬 Observação <span style="font-weight:400;font-size:0.76rem;">(opcional — ex: sem cebola, ponto da carne, etc)</span></label>' +
+        '<textarea id="wiz-obs" placeholder="Digite aqui se quiser..." maxlength="200" oninput="_obsTemp=this.value" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:1rem;box-sizing:border-box;resize:vertical;min-height:60px;">' + escapar(_obsTemp||'') + '</textarea>' +
+      '</div>' +
       '<div style="margin-top:24px;display:flex;align-items:center;justify-content:center;gap:18px;">' +
         '<div style="font-size:0.86rem;color:var(--muted);">Quantidade:</div>' +
         '<button onclick="wizardQtd(-1)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);width:42px;height:42px;border-radius:50%;font-size:1.4rem;cursor:pointer;">−</button>' +
@@ -1596,6 +1605,9 @@ function wizardQtd(delta){
 }
 
 function wizardAdicionar(){
+  // Captura observação do textarea (caso usuário não tenha disparado oninput)
+  var ta = document.getElementById('wiz-obs');
+  if(ta) _obsTemp = ta.value || '';
   // No wizard, todos os grupos obrigatórios já foram validados passo a passo,
   // então confirmarAdicionarAoCarrinho vai passar direto e empurrar pro carrinho.
   if(typeof confirmarAdicionarAoCarrinho === 'function'){
@@ -1767,11 +1779,15 @@ function renderCarrinhoModal(){
     var labelOpcoes = c.selecoesLabel
       ? '<div class="sel-label">' + escapar(c.selecoesLabel) + '</div>'
       : '';
+    var labelObs = (c.observacao && c.observacao.trim())
+      ? '<div class="sel-label" style="color:#fbbf24;font-style:italic;">💬 ' + escapar(c.observacao) + '</div>'
+      : '';
     return '<div class="cart-item">' +
       '<div class="foto-mini">' + foto + '</div>' +
       '<div class="info">' +
         '<div class="nome">' + escapar(c.nome) + '</div>' +
         labelOpcoes +
+        labelObs +
         '<div class="preco">R$ ' + subtotal + '</div>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' +
@@ -1836,13 +1852,18 @@ function finalizarPedido(){
     console.log('[TOTEM] Modo sem caixa: criando doc em "pedidos" id=', refPedidoImpressao.id);
     // Enriquece com categoria pro filtro do PDV (cozinha/bar/etc)
     itensEnriquecidos = _carrinho.map(function(c){
+      // Monta a obs: opções escolhidas + observação livre do cliente
+      var partesObs = [];
+      if(c.selecoesLabel) partesObs.push(c.selecoesLabel);
+      if(c.observacao && c.observacao.trim()) partesObs.push('OBS: ' + c.observacao.trim());
       var item = {
         id: c.itemId,
         nome: c.nome,
         preco: c.preco,
         precoBase: c.precoBase || c.preco,
         qtd: c.qtd,
-        obs: c.selecoesLabel || '',
+        obs: partesObs.join(' · '),
+        observacao: c.observacao || '',
         selecoes: [],
         cozinhaCriadoEm: Date.now()
       };

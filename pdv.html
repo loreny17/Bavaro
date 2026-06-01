@@ -4258,6 +4258,21 @@ function abrirNovoModelo(){
   if(ccTitN) ccTitN.value = '';
   if(ccTamN) ccTamN.value = 'extra';
   if(ccInstrN) ccInstrN.value = '';
+  // Reseta novos campos pros padrões
+  var ccMLn = document.getElementById('mod-cc-mostrar-linhas');
+  if(ccMLn) ccMLn.checked = true;
+  var ccNIn = document.getElementById('mod-cc-negrito-itens');
+  if(ccNIn) ccNIn.checked = false;
+  var ccNTn = document.getElementById('mod-cc-negrito-total');
+  if(ccNTn) ccNTn.checked = true;
+  var ccNInsn = document.getElementById('mod-cc-negrito-instrucao');
+  if(ccNInsn) ccNInsn.checked = true;
+  var ccNRn = document.getElementById('mod-cc-negrito-rodape');
+  if(ccNRn) ccNRn.checked = false;
+  var ccTTn = document.getElementById('mod-cc-tamanho-total');
+  if(ccTTn) ccTTn.value = 'largo';
+  var ccTInsn = document.getElementById('mod-cc-tamanho-instrucao');
+  if(ccTInsn) ccTInsn.value = 'alto';
   // Reseta logo
   modCCSetLogo(null);
   atualizarTipoModelo();
@@ -4292,6 +4307,21 @@ function abrirEditarModelo(m){
   if(ccTit) ccTit.value = m.tituloCupomCliente || '';
   if(ccTam) ccTam.value = m.tamanhoSenha || 'extra';
   if(ccInstr) ccInstr.value = m.instrucaoCupomCliente || '';
+  // Novos campos de personalização
+  var ccML = document.getElementById('mod-cc-mostrar-linhas');
+  if(ccML) ccML.checked = m.ccMostrarLinhas !== false;
+  var ccNI = document.getElementById('mod-cc-negrito-itens');
+  if(ccNI) ccNI.checked = m.ccNegritoItens === true;
+  var ccNT = document.getElementById('mod-cc-negrito-total');
+  if(ccNT) ccNT.checked = m.ccNegritoTotal !== false;
+  var ccNIns = document.getElementById('mod-cc-negrito-instrucao');
+  if(ccNIns) ccNIns.checked = m.ccNegritoInstrucao !== false;
+  var ccNR = document.getElementById('mod-cc-negrito-rodape');
+  if(ccNR) ccNR.checked = m.ccNegritoRodape === true;
+  var ccTT = document.getElementById('mod-cc-tamanho-total');
+  if(ccTT) ccTT.value = m.ccTamanhoTotal || 'largo';
+  var ccTIns = document.getElementById('mod-cc-tamanho-instrucao');
+  if(ccTIns) ccTIns.value = m.ccTamanhoInstrucao || 'alto';
   // Logo PB do cupom cliente
   modCCSetLogo(m.logoCupomCliente || null);
   atualizarTipoModelo();
@@ -4850,6 +4880,21 @@ function salvarModelo(){
       dados.tamanhoSenha = ccTamV ? ccTamV.value : 'extra';
       dados.instrucaoCupomCliente = ccInstrV ? (ccInstrV.value||'').trim() : '';
       dados.logoCupomCliente = _modCCLogoBase64 || null; // logo PB em base64
+      // Novas opções de personalização visual
+      var ccMLs = document.getElementById('mod-cc-mostrar-linhas');
+      var ccNIs = document.getElementById('mod-cc-negrito-itens');
+      var ccNTs = document.getElementById('mod-cc-negrito-total');
+      var ccNInss = document.getElementById('mod-cc-negrito-instrucao');
+      var ccNRs = document.getElementById('mod-cc-negrito-rodape');
+      var ccTTs = document.getElementById('mod-cc-tamanho-total');
+      var ccTInss = document.getElementById('mod-cc-tamanho-instrucao');
+      dados.ccMostrarLinhas    = ccMLs ? ccMLs.checked : true;
+      dados.ccNegritoItens     = ccNIs ? ccNIs.checked : false;
+      dados.ccNegritoTotal     = ccNTs ? ccNTs.checked : true;
+      dados.ccNegritoInstrucao = ccNInss ? ccNInss.checked : true;
+      dados.ccNegritoRodape    = ccNRs ? ccNRs.checked : false;
+      dados.ccTamanhoTotal     = ccTTs ? ccTTs.value : 'largo';
+      dados.ccTamanhoInstrucao = ccTInss ? ccTInss.value : 'alto';
     }
   } else if(filtro === 'categoria'){
     var cats = [];
@@ -5039,7 +5084,8 @@ function escposSize(modo){
   if(modo === 'alto')   byte = 0x01;       // só altura 2x
   else if(modo === 'largo') byte = 0x10;   // só largura 2x
   else if(modo === 'grande') byte = 0x11;  // 2x altura e largura (igual ao escposLarge)
-  else if(modo === 'extra')  byte = 0x33;  // 4x altura e largura (cuidado: nem toda impressora aceita)
+  else if(modo === 'extra')  byte = 0x22;  // 3x altura e largura (bom tamanho sem exagero)
+  else if(modo === 'gigante') byte = 0x33; // 4x altura e largura (extremo)
   // 'normal' = 0
   return GS + '!' + String.fromCharCode(byte);
 }
@@ -5761,23 +5807,35 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   var senha = pedido.senhaTotem || '?';
   var s = escposInit();
 
-  // Configurações personalizadas do modelo (com defaults)
-  var tituloTopo = (modelo && modelo.tituloCupomCliente) || 'BAVARO';
-  var tamanhoSenha = (modelo && modelo.tamanhoSenha) || 'extra'; // 'normal', 'largo', 'alto', 'extra'
-  var instrucao = (modelo && modelo.instrucaoCupomCliente) || 'AGUARDE SER CHAMADO\nno painel';
+  // ── Configurações personalizadas do modelo (com defaults) ──
+  var m = modelo || {};
+  var tituloTopo    = m.tituloCupomCliente || 'BAVARO';
+  var tamanhoSenha  = m.tamanhoSenha || 'extra'; // 'normal', 'largo', 'alto', 'extra', 'gigante'
+  var instrucao     = m.instrucaoCupomCliente || 'AGUARDE SER CHAMADO\nno painel';
+  // Opções booleanas (default true se nunca foram definidas)
+  var mostrarLinhas    = m.ccMostrarLinhas !== false;   // === false explícito desliga
+  var negritoItens     = m.ccNegritoItens === true;
+  var negritoTotal     = m.ccNegritoTotal !== false;    // default ligado
+  var negritoInstrucao = m.ccNegritoInstrucao !== false; // default ligado
+  var negritoRodape    = m.ccNegritoRodape === true;
+  var tamanhoTotal     = m.ccTamanhoTotal || 'largo';   // 'normal', 'alto', 'largo', 'grande'
+  var tamanhoInstrucao = m.ccTamanhoInstrucao || 'alto'; // 'normal', 'alto', 'largo', 'grande'
+
+  // Helpers de linha decorativa (respeita o toggle "mostrar linhas")
+  function linhaDeco(ch){ return mostrarLinhas ? (linha(ch, L) + '\n') : '\n'; }
 
   // ── Cabeçalho ──
   s += escposCenter();
   // Se tem logo carregada e processada, imprime logo em vez do título
-  if(modelo && modelo._logoBytesCache){
-    s += modelo._logoBytesCache;
+  if(m._logoBytesCache){
+    s += m._logoBytesCache;
     s += '\n';
   } else {
     s += escposBold(true) + escposLarge(true);
     s += tituloTopo + '\n';
     s += escposLarge(false) + escposBold(false);
   }
-  s += linha('=', L) + '\n';
+  s += linhaDeco('=');
 
   // ── SENHA (tamanho configurável) ──
   s += '\n';
@@ -5789,21 +5847,23 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   s += escposBold(false);
   s += '\n';
 
-  s += linha('-', L) + '\n';
+  s += linhaDeco('-');
 
   // ── Instrução pro cliente (configurável) ──
-  // Suporta múltiplas linhas separadas por \n
-  s += escposBold(true) + escposSize('alto');
+  if(negritoInstrucao) s += escposBold(true);
+  s += escposSize(tamanhoInstrucao);
   var linhasInstr = String(instrucao).split('\n');
   s += linhasInstr[0] + '\n';
-  s += escposSize('normal') + escposBold(false);
+  s += escposSize('normal');
+  if(negritoInstrucao) s += escposBold(false);
   for(var li=1; li<linhasInstr.length; li++){
     s += linhasInstr[li] + '\n';
   }
-  s += linha('-', L) + '\n';
+  s += linhaDeco('-');
 
   // ── Itens ──
   s += escposLeft();
+  if(negritoItens) s += escposBold(true);
   (pedido.itens||[]).forEach(function(it){
     var qtd = (it.qtd||1) + 'x';
     // Nome: quebra em várias linhas se muito longo
@@ -5812,19 +5872,25 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
     for(var k=1;k<linhasNome.length;k++) s += '   ' + linhasNome[k] + '\n';
     // Opções (sem cebola, +bacon, etc) — uma por linha com "* "
     if(it.obs){
+      // Obs sai sempre sem negrito mesmo se o item estiver em negrito
+      if(negritoItens) s += escposBold(false);
       var obsForm = _formatarObsImpressao(it.obs, L, '   ');
       if(obsForm) s += obsForm + '\n';
+      if(negritoItens) s += escposBold(true);
     }
   });
-  s += linha('-', L) + '\n';
+  if(negritoItens) s += escposBold(false);
+  s += linhaDeco('-');
 
   // ── Total ──
   var totalTxt = 'R$ ' + (pedido.total||0).toFixed(2).replace('.', ',');
-  s += escposBold(true) + escposSize('largo');
+  if(negritoTotal) s += escposBold(true);
+  s += escposSize(tamanhoTotal);
   s += 'TOTAL ' + totalTxt + '\n';
-  s += escposSize('normal') + escposBold(false);
+  s += escposSize('normal');
+  if(negritoTotal) s += escposBold(false);
 
-  s += linha('=', L) + '\n';
+  s += linhaDeco('=');
 
   // ── Rodapé ──
   s += escposCenter();
@@ -5832,7 +5898,9 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   var dataHora = agora.toLocaleDateString('pt-BR') + ' ' +
     agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
   s += dataHora + '\n';
+  if(negritoRodape) s += escposBold(true);
   s += 'Obrigado pela preferencia!\n';
+  if(negritoRodape) s += escposBold(false);
 
   s += '\n\n\n';
   if(_configImp && _configImp.cortePapel) s += escposCut();
@@ -11290,7 +11358,9 @@ function toggleAdminUsuario(garcomId, novoValor){
             <option value="normal">Normal (1x)</option>
             <option value="largo">Largo (2x largura)</option>
             <option value="alto">Alto (2x altura)</option>
-            <option value="extra" selected>Extra grande (4x)</option>
+            <option value="grande">Grande (2x todos)</option>
+            <option value="extra" selected>Extra grande (3x)</option>
+            <option value="gigante">Gigante (4x — pode não caber)</option>
           </select>
           <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">Quanto maior, mais espaço ocupa no papel</div>
         </div>
@@ -11298,6 +11368,65 @@ function toggleAdminUsuario(garcomId, novoValor){
           <label class="f-label">Instrução pro cliente</label>
           <textarea class="f-input" id="mod-cc-instrucao" rows="2" maxlength="80" placeholder="Ex: AGUARDE SER CHAMADO no painel" style="resize:vertical;font-family:inherit;"></textarea>
           <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">A primeira linha sai em destaque. Use Enter pra quebrar linha.</div>
+        </div>
+
+        <!-- ── Personalização visual ── -->
+        <div style="background:rgba(74,222,128,0.04);border:1px solid rgba(74,222,128,0.2);border-radius:10px;padding:12px;margin-top:6px;">
+          <div style="font-size:0.84rem;font-weight:700;color:#4ade80;margin-bottom:10px;">🎨 Personalização Visual</div>
+
+          <!-- Toggle linhas decorativas -->
+          <label style="display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;margin-bottom:10px;cursor:pointer;">
+            <input type="checkbox" id="mod-cc-mostrar-linhas" checked style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+            <div style="flex:1;">
+              <div style="font-size:0.84rem;font-weight:600;">📏 Mostrar linhas decorativas</div>
+              <div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Linhas de <code>====</code> e <code>----</code> separando seções</div>
+            </div>
+          </label>
+
+          <!-- Tamanho da instrução -->
+          <div class="f-grupo" style="margin-bottom:10px;">
+            <label class="f-label" style="font-size:0.78rem;">Tamanho da instrução</label>
+            <select class="f-select" id="mod-cc-tamanho-instrucao">
+              <option value="normal">Normal</option>
+              <option value="alto" selected>Alto</option>
+              <option value="largo">Largo</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+
+          <!-- Tamanho do total -->
+          <div class="f-grupo" style="margin-bottom:10px;">
+            <label class="f-label" style="font-size:0.78rem;">Tamanho do TOTAL</label>
+            <select class="f-select" id="mod-cc-tamanho-total">
+              <option value="normal">Normal</option>
+              <option value="alto">Alto</option>
+              <option value="largo" selected>Largo</option>
+              <option value="grande">Grande</option>
+            </select>
+          </div>
+
+          <!-- Toggles de negrito -->
+          <div style="font-size:0.78rem;color:var(--muted);margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Em negrito:</div>
+
+          <label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;margin-bottom:5px;cursor:pointer;">
+            <input type="checkbox" id="mod-cc-negrito-instrucao" checked style="width:16px;height:16px;cursor:pointer;">
+            <span style="font-size:0.82rem;">💪 Instrução (AGUARDE SER CHAMADO)</span>
+          </label>
+
+          <label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;margin-bottom:5px;cursor:pointer;">
+            <input type="checkbox" id="mod-cc-negrito-itens" style="width:16px;height:16px;cursor:pointer;">
+            <span style="font-size:0.82rem;">💪 Itens do pedido</span>
+          </label>
+
+          <label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;margin-bottom:5px;cursor:pointer;">
+            <input type="checkbox" id="mod-cc-negrito-total" checked style="width:16px;height:16px;cursor:pointer;">
+            <span style="font-size:0.82rem;">💪 Linha do TOTAL</span>
+          </label>
+
+          <label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;cursor:pointer;">
+            <input type="checkbox" id="mod-cc-negrito-rodape" style="width:16px;height:16px;cursor:pointer;">
+            <span style="font-size:0.82rem;">💪 Rodapé (Obrigado pela preferência)</span>
+          </label>
         </div>
       </div>
 

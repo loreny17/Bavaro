@@ -4258,6 +4258,8 @@ function abrirNovoModelo(){
   if(ccTitN) ccTitN.value = '';
   if(ccTamN) ccTamN.value = 'extra';
   if(ccInstrN) ccInstrN.value = '';
+  // Reseta logo
+  modCCSetLogo(null);
   atualizarTipoModelo();
   atualizarFiltroModelo();
   renderModeloCategorias([], []);
@@ -4290,6 +4292,8 @@ function abrirEditarModelo(m){
   if(ccTit) ccTit.value = m.tituloCupomCliente || '';
   if(ccTam) ccTam.value = m.tamanhoSenha || 'extra';
   if(ccInstr) ccInstr.value = m.instrucaoCupomCliente || '';
+  // Logo PB do cupom cliente
+  modCCSetLogo(m.logoCupomCliente || null);
   atualizarTipoModelo();
   atualizarFiltroModelo();
   renderModeloCategorias(m.categorias || [], m.categoriasTotem || []);
@@ -4313,6 +4317,171 @@ function trocarAbaModelo(aba){
 
 // Preenche os campos de estilo do modelo. Se modelo for null OU não tiver os campos,
 // usa os valores do global (_configImp). Se modelo tiver, usa os do modelo.
+// ═══════════════════════════════════════════════
+// 🖼️ LOGO DO CUPOM CLIENTE
+// ═══════════════════════════════════════════════
+// Estado: guarda a logo do modelo sendo editado (base64 PB)
+var _modCCLogoBase64 = null;
+
+// Limpa estado (chamado quando abre formulário novo / edita modelo)
+function modCCSetLogo(logoB64){
+  _modCCLogoBase64 = logoB64 || null;
+  var preview = document.getElementById('mod-cc-logo-preview');
+  var img = document.getElementById('mod-cc-logo-img');
+  var btnRem = document.getElementById('mod-cc-logo-remover');
+  if(_modCCLogoBase64 && img && preview){
+    img.src = _modCCLogoBase64;
+    preview.style.display = 'block';
+    if(btnRem) btnRem.style.display = 'inline-flex';
+  } else if(preview){
+    preview.style.display = 'none';
+    if(btnRem) btnRem.style.display = 'none';
+    if(img) img.src = '';
+  }
+}
+
+function modCCRemoverLogo(){
+  if(!confirm('Remover a logo do cupom?')) return;
+  modCCSetLogo(null);
+}
+
+function modCCEscolherLogo(){
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e){
+    var f = e.target.files[0];
+    if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var img = new Image();
+      img.onload = function(){
+        // Redimensiona pra largura máxima de 384px (térmica 80mm)
+        // mantendo proporção. Altura máxima 200px pra não estourar o cupom.
+        var maxW = 384;
+        var maxH = 200;
+        var w = img.width, h = img.height;
+        if(w > maxW){ h = h * (maxW/w); w = maxW; }
+        if(h > maxH){ w = w * (maxH/h); h = maxH; }
+        // Largura precisa ser múltipla de 8 pra ESC/POS raster
+        w = Math.floor(w / 8) * 8;
+        if(w < 8) w = 8;
+        h = Math.floor(h);
+        // Canvas pra processar
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        // Fundo branco (impressora térmica não imprime fundo)
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        // Converte pra preto e branco com dithering Floyd-Steinberg
+        // (dá melhor resultado em logos coloridas/com cinza)
+        var imgData = ctx.getImageData(0, 0, w, h);
+        var data = imgData.data;
+        // Converte pra grayscale primeiro
+        var gray = new Float32Array(w * h);
+        for(var i=0; i<w*h; i++){
+          var r = data[i*4], g = data[i*4+1], b = data[i*4+2], a = data[i*4+3];
+          // Considera transparência como branco
+          if(a < 128){
+            gray[i] = 255;
+          } else {
+            gray[i] = 0.299*r + 0.587*g + 0.114*b;
+          }
+        }
+        // Dithering Floyd-Steinberg
+        for(var y=0; y<h; y++){
+          for(var x=0; x<w; x++){
+            var idx = y*w + x;
+            var oldP = gray[idx];
+            var newP = oldP < 128 ? 0 : 255;
+            gray[idx] = newP;
+            var err = oldP - newP;
+            // Distribui erro pros vizinhos
+            if(x+1 < w) gray[idx+1] += err * 7/16;
+            if(y+1 < h){
+              if(x-1 >= 0) gray[idx+w-1] += err * 3/16;
+              gray[idx+w] += err * 5/16;
+              if(x+1 < w) gray[idx+w+1] += err * 1/16;
+            }
+          }
+        }
+        // Aplica ao canvas
+        for(var i=0; i<w*h; i++){
+          var v = gray[i];
+          data[i*4] = v;
+          data[i*4+1] = v;
+          data[i*4+2] = v;
+          data[i*4+3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        // Salva como PNG base64
+        var b64 = canvas.toDataURL('image/png');
+        modCCSetLogo(b64);
+        showToast('✓ Logo carregada e convertida pra P&B', '#4ade80');
+      };
+      img.onerror = function(){
+        showToast('Não foi possível ler a imagem', '#f87171');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  };
+  input.click();
+}
+
+// Converte uma imagem base64 PB pra bytes ESC/POS raster (GS v 0)
+function _logoBase64ParaEscpos(base64, callback){
+  if(!base64){ callback(''); return; }
+  var img = new Image();
+  img.onload = function(){
+    var w = img.width;
+    var h = img.height;
+    // Garante largura múltipla de 8
+    var wRound = Math.floor(w / 8) * 8;
+    if(wRound < 8){ callback(''); return; }
+    var canvas = document.createElement('canvas');
+    canvas.width = wRound;
+    canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, wRound, h);
+    ctx.drawImage(img, 0, 0, wRound, h);
+    var imgData = ctx.getImageData(0, 0, wRound, h);
+    var data = imgData.data;
+    var bytesPorLinha = wRound / 8;
+    var xL = bytesPorLinha & 0xff;
+    var xH = (bytesPorLinha >> 8) & 0xff;
+    var yL = h & 0xff;
+    var yH = (h >> 8) & 0xff;
+    var saida = '';
+    saida += escposCenter();
+    saida += GS + 'v' + '0' + String.fromCharCode(0) +
+             String.fromCharCode(xL) + String.fromCharCode(xH) +
+             String.fromCharCode(yL) + String.fromCharCode(yH);
+    for(var y=0; y<h; y++){
+      for(var bx=0; bx<bytesPorLinha; bx++){
+        var byte = 0;
+        for(var bit=0; bit<8; bit++){
+          var px = bx*8 + bit;
+          var idx = (y*wRound + px) * 4;
+          var brightness = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+          if(brightness < 128){
+            byte |= (1 << (7 - bit));
+          }
+        }
+        saida += String.fromCharCode(byte);
+      }
+    }
+    saida += escposLeft();
+    callback(saida);
+  };
+  img.onerror = function(){ callback(''); };
+  img.src = base64;
+}
+
 function preencherEstilosNoModeloUI(modelo){
   function v(id, val){ var el = document.getElementById(id); if(!el) return; if(el.type==='checkbox') el.checked = !!val; else el.value = val; }
   // Cabeçalho — defaults do global
@@ -4652,6 +4821,7 @@ function salvarModelo(){
       dados.tituloCupomCliente = ccTitV ? (ccTitV.value||'').trim().toUpperCase() : '';
       dados.tamanhoSenha = ccTamV ? ccTamV.value : 'extra';
       dados.instrucaoCupomCliente = ccInstrV ? (ccInstrV.value||'').trim() : '';
+      dados.logoCupomCliente = _modCCLogoBase64 || null; // logo PB em base64
     }
   } else if(filtro === 'categoria'){
     var cats = [];
@@ -5429,9 +5599,14 @@ function gerarReciboCliente(pedido, modelo, imp){
 
   // ── Cabeçalho ──
   s += escposCenter();
-  s += escposBold(true) + escposLarge(true);
-  s += tituloTopo + '\n';
-  s += escposLarge(false) + escposBold(false);
+  if(modelo && modelo._logoBytesCache){
+    s += modelo._logoBytesCache;
+    s += '\n';
+  } else {
+    s += escposBold(true) + escposLarge(true);
+    s += tituloTopo + '\n';
+    s += escposLarge(false) + escposBold(false);
+  }
   s += 'Recibo do Pedido\n';
   s += linha('=', L) + '\n';
 
@@ -5509,9 +5684,15 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
 
   // ── Cabeçalho ──
   s += escposCenter();
-  s += escposBold(true) + escposLarge(true);
-  s += tituloTopo + '\n';
-  s += escposLarge(false) + escposBold(false);
+  // Se tem logo carregada e processada, imprime logo em vez do título
+  if(modelo && modelo._logoBytesCache){
+    s += modelo._logoBytesCache;
+    s += '\n';
+  } else {
+    s += escposBold(true) + escposLarge(true);
+    s += tituloTopo + '\n';
+    s += escposLarge(false) + escposBold(false);
+  }
   s += linha('=', L) + '\n';
 
   // ── SENHA (tamanho configurável) ──
@@ -5611,31 +5792,54 @@ function imprimirPedidoAutomatico(pedido){
   if(pedido && pedido.origemTotem){
     var modelosCupom = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; });
     console.log('[CUPOM-CLIENTE] modelos cupom_cliente:', modelosCupom.length);
-    modelosCupom.forEach(function(modelo){
-      var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
-      if(!imp){
-        console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome, 'id:', modelo.impressoraId);
-        return;
-      }
-      var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
-      console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
-      if(cupom) enviarParaImpressora(imp, cupom);
-    });
 
-    // ── RECIBO CLIENTE (só se foi solicitado no caixa) ──
-    // Sai na MESMA impressora do cupom cliente. Cliente leva como recibo não-fiscal.
-    if(pedido.imprimirRecibo){
-      console.log('[RECIBO] cliente pediu recibo — gerando...');
+    // Helper: pré-converte logos em bytes ESC/POS antes de imprimir
+    // Retorna Promise que resolve quando todas as logos estão prontas
+    var preCarregarLogos = function(){
+      var promessas = modelosCupom.map(function(modelo){
+        return new Promise(function(resolve){
+          if(!modelo.logoCupomCliente){ resolve(); return; }
+          // Já tem cache da última vez? Reusa
+          if(modelo._logoBytesCache && modelo._logoBytesCacheUrl === modelo.logoCupomCliente){
+            resolve(); return;
+          }
+          _logoBase64ParaEscpos(modelo.logoCupomCliente, function(bytes){
+            modelo._logoBytesCache = bytes;
+            modelo._logoBytesCacheUrl = modelo.logoCupomCliente;
+            resolve();
+          });
+        });
+      });
+      return Promise.all(promessas);
+    };
+
+    preCarregarLogos().then(function(){
       modelosCupom.forEach(function(modelo){
         var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
-        if(!imp) return;
-        var recibo = gerarReciboCliente(pedido, modelo, imp);
-        if(recibo){
-          console.log('[RECIBO] enviando pra', imp.nome);
-          enviarParaImpressora(imp, recibo);
+        if(!imp){
+          console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome, 'id:', modelo.impressoraId);
+          return;
+        }
+        var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
+        console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
+        if(cupom) enviarParaImpressora(imp, cupom);
+      });
+
+      // ── RECIBO CLIENTE (só se foi solicitado no caixa) ──
+      // Sai na MESMA impressora do cupom cliente. Cliente leva como recibo não-fiscal.
+      if(pedido.imprimirRecibo){
+        console.log('[RECIBO] cliente pediu recibo — gerando...');
+        modelosCupom.forEach(function(modelo){
+          var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+          if(!imp) return;
+          var recibo = gerarReciboCliente(pedido, modelo, imp);
+          if(recibo){
+            console.log('[RECIBO] enviando pra', imp.nome);
+            enviarParaImpressora(imp, recibo);
         }
       });
     }
+    }); // fim preCarregarLogos().then()
   }
 
   // ── ITENS AVULSOS com impressora forçada ──
@@ -10943,10 +11147,22 @@ function toggleAdminUsuario(garcomId, novoValor){
       <!-- Configurações exclusivas do Cupom Cliente (totem) -->
       <div id="mod-bloco-cupom-cliente" style="display:none;background:rgba(168,85,247,0.05);border:1px solid rgba(168,85,247,0.25);border-radius:10px;padding:12px;margin-bottom:14px;">
         <div style="font-weight:700;font-size:0.86rem;color:#c084fc;margin-bottom:10px;">🎫 Configurações do Cupom Cliente</div>
+        <!-- Logo da loja -->
+        <div class="f-grupo">
+          <label class="f-label">🖼️ Logo da loja (opcional)</label>
+          <div id="mod-cc-logo-preview" style="display:none;text-align:center;margin-bottom:8px;padding:10px;background:#fff;border:1px solid var(--border);border-radius:8px;">
+            <img id="mod-cc-logo-img" style="max-width:200px;max-height:120px;display:inline-block;" alt="">
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" onclick="modCCEscolherLogo()" style="flex:1;min-width:120px;background:var(--surface2);border:1px dashed var(--border2);color:var(--text);padding:10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.84rem;">📷 Escolher imagem</button>
+            <button type="button" id="mod-cc-logo-remover" onclick="modCCRemoverLogo()" style="display:none;background:rgba(248,113,113,0.15);border:1px solid #f87171;color:#f87171;padding:10px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.84rem;">Remover</button>
+          </div>
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:5px;line-height:1.5;">A logo aparecerá em <b>preto e branco</b> no topo do cupom. Funciona melhor com logos com contornos bem definidos (preto sobre fundo branco). Logos coloridas serão convertidas automaticamente.</div>
+        </div>
         <div class="f-grupo">
           <label class="f-label">Título do topo</label>
           <input type="text" class="f-input" id="mod-cc-titulo" maxlength="20" placeholder="Ex: BAVARO, OMAR CAFE">
-          <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">Aparece grande no topo do cupom. Padrão: BAVARO</div>
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">Aparece grande no topo do cupom (se não tiver logo). Padrão: BAVARO</div>
         </div>
         <div class="f-grupo">
           <label class="f-label">Tamanho da senha</label>

@@ -7210,6 +7210,15 @@ function abrirCopiarCardapio(){
   document.getElementById('copy-novo-rest-id').style.display = 'none';
   document.getElementById('copy-novo-rest-id').value = '';
   document.getElementById('copy-destino-id').style.display = '';
+  // Reseta config do cardápio principal
+  var chkCard = document.getElementById('copy-cardapio');
+  if(chkCard){
+    chkCard.checked = true;
+    document.getElementById('copy-cardapio-bloco').style.display = 'block';
+    var radioCardCompl = document.querySelector('input[name="copy-cardapio-modo"][value="completo"]');
+    if(radioCardCompl) radioCardCompl.checked = true;
+    document.getElementById('copy-cardapio-cats').style.display = 'none';
+  }
   // Reseta config de totem
   var chkTot = document.getElementById('copy-totem');
   if(chkTot){
@@ -7224,6 +7233,45 @@ function abrirCopiarCardapio(){
   btn.textContent = 'Copiar';
   // Carrega lista de restaurantes
   carregarDestinosCopia();
+}
+
+function toggleCopiaCardapio(){
+  var chk = document.getElementById('copy-cardapio');
+  var bloco = document.getElementById('copy-cardapio-bloco');
+  if(bloco) bloco.style.display = chk.checked ? 'block' : 'none';
+}
+
+function cardapioRecarregarCats(){
+  var modoSelec = document.querySelector('input[name="copy-cardapio-modo"][value="selecao"]');
+  var caixa = document.getElementById('copy-cardapio-cats');
+  if(!caixa) return;
+  if(!modoSelec || !modoSelec.checked){ caixa.style.display = 'none'; return; }
+  caixa.style.display = 'block';
+  caixa.innerHTML = '<div style="font-size:0.74rem;color:var(--muted);">Carregando...</div>';
+  if(!_restauranteAtivo || !_restauranteAtivo.id){
+    caixa.innerHTML = '<div style="color:#f87171;font-size:0.78rem;">Restaurante origem inválido</div>';
+    return;
+  }
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio').doc('data').collection('categorias').get()
+    .then(function(snap){
+      var cats = [];
+      snap.forEach(function(d){ cats.push(Object.assign({id:d.id}, d.data())); });
+      cats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
+      if(!cats.length){
+        caixa.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;">Nenhuma categoria no cardápio principal</div>';
+        return;
+      }
+      caixa.innerHTML = cats.map(function(c){
+        return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:0.84rem;cursor:pointer;">' +
+          '<input type="checkbox" data-cat-cardapio="'+c.id+'" checked style="width:16px;height:16px;accent-color:var(--accent);">' +
+          '<span>' + (c.emoji||'🍽️') + ' ' + escapeHtml(c.nome||'') + '</span>' +
+        '</label>';
+      }).join('');
+    }).catch(function(e){
+      caixa.innerHTML = '<div style="color:#f87171;font-size:0.78rem;">Erro: ' + (e.message||e.code) + '</div>';
+    });
 }
 
 function toggleCopiaTotem(){
@@ -7372,25 +7420,49 @@ async function executarCopiaCardapio(){
     // 1. CARDÁPIO: cardapio/data/itens, cardapio/data/categorias
     if(copiarCardapio){
       _logCopia(''); _logCopia('=== CARDÁPIO ===');
+      // Determina modo: completo ou seleção
+      var modoCardapio = (document.querySelector('input[name="copy-cardapio-modo"]:checked')||{}).value || 'completo';
+      var catsPermitidasPrincipal = null;
+      if(modoCardapio === 'selecao'){
+        catsPermitidasPrincipal = [];
+        document.querySelectorAll('#copy-cardapio-cats input[type="checkbox"][data-cat-cardapio]:checked').forEach(function(cb){
+          catsPermitidasPrincipal.push(cb.getAttribute('data-cat-cardapio'));
+        });
+        if(!catsPermitidasPrincipal.length){
+          throw new Error('Selecione pelo menos 1 categoria do cardápio principal (ou escolha modo Completo)');
+        }
+        _logCopia('Modo: SELEÇÃO de ' + catsPermitidasPrincipal.length + ' categoria(s)');
+      } else {
+        _logCopia('Modo: COMPLETO (tudo)');
+      }
       // Itens
       _logCopia('→ Copiando itens...');
       var itensSnap = await origemDoc.collection('cardapio').doc('data').collection('itens').get();
       _logCopia('  Itens encontrados: ' + itensSnap.size);
+      var itensCopiadosP = 0, itensIgnoradosP = 0;
       for(var i=0; i<itensSnap.docs.length; i++){
         var doc = itensSnap.docs[i];
-        await destinoDoc.collection('cardapio').doc('data').collection('itens').doc(doc.id).set(doc.data());
+        var dataIt = doc.data();
+        if(catsPermitidasPrincipal && catsPermitidasPrincipal.indexOf(dataIt.categoriaId || dataIt.categoria) < 0){
+          itensIgnoradosP++;
+          continue;
+        }
+        await destinoDoc.collection('cardapio').doc('data').collection('itens').doc(doc.id).set(dataIt);
+        itensCopiadosP++;
       }
-      _logCopia('  ✓ ' + itensSnap.size + ' itens copiados');
+      _logCopia('  ✓ ' + itensCopiadosP + ' itens copiados' + (itensIgnoradosP ? ' (' + itensIgnoradosP + ' ignorados)' : ''));
 
       // Categorias
       _logCopia('→ Copiando categorias...');
       var catSnap = await origemDoc.collection('cardapio').doc('data').collection('categorias').get();
-      _logCopia('  Categorias encontradas: ' + catSnap.size);
+      var catsCopiadasP = 0;
       for(var i=0; i<catSnap.docs.length; i++){
         var doc = catSnap.docs[i];
+        if(catsPermitidasPrincipal && catsPermitidasPrincipal.indexOf(doc.id) < 0) continue;
         await destinoDoc.collection('cardapio').doc('data').collection('categorias').doc(doc.id).set(doc.data());
+        catsCopiadasP++;
       }
-      _logCopia('  ✓ ' + catSnap.size + ' categorias copiadas');
+      _logCopia('  ✓ ' + catsCopiadasP + ' categorias copiadas');
     }
 
     // 2. GRUPOS: cardapio/data/grupos_opcoes
@@ -10904,7 +10976,16 @@ function toggleAdminUsuario(garcomId, novoValor){
       </div>
       <div class="copy-section">
         <div class="label">O que copiar</div>
-        <label class="copy-check"><input type="checkbox" id="copy-cardapio" checked> <span>Cardápio principal (itens, categorias)</span></label>
+        <label class="copy-check"><input type="checkbox" id="copy-cardapio" checked onchange="toggleCopiaCardapio()"> <span>Cardápio principal (itens, categorias)</span></label>
+        <!-- Bloco de categorias do principal -->
+        <div id="copy-cardapio-bloco" style="background:rgba(212,168,67,0.05);border:1px solid rgba(212,168,67,0.25);border-radius:9px;padding:10px;margin:6px 0 0 24px;">
+          <div style="font-size:0.78rem;color:var(--accent);font-weight:700;margin-bottom:8px;">Qual cardápio principal copiar?</div>
+          <label class="copy-check" style="margin-bottom:4px;"><input type="radio" name="copy-cardapio-modo" value="completo" checked onchange="cardapioRecarregarCats()"> <span>Completo (todas categorias + itens)</span></label>
+          <label class="copy-check" style="margin-bottom:4px;"><input type="radio" name="copy-cardapio-modo" value="selecao" onchange="cardapioRecarregarCats()"> <span>Selecionar categorias</span></label>
+          <div id="copy-cardapio-cats" style="display:none;max-height:160px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px;">
+            <div style="font-size:0.74rem;color:var(--muted);">Carregando categorias...</div>
+          </div>
+        </div>
         <label class="copy-check"><input type="checkbox" id="copy-grupos" checked> <span>Grupos de impressão</span></label>
         <label class="copy-check"><input type="checkbox" id="copy-config-imp"> <span>Configuração de impressoras</span></label>
         <label class="copy-check"><input type="checkbox" id="copy-garcons"> <span>Garçons</span></label>

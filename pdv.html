@@ -191,15 +191,15 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 /* ─── Desktop frame (mesma estratégia do app) ─── */
 @media (min-width: 768px){
   html{background:radial-gradient(ellipse at 30% 20%,rgba(212,168,67,0.06) 0%,transparent 50%),radial-gradient(ellipse at 70% 80%,rgba(212,168,67,0.04) 0%,transparent 50%),#050505;min-height:100vh;}
-  body{max-width:480px;margin:0 auto;min-height:100vh;box-shadow:0 0 40px rgba(0,0,0,0.6),0 0 0 1px rgba(212,168,67,0.08);position:relative;overflow-x:hidden;}
-  header{max-width:480px;margin:0 auto;}
-  .tabs{max-width:480px;margin:0 auto;}
-  .fab{right:calc(50vw - 240px + 16px);}
+  body{max-width:100%;margin:0;min-height:100vh;position:relative;overflow-x:hidden;}
+  header{max-width:100%;margin:0;}
+  .tabs{max-width:100%;margin:0;}
+  .fab{right:24px;}
 }
 @media (min-width: 1280px){
-  body{max-width:520px;}
-  header,.tabs{max-width:520px;}
-  .fab{right:calc(50vw - 260px + 16px);}
+  body{max-width:100%;}
+  header,.tabs{max-width:100%;}
+  .fab{right:32px;}
 }
 
 /* ─── Pedidos PDV ─── */
@@ -1959,35 +1959,85 @@ function estoqueTogglePausa(itemId, fonte, novoEstado){
   });
 }
 
-// Ajusta estoque (modal simples com input)
+// Ajusta estoque (modal próprio — funciona em qualquer navegador/PWA)
 function estoqueAjustar(itemId, fonte){
   var lista = _estoqueItensP.concat(_estoqueItensT);
   var item = lista.find(function(x){ return x.id === itemId && x._fonte === fonte; });
   if(!item) return;
   var atual = item.estoque || 0;
-  var nova = prompt(item.nome + '\n\nEstoque atual: ' + atual + '\n\nDigite a NOVA quantidade:\n(ou prefixe com + ou - pra somar/subtrair)\n\nEx: 20 → define em 20\nEx: +5 → adiciona 5\nEx: -2 → remove 2', atual);
-  if(nova === null) return;
-  nova = (nova||'').trim();
-  if(!nova) return;
-  var resultado;
-  if(nova.charAt(0) === '+'){
-    resultado = atual + (parseInt(nova.substring(1))||0);
-  } else if(nova.charAt(0) === '-'){
-    resultado = atual - (parseInt(nova.substring(1))||0);
-  } else {
-    resultado = parseInt(nova);
-  }
-  if(isNaN(resultado) || resultado < 0){
+
+  // Remove modal anterior se existe
+  var ex = document.getElementById('modal-est-ajustar');
+  if(ex) ex.remove();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-est-ajustar';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:380px;width:100%;padding:20px;">' +
+      '<div style="font-weight:700;font-size:1.05rem;margin-bottom:6px;">📦 Ajustar Estoque</div>' +
+      '<div style="font-size:0.86rem;color:var(--muted);margin-bottom:14px;">' + escapeHtml(item.nome) + '</div>' +
+      '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="color:var(--muted);font-size:0.86rem;">Estoque atual</span>' +
+        '<span style="color:var(--accent);font-family:\'Bebas Neue\',sans-serif;font-size:1.8rem;line-height:1;">' + atual + '</span>' +
+      '</div>' +
+      // Botões rápidos +/-
+      '<div style="display:flex;gap:6px;margin-bottom:14px;">' +
+        '<button onclick="_estAjusteRapido(-1)" style="flex:1;background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">−1</button>' +
+        '<button onclick="_estAjusteRapido(-5)" style="flex:1;background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">−5</button>' +
+        '<button onclick="_estAjusteRapido(1)" style="flex:1;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.4);color:#4ade80;border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">+1</button>' +
+        '<button onclick="_estAjusteRapido(5)" style="flex:1;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.4);color:#4ade80;border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">+5</button>' +
+        '<button onclick="_estAjusteRapido(10)" style="flex:1;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.4);color:#4ade80;border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.9rem;">+10</button>' +
+      '</div>' +
+      // Input direto
+      '<label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Ou defina o valor exato:</label>' +
+      '<input type="number" id="est-ajustar-input" min="0" step="1" value="' + atual + '" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1.1rem;box-sizing:border-box;text-align:center;" autofocus>' +
+      // Ações
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button onclick="document.getElementById(\'modal-est-ajustar\').remove()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:11px;font-family:inherit;cursor:pointer;font-size:0.92rem;">Cancelar</button>' +
+        '<button onclick="_estConfirmarAjuste(\'' + itemId + '\',\'' + fonte + '\')" style="flex:1.5;background:var(--accent);border:none;color:#000;border-radius:8px;padding:11px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.92rem;">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  // Foca e seleciona o input
+  setTimeout(function(){
+    var inp = document.getElementById('est-ajustar-input');
+    if(inp){ inp.focus(); inp.select(); }
+  }, 50);
+}
+
+// Botões rápidos +/-N
+function _estAjusteRapido(delta){
+  var inp = document.getElementById('est-ajustar-input');
+  if(!inp) return;
+  var atual = parseInt(inp.value) || 0;
+  var novo = Math.max(0, atual + delta);
+  inp.value = novo;
+}
+
+// Salva ajuste
+function _estConfirmarAjuste(itemId, fonte){
+  var inp = document.getElementById('est-ajustar-input');
+  if(!inp) return;
+  var nova = parseInt(inp.value);
+  if(isNaN(nova) || nova < 0){
     showToast('Quantidade inválida', '#f7a34f');
     return;
   }
+  var lista = _estoqueItensP.concat(_estoqueItensT);
+  var item = lista.find(function(x){ return x.id === itemId && x._fonte === fonte; });
+  if(!item) return;
+  var atual = item.estoque || 0;
   var ref = _estoqueRef(itemId, fonte);
-  var update = { estoque: resultado, atualizadoEm: Date.now() };
-  // Auto-pausa se chegou a 0 / auto-despausa se saiu do 0
-  if(resultado === 0) update.pausado = true;
-  if(atual === 0 && resultado > 0 && item.pausado === true) update.pausado = false;
+  var update = { estoque: nova, atualizadoEm: Date.now() };
+  // Auto-pausa quando chega a 0
+  if(nova === 0) update.pausado = true;
+  // Auto-despausa quando sai do 0 (se estava auto-pausado)
+  if(atual === 0 && nova > 0 && item.pausado === true) update.pausado = false;
   ref.update(update).then(function(){
-    showToast('📦 ' + item.nome + ': ' + resultado + ' un.', '#4ade80');
+    showToast('📦 ' + item.nome + ': ' + nova + ' un.', '#4ade80');
+    document.getElementById('modal-est-ajustar').remove();
   }).catch(function(e){
     showToast('Erro: ' + e.message, '#f87171');
   });
@@ -1998,9 +2048,37 @@ function estoqueAtivarControle(itemId, fonte){
   var lista = _estoqueItensP.concat(_estoqueItensT);
   var item = lista.find(function(x){ return x.id === itemId && x._fonte === fonte; });
   if(!item) return;
-  var qtdStr = prompt(item.nome + '\n\nAtivar controle de estoque com qual quantidade inicial?', '10');
-  if(qtdStr === null) return;
-  var qtd = parseInt(qtdStr);
+
+  // Modal próprio (sem prompt)
+  var ex = document.getElementById('modal-est-ativar');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-est-ativar';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:380px;width:100%;padding:20px;">' +
+      '<div style="font-weight:700;font-size:1.05rem;margin-bottom:6px;">📦 Ativar Controle de Estoque</div>' +
+      '<div style="font-size:0.86rem;color:var(--muted);margin-bottom:14px;">' + escapeHtml(item.nome) + '</div>' +
+      '<label style="font-size:0.84rem;color:var(--muted);display:block;margin-bottom:6px;">Quantidade inicial em estoque:</label>' +
+      '<input type="number" id="est-ativar-input" min="0" step="1" value="10" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1.1rem;box-sizing:border-box;text-align:center;" autofocus>' +
+      '<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Cada pedido pra cozinha vai decrementar automaticamente. Cancelamentos devolvem.</div>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button onclick="document.getElementById(\'modal-est-ativar\').remove()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:11px;font-family:inherit;cursor:pointer;font-size:0.92rem;">Cancelar</button>' +
+        '<button onclick="_estConfirmarAtivar(\'' + itemId + '\',\'' + fonte + '\')" style="flex:1.5;background:#c084fc;border:none;color:#000;border-radius:8px;padding:11px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.92rem;">Ativar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){
+    var inp = document.getElementById('est-ativar-input');
+    if(inp){ inp.focus(); inp.select(); }
+  }, 50);
+}
+
+function _estConfirmarAtivar(itemId, fonte){
+  var inp = document.getElementById('est-ativar-input');
+  if(!inp) return;
+  var qtd = parseInt(inp.value);
   if(isNaN(qtd) || qtd < 0){ showToast('Quantidade inválida', '#f7a34f'); return; }
   var ref = _estoqueRef(itemId, fonte);
   ref.update({
@@ -2009,6 +2087,7 @@ function estoqueAtivarControle(itemId, fonte){
     atualizadoEm: Date.now()
   }).then(function(){
     showToast('📦 Controle ativado: ' + qtd + ' un.', '#4ade80');
+    document.getElementById('modal-est-ativar').remove();
   }).catch(function(e){
     showToast('Erro: ' + e.message, '#f87171');
   });

@@ -1329,6 +1329,10 @@ function iniciarApp(){
   try { iniciarListenerPedidos(); } catch(e){ console.warn('Erro pedidos:', e); }
   // Listener de comandos de impressão (insumos, reimpressão) — independente da impressora
   try { iniciarListenerComandosImpressao(); } catch(e){ console.warn('Erro comandos imp:', e); }
+  // ⚡ Conecta com a impressora JÁ no boot (não espera abrir a aba Impressoras)
+  try { qzInicializar(); } catch(e){ console.warn('Erro init impressora:', e); }
+  // 🔁 Monitor de reconexão: checa a cada 20s se a impressora ainda tá conectada
+  iniciarMonitorImpressao();
 }
 
 // ═══ LISTENERS ═══
@@ -3896,14 +3900,22 @@ function qzReconectar(){
 
 function qzConectar(){
   qz.websocket.connect().then(function(){
+    var eraOffline = !_qzPronto;
     _qzPronto = true;
     atualizarStatusQZ('online', '✓ QZ Tray conectado', 'Pronto para imprimir');
     iniciarListenerImpressao();
     iniciarListenerComandosImpressao();
+    if(eraOffline){
+      console.log('[MONITOR-IMP] ✓ QZ reconectado com sucesso');
+    }
   }).catch(function(e){
     _qzPronto = false;
     atualizarStatusQZ('offline', '⚠️ QZ Tray não conectado', 'Abra o QZ Tray no PC do caixa');
-    console.warn('QZ erro:', e);
+    // Loga só uma vez por sessão pra não poluir o console com tentativas
+    if(!window._qzErrorLogged){
+      console.warn('QZ erro:', e);
+      window._qzErrorLogged = true;
+    }
   });
 }
 
@@ -3918,6 +3930,78 @@ function atualizarStatusQZ(estado, titulo, sub){
   else { ico.textContent = '⚪'; }
   if(t) t.textContent = titulo;
   if(s) s.textContent = sub;
+}
+
+// 🔁 Monitor que mantém a impressora sempre conectada
+// Roda a cada 20s e reconecta se cair (sem precisar abrir a aba Impressoras)
+var _monitorImpressaoIniciado = false;
+function iniciarMonitorImpressao(){
+  if(_monitorImpressaoIniciado) return; // só roda uma vez
+  _monitorImpressaoIniciado = true;
+
+  // Detecta queda de conexão imediatamente (event listener do websocket)
+  if(typeof qz !== 'undefined' && qz.websocket && qz.websocket.setClosedCallbacks){
+    try{
+      qz.websocket.setClosedCallbacks(function(){
+        console.warn('[MONITOR-IMP] Websocket caiu — tentando reconectar...');
+        _qzPronto = false;
+        atualizarStatusQZ('offline', '⚠️ Conexão caiu — reconectando...', 'Tentando recuperar');
+        // Reconecta após 2s
+        setTimeout(function(){ qzReconectar(); }, 2000);
+      });
+    }catch(e){ console.warn('Erro setClosedCallbacks:', e); }
+  }
+
+  // Checa a cada 20s se a conexão tá viva
+  setInterval(function(){
+    // Modo Electron: faz health-check no serviço local
+    if(_modoImpressao === 'electron' && window.__BAVARO_DESKTOP__){
+      var url = window.__BAVARO_DESKTOP__.printerApiUrl + '/health';
+      fetch(url).then(function(r){ return r.json(); }).then(function(data){
+        if(data && data.ok){
+          if(!_qzPronto){
+            console.log('[MONITOR-IMP] Electron voltou — reconectando');
+            _qzPronto = true;
+            atualizarStatusQZ('online', '✓ App Desktop conectado', 'Impressão automática habilitada');
+            iniciarListenerImpressao();
+            iniciarListenerComandosImpressao();
+          }
+        } else if(_qzPronto){
+          console.warn('[MONITOR-IMP] Electron offline');
+          _qzPronto = false;
+          atualizarStatusQZ('erro', 'Serviço de impressão offline', 'Reinicie o app Desktop');
+        }
+      }).catch(function(){
+        if(_qzPronto){
+          console.warn('[MONITOR-IMP] Electron não responde');
+          _qzPronto = false;
+          atualizarStatusQZ('erro', 'Serviço de impressão não responde', 'Reinicie o app Desktop');
+        }
+      });
+      return;
+    }
+    // Modo QZ Tray
+    if(_modoImpressao === 'qz' && typeof qz !== 'undefined'){
+      var conectado = false;
+      try{ conectado = qz.websocket.isActive(); }catch(e){}
+      if(!conectado){
+        // Estava offline — tenta reconectar silenciosamente
+        if(_qzPronto){
+          console.warn('[MONITOR-IMP] QZ caiu — reconectando');
+          _qzPronto = false;
+        }
+        qzConectar();
+      } else if(!_qzPronto){
+        // Websocket ativo mas flag false — sincroniza
+        _qzPronto = true;
+        atualizarStatusQZ('online', '✓ QZ Tray conectado', 'Pronto para imprimir');
+      }
+    } else if(!_modoImpressao){
+      // Ainda não inicializou — tenta agora
+      try{ qzInicializar(); }catch(e){}
+    }
+  }, 20000); // 20 segundos
+  console.log('[MONITOR-IMP] iniciado — verifica conexão a cada 20s');
 }
 
 // ─── ABRIR ABA IMPRESSÃO ───
@@ -8660,124 +8744,81 @@ function abrirModalQRTotem(){
   }, 50);
 }
 
-// Gera bytes ESC/POS pra imprimir um QR Code como IMAGEM RASTER
-// (compatível com TODA impressora térmica, mesmo as que não suportam QR nativo)
-function escposQRCodeRaster(texto, tamanhoModulo){
-  tamanhoModulo = tamanhoModulo || 6; // multiplicador de pixel (6 = QR de bom tamanho na 80mm)
+// Gera bytes ESC/POS pra imprimir QR Code como IMAGEM RASTER
+// Funciona em qualquer impressora térmica — desenha o QR num canvas e converte direto
+function escposQRCodeRaster(texto, larguraAlvo){
+  larguraAlvo = larguraAlvo || 384; // 384 pixels = quase largura cheia da térmica 80mm (~48mm)
   if(typeof QRCode === 'undefined'){
-    console.warn('Lib QRCode não carregou');
+    console.warn('[QR-RASTER] Lib QRCode não carregou');
     return '';
   }
-  // 1. Cria QR como canvas usando qrcodejs num div temporário oculto
+  // 1. Cria QR num div oculto
   var divTemp = document.createElement('div');
-  divTemp.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
+  divTemp.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;';
   document.body.appendChild(divTemp);
   try{
     new QRCode(divTemp, {
       text: texto,
-      width: 256,
-      height: 256,
+      width: larguraAlvo,
+      height: larguraAlvo,
       colorDark: '#000000',
       colorLight: '#ffffff',
       correctLevel: QRCode.CorrectLevel.M
     });
   }catch(e){
     document.body.removeChild(divTemp);
-    console.error('Erro gerar QR canvas:', e);
+    console.error('[QR-RASTER] Erro gerar:', e);
     return '';
   }
-  // 2. Pega o canvas ou table renderizado
+  // 2. Pega canvas ou img
   var canvas = divTemp.querySelector('canvas');
   var img = divTemp.querySelector('img');
-  var matrixPx = null;
+  // Cria canvas de trabalho com largura exata desejada
+  var cv = document.createElement('canvas');
+  cv.width = larguraAlvo;
+  cv.height = larguraAlvo;
+  var ctx = cv.getContext('2d');
+  // Fundo branco
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, larguraAlvo, larguraAlvo);
   if(canvas){
-    var ctx = canvas.getContext('2d');
-    var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    matrixPx = { w: canvas.width, h: canvas.height, data: imgData.data };
-  } else if(img && img.complete && img.naturalWidth > 0){
-    // Caso seja img, desenha num canvas pra ler pixels
-    var cv2 = document.createElement('canvas');
-    cv2.width = img.naturalWidth;
-    cv2.height = img.naturalHeight;
-    cv2.getContext('2d').drawImage(img, 0, 0);
-    var d2 = cv2.getContext('2d').getImageData(0, 0, cv2.width, cv2.height);
-    matrixPx = { w: cv2.width, h: cv2.height, data: d2.data };
-  }
-  document.body.removeChild(divTemp);
-  if(!matrixPx){
-    console.warn('Não conseguiu extrair pixels do QR');
+    ctx.drawImage(canvas, 0, 0, larguraAlvo, larguraAlvo);
+  } else if(img){
+    ctx.drawImage(img, 0, 0, larguraAlvo, larguraAlvo);
+  } else {
+    document.body.removeChild(divTemp);
+    console.warn('[QR-RASTER] Nem canvas nem img gerado');
     return '';
   }
-  // 3. Detecta tamanho real da matriz (qrcodejs adiciona margem branca)
-  //    Procura primeira/última linha/coluna com pixel preto
-  var w = matrixPx.w, h = matrixPx.h, data = matrixPx.data;
-  function isBlack(x, y){
-    var idx = (y*w + x) * 4;
-    return data[idx] < 128; // R do pixel
-  }
-  var minX=w, minY=h, maxX=0, maxY=0;
-  for(var y=0; y<h; y++){
-    for(var x=0; x<w; x++){
-      if(isBlack(x,y)){
-        if(x<minX) minX=x;
-        if(y<minY) minY=y;
-        if(x>maxX) maxX=x;
-        if(y>maxY) maxY=y;
-      }
-    }
-  }
-  if(minX > maxX){ return ''; } // sem pixels pretos
-  // 4. Calcula o tamanho dos "módulos" (cada quadradinho do QR)
-  //    qrcodejs sempre desenha módulos quadrados de tamanho igual
-  //    Vamos varrer a primeira linha pra detectar o tamanho do módulo
-  var moduloDetect = 1;
-  for(var x=minX; x<=maxX; x++){
-    if(!isBlack(x, minY)) break;
-    moduloDetect++;
-  }
-  // 5. Quantos módulos tem o QR (largura/altura em módulos)
-  var totalMods = Math.round((maxX - minX + 1) / moduloDetect);
-  // 6. Monta a matriz binária do QR (true = preto)
-  var matrix = [];
-  for(var my=0; my<totalMods; my++){
-    matrix.push([]);
-    var pxY = minY + Math.floor((my + 0.5) * moduloDetect);
-    for(var mx=0; mx<totalMods; mx++){
-      var pxX = minX + Math.floor((mx + 0.5) * moduloDetect);
-      matrix[my].push(isBlack(pxX, pxY));
-    }
-  }
-  // 7. Renderiza essa matriz EXPANDIDA por `tamanhoModulo` em raster ESC/POS
-  //    Comando: GS v 0 m xL xH yL yH d1...dN
-  //    m = 0 (densidade normal)
-  //    xL/xH = largura em bytes (cada byte = 8 pixels)
-  //    yL/yH = altura em pixels
-  var pixelsPorLinha = totalMods * tamanhoModulo;
-  // Largura precisa ser múltipla de 8 pra ESC/POS raster
-  var bytesPorLinha = Math.ceil(pixelsPorLinha / 8);
-  var larguraTotal = bytesPorLinha * 8;
-  var altura = totalMods * tamanhoModulo;
+  document.body.removeChild(divTemp);
+  // 3. Lê pixels
+  var imgData = ctx.getImageData(0, 0, larguraAlvo, larguraAlvo);
+  var data = imgData.data;
+  var w = larguraAlvo;
+  var h = larguraAlvo;
+  // 4. Largura precisa ser múltipla de 8 pra ESC/POS raster
+  var bytesPorLinha = Math.ceil(w / 8);
   var xL = bytesPorLinha & 0xff;
   var xH = (bytesPorLinha >> 8) & 0xff;
-  var yL = altura & 0xff;
-  var yH = (altura >> 8) & 0xff;
+  var yL = h & 0xff;
+  var yH = (h >> 8) & 0xff;
+  // 5. Monta o comando GS v 0
   var saida = '';
-  // Centraliza o QR
   saida += escposCenter();
-  // Cabeçalho do comando GS v 0
   saida += GS + 'v' + '0' + String.fromCharCode(0) +
            String.fromCharCode(xL) + String.fromCharCode(xH) +
            String.fromCharCode(yL) + String.fromCharCode(yH);
-  // Pixels
-  for(var py=0; py<altura; py++){
-    var moduloY = Math.floor(py / tamanhoModulo);
+  // 6. Bytes da imagem (1 bit por pixel; 1 = preto)
+  for(var y=0; y<h; y++){
     for(var bx=0; bx<bytesPorLinha; bx++){
       var byte = 0;
       for(var bit=0; bit<8; bit++){
         var px = bx*8 + bit;
-        if(px < pixelsPorLinha){
-          var moduloX = Math.floor(px / tamanhoModulo);
-          if(matrix[moduloY] && matrix[moduloY][moduloX]){
+        if(px < w){
+          var idx = (y*w + px) * 4;
+          // Considera "preto" se brightness < 128
+          var brightness = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+          if(brightness < 128){
             byte |= (1 << (7 - bit));
           }
         }
@@ -8786,13 +8827,14 @@ function escposQRCodeRaster(texto, tamanhoModulo){
     }
   }
   saida += escposLeft();
+  console.log('[QR-RASTER] gerado:', w + 'x' + h, 'bytes/linha:', bytesPorLinha);
   return saida;
 }
 
-// ESC/POS QR Code nativo (mantido por compatibilidade — mas a impressora pode não suportar)
+// ESC/POS QR Code (usa raster bitmap pra funcionar em qualquer impressora)
 function escposQRCode(texto, tamanho){
-  // Usa o raster (bitmap) em vez do comando QR nativo, pra funcionar em qualquer impressora
-  return escposQRCodeRaster(texto, 6);
+  // tamanho aqui ignorado — usa larguraAlvo fixa de 384 pixels (~48mm na térmica 80mm)
+  return escposQRCodeRaster(texto, 384);
 }
 
 // Imprime QR Code na impressora térmica (ESC/POS nativo)

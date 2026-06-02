@@ -647,13 +647,16 @@ header{
     <span style="flex:1;" id="banner-offline-texto">Sem internet — pedidos serão enviados quando reconectar</span>
     <span id="banner-offline-fila" style="background:rgba(0,0,0,0.2);padding:2px 8px;border-radius:10px;font-size:0.74rem;display:none;">0 na fila</span>
   </div>
-  <!-- Abas: Mesas | Comandas -->
+  <!-- Abas: Mesas | Comandas | Almoço -->
   <div class="abas-topo">
     <button class="aba-btn active" id="aba-mesas-btn" onclick="trocarAba('mesas')">
       <span style="font-size:1.05rem;">🪑</span> Mesas
     </button>
     <button class="aba-btn" id="aba-comandas-btn" onclick="trocarAba('comandas')">
       <span style="font-size:1.05rem;">📝</span> Comandas
+    </button>
+    <button class="aba-btn" id="aba-almoco-btn" onclick="trocarAba('almoco')">
+      <span style="font-size:1.05rem;">☀️</span> Almoço
     </button>
   </div>
   <div class="mesa-search" id="mesa-search-bar">
@@ -675,8 +678,18 @@ header{
   </div>
   <div class="mesas-grid" id="mesas-grid"></div>
   <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
+  <!-- ☀️ Tela do Almoço -->
+  <div id="almoco-tela" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;">
+    <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center;">
+      <input type="text" id="almoco-busca" placeholder="🔍 Buscar nome ou mesa..." oninput="renderAlmocos()" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px 14px;font-family:inherit;font-size:0.95rem;box-sizing:border-box;">
+    </div>
+    <div id="almoco-lista"></div>
+  </div>
   <button id="btn-nova-comanda" onclick="abrirNovaComanda()" style="display:none;position:fixed;bottom:20px;right:20px;background:var(--accent);color:#000;border:none;border-radius:50px;padding:14px 22px;font-family:inherit;font-weight:700;font-size:0.9rem;box-shadow:0 4px 16px rgba(212,168,67,0.4);cursor:pointer;z-index:50;display:none;align-items:center;gap:8px;">
     <span style="font-size:1.2rem;">+</span> Nova Comanda
+  </button>
+  <button id="btn-novo-almoco" onclick="abrirNovoAlmoco()" style="display:none;position:fixed;bottom:20px;right:20px;background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000;border:none;border-radius:50px;padding:14px 22px;font-family:inherit;font-weight:700;font-size:0.9rem;box-shadow:0 4px 16px rgba(251,191,36,0.4);cursor:pointer;z-index:50;align-items:center;gap:8px;">
+    <span style="font-size:1.2rem;">☀️</span> Novo Almoço
   </button>
 
   <!-- Menu Lateral -->
@@ -1573,6 +1586,171 @@ var _ultimoContaIdEscutado = null; // último contaId que está sendo escutado e
 var _comandasAvulsas = []; // [{id, cliente, ...contaCompleta}]
 var _abaAtual = 'mesas';
 
+// ═══════════════════════════════════════════════
+// ☀️ ALMOÇO — comandas tipo "almoço" (buffet kg + pratos)
+// ═══════════════════════════════════════════════
+
+// Abre o fluxo de criar novo almoço: pede nome e mesa (opcionais)
+function abrirNovoAlmoco(){
+  var ex = document.getElementById('modal-novo-almoco');
+  if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-novo-almoco';
+  m.className = 'modal-bg aberto';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  m.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;padding:20px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">' +
+        '<span style="font-size:1.4rem;">☀️</span>' +
+        '<div style="font-weight:700;font-size:1.1rem;">Novo Almoço</div>' +
+      '</div>' +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5;">Crie uma comanda de almoço com nome opcional do cliente e número da mesa opcional. O cliente paga quando sair.</div>' +
+      '<label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Nome do cliente <span style="color:var(--muted);font-style:italic;">(opcional)</span></label>' +
+      '<input type="text" id="alm-nome" placeholder="Ex: João" maxlength="50" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1rem;box-sizing:border-box;margin-bottom:12px;" autofocus>' +
+      '<label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Mesa <span style="color:var(--muted);font-style:italic;">(opcional — pode pegar depois)</span></label>' +
+      '<input type="number" id="alm-mesa" placeholder="Ex: 5" min="1" max="999" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1rem;box-sizing:border-box;">' +
+      '<div style="display:flex;gap:8px;margin-top:18px;">' +
+        '<button onclick="document.getElementById(\'modal-novo-almoco\').remove()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:12px;font-family:inherit;cursor:pointer;font-size:0.95rem;">Cancelar</button>' +
+        '<button onclick="criarComandaAlmoco()" style="flex:1.6;background:linear-gradient(135deg,#fbbf24,#f59e0b);border:none;color:#000;border-radius:8px;padding:12px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.95rem;">☀️ Criar e abrir</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(m);
+  setTimeout(function(){
+    var inp = document.getElementById('alm-nome');
+    if(inp) inp.focus();
+  }, 50);
+}
+
+// Cria a comanda de almoço no Firestore e abre o menu pra adicionar itens
+function criarComandaAlmoco(){
+  var nome = (document.getElementById('alm-nome').value || '').trim();
+  var mesaStr = (document.getElementById('alm-mesa').value || '').trim();
+  var mesa = mesaStr ? parseInt(mesaStr) : null;
+  if(mesa !== null && (isNaN(mesa) || mesa <= 0)){
+    showToast('Mesa inválida', '#f7a34f');
+    return;
+  }
+  // Nome padrão se não digitar: "Almoço HH:MM"
+  if(!nome){
+    var ag = new Date();
+    nome = 'Almoço ' + String(ag.getHours()).padStart(2,'0') + ':' + String(ag.getMinutes()).padStart(2,'0');
+  }
+  // Verifica duplicidade só se nome foi digitado
+  fbDb.collection('contas_mesa').add({
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    tipoConta: 'almoco',
+    cliente: nome,
+    mesa: mesa,                 // pode ser null
+    status: 'aberta',
+    itens: [],
+    pagamentos: [],
+    subtotal: 0,
+    taxa10: 0,
+    total: 0,
+    pagoTotal: 0,
+    restante: 0,
+    garcomPrincipal: _nomeGarcom,
+    abertaEm: Date.now(),
+    abertaPor: _nomeGarcom,
+    teste: _modoTeste ? true : false
+  }).then(function(ref){
+    document.getElementById('modal-novo-almoco').remove();
+    showToast('☀️ ' + nome + (mesa ? ' (Mesa ' + mesa + ')' : '') + ' aberto', '#fbbf24');
+    // Abre direto o menu da comanda pra começar a adicionar itens
+    setTimeout(function(){
+      abrirMenuComanda(ref.id);
+    }, 200);
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
+}
+
+// Lista os almoços abertos na aba ☀️ Almoço
+function renderAlmocos(){
+  var lista = document.getElementById('almoco-lista');
+  if(!lista) return;
+  var busca = (document.getElementById('almoco-busca').value || '').toLowerCase().trim();
+  // Filtra _comandasAvulsas que são do tipo 'almoco'
+  var almocos = (_comandasAvulsas || []).filter(function(c){
+    return c.tipoConta === 'almoco';
+  });
+  // Aplica busca por nome ou mesa
+  if(busca){
+    almocos = almocos.filter(function(c){
+      var nome = (c.cliente||'').toLowerCase();
+      var mesa = c.mesa ? ('mesa ' + c.mesa + ' ' + c.mesa) : '';
+      return nome.indexOf(busca) >= 0 || mesa.indexOf(busca) >= 0;
+    });
+  }
+  // Ordena: mais novos primeiro
+  almocos.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
+  if(!almocos.length){
+    lista.innerHTML =
+      '<div style="text-align:center;padding:50px 20px;color:var(--muted);">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">☀️</div>' +
+        '<div style="font-size:0.92rem;font-weight:600;margin-bottom:6px;">Nenhum almoço em aberto</div>' +
+        '<div style="font-size:0.8rem;line-height:1.5;">Toque em "☀️ Novo Almoço" pra começar.<br>Cada pessoa que pesar o buffet pode ter sua própria comanda.</div>' +
+      '</div>';
+    return;
+  }
+  // Agrupa por mesa (se tem) | "Sem mesa"
+  var grupos = {};
+  almocos.forEach(function(c){
+    var ch = c.mesa ? ('M' + c.mesa) : 'SEM';
+    if(!grupos[ch]) grupos[ch] = { mesa: c.mesa, lista: [] };
+    grupos[ch].lista.push(c);
+  });
+  var ordemMesas = Object.keys(grupos).sort(function(a,b){
+    if(a === 'SEM') return 1;
+    if(b === 'SEM') return -1;
+    return parseInt(a.substr(1)) - parseInt(b.substr(1));
+  });
+  var html = '';
+  ordemMesas.forEach(function(ch){
+    var g = grupos[ch];
+    var titGrupo = g.mesa ? ('🪑 MESA ' + g.mesa) : '👤 SEM MESA';
+    var totalGrupo = 0;
+    g.lista.forEach(function(c){
+      var t = (c.itens||[]).filter(function(i){
+        return i.status !== 'cancelado';
+      }).reduce(function(a, i){
+        if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
+        return a + (i.preco||0) * (i.qtd||1);
+      }, 0);
+      totalGrupo += t;
+    });
+    html += '<div style="font-size:0.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:6px 0 8px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">' +
+      '<span>' + titGrupo + ' · ' + g.lista.length + ' pessoa' + (g.lista.length>1?'s':'') + '</span>' +
+      '<span style="color:var(--accent);font-size:0.78rem;">R$ ' + fmtPreco(totalGrupo) + '</span>' +
+    '</div>';
+    g.lista.forEach(function(c){
+      var qtdItens = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length;
+      var total = (c.itens||[]).filter(function(i){
+        return i.status !== 'cancelado';
+      }).reduce(function(a, i){
+        if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
+        return a + (i.preco||0) * (i.qtd||1);
+      }, 0);
+      var minAtras = Math.floor((Date.now() - (c.abertaEm||Date.now())) / 60000);
+      var tempoTxt = minAtras < 1 ? 'agora' : minAtras < 60 ? minAtras + ' min' : Math.floor(minAtras/60) + 'h ' + (minAtras%60) + 'm';
+      html += '<div class="almoco-card" onclick="abrirMenuComanda(\'' + c.id + '\')" style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #fbbf24;border-radius:11px;padding:13px 14px;margin-bottom:9px;cursor:pointer;transition:transform 0.1s;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px;">' +
+          '<div style="font-weight:700;font-size:0.98rem;color:var(--text);">' + esc(c.cliente||'?') + '</div>' +
+          '<div style="font-weight:700;color:var(--accent);font-size:1rem;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.04em;">R$ ' + fmtPreco(total) + '</div>' +
+        '</div>' +
+        '<div style="font-size:0.76rem;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;">' +
+          '<span>📦 ' + qtdItens + ' item' + (qtdItens!==1?'s':'') + '</span>' +
+          '<span>⏱ ' + tempoTxt + '</span>' +
+          (c.garcomPrincipal ? '<span>👨‍🍳 ' + esc(c.garcomPrincipal) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    });
+  });
+  lista.innerHTML = html;
+}
+
 // Carrega/escuta configuração de mesas (sync com PDV)
 function escutarConfigMesas(){
   if(!fbDb || !_restauranteId) return;
@@ -1603,12 +1781,21 @@ function trocarAba(aba){
   _abaAtual = aba;
   document.getElementById('aba-mesas-btn').classList.toggle('active', aba==='mesas');
   document.getElementById('aba-comandas-btn').classList.toggle('active', aba==='comandas');
+  var btnAlm = document.getElementById('aba-almoco-btn');
+  if(btnAlm) btnAlm.classList.toggle('active', aba==='almoco');
   document.getElementById('mesa-search-bar').style.display = aba==='mesas' ? '' : 'none';
   document.getElementById('comanda-search-bar').style.display = aba==='comandas' ? '' : 'none';
   document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
   document.getElementById('comandas-lista').style.display = aba==='comandas' ? '' : 'none';
+  // Tela do almoço
+  var almTela = document.getElementById('almoco-tela');
+  if(almTela) almTela.style.display = aba==='almoco' ? '' : 'none';
+  // FAB nova comanda (mostra só na aba comandas) | FAB almoço (na aba almoço)
   document.getElementById('btn-nova-comanda').style.display = aba==='comandas' ? 'flex' : 'none';
+  var fabAlm = document.getElementById('btn-novo-almoco');
+  if(fabAlm) fabAlm.style.display = aba==='almoco' ? 'flex' : 'none';
   if(aba==='comandas') renderComandas();
+  if(aba==='almoco') renderAlmocos();
 }
 
 // ═══════════════════════════════════════════════
@@ -3161,8 +3348,8 @@ function escutarMesasOcupadas(){
     snap.forEach(function(doc){
       var d = doc.data();
       var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
-      // Comanda avulsa
-      if(d.tipoConta === 'avulsa'){
+      // Comanda avulsa OU almoço (ambas ficam no array _comandasAvulsas)
+      if(d.tipoConta === 'avulsa' || d.tipoConta === 'almoco'){
         _comandasAvulsas.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
         return;
       }
@@ -3193,6 +3380,7 @@ function escutarMesasOcupadas(){
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
     if(_abaAtual === 'comandas') renderComandas();
+    if(_abaAtual === 'almoco') renderAlmocos();
     // Se o garçom está dentro de uma mesa e o contaId mudou (ex: cache atualizou após abrir mesa),
     // refaz o listener de pedidos pra apontar pra conta correta.
     if(_mesaAtiva !== null && _mesaAtiva !== undefined){
@@ -6426,6 +6614,8 @@ function renderComandas(){
   var input = document.getElementById('comanda-search-input');
   var busca = input ? (input.value||'').toLowerCase().trim() : '';
   var filtradas = _comandasAvulsas.filter(function(c){
+    // Não mostra almoços aqui — eles vão pra aba ☀️ Almoço
+    if(c.tipoConta === 'almoco') return false;
     if(!busca) return true;
     return (c.cliente||'').toLowerCase().includes(busca);
   });
@@ -6495,7 +6685,10 @@ function abrirMenuComanda(comandaId){
   var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
   if(!c){ showToast('Comanda não encontrada','#f87171'); return; }
   _comandaMenuAtual = comandaId;
-  document.getElementById('mesa-menu-titulo').textContent = '👤 ' + (c.cliente||'').toUpperCase();
+  var ehAlmoco = c.tipoConta === 'almoco';
+  var prefixoTit = ehAlmoco ? '☀️ ' : '👤 ';
+  var sufixoMesa = (ehAlmoco && c.mesa) ? ' • MESA ' + c.mesa : '';
+  document.getElementById('mesa-menu-titulo').textContent = prefixoTit + (c.cliente||'').toUpperCase() + sufixoMesa;
   var qtdAbertos = c._itensAbertosCount||0;
   var totalAbertos = (c.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){
     if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);

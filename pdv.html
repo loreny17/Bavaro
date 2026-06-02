@@ -2416,6 +2416,8 @@ function filtrarPedidos(btn, status) {
 
 function renderPedidosPDV() {
   var lista = _pedidosPDV.filter(function(p){
+    // Esconde pedidos que são só pra impressão (conta da mesa almoço)
+    if(p.tipoImpressao === 'conta_mesa_almoco') return false;
     return _filtroStatus === 'todos' || p.status === _filtroStatus;
   });
   var wrap = document.getElementById('pedidos-lista');
@@ -5807,6 +5809,107 @@ function gerarReciboCliente(pedido, modelo, imp){
   return s;
 }
 
+// ☀️ CONTA DA MESA DO ALMOÇO — uma comanda só com seção por pessoa
+function gerarCupomContaMesaAlmoco(pedido, modelo, imp){
+  var L = (imp && imp.largura) || 48;
+  var s = escposInit();
+
+  // Pega o nome do restaurante (a partir do _restauranteAtivo)
+  var nomeRest = (_restauranteAtivo && _restauranteAtivo.nome) || 'BAVARO';
+
+  // ── Cabeçalho ──
+  s += escposCenter();
+  s += escposBold(true) + escposLarge(true);
+  s += removerAcentosImpressao(nomeRest).toUpperCase() + '\n';
+  s += escposLarge(false);
+  s += escposSize('alto');
+  s += 'MESA ' + (pedido.mesa || '?') + '\n';
+  s += escposSize('normal');
+  s += escposBold(false);
+  s += '\n';
+
+  // Data/hora
+  var agora = new Date();
+  var dataHora = agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  s += dataHora + '\n';
+  s += '\n';
+
+  // ── Pessoas (seções) ──
+  s += escposLeft();
+  (pedido.comandas || []).forEach(function(pessoa, idx){
+    // Linha separadora dupla
+    s += linha('=', L) + '\n';
+    // Nome em destaque com o total
+    s += escposBold(true);
+    var nomeCliente = removerAcentosImpressao(String(pessoa.cliente || '?'));
+    var totalCliente = 'R$ ' + (pessoa.total || 0).toFixed(2).replace('.', ',');
+    // Nome à esquerda, total à direita
+    var espacos = Math.max(1, L - nomeCliente.length - totalCliente.length - 2);
+    s += '👤 ' + nomeCliente + (espacos > 1 ? new Array(espacos).join(' ') : ' ') + totalCliente + '\n';
+    s += escposBold(false);
+    s += linha('-', L) + '\n';
+
+    // Itens da pessoa
+    (pessoa.itens || []).forEach(function(it){
+      var qtd, valor;
+      if(it.tipoVenda === 'kg' && it.peso){
+        // Buffet por kg: mostra peso
+        qtd = (it.peso).toFixed(3).replace('.', ',') + ' kg';
+        valor = (it.preco || 0).toFixed(2).replace('.', ',');
+      } else {
+        qtd = (it.qtd || 1) + 'x';
+        valor = ((it.preco || 0) * (it.qtd || 1)).toFixed(2).replace('.', ',');
+      }
+      var nomeItem = removerAcentosImpressao(String(it.nome || ''));
+      var prefixo = qtd + ' ' + nomeItem;
+      var sufixo = 'R$ ' + valor;
+      var espacos2 = Math.max(1, L - prefixo.length - sufixo.length);
+      // Se não cabe na mesma linha, quebra
+      if(prefixo.length + sufixo.length + 2 > L){
+        s += prefixo + '\n';
+        s += new Array(L - sufixo.length + 1).join(' ') + sufixo + '\n';
+      } else {
+        s += prefixo + new Array(espacos2 + 1).join(' ') + sufixo + '\n';
+      }
+    });
+    s += '\n';
+  });
+
+  // ── Total geral ──
+  s += linha('=', L) + '\n';
+  s += escposBold(true);
+  // Subtotal
+  var subtotalTxt = 'R$ ' + (pedido.subtotalGeral || pedido.totalGeral || 0).toFixed(2).replace('.', ',');
+  var subtotalLbl = 'Subtotal';
+  var espSub = Math.max(1, L - subtotalLbl.length - subtotalTxt.length);
+  s += subtotalLbl + new Array(espSub + 1).join(' ') + subtotalTxt + '\n';
+  // Taxa de serviço (se tem)
+  if(pedido.taxaValor && pedido.taxaValor > 0){
+    var taxaTxt = 'R$ ' + pedido.taxaValor.toFixed(2).replace('.', ',');
+    var taxaLbl = 'Taxa serv. (' + (pedido.taxaPct || 10) + '%)';
+    var espTaxa = Math.max(1, L - taxaLbl.length - taxaTxt.length);
+    s += taxaLbl + new Array(espTaxa + 1).join(' ') + taxaTxt + '\n';
+  }
+  s += escposBold(false);
+  s += linha('-', L) + '\n';
+  // Total final
+  s += escposBold(true) + escposSize('largo');
+  var totalGeralTxt = 'R$ ' + (pedido.totalGeral || 0).toFixed(2).replace('.', ',');
+  s += 'TOTAL ' + totalGeralTxt + '\n';
+  s += escposSize('normal') + escposBold(false);
+  s += linha('=', L) + '\n';
+  s += '\n';
+
+  // Rodapé
+  s += escposCenter();
+  s += 'Obrigado pela preferencia!\n';
+
+  s += '\n\n\n';
+  if(_configImp && _configImp.cortePapel) s += escposCut();
+  return s;
+}
+
 function gerarCupomClienteTotem(pedido, modelo, imp){
   var L = (imp && imp.largura) || 48;
   var senha = pedido.senhaTotem || '?';
@@ -5928,6 +6031,28 @@ function imprimirPedidoAutomatico(pedido){
     console.warn('[IMPRIMIR] ❌ sem modelos OU sem impressoras — não imprimirá');
     return;
   }
+
+  // ☀️ CONTA DA MESA DO ALMOÇO — cupom especial agrupado por pessoa
+  if(pedido && pedido.tipoImpressao === 'conta_mesa_almoco'){
+    console.log('[IMPRIMIR] 🧾 conta da mesa almoço — pessoas:', (pedido.comandas||[]).length);
+    // Pega o primeiro modelo apenasAlmoco pra usar sua impressora
+    var modeloAlm = _modelos.find(function(m){ return m.apenasAlmoco && (m.tipo||'pedido') === 'pedido'; });
+    if(!modeloAlm){
+      console.warn('[IMPRIMIR] ❌ sem modelo apenasAlmoco — não imprime conta da mesa');
+      return;
+    }
+    var impAlm = _impressoras.find(function(i){ return i.id === modeloAlm.impressoraId; });
+    if(!impAlm){
+      console.warn('[IMPRIMIR] ❌ impressora do modelo almoço não encontrada');
+      return;
+    }
+    var cupom = gerarCupomContaMesaAlmoco(pedido, modeloAlm, impAlm);
+    if(cupom){
+      enviarParaImpressora(impAlm, cupom);
+    }
+    return;
+  }
+
   // Detecta se este pedido é de uma comanda almoço (pra escolher os modelos certos)
   var ehPedidoAlmoco = pedido && pedido.tipoConta === 'almoco';
   var modelosPedido = _modelos.filter(function(m){

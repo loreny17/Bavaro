@@ -1751,6 +1751,73 @@ function renderAlmocos(){
   lista.innerHTML = html;
 }
 
+// ☀️ Conta quantas comandas de almoço estão abertas na mesma mesa
+function _quantasComandasNaMesa(mesa){
+  if(!mesa) return 0;
+  return (_comandasAvulsas || []).filter(function(c){
+    return c.tipoConta === 'almoco' && c.mesa == mesa;
+  }).length;
+}
+
+// ☀️ Imprime conta agrupada — uma comanda só, com seção por pessoa
+function imprimirContaMesaAlmoco(mesa){
+  if(!mesa){ showToast('Mesa não definida', '#f7a34f'); return; }
+  // Pega todas as comandas almoço dessa mesa
+  var comandas = (_comandasAvulsas || []).filter(function(c){
+    return c.tipoConta === 'almoco' && c.mesa == mesa;
+  });
+  if(!comandas.length){
+    showToast('Sem comandas nessa mesa', '#f7a34f');
+    return;
+  }
+  // Ordena por hora de abertura
+  comandas.sort(function(a,b){ return (a.abertaEm||0) - (b.abertaEm||0); });
+
+  // Cria um doc "pseudo-pedido" com flag de impressão de conta da mesa
+  // que será capturado pelo listener de impressão do PDV
+  var docConta = {
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || null,
+    tipoConta: 'almoco',
+    tipoImpressao: 'conta_mesa_almoco', // ← chave que o PDV usa pra gerar o cupom certo
+    mesa: parseInt(mesa) || mesa,
+    comandas: comandas.map(function(c){
+      // Só itens não cancelados, não pagos
+      var itensValidos = (c.itens||[]).filter(function(it){
+        return it.status !== 'cancelado' && it.status !== 'pago';
+      });
+      var total = itensValidos.reduce(function(a, it){
+        if(it.tipoVenda === 'kg' && it.peso) return a + (it.preco||0);
+        return a + (it.preco||0) * (it.qtd||1);
+      }, 0);
+      return {
+        cliente: c.cliente || '?',
+        itens: itensValidos,
+        total: total
+      };
+    }),
+    criadoEm: Date.now(),
+    teste: _modoTeste ? true : false,
+    imprimir: true,
+    fechaMenuMesa: false
+  };
+  // Subtotal (sem taxa)
+  var subtotal = docConta.comandas.reduce(function(a, p){ return a + p.total; }, 0);
+  // Taxa de serviço (vem da config do restaurante)
+  var taxaPct = (typeof _taxaServicoPct === 'number' && _taxaServicoAtiva) ? _taxaServicoPct : 10;
+  var taxaValor = subtotal * (taxaPct/100);
+  docConta.subtotalGeral = subtotal;
+  docConta.taxaPct = taxaPct;
+  docConta.taxaValor = taxaValor;
+  docConta.totalGeral = subtotal + taxaValor;
+
+  fbDb.collection('pedidos').add(docConta).then(function(){
+    showToast('🧾 Conta da mesa ' + mesa + ' enviada pra impressão', '#4ade80');
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
+}
+
 // ☀️ Retorna lista de IDs de categorias permitidas SE estamos dentro de comanda almoço.
 // Junta as categorias de TODOS os modelos com apenasAlmoco === true.
 // Retorna null se NÃO estamos em comanda almoço (= sem filtro, mostra tudo).
@@ -6917,10 +6984,118 @@ function fazerNovoPedidoComanda(comandaId){
 function abrirFecharContaComanda(comandaId){
   var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
   if(!c) return;
-  // Coloca a comanda no _contasMesaCache temporariamente usando o id como chave especial
+  // ☀️ Se é comanda almoço com mesa que tem mais de 1 pessoa,
+  // mostra tela intermediária pra escolher quem pagar
+  if(c.tipoConta === 'almoco' && c.mesa && _quantasComandasNaMesa(c.mesa) > 1){
+    abrirEscolherPagamentoAlmoco(c.mesa);
+    return;
+  }
+  // Comportamento normal: abre fechar conta direto
   var chaveTemp = 'avulsa_' + comandaId;
   _contasMesaCache[chaveTemp] = c;
   abrirFecharConta(chaveTemp);
+}
+
+// ☀️ Tela intermediária: escolher quem da mesa quer pagar (almoço com várias pessoas)
+function abrirEscolherPagamentoAlmoco(mesa){
+  // Pega todas as comandas almoço dessa mesa
+  var comandas = (_comandasAvulsas || []).filter(function(c){
+    return c.tipoConta === 'almoco' && c.mesa == mesa;
+  });
+  if(!comandas.length){
+    showToast('Sem comandas nessa mesa', '#f7a34f');
+    return;
+  }
+  comandas.sort(function(a,b){ return (a.abertaEm||0) - (b.abertaEm||0); });
+
+  // Calcula total de cada pessoa e total geral
+  var totaisPessoa = comandas.map(function(c){
+    var itensValidos = (c.itens||[]).filter(function(it){
+      return it.status !== 'cancelado' && it.status !== 'pago';
+    });
+    var t = itensValidos.reduce(function(a, it){
+      if(it.tipoVenda === 'kg' && it.peso) return a + (it.preco||0);
+      return a + (it.preco||0) * (it.qtd||1);
+    }, 0);
+    return { comanda: c, total: t, itensCount: itensValidos.length };
+  });
+  var totalGeral = totaisPessoa.reduce(function(a, p){ return a + p.total; }, 0);
+  // Taxa de serviço configurada no restaurante
+  var taxaPct = (typeof _taxaServicoPct === 'number' && _taxaServicoAtiva) ? _taxaServicoPct : 10;
+  var taxaValor = totalGeral * (taxaPct/100);
+  var totalComTaxa = totalGeral + taxaValor;
+
+  var ex = document.getElementById('modal-escolher-pag-alm');
+  if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-escolher-pag-alm';
+  m.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:600;display:flex;flex-direction:column;';
+
+  // Cards de cada pessoa
+  var cardsHtml = totaisPessoa.map(function(p){
+    return '<div onclick="_pagarUmaPessoaAlmoco(\'' + p.comanda.id + '\')" style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #fbbf24;border-radius:11px;padding:14px;margin-bottom:9px;cursor:pointer;transition:transform 0.1s;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<div>' +
+          '<div style="font-weight:700;font-size:1.02rem;color:var(--text);">👤 ' + esc(p.comanda.cliente||'?') + '</div>' +
+          '<div style="font-size:0.76rem;color:var(--muted);margin-top:3px;">' + p.itensCount + ' ' + (p.itensCount===1?'item em aberto':'itens em aberto') + '</div>' +
+        '</div>' +
+        '<div style="text-align:right;">' +
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:var(--accent);line-height:1;">R$ ' + fmtPreco(p.total) + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  m.innerHTML =
+    // Header
+    '<div style="padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:10px;">' +
+      '<button onclick="document.getElementById(\'modal-escolher-pag-alm\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:1.3rem;font-family:inherit;">‹</button>' +
+      '<div style="flex:1;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.05em;line-height:1;">☀️ MESA ' + mesa + ' — ' + comandas.length + ' PESSOAS</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">Escolha quem vai pagar</div>' +
+      '</div>' +
+    '</div>' +
+    // Body
+    '<div style="flex:1;overflow-y:auto;padding:14px;">' +
+      '<div style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;font-weight:700;">Toque numa pessoa pra pagar a comanda dela:</div>' +
+      cardsHtml +
+      // Resumo da mesa
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px;margin-top:14px;">' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:0.88rem;color:var(--muted);">' +
+          '<span>Subtotal da mesa</span><span>R$ ' + fmtPreco(totalGeral) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:0.88rem;color:var(--muted);">' +
+          '<span>Taxa de serviço (' + taxaPct + '%)</span><span>R$ ' + fmtPreco(taxaValor) + '</span>' +
+        '</div>' +
+        '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="font-weight:700;font-size:0.98rem;">TOTAL DA MESA</span>' +
+          '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:1.7rem;color:var(--accent);line-height:1;">R$ ' + fmtPreco(totalComTaxa) + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    // Footer com botões
+    '<div style="padding:14px;border-top:1px solid var(--border);background:var(--surface);display:flex;gap:8px;flex-wrap:wrap;">' +
+      '<button onclick="_imprimirContaMesaAlmoco(' + mesa + ')" style="flex:1;min-width:160px;background:linear-gradient(135deg,#fbbf24,#f59e0b);border:none;color:#000;border-radius:10px;padding:14px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.92rem;">🧾 Imprimir conta agrupada</button>' +
+    '</div>';
+  document.body.appendChild(m);
+  fecharMenuMesa();
+}
+
+// Paga UMA pessoa específica (abre o fluxo normal de fechar conta dela)
+function _pagarUmaPessoaAlmoco(comandaId){
+  document.getElementById('modal-escolher-pag-alm').remove();
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  var chaveTemp = 'avulsa_' + comandaId;
+  _contasMesaCache[chaveTemp] = c;
+  abrirFecharConta(chaveTemp);
+}
+
+// Wrapper que chama a impressão da conta da mesa (já com taxa de 10%)
+function _imprimirContaMesaAlmoco(mesa){
+  imprimirContaMesaAlmoco(mesa);
+  // Não fecha o modal — usuário pode imprimir várias vezes ou escolher uma pessoa depois
 }
 
 function selecionarMesa(num){

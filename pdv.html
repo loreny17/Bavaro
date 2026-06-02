@@ -4250,6 +4250,8 @@ function abrirNovoModelo(){
   document.getElementById('mod-negrito').checked = false;
   var chkSin = document.getElementById('mod-aparece-sininho');
   if(chkSin) chkSin.checked = false;
+  var chkAlmN = document.getElementById('mod-apenas-almoco');
+  if(chkAlmN) chkAlmN.checked = false;
   document.getElementById('btn-excluir-mod').style.display = 'none';
   // Limpa campos do Cupom Cliente (defaults)
   var ccTitN = document.getElementById('mod-cc-titulo');
@@ -4299,6 +4301,8 @@ function abrirEditarModelo(m){
   document.getElementById('mod-negrito').checked = !!m.negrito;
   var chkSinEd = document.getElementById('mod-aparece-sininho');
   if(chkSinEd) chkSinEd.checked = !!m.apareceSininho;
+  var chkAlmEd = document.getElementById('mod-apenas-almoco');
+  if(chkAlmEd) chkAlmEd.checked = !!m.apenasAlmoco;
   document.getElementById('btn-excluir-mod').style.display = 'inline-flex';
   // Preenche campos do Cupom Cliente (se existirem)
   var ccTit = document.getElementById('mod-cc-titulo');
@@ -4858,6 +4862,7 @@ function salvarModelo(){
     mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
     negrito: document.getElementById('mod-negrito').checked,
     apareceSininho: (function(){ var c = document.getElementById('mod-aparece-sininho'); return c ? c.checked : false; })(),
+    apenasAlmoco: (function(){ var c = document.getElementById('mod-apenas-almoco'); return c ? c.checked : false; })(),
     estiloCabecalho: estilos.estiloCabecalho,
     estiloItens: estilos.estiloItens,
     estiloAdicionais: estilos.estiloAdicionais,
@@ -5923,8 +5928,17 @@ function imprimirPedidoAutomatico(pedido){
     console.warn('[IMPRIMIR] ❌ sem modelos OU sem impressoras — não imprimirá');
     return;
   }
-  var modelosPedido = _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido'; });
-  console.log('[IMPRIMIR] modelos tipo "pedido":', modelosPedido.length);
+  // Detecta se este pedido é de uma comanda almoço (pra escolher os modelos certos)
+  var ehPedidoAlmoco = pedido && pedido.tipoConta === 'almoco';
+  var modelosPedido = _modelos.filter(function(m){
+    if((m.tipo||'pedido') !== 'pedido') return false;
+    // Modelo "apenas almoço" SÓ entra em pedidos almoço
+    if(m.apenasAlmoco && !ehPedidoAlmoco) return false;
+    // Modelos normais NÃO entram em pedidos almoço
+    if(!m.apenasAlmoco && ehPedidoAlmoco) return false;
+    return true;
+  });
+  console.log('[IMPRIMIR] pedido', ehPedidoAlmoco?'☀️ ALMOÇO':'normal', '— modelos tipo "pedido":', modelosPedido.length);
   // SÓ usa modelos do tipo "pedido" (não fechamento)
   modelosPedido.forEach(function(modelo){
     var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
@@ -11334,6 +11348,16 @@ function toggleAdminUsuario(garcomId, novoValor){
           </label>
         </div>
         <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa. 🎫 Cupom Cliente = ticket com senha do totem (sai no caixa pro cliente).</div>
+      </div>
+      <!-- ☀️ Toggle: modelo exclusivo de Almoço -->
+      <div class="f-grupo" id="bloco-mod-almoco" style="background:linear-gradient(135deg,rgba(251,191,36,0.06),rgba(251,191,36,0.02));border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="mod-apenas-almoco" style="width:18px;height:18px;cursor:pointer;accent-color:#fbbf24;margin-top:2px;">
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:0.88rem;color:#fbbf24;">☀️ Modelo exclusivo de Almoço</div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:3px;line-height:1.4;">Quando ligado, este modelo é usado APENAS em comandas do tipo "Almoço" (criadas na aba ☀️ Almoço do garçom). As categorias selecionadas abaixo também viram <b>o filtro do cardápio</b> que aparece pro garçom dentro dessas comandas.</div>
+          </div>
+        </label>
       </div>
       <div class="f-grupo">
         <label class="f-label">Impressora *</label>

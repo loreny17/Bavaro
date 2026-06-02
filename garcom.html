@@ -1751,6 +1751,28 @@ function renderAlmocos(){
   lista.innerHTML = html;
 }
 
+// ☀️ Retorna lista de IDs de categorias permitidas SE estamos dentro de comanda almoço.
+// Junta as categorias de TODOS os modelos com apenasAlmoco === true.
+// Retorna null se NÃO estamos em comanda almoço (= sem filtro, mostra tudo).
+function _categoriasPermitidasAlmoco(){
+  // Só filtra se estamos em comanda selecionada
+  if(!_comandaSelecionada) return null;
+  var c = _comandasAvulsas.find(function(x){ return x.id === _comandaSelecionada; });
+  if(!c || c.tipoConta !== 'almoco') return null;
+  // Junta categorias de modelos apenasAlmoco
+  var ids = [];
+  (_modelosCozinha || []).forEach(function(m){
+    if(m.apenasAlmoco && (m.tipo||'pedido') === 'pedido'){
+      (m.categorias||[]).forEach(function(catId){
+        if(ids.indexOf(catId) < 0) ids.push(catId);
+      });
+    }
+  });
+  // Se nenhum modelo "apenasAlmoco" configurado → não filtra (mostra tudo)
+  if(!ids.length) return null;
+  return ids;
+}
+
 // Carrega/escuta configuração de mesas (sync com PDV)
 function escutarConfigMesas(){
   if(!fbDb || !_restauranteId) return;
@@ -6708,6 +6730,16 @@ function abrirMenuComanda(comandaId){
         '<div class="sub-pequeno">Adicionar itens à comanda</div>'+
       '</div>'+
     '</button>'+
+    // ☀️ Botão de definir/trocar mesa (só pra comandas de almoço)
+    (ehAlmoco ? (
+      '<button class="mesa-menu-item" onclick="acaoComanda(\'definir-mesa\')">'+
+        '<span class="icone-grande">🪑</span>'+
+        '<div style="flex:1;text-align:left;">'+
+          '<div class="titulo-grande">' + (c.mesa ? 'Trocar Mesa' : 'Definir Mesa') + '</div>'+
+          '<div class="sub-pequeno">' + (c.mesa ? 'Atualmente: Mesa ' + c.mesa : 'Vincular a uma mesa') + '</div>'+
+        '</div>'+
+      '</button>'
+    ) : '') +
     '<button class="mesa-menu-item" onclick="acaoComanda(\'ver-pedidos\')">'+
       '<span class="icone-grande">📋</span>'+
       '<div style="flex:1;text-align:left;">'+
@@ -6737,11 +6769,76 @@ function acaoComanda(acao){
   fecharMenuMesa();
   if(acao === 'pedido'){
     selecionarComanda(c);
+  } else if(acao === 'definir-mesa'){
+    abrirDefinirMesaAlmoco(c.id);
   } else if(acao === 'ver-pedidos'){
     abrirVerPedidosComanda(c.id);
   } else if(acao === 'fechar'){
     abrirFecharContaComanda(c.id);
   }
+}
+
+// Define ou troca a mesa de uma comanda de almoço
+function abrirDefinirMesaAlmoco(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  var ex = document.getElementById('modal-def-mesa-alm');
+  if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-def-mesa-alm';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:600;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  var msgAtual = c.mesa
+    ? '<div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:0.86rem;color:#4ade80;">🪑 Atualmente: <b>Mesa ' + c.mesa + '</b></div>'
+    : '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:0.86rem;color:#fbbf24;">⚠️ Sem mesa atualmente</div>';
+  m.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:380px;width:100%;padding:20px;">' +
+      '<div style="font-weight:700;font-size:1.05rem;margin-bottom:4px;">🪑 ' + (c.mesa ? 'Trocar Mesa' : 'Definir Mesa') + '</div>' +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">Comanda: <b>' + esc(c.cliente||'?') + '</b></div>' +
+      msgAtual +
+      '<label style="font-size:0.78rem;color:var(--muted);display:block;margin-bottom:4px;">Número da mesa:</label>' +
+      '<input type="number" id="def-mesa-input" min="1" max="999" placeholder="Ex: 5" value="' + (c.mesa||'') + '" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:1.1rem;box-sizing:border-box;text-align:center;" autofocus>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
+        (c.mesa ? '<button onclick="removerMesaAlmoco(\'' + comandaId + '\')" style="flex:1;min-width:120px;background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:11px;font-family:inherit;font-weight:600;cursor:pointer;font-size:0.86rem;">Remover mesa</button>' : '') +
+        '<button onclick="document.getElementById(\'modal-def-mesa-alm\').remove()" style="flex:1;min-width:90px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:11px;font-family:inherit;cursor:pointer;font-size:0.92rem;">Cancelar</button>' +
+        '<button onclick="confirmarDefinirMesaAlmoco(\'' + comandaId + '\')" style="flex:1.4;min-width:110px;background:var(--accent);border:none;color:#000;border-radius:8px;padding:11px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.92rem;">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(m);
+  setTimeout(function(){
+    var inp = document.getElementById('def-mesa-input');
+    if(inp){ inp.focus(); inp.select(); }
+  }, 50);
+}
+
+function confirmarDefinirMesaAlmoco(comandaId){
+  var inp = document.getElementById('def-mesa-input');
+  if(!inp) return;
+  var mesa = parseInt(inp.value);
+  if(isNaN(mesa) || mesa <= 0 || mesa > 999){
+    showToast('Mesa inválida', '#f7a34f');
+    return;
+  }
+  fbDb.collection('contas_mesa').doc(comandaId).update({
+    mesa: mesa
+  }).then(function(){
+    showToast('✓ Mesa ' + mesa + ' atribuída', '#4ade80');
+    document.getElementById('modal-def-mesa-alm').remove();
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
+}
+
+function removerMesaAlmoco(comandaId){
+  if(!confirm('Remover a mesa dessa comanda?')) return;
+  fbDb.collection('contas_mesa').doc(comandaId).update({
+    mesa: null
+  }).then(function(){
+    showToast('✓ Mesa removida', '#94a3b8');
+    document.getElementById('modal-def-mesa-alm').remove();
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171');
+  });
 }
 
 // Seleciona uma comanda avulsa para fazer pedido (similar a selecionarMesa)
@@ -6999,7 +7096,9 @@ function iniciarListeners(){
           filtro: v.filtro || 'categoria',
           categorias: v.categorias || [],
           itens: v.itens || [],
-          apareceSininho: !!v.apareceSininho // NOVO: marca se aparece no sininho
+          apareceSininho: !!v.apareceSininho, // NOVO: marca se aparece no sininho
+          apenasAlmoco: !!v.apenasAlmoco,     // ☀️ exclusivo de comandas almoço
+          tipo: v.tipo || 'pedido'
         });
       });
       var qtdSininho = _modelosCozinha.filter(function(m){ return m.apareceSininho; }).length;
@@ -8161,8 +8260,12 @@ function renderItens(){
       return;
     }
     grid.innerHTML = '';
+    // Filtro: se estamos em comanda almoço, mostra só categorias permitidas no modelo "apenasAlmoco"
+    var catsPermitidasAlm = _categoriasPermitidasAlmoco();
     // Cards de categorias compactos em grade 3 colunas
     _categorias.forEach(function(cat){
+      // Aplica filtro de almoço (se existir)
+      if(catsPermitidasAlm && catsPermitidasAlm.indexOf(cat.id) < 0) return;
       var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
       if(!count) return;
       var card = document.createElement('div');
@@ -8182,10 +8285,14 @@ function renderItens(){
   // Tela de ITENS (categoria selecionada)
   if(buscaBar) buscaBar.style.display = '';
   var busca = (buscaInput && buscaInput.value || '').toLowerCase().trim();
+  // Filtro: se estamos em comanda almoço, esconde itens fora das categorias permitidas
+  var catsPermitidasAlm2 = _categoriasPermitidasAlmoco();
   var lista = _itens.filter(function(it){
     if(!it.disponivel) return false;
     if(_catAtiva!=='todas' && (it.categoriaId||'')!==_catAtiva) return false;
     if(busca && !it.nome.toLowerCase().includes(busca)) return false;
+    // Filtro almoço: só itens de categorias permitidas no modelo
+    if(catsPermitidasAlm2 && catsPermitidasAlm2.indexOf(it.categoriaId||'') < 0) return false;
     return true;
   });
   if(!lista.length){
@@ -10552,13 +10659,21 @@ function enviarPedido(){
     _deveImprimir = _chkImprimir ? _chkImprimir.checked : true;
   }
 
+  // tipoConta do pedido reflete o tipo da conta (mesa | avulsa | almoço)
+  var tipoContaPedido;
+  if(ehComanda){
+    tipoContaPedido = conta.tipoConta === 'almoco' ? 'almoco' : 'avulsa';
+  } else {
+    tipoContaPedido = 'mesa';
+  }
+
   var pedido = {
     garcom: _nomeGarcom,
-    mesa: mesaInt,
+    mesa: mesaInt !== null ? mesaInt : (ehComanda && conta.mesa ? parseInt(conta.mesa) || conta.mesa : null),
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: contaId,
-    tipoConta: ehComanda ? 'avulsa' : 'mesa',
+    tipoConta: tipoContaPedido,
     cliente: ehComanda ? (conta.cliente||'') : null,
     status: 'preparo',
     criadoEm: Date.now(),

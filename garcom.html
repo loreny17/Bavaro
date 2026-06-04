@@ -13061,6 +13061,26 @@ function abrirVerPedidosMesa(num){
   // Isso resolve problemas de tipo (alguns pedidos antigos podem ter mesa como string)
   console.log('[VER-PEDIDOS] Mesa:', num, '| contaIdAtual:', contaIdAtual, '| abertaEm:', abertaEm);
 
+  // 🩺 DIAGNÓSTICO: lista TODOS os pedidos do restaurante (sem filtro) pra entender o que tá lá
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .orderBy('criadoEm','desc')
+    .limit(20)
+    .get()
+    .then(function(snap){
+      console.log('[VER-PEDIDOS-DIAG] últimos 20 pedidos do restaurante:');
+      snap.forEach(function(d){
+        var v = d.data();
+        console.log('  - pedido', d.id.substring(0,8),
+          '| mesa:', v.mesa, '(' + typeof v.mesa + ')',
+          '| contaId:', (v.contaId||'').substring(0,8),
+          '| status:', v.status,
+          '| criadoEm:', v.criadoEm ? new Date(v.criadoEm).toLocaleString('pt-BR') : '?');
+      });
+    }).catch(function(e){
+      console.warn('[VER-PEDIDOS-DIAG] erro:', e);
+    });
+
   var pedidosCache = {}; // {id: pedidoData} pra deduplica
 
   function filtrarERender(){
@@ -13169,6 +13189,47 @@ function fazerNovoPedidoMesa(num){
   pushHistory('cardapio:null');
 }
 
+// Cancela um item órfão direto na conta (não tem pedido pra referenciar)
+function cancelarItemOrfaoConta(contaId, idx){
+  if(!confirm('Cancelar este item da conta?\n\nIsso vai removê-lo do total da conta. Não dá pra desfazer.')) return;
+  fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+    if(!doc.exists){ showToast('Conta não encontrada', '#f87171'); return; }
+    var c = doc.data();
+    var itens = c.itens || [];
+    if(idx < 0 || idx >= itens.length){ showToast('Item não encontrado', '#f87171'); return; }
+    var item = itens[idx];
+    // Marca como cancelado
+    itens[idx] = Object.assign({}, item, {
+      status: 'cancelado',
+      canceladoEm: Date.now(),
+      canceladoPor: _nomeGarcom,
+      motivoCancelamento: 'Cancelado via "Ver pedidos" (item órfão)'
+    });
+    // Recalcula totais
+    var subtotal = itens.filter(function(i){
+      return i.status !== 'cancelado' && !i.transferidoPara;
+    }).reduce(function(a, i){
+      if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
+      return a + (i.preco||0) * (i.qtd||1);
+    }, 0);
+    var taxa10 = (c.taxa10Ativa !== false && c.taxa10 !== 0) ? subtotal * 0.10 : 0;
+    var total = subtotal + taxa10;
+    var pagoTotal = c.pagoTotal || 0;
+    var restante = Math.max(0, total - pagoTotal);
+    fbDb.collection('contas_mesa').doc(contaId).update({
+      itens: itens,
+      subtotal: subtotal,
+      taxa10: taxa10,
+      total: total,
+      restante: restante
+    }).then(function(){
+      showToast('✓ Item cancelado', '#4ade80');
+    }).catch(function(e){
+      showToast('❌ ' + e.message, '#f87171');
+    });
+  });
+}
+
 function renderVerPedidosMesa(pedidos){
   var body = document.getElementById('ver-pedidos-body');
   if(!body) return;
@@ -13179,7 +13240,50 @@ function renderVerPedidosMesa(pedidos){
     });
     return visiveis.length > 0;
   });
+  // 🔧 FALLBACK: se nenhum pedido foi encontrado MAS a conta tem itens não pagos,
+  // mostra esses itens "órfãos" pro garçom não perder a referência
   if(!validos.length){
+    var contaOrfa = null;
+    if(_verPedidosMesaNum !== null && _verPedidosMesaNum !== undefined){
+      contaOrfa = _contasMesaCache[String(_verPedidosMesaNum)] || _contasMesaCache[_verPedidosMesaNum];
+    } else if(_verPedidosComandaId){
+      var ca = _comandasAvulsas.find(function(x){ return x.id === _verPedidosComandaId; });
+      contaOrfa = ca;
+    }
+    if(contaOrfa && (contaOrfa.itens||[]).length){
+      var itensOrfaos = (contaOrfa.itens||[]).filter(function(it){
+        return it.status !== 'pago' && it.status !== 'cancelado' && !it.transferidoPara;
+      });
+      if(itensOrfaos.length){
+        // Renderiza um "pseudo-pedido" agrupado com esses itens
+        var htmlOrfaos = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.78rem;color:#fbbf24;line-height:1.5;">'+
+          '⚠️ <b>Itens sem pedido correspondente</b><br>'+
+          'Esses itens estão na conta mas o pedido original foi removido ou perdido. Você pode cancelar individualmente abaixo.'+
+        '</div>';
+        var totalOrfaos = itensOrfaos.reduce(function(acc, it){ return acc + (it.preco||0)*(it.qtd||1); }, 0);
+        htmlOrfaos += '<div class="pedido-card" style="border-left:3px solid #fbbf24;">'+
+          '<div class="pedido-cab" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+            '<div><b>📦 Itens na conta</b> <span style="color:var(--muted);font-size:0.78rem;">(sem pedido)</span></div>'+
+            '<div style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(totalOrfaos)+'</div>'+
+          '</div>';
+        itensOrfaos.forEach(function(it){
+          var nm = esc(it.nome||'?');
+          var qt = it.qtd || 1;
+          var vl = ((it.preco||0)*qt).toFixed(2).replace('.',',');
+          htmlOrfaos += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:6px;">'+
+            '<div style="display:flex;justify-content:space-between;">'+
+              '<div><b>'+qt+'x</b> '+nm+'</div>'+
+              '<div>R$ '+vl+'</div>'+
+            '</div>'+
+            (it.obs ? '<div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">'+esc(it.obs)+'</div>' : '')+
+            '<button onclick="cancelarItemOrfaoConta(\''+contaOrfa.id+'\','+(contaOrfa.itens||[]).indexOf(it)+')" style="margin-top:6px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:6px 10px;border-radius:6px;font-size:0.72rem;font-family:inherit;cursor:pointer;">✕ Cancelar item</button>'+
+          '</div>';
+        });
+        htmlOrfaos += '</div>';
+        body.innerHTML = htmlOrfaos;
+        return;
+      }
+    }
     body.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-titulo">Nenhum pedido</div><div class="empty-sub">Ainda não há pedidos nesta mesa.</div></div>';
     return;
   }

@@ -13067,11 +13067,12 @@ function abrirVerPedidosMesa(num){
     var lista = [];
     Object.keys(pedidosCache).forEach(function(id){
       var data = pedidosCache[id];
-      // ESTRATÉGIA SIMPLIFICADA E ROBUSTA:
-      // Mostra pedido se:
-      //   - contaId bate com a conta atual, OU
-      //   - foi criado/transferido recentemente (depois da abertura da conta), OU
-      //   - mesa atual não tem conta (mostra todos os pedidos da mesa)
+      // ESTRATÉGIA MAIS PERMISSIVA: mostra o pedido se UMA das condições:
+      //   1. contaId bate com a conta atual (ideal), OU
+      //   2. foi criado/transferido recentemente (depois da abertura), OU
+      //   3. mesa atual não tem conta no cache (mostra todos), OU
+      //   4. o pedido tem pelo menos UM item ainda não pago (pra não perder pedidos
+      //      antigos quando a conta foi parcialmente fechada e recriada)
       var pertence;
       if(!contaIdAtual){
         // Sem conta no cache — mostra tudo da mesa pra não deixar usuário no escuro
@@ -13080,6 +13081,20 @@ function abrirVerPedidosMesa(num){
         pertence = (data.contaId === contaIdAtual)
           || (data.criadoEm && data.criadoEm >= abertaEm - 1000)
           || (data.transferidoEm && data.transferidoEm >= abertaEm - 1000);
+
+        // FALLBACK ROBUSTO: se ainda não pertence, mas o pedido tem itens em aberto
+        // (não pagos, não cancelados), mostra também — assim pedidos órfãos
+        // de uma conta antiga reaparecem se ainda tem itens pendentes.
+        if(!pertence){
+          var temItensAbertos = (data.itens||[]).some(function(it){
+            return it.status !== 'pago' && it.status !== 'cancelado';
+          });
+          // Tem que estar dentro de uma janela razoável (24h) pra não pegar pedidos muito antigos
+          var dentroJanela = data.criadoEm && (Date.now() - data.criadoEm) < 24*60*60*1000;
+          if(temItensAbertos && dentroJanela){
+            pertence = true;
+          }
+        }
       }
       if(pertence){
         lista.push(Object.assign({id:id}, data));

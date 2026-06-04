@@ -2803,7 +2803,11 @@ function executarEncerrarDiaGarcom(){
       .then(function(){
         return fbDb.collection('contas_mesa').doc(c.id).delete();
       })
-      .then(function(){ processadas++; })
+      .then(function(){
+        // Limpa pedidos órfãos dessa conta
+        _apagarPedidosDaConta(c.id);
+        processadas++;
+      })
       .catch(function(e){
         console.error('[ENCERRAR-DIA] erro conta', c.id, ':', e);
         erros++;
@@ -12950,6 +12954,8 @@ function executarEncerramento(){
     return fbDb.collection('contas_mesa').doc(contaIdParaApagar).delete();
   }).then(function(){
     console.log('[ENCERRAR] conta_mesa deletada com sucesso:', contaIdParaApagar);
+    // 3. Limpa pedidos órfãos dessa conta (não acumula no PDV)
+    _apagarPedidosDaConta(contaIdParaApagar);
 
     // ═══ LIMPEZA DE ÓRFÃS ═══
     // Verifica se ainda existem OUTRAS contas_mesa abertas dessa mesa
@@ -13170,6 +13176,24 @@ function fazerNovoPedidoMesa(num){
 }
 
 // Cancela um item órfão direto na conta (não tem pedido pra referenciar)
+// Apaga todos os pedidos vinculados a uma conta (chamado ao fechar conta).
+// Evita que pedidos órfãos acumulem no PDV após o fechamento.
+function _apagarPedidosDaConta(contaId){
+  if(!contaId) return;
+  fbDb.collection('pedidos')
+    .where('contaId','==', contaId)
+    .get()
+    .then(function(snap){
+      if(snap.empty) return;
+      var batch = fbDb.batch();
+      snap.forEach(function(d){ batch.delete(d.ref); });
+      return batch.commit().then(function(){
+        console.log('[ENCERRAR] ' + snap.size + ' pedidos da conta ' + contaId + ' apagados');
+      });
+    })
+    .catch(function(e){ console.warn('[ENCERRAR] erro apagar pedidos:', e); });
+}
+
 function cancelarItemOrfaoConta(contaId, idx){
   if(!confirm('Cancelar este item da conta?\n\nIsso vai removê-lo do total da conta. Não dá pra desfazer.')) return;
   fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){

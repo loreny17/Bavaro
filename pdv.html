@@ -413,8 +413,6 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
       <button class="status-filtro" onclick="filtrarPedidos(this,'preparo')">👨‍🍳 Preparo</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'pronto')">✅ Pronto</button>
       <button class="status-filtro" onclick="filtrarPedidos(this,'entregue')">🚀 Entregue</button>
-      <div style="flex:1;"></div>
-      <button class="status-filtro" style="background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.3);color:#f87171;" onclick="limparPedidosAntigos()" title="Limpar todos os pedidos exibidos">🗑 Limpar tudo</button>
     </div>
     <div id="pedidos-lista" style="padding:14px;"></div>
   </div>
@@ -2522,16 +2520,28 @@ function excluirPedidoVisualizacao(pedidoId){
 }
 
 function limparPedidosAntigos(){
-  var lista = _pedidosPDV.slice();
-  if(!lista.length){ showToast('Nenhum pedido pra limpar','#f7a34f'); return; }
-  if(!confirm('Limpar TODOS os '+lista.length+' pedidos da lista?\n\nIsso vai apagar os pedidos exibidos aqui (não afeta as contas das mesas).')) return;
-  var batch = fbDb.batch();
-  lista.forEach(function(p){
-    batch.delete(fbDb.collection('pedidos').doc(p.id));
-  });
-  batch.commit()
-    .then(function(){ showToast('✓ '+lista.length+' pedidos removidos','#4ade80'); })
-    .catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+  // FUNÇÃO MANTIDA POR COMPATIBILIDADE MAS DESATIVADA
+  // Causava perda de pedidos de contas abertas. Agora os pedidos são apagados
+  // AUTOMATICAMENTE quando uma conta é fechada (via _apagarPedidosDaContaPDV).
+  showToast('💡 Os pedidos agora são apagados automaticamente ao fechar a conta — não precisa limpar manualmente', '#94a3b8', 5000);
+}
+
+// Apaga todos os pedidos vinculados a uma conta (chamado ao fechar conta).
+// Evita que pedidos órfãos acumulem na lista do PDV.
+function _apagarPedidosDaContaPDV(contaId){
+  if(!contaId) return;
+  fbDb.collection('pedidos')
+    .where('contaId','==', contaId)
+    .get()
+    .then(function(snap){
+      if(snap.empty) return;
+      var batch = fbDb.batch();
+      snap.forEach(function(d){ batch.delete(d.ref); });
+      return batch.commit().then(function(){
+        console.log('[PDV] ' + snap.size + ' pedidos da conta ' + contaId + ' apagados após fechamento');
+      });
+    })
+    .catch(function(e){ console.warn('[PDV] erro apagar pedidos da conta:', e); });
 }
 
 function ciclarStatus(id, atual) {
@@ -7833,6 +7843,8 @@ function executarEncerrarDia(){
         return fbDb.collection('contas_mesa').doc(c.id).delete();
       })
       .then(function(){
+        // 3. Limpa pedidos órfãos dessa conta (não acumula no PDV)
+        _apagarPedidosDaContaPDV(c.id);
         processadas++;
       })
       .catch(function(e){

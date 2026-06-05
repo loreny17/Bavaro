@@ -12,6 +12,15 @@
       document.documentElement.setAttribute('data-theme', t);
       var mt = document.getElementById('meta-theme-color');
       if(mt) mt.setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0d');
+      // Aplica cor de acento customizada imediatamente (antes do CSS carregar)
+      var corCustom = localStorage.getItem('garcom_cor_accent');
+      if(corCustom){
+        document.documentElement.style.setProperty('--accent', corCustom);
+        document.documentElement.style.setProperty('--accent2', corCustom);
+      }
+      // Aplica fonte customizada via atributo (lida pelo CSS)
+      var fonteCustom = localStorage.getItem('garcom_fonte') || 'DM Sans';
+      document.documentElement.setAttribute('data-fonte', fonteCustom);
     } catch(e){}
   })();
 </script>
@@ -26,7 +35,7 @@
 <title>Garçom — Bávaro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Nunito:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Raleway:wght@400;500;600;700&family=Josefin+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#0d0d0d; --surface:#171717; --surface2:#1f1f1f; --surface3:#2a2a2a;
@@ -55,10 +64,22 @@ html[data-theme="light"] .modal{
 html[data-theme="light"] .toast{
   color:#fff;
 }
+/* ─── Fontes dinâmicas por data-fonte ─── */
+html[data-fonte="DM Sans"],html:not([data-fonte]) { --fonte-base:'DM Sans','Space Grotesk',-apple-system,sans-serif; }
+html[data-fonte="Inter"]           { --fonte-base:'Inter',-apple-system,sans-serif; }
+html[data-fonte="Poppins"]         { --fonte-base:'Poppins',-apple-system,sans-serif; }
+html[data-fonte="Nunito"]          { --fonte-base:'Nunito',-apple-system,sans-serif; }
+html[data-fonte="Roboto"]          { --fonte-base:'Roboto',-apple-system,sans-serif; }
+html[data-fonte="Playfair Display"]{ --fonte-base:'Playfair Display',Georgia,serif; }
+html[data-fonte="Montserrat"]      { --fonte-base:'Montserrat',-apple-system,sans-serif; }
+html[data-fonte="Raleway"]         { --fonte-base:'Raleway',-apple-system,sans-serif; }
+html[data-fonte="Space Grotesk"]   { --fonte-base:'Space Grotesk',-apple-system,sans-serif; }
+html[data-fonte="Bebas Neue"]      { --fonte-base:'Bebas Neue','Space Grotesk',-apple-system,sans-serif; }
+html[data-fonte="Josefin Sans"]    { --fonte-base:'Josefin Sans',-apple-system,sans-serif; }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{
   background:var(--bg); color:var(--text);
-  font-family:'DM Sans','Space Grotesk',-apple-system,sans-serif;
+  font-family:var(--fonte-base,'DM Sans',-apple-system,sans-serif);
   font-size:16.5px; line-height:1.45;
   min-height:100vh; min-height:100dvh;
   overflow-x:hidden;
@@ -1235,6 +1256,16 @@ window.addEventListener('load', function(){
       });
     }catch(e){ /* navegador muito antigo, ignora */ }
     // Não usa Firebase Auth — login só por nome
+    // Re-aplica cor e fonte salvas (garante que os CSS vars estão corretos)
+    try{
+      var _corSalva = localStorage.getItem('garcom_cor_accent');
+      if(_corSalva){
+        document.documentElement.style.setProperty('--accent', _corSalva);
+        document.documentElement.style.setProperty('--accent2', _corSalva);
+      }
+      var _fonteSalva = localStorage.getItem('garcom_fonte') || 'DM Sans';
+      document.documentElement.setAttribute('data-fonte', _fonteSalva);
+    }catch(e){}
     document.getElementById('loading').classList.add('hidden');
     mostrarLoginOuMesas();
   } catch(e){
@@ -3294,11 +3325,46 @@ function renderAparenciaModal(){
   var mod = document.getElementById('modal-aparencia');
   if(!mod) return;
 
+  var corAtual = localStorage.getItem('garcom_cor_accent') || '';
+  var fonteAtual = localStorage.getItem('garcom_fonte') || 'DM Sans';
+  var temaAtual = document.documentElement.getAttribute('data-theme') || 'dark';
+
+  // Paleta de cores predefinidas + input livre
+  var coresPaleta = [
+    {cor:'#d4a843', nome:'Dourado'},
+    {cor:'#e8345a', nome:'Vermelho'},
+    {cor:'#3b82f6', nome:'Azul'},
+    {cor:'#10b981', nome:'Verde'},
+    {cor:'#8b5cf6', nome:'Roxo'},
+    {cor:'#f59e0b', nome:'Âmbar'},
+    {cor:'#06b6d4', nome:'Ciano'},
+    {cor:'#f97316', nome:'Laranja'},
+    {cor:'#ec4899', nome:'Rosa'},
+    {cor:'#14b8a6', nome:'Teal'},
+    {cor:'#6366f1', nome:'Índigo'},
+    {cor:'#ef4444', nome:'Tomate'},
+  ];
+
+  // Fontes disponíveis
+  var fontes = [
+    {id:'DM Sans',       nome:'DM Sans',       ex:'Aa'},
+    {id:'Inter',         nome:'Inter',          ex:'Aa'},
+    {id:'Poppins',       nome:'Poppins',        ex:'Aa'},
+    {id:'Nunito',        nome:'Nunito',         ex:'Aa'},
+    {id:'Roboto',        nome:'Roboto',         ex:'Aa'},
+    {id:'Montserrat',    nome:'Montserrat',     ex:'Aa'},
+    {id:'Raleway',       nome:'Raleway',        ex:'Aa'},
+    {id:'Space Grotesk', nome:'Space Grotesk',  ex:'Aa'},
+    {id:'Josefin Sans',  nome:'Josefin Sans',   ex:'Aa'},
+    {id:'Playfair Display',nome:'Playfair',     ex:'Aa'},
+    {id:'Bebas Neue',    nome:'Bebas Neue',     ex:'AA'},
+  ];
+
   function segBtn(valor, atual, fn){
     var ativo = valor === atual;
     return '<button onclick="' + fn + '(' + valor + ');renderAparenciaModal()" ' +
       'style="flex:1;padding:11px;background:' + (ativo?'var(--accent)':'var(--bg)') + ';' +
-      'color:' + (ativo?'#000':'var(--text)') + ';border:1px solid ' + (ativo?'var(--accent)':'var(--border2)') + ';' +
+      'color:' + (ativo?'#fff':'var(--text)') + ';border:1px solid ' + (ativo?'var(--accent)':'var(--border2)') + ';' +
       'border-radius:9px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">' + valor + '</button>';
   }
 
@@ -3318,19 +3384,76 @@ function renderAparenciaModal(){
     '</div>';
   }
 
+  // Bloco de cores
+  var blocoCorPredef = coresPaleta.map(function(c){
+    var sel = corAtual.toLowerCase() === c.cor.toLowerCase();
+    return '<div onclick="setCorAccent(\''+c.cor+'\')" title="'+c.nome+'" ' +
+      'style="width:36px;height:36px;border-radius:50%;background:'+c.cor+';cursor:pointer;flex-shrink:0;' +
+      'box-shadow:' + (sel ? '0 0 0 3px var(--bg),0 0 0 5px '+c.cor : 'none') + ';' +
+      'transform:' + (sel ? 'scale(1.15)' : 'scale(1)') + ';transition:all 0.15s;"></div>';
+  }).join('');
+
+  // Grid de fontes
+  var blocoFontes = fontes.map(function(f){
+    var sel = fonteAtual === f.id;
+    return '<div onclick="setFonte(\''+f.id+'\')" ' +
+      'style="padding:10px 8px;border-radius:10px;border:1.5px solid '+(sel?'var(--accent)':'var(--border2)')+';' +
+      'background:'+(sel?'rgba(var(--accent-rgb,212,168,67),0.1)':'var(--bg)')+';' +
+      'cursor:pointer;text-align:center;transition:all 0.15s;">' +
+      '<div style="font-family:'+f.id+',sans-serif;font-size:1.25rem;font-weight:700;color:'+(sel?'var(--accent)':'var(--text)')+';">'+f.ex+'</div>' +
+      '<div style="font-size:0.6rem;color:'+(sel?'var(--accent)':'var(--muted)')+';margin-top:3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+f.nome+'</div>' +
+    '</div>';
+  }).join('');
+
   mod.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
-      '<div style="padding:14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;">' +
+    '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;max-width:440px;width:100%;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;animation:bannerSlideDown 0.3s ease;">' +
+
+      // Header
+      '<div style="padding:14px 16px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
         '<div style="font-size:1.6rem;">🎨</div>' +
         '<div style="flex:1;">' +
           '<div style="font-weight:700;font-size:1.05rem;">Aparência</div>' +
-          '<div style="font-size:0.72rem;color:var(--muted);">Ajustes salvos neste aparelho</div>' +
+          '<div style="font-size:0.72rem;color:var(--muted);">Salvo neste aparelho, por garçom</div>' +
         '</div>' +
         '<button onclick="document.getElementById(\'modal-aparencia\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
       '</div>' +
+
       '<div style="flex:1;overflow-y:auto;padding:14px;">' +
 
-        // Cardápio
+        // ─── TEMA ───
+        '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:0 2px 8px;">Tema</div>' +
+        '<div style="display:flex;gap:8px;margin-bottom:16px;">' +
+          '<button onclick="setTema(\'dark\');renderAparenciaModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid '+(temaAtual==='dark'?'var(--accent)':'var(--border2)')+';background:var(--bg);color:var(--text);font-family:inherit;font-weight:600;font-size:0.88rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">🌙 Escuro</button>' +
+          '<button onclick="setTema(\'light\');renderAparenciaModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid '+(temaAtual==='light'?'var(--accent)':'var(--border2)')+';background:var(--bg);color:var(--text);font-family:inherit;font-weight:600;font-size:0.88rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">☀️ Claro</button>' +
+        '</div>' +
+
+        // ─── COR DO APP ───
+        '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:0 2px 8px;">Cor principal</div>' +
+        '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:11px;padding:12px;margin-bottom:8px;">' +
+          '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">' + blocoCorPredef + '</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<label style="font-size:0.78rem;color:var(--muted);font-weight:600;white-space:nowrap;">Cor livre:</label>' +
+            '<input type="color" id="input-cor-livre" value="'+(corAtual||'#d4a843')+'" oninput="setCorAccent(this.value)" ' +
+              'style="width:40px;height:32px;border-radius:8px;border:1px solid var(--border2);cursor:pointer;padding:2px;background:var(--surface2);">' +
+            '<div id="preview-cor-hex" style="font-size:0.78rem;color:var(--muted);font-family:monospace;">'+(corAtual||'#d4a843')+'</div>' +
+            '<button onclick="resetCorAccent()" style="margin-left:auto;padding:5px 10px;background:var(--surface3);border:1px solid var(--border2);color:var(--muted);border-radius:8px;font-size:0.72rem;cursor:pointer;font-family:inherit;">Padrão</button>' +
+          '</div>' +
+        '</div>' +
+
+        // Preview da cor
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:10px;margin-bottom:16px;">' +
+          '<div style="width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;"></div>' +
+          '<div style="font-size:0.8rem;color:var(--muted);">Prévia da cor nos botões e destaques do app</div>' +
+          '<div style="margin-left:auto;padding:6px 14px;background:var(--accent);color:#fff;border-radius:8px;font-size:0.78rem;font-weight:600;">Botão</div>' +
+        '</div>' +
+
+        // ─── FONTE ───
+        '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:0 2px 8px;">Fonte do app</div>' +
+        '<div style="background:var(--bg);border:1px solid var(--border2);border-radius:11px;padding:12px;margin-bottom:16px;">' +
+          '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;">' + blocoFontes + '</div>' +
+        '</div>' +
+
+        // ─── CARDÁPIO ───
         '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:0 2px 8px;">Cardápio</div>' +
         toggleRow('🖼️', _modoCompacto ? 'Lista compacta' : 'Modo com fotos',
           _modoCompacto ? 'Toque para mostrar fotos' : 'Toque para lista compacta',
@@ -3352,7 +3475,7 @@ function renderAparenciaModal(){
           segBtn(4, _colsCardapio, 'setColsCardapio') +
         '</div>' +
 
-        // Mesas
+        // ─── MESAS ───
         '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:4px 2px 8px;">Mapa de mesas</div>' +
         '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border:1px solid var(--border2);border-radius:11px;margin-bottom:8px;">' +
           '<span style="font-size:1.4rem;">🗺️</span>' +
@@ -3972,6 +4095,43 @@ function atualizarUITema(){
   document.querySelectorAll('.tema-btn').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-tema') === temaAtual);
   });
+}
+
+// ─── Cor de acento customizada ───
+function setCorAccent(cor){
+  if(!cor) return;
+  document.documentElement.style.setProperty('--accent', cor);
+  document.documentElement.style.setProperty('--accent2', cor);
+  try{ localStorage.setItem('garcom_cor_accent', cor); }catch(e){}
+  // Atualiza o input de cor e hex se visíveis
+  var inp = document.getElementById('input-cor-livre');
+  if(inp) inp.value = cor;
+  var hex = document.getElementById('preview-cor-hex');
+  if(hex) hex.textContent = cor;
+  // Re-renderiza os pontinhos de seleção no modal sem fechar
+  var mod = document.getElementById('modal-aparencia');
+  if(mod) renderAparenciaModal();
+}
+
+function resetCorAccent(){
+  // Volta à cor padrão do tema
+  var tema = document.documentElement.getAttribute('data-theme') || 'dark';
+  var padrao = tema === 'light' ? '#b8862e' : '#d4a843';
+  document.documentElement.style.removeProperty('--accent');
+  document.documentElement.style.removeProperty('--accent2');
+  try{ localStorage.removeItem('garcom_cor_accent'); }catch(e){}
+  if(typeof showToast === 'function') showToast('🎨 Cor restaurada ao padrão', '#4ade80', 1500);
+  var mod = document.getElementById('modal-aparencia');
+  if(mod) renderAparenciaModal();
+}
+
+// ─── Fonte customizada ───
+function setFonte(fonte){
+  document.documentElement.setAttribute('data-fonte', fonte);
+  try{ localStorage.setItem('garcom_fonte', fonte); }catch(e){}
+  if(typeof showToast === 'function') showToast('🔤 Fonte: ' + fonte, '#4ade80', 1200);
+  var mod = document.getElementById('modal-aparencia');
+  if(mod) renderAparenciaModal();
 }
 
 function setLongPressMs(ms){

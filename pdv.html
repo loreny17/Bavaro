@@ -2397,9 +2397,13 @@ function iniciarListenerPedidos() {
   if(!fbDb || !_restauranteAtivo) return;
   if(_unsubPedidosPDV) _unsubPedidosPDV();
   var restId = _restauranteAtivo.id || 'default';
-  _unsubPedidosPDV = fbDb.collection('pedidos')
-    .where('restauranteId','==', restId)
-    .onSnapshot(function(snap) {
+  // Filtra por tenantId E restauranteId pra garantir isolamento entre restaurantes
+  // (importante quando restauranteId é genérico como 'default')
+  var query = fbDb.collection('pedidos').where('restauranteId','==', restId);
+  if(_tenantId){
+    query = query.where('tenantId','==', _tenantId);
+  }
+  _unsubPedidosPDV = query.onSnapshot(function(snap) {
       var anterior = _pedidosPDV.map(function(p){ return p.id; });
       _pedidosPDV = [];
       snap.forEach(function(doc){
@@ -2694,9 +2698,9 @@ function carregarHistoricoPDV(){
   if(!lista) return;
   lista.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
   var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
-  fbDb.collection('contas_fechadas')
-    .where('restauranteId','==', restId)
-    .get().then(function(snap){
+  var queryHist = fbDb.collection('contas_fechadas').where('restauranteId','==', restId);
+  if(_tenantId) queryHist = queryHist.where('tenantId','==', _tenantId);
+  queryHist.get().then(function(snap){
       var contas = [];
       snap.forEach(function(d){ contas.push(Object.assign({id: d.id}, d.data())); });
       // MODO TESTE: ignora contas de teste no histórico e nas vendas
@@ -5701,16 +5705,16 @@ function iniciarListenerImpressao(){
   if(!_qzPronto || !_restauranteAtivo) return;
   _impListenerAtivo = true;
   // Marca pedidos já existentes para não imprimir o que já estava lá quando QZ conectou
-  fbDb.collection('pedidos')
-    .where('restauranteId','==', _restauranteAtivo.id)
-    .get().then(function(snap){
-      snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
-    });
+  var queryImp = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
+  if(_tenantId) queryImp = queryImp.where('tenantId','==', _tenantId);
+  queryImp.get().then(function(snap){
+    snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
+  });
   // Listener: imprime novos pedidos automaticamente
   console.log('[PDV] Iniciando listener de pedidos para restaurante:', _restauranteAtivo.id);
-  fbDb.collection('pedidos')
-    .where('restauranteId','==', _restauranteAtivo.id)
-    .onSnapshot(function(snap){
+  var queryImpListen = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
+  if(_tenantId) queryImpListen = queryImpListen.where('tenantId','==', _tenantId);
+  queryImpListen.onSnapshot(function(snap){
       snap.docChanges().forEach(function(ch){
         if(ch.type === 'added'){
           var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());

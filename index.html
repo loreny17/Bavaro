@@ -1827,6 +1827,19 @@ body.admin-mode .admin-only{display:flex!important;}
         <span>Entrar com biometria</span>
       </button>
       <div id="auth-divisor" style="display:none;text-align:center;color:var(--muted);font-size:0.72rem;letter-spacing:0.1em;margin:2px 0;">— OU —</div>
+
+      <!-- Botão Google -->
+      <button onclick="authLoginGoogle()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;border:1.5px solid #dadce0;border-radius:10px;color:#3c4043;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:0.95rem;padding:12px;cursor:pointer;transition:box-shadow 0.15s;" onmouseover="this.style.boxShadow='0 1px 6px rgba(0,0,0,0.2)'" onmouseout="this.style.boxShadow='none'">
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 29.8 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.2-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15 16.1 19.2 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3c-7.7 0-14.4 4.4-17.7 11.7z"/><path fill="#FBBC05" d="M24 45c5.5 0 10.5-1.9 14.3-5l-6.6-5.4C29.8 36.1 27 37 24 37c-5.7 0-10.6-3.1-11.8-8.5l-7 5.4C8.1 40.7 15.5 45 24 45z"/><path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-.6 2.8-2.3 5.1-4.7 6.6l6.6 5.4C41.7 37.2 44.5 31 44.5 24c0-1.3-.2-2.7-.5-4z"/></svg>
+        Entrar com Google
+      </button>
+
+      <div style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+        <div style="flex:1;height:1px;background:var(--border2);"></div>
+        <span style="font-size:0.7rem;color:var(--muted);letter-spacing:0.08em;">OU</span>
+        <div style="flex:1;height:1px;background:var(--border2);"></div>
+      </div>
+
       <div class="auth-campo">
         <label>Email</label>
         <input type="email" id="auth-login-email" placeholder="seu@email.com" autocomplete="email">
@@ -11157,6 +11170,14 @@ function iniciarFirebase(){
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(e){
       console.warn('Persistence erro:', e.message);
     });
+    // Trata resultado de redirect (caso iOS Safari bloqueou popup e usou redirect)
+    fbAuth.getRedirectResult().then(function(result){
+      if(result && result.user){
+        console.log('Login Google via redirect OK:', result.user.email);
+      }
+    }).catch(function(e){
+      if(e.code !== 'auth/no-auth-event') console.warn('Redirect result erro:', e.code);
+    });
     console.log('Firebase conectado!');
     // Observer principal: detecta login/logout e libera o app
     fbAuth.onAuthStateChanged(function(user){
@@ -12025,6 +12046,39 @@ function _biomPerguntarAtivar(email, senha){
   });
 }
 
+
+// ─── LOGIN COM GOOGLE ───
+function authLoginGoogle(){
+  if(!fbAuth){
+    _authMostrarErro('auth-login-erro', 'Aguarde a conexão com o servidor...');
+    return;
+  }
+  var provider = new firebase.auth.GoogleAuthProvider();
+  // Solicita email sempre (bom pra multi-conta)
+  provider.setCustomParameters({ prompt: 'select_account' });
+  _authMostrarErro('auth-login-erro', 'Abrindo Google...', true);
+  fbAuth.signInWithPopup(provider)
+    .then(function(result){
+      // onAuthStateChanged cuida do resto (igual ao login por email)
+      console.log('Login Google OK:', result.user.email);
+      _authMostrarErro('auth-login-erro', '');
+    })
+    .catch(function(err){
+      console.warn('Login Google erro:', err.code, err.message);
+      // Usuário fechou o popup — não mostra erro
+      if(err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request'){
+        _authMostrarErro('auth-login-erro', '');
+        return;
+      }
+      // Popup bloqueado pelo navegador (comum em iOS Safari)
+      if(err.code === 'auth/popup-blocked'){
+        // Tenta redirect como fallback
+        fbAuth.signInWithRedirect(provider);
+        return;
+      }
+      _authMostrarErro('auth-login-erro', _authMensagemErroFirebase(err.code) + ' (' + err.code + ')');
+    });
+}
 
 function authFazerLogin(){
   var email = document.getElementById('auth-login-email').value.trim();

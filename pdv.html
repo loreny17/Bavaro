@@ -6712,6 +6712,38 @@ function gerarCupomContaFinal(conta){
     }
     // OBS: observações foram removidas do cupom de fechamento.
     // Elas continuam aparecendo nos cupons de pedido (cozinha/bar).
+
+    // ─── ADICIONAIS COM PREÇO EXTRA (só os que têm valor > 0) ───
+    // Ex: "  + Batata palito         R$ 4,90"
+    // Aparecem apenas quando o adicional cobrou algo a mais.
+    // Adicionais gratuitos (preço 0) são omitidos pra não poluir o cupom.
+    if(it.selecoes && it.selecoes.length){
+      var temAdicionalPago = (it.selecoes||[]).some(function(sel){
+        var qtdSel = sel.qtd || 1;
+        return (parseFloat(sel.precoExtra)||0) * qtdSel > 0;
+      });
+      if(temAdicionalPago){
+        s += _aplicarEstilo(estAdc);
+        var indAdc = estAdc.indentar !== false ? '  ' : '';
+        (it.selecoes||[]).forEach(function(sel){
+          var qtdSel = sel.qtd || 1;
+          var precoSel = (parseFloat(sel.precoExtra)||0) * qtdSel;
+          if(precoSel <= 0) return; // pula gratuitos
+          var prefSel = qtdSel > 1 ? qtdSel + 'x ' : '';
+          var labelSel = indAdc + '+ ' + prefSel + (sel.opcao||'');
+          var precoSelStr = '+R$ ' + formatarPreco(precoSel);
+          var espSel = Lefetivo - labelSel.length - precoSelStr.length;
+          if(espSel < 1){
+            s += labelSel + '\n' + _resetarEstilo() + padR(precoSelStr, L) + '\n';
+            s += _aplicarEstilo(estAdc);
+          } else {
+            s += labelSel + new Array(espSel+1).join(' ') + precoSelStr + '\n';
+          }
+        });
+        s += _resetarEstilo();
+      }
+    }
+
     if(_aplicaNegrito(modelo)) s += escposBold(true);
   });
   s += linha('=', L) + '\n';

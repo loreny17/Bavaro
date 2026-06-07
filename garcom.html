@@ -953,7 +953,7 @@ header{
           </div>
           <div style="flex:1;">
             <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">Valor (R$)</label>
-            <input type="text" id="kg-valor" inputmode="decimal" placeholder="35,95" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
+            <input type="text" id="kg-valor" inputmode="numeric" placeholder="ex: 2582 = R$ 25,82" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
           </div>
         </div>
         <!-- Nome do cliente (aparece na impressão de fechamento) -->
@@ -10137,28 +10137,44 @@ function _conectarSyncKgCampos(){
   var inpPeso = document.getElementById('kg-peso');
   var inpValor = document.getElementById('kg-valor');
   if(!inpPeso || !inpValor) return;
+
   function parseNum(s){
     if(!s) return 0;
     var n = parseFloat(String(s).replace(',', '.').replace(/[^\d.]/g, ''));
     return isNaN(n) ? 0 : n;
   }
-  // Quando digita peso → calcula valor
+
+  // Máscara automática no campo valor:
+  // Usuário digita apenas números (ex: 2582) e automaticamente vira 25,82
+  // Funciona como campo monetário — sempre 2 casas decimais
+  inpValor.addEventListener('input', function(){
+    if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
+    // Remove tudo que não é dígito
+    var apenasDigitos = inpValor.value.replace(/\D/g, '');
+    if(!apenasDigitos){ inpPeso.value = ''; atualizarBtnAdd(); return; }
+    // Converte pra centavos → reais (2582 → 25.82)
+    var centavos = parseInt(apenasDigitos, 10);
+    var valor = centavos / 100;
+    // Mostra formatado com vírgula mas sem alterar o cursor de forma estranha
+    inpValor.value = fmtPreco(valor);
+    // Calcula e preenche o peso correspondente
+    var precoKg = _itemAberto.preco || 0;
+    if(valor > 0 && precoKg > 0){
+      var peso = (valor * 1000) / precoKg;
+      inpPeso.value = Math.round(peso);
+    } else {
+      inpPeso.value = '';
+    }
+    atualizarBtnAdd();
+  });
+
+  // Quando digita peso → calcula valor (mantém comportamento original)
   inpPeso.addEventListener('input', function(){
     if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
     var peso = parseNum(inpPeso.value);
     if(peso <= 0){ inpValor.value = ''; atualizarBtnAdd(); return; }
     var valor = (peso * (_itemAberto.preco || 0)) / 1000;
     inpValor.value = fmtPreco(valor);
-    atualizarBtnAdd();
-  });
-  // Quando digita valor → calcula peso
-  inpValor.addEventListener('input', function(){
-    if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
-    var valor = parseNum(inpValor.value);
-    var precoKg = _itemAberto.preco || 0;
-    if(valor <= 0 || precoKg <= 0){ inpPeso.value = ''; atualizarBtnAdd(); return; }
-    var peso = (valor * 1000) / precoKg;
-    inpPeso.value = Math.round(peso);
     atualizarBtnAdd();
   });
 }
@@ -12376,6 +12392,10 @@ function renderFecharConta(){
         checkboxHtml+
         '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
           esc((it.qtd||1)+'x '+it.nome)+
+          // Nome do cliente (buffet por kg)
+          (it.nomeCliente ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>' : '')+
+          // Peso em gramas (buffet por kg)
+          (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : '')+
           (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
           linhaAbatido+
         '</div>'+

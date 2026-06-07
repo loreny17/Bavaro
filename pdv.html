@@ -6669,9 +6669,13 @@ function gerarCupomContaFinal(conta){
       && (it.divisao.pagas||0) > 0 && (it.divisao.pagas||0) < it.divisao.total;
     s += _aplicarEstilo(estItens);
     var ehKg = it.tipoVenda === 'kg' && it.peso;
-    var nome = ehKg
-      ? '1x ' + (it.nome||'').toUpperCase()
-      : (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
+    var nome;
+    if(ehKg){
+      // Inclui nome do cliente se preenchido (ex: "BUFFET — João")
+      nome = (it.nomeCliente ? (it.nome||'').toUpperCase() + ' — ' + it.nomeCliente.toUpperCase() : '1x ' + (it.nome||'').toUpperCase());
+    } else {
+      nome = (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase();
+    }
     // Marca [PAGO] após o nome se já foi pago.
     // Mas se está parcialmente dividido, não marca PAGO (porque ainda tem partes em aberto).
     var marcaPago = (ehPago && !temDivisaoParcial) ? ' [PAGO]' : '';
@@ -6688,12 +6692,12 @@ function gerarCupomContaFinal(conta){
       s += nomeComMarca + new Array(espaco+1).join(' ') + precoStr + '\n';
     }
     s += _resetarEstilo();
-    // Linha de pesagem
+    // Linha de pesagem — só as gramas (valor já aparece na linha do item acima)
     if(ehKg){
       s += _aplicarEstilo(estAdc);
       var indKg = estAdc.indentar !== false ? '  ' : '';
       var pesoStr = (it.peso < 1000) ? it.peso + 'g' : (it.peso/1000).toFixed(3).replace('.', ',') + 'kg';
-      s += indKg + pesoStr + (it.precoBase ? ' x R$ ' + formatarPreco(it.precoBase) + '/kg' : '') + '\n';
+      s += indKg + pesoStr + '\n';
       s += _resetarEstilo();
     }
     // ─── PARTES DA DIVISÃO (item parcialmente pago) ───

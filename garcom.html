@@ -10517,8 +10517,13 @@ function renderCarrinho(){
     var pesoHtml = '';
     if(ehKg){
       var pesoFmt = it.peso < 1000 ? it.peso + 'g' : (it.peso/1000).toFixed(3).replace('.', ',') + 'kg';
-      var pkg = it.precoBase ? ' x R$ ' + fmtPreco(it.precoBase) + '/kg' : '';
-      pesoHtml = '<div style="font-size:0.72rem;color:var(--accent);font-weight:600;margin-top:3px;">⚖️ '+pesoFmt+pkg+'</div>';
+      // Mostra nome do cliente se tiver, senão mostra as gramas
+      if(it.nomeCliente){
+        pesoHtml = '<div style="font-size:0.72rem;color:var(--accent);font-weight:600;margin-top:3px;">👤 '+esc(it.nomeCliente)+' · ⚖️ '+pesoFmt+'</div>';
+      } else {
+        var pkg = it.precoBase ? ' x R$ ' + fmtPreco(it.precoBase) + '/kg' : '';
+        pesoHtml = '<div style="font-size:0.72rem;color:var(--accent);font-weight:600;margin-top:3px;">⚖️ '+pesoFmt+pkg+'</div>';
+      }
     }
     // Controles diferentes pra item kg vs unidade
     var controleQtdHtml;
@@ -10613,12 +10618,15 @@ function cartEditar(idx){
     if(it.tipoVenda === 'kg' && it.peso){
       var inpPeso = document.getElementById('kg-peso');
       var inpValor = document.getElementById('kg-valor');
+      var inpNome = document.getElementById('kg-nome-cliente');
       if(inpPeso) inpPeso.value = it.peso;
       // Calcula valor (pesoG/1000 * precoBase)
       if(inpValor && it.precoBase){
         var valor = (it.peso / 1000) * it.precoBase;
         inpValor.value = valor.toFixed(2).replace('.', ',');
       }
+      // Restaura nome do cliente
+      if(inpNome) inpNome.value = it.nomeCliente || '';
     } else {
       _qtdTemp = it.qtd || 1;
       var qtdEl = document.getElementById('qtd-val');
@@ -11159,11 +11167,12 @@ function enviarPedido(){
         adicionadoPor: _nomeGarcom,
         teste: _modoTeste ? true : false
       };
-      // Preserva campos de pesagem
+      // Preserva campos de pesagem e nome do cliente
       if(it.tipoVenda === 'kg' && it.peso){
         item.tipoVenda = 'kg';
         item.peso = it.peso;
         item.precoBase = it.precoBase || 0;
+        if(it.nomeCliente) item.nomeCliente = it.nomeCliente;
       }
       return item;
     });
@@ -12392,10 +12401,11 @@ function renderFecharConta(){
         checkboxHtml+
         '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
           esc((it.qtd||1)+'x '+it.nome)+
-          // Nome do cliente (buffet por kg)
-          (it.nomeCliente ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>' : '')+
-          // Peso em gramas (buffet por kg)
-          (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : '')+
+          // Nome do cliente (buffet por kg) — substitui as gramas
+          (it.nomeCliente
+            ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>'
+            : (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : '')
+          )+
           (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
           linhaAbatido+
         '</div>'+

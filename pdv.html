@@ -3,16 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#0d0d0d">
+<meta name="theme-color" content="#d4a843">
 <title>PDV Bávaro</title>
-<!-- PWA: Manifest e ícones (scope restrito a /pdv.html pra não conflitar com outros apps Bávaro) -->
+<!-- PWA Manifest do PDV (ícone e nome específicos) -->
 <link rel="manifest" href="/manifest-pdv.json">
+<!-- Favicon específico do PDV -->
 <link rel="icon" type="image/png" sizes="64x64" href="/icon-pdv-64.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-pdv-192.png">
+<link rel="shortcut icon" href="/icon-pdv-64.png">
+<!-- iOS: ícone e nome do PDV (tem que ser específico pra não puxar o ícone do app principal) -->
+<link rel="apple-touch-icon" href="/icon-pdv-apple.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icon-pdv-apple.png">
+<link rel="apple-touch-icon" sizes="192x192" href="/icon-pdv-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/icon-pdv-512.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PDV Bávaro">
+<meta name="application-name" content="PDV Bávaro">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -7119,11 +7126,32 @@ function calcularTotaisContaPDV(c){
 }
 
 // ═══ PWA: INSTALAÇÃO COMO APP ═══
-// Registra o service worker (necessário pra browser permitir instalar)
+// O PDV e o app principal estão no mesmo domínio.
+// O SW do app principal (scope '/') pode conflitar com o do PDV.
+// Solução: ao carregar o PDV, verifica se há SW controlador que não é o sw-pdv.js
+// e o desregistra, registrando o sw-pdv.js no lugar.
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw-pdv.js', { scope: '/pdv.html' })
-      .catch(function(err){ console.warn('SW erro:', err); });
+    // Primeiro: desregistra qualquer SW que não seja o do PDV
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      var desregistros = regs
+        .filter(function(r){
+          var sw = r.active || r.installing || r.waiting;
+          var script = sw ? sw.scriptURL : '';
+          // Remove SWs que não são o sw-pdv.js (ex: sw.js do app principal)
+          return script && script.indexOf('sw-pdv.js') === -1;
+        })
+        .map(function(r){ return r.unregister(); });
+      return Promise.all(desregistros);
+    }).then(function(){
+      // Agora registra o SW do PDV com scope correto
+      // Usa '/' como scope (igual ao manifest) mas com SW específico do PDV
+      return navigator.serviceWorker.register('/sw-pdv.js', { scope: '/' });
+    }).then(function(reg){
+      console.log('[PDV] SW registrado, scope:', reg.scope);
+    }).catch(function(err){
+      console.warn('[PDV] SW erro:', err);
+    });
   });
 }
 // Captura o evento beforeinstallprompt (Chrome/Edge/Android) pra exibir o botão

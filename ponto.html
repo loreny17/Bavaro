@@ -1223,22 +1223,29 @@ function fecharModalAcao(){document.getElementById('modal-acao').classList.remov
 
 function iniciarAcao(tipo){
   _acaoPendente={tipo:tipo};
-  // Registra direto com localização — câmera é opcional
-  showToast('Registrando...', false);
+  showToast('⏳ Registrando...', false);
+  // Registra imediatamente sem esperar GPS
+  // Tenta pegar localização em paralelo (não bloqueia)
+  var gpsObtido = false;
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(
       function(p){
-        registrarPonto(null,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy});
+        if(!gpsObtido){
+          gpsObtido = true;
+          registrarPonto(null,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy});
+        }
       },
-      function(){
-        // Sem GPS, registra mesmo assim
-        registrarPonto(null,null);
-      },
-      {timeout:5000,maximumAge:30000}
+      function(){ /* ignora erro de GPS */ },
+      {timeout:4000,maximumAge:60000}
     );
-  } else {
-    registrarPonto(null,null);
   }
+  // Registra após 500ms independente do GPS
+  setTimeout(function(){
+    if(!gpsObtido){
+      gpsObtido = true;
+      registrarPonto(null, null);
+    }
+  }, 500);
 }
 
 function abrirSelfie(){
@@ -1268,19 +1275,24 @@ function capturarSelfie(){
 }
 
 function registrarPonto(foto,coords){
-  if(!_acaoPendente||!_func)return;
-  var tipo=_acaoPendente.tipo;_acaoPendente=null;
-  var agora=Date.now();var hoje=diaKey(new Date());
+  if(!_acaoPendente) return;
+  if(!_func){ showToast('Erro: usuário não carregado. Recarregue a página.',true); return; }
+  if(!fbDb){ showToast('Erro: Firebase não conectado.',true); return; }
+  var tipo=_acaoPendente.tipo; _acaoPendente=null;
+  var agora=Date.now(); var hoje=diaKey(new Date());
   var reg={funcId:_func.id,funcNome:_func.nome||_func.nomeLogin,tipo:tipo,ts:agora,diaKey:hoje,registradoEm:agora};
-  if(coords){reg.lat=coords.lat;reg.lng=coords.lng;reg.acc=coords.acc;}
-  if(foto)reg.foto=foto;
+  if(coords){ reg.lat=coords.lat; reg.lng=coords.lng; reg.acc=coords.acc; }
+  if(foto) reg.foto=foto;
   fbDb.collection('ponto_registros').add(reg).then(function(){
     var icons={entrada:'✅',saida:'🏠',ini_intervalo:'⏸',fim_intervalo:'▶️'};
-    var labels={entrada:'Entrada registrada',saida:'Saída registrada',ini_intervalo:'Intervalo iniciado',fim_intervalo:'Voltou do intervalo'};
+    var labels={entrada:'Entrada registrada!',saida:'Saída registrada!',ini_intervalo:'Intervalo iniciado',fim_intervalo:'Voltou do intervalo!'};
     mostrarFeedback(icons[tipo]||'✓');
     showToast(labels[tipo]||'Registrado ✓');
     renderStatus();
-  }).catch(function(e){showToast('Erro: '+e.message,true);});
+  }).catch(function(e){
+    showToast('Erro ao registrar: '+e.message, true);
+    console.error('Ponto erro:', e);
+  });
 }
 
 function mostrarFeedback(icon){

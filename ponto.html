@@ -681,7 +681,7 @@ body{
       <div class="header-date" id="header-date">—</div>
       <div class="header-time" id="header-time">00:00</div>
     </div>
-    <div class="header-notif">🔔</div>
+    <div class="header-notif" onclick="abrirMenuUsuario()" id="header-menu-btn" style="position:relative;">⋮</div>
   </div>
 
   <!-- SCROLL -->
@@ -876,8 +876,8 @@ body{
 
 <!-- Modal selfie -->
 <div id="modal-selfie">
-  <div class="selfie-title">CONFIRMAÇÃO DE PRESENÇA</div>
-  <div class="selfie-sub">Posicione seu rosto dentro do círculo<br>e toque em "Registrar"</div>
+  <div class="selfie-title">REGISTRAR PONTO</div>
+  <div class="selfie-sub">O browser pedirá permissão para a câmera.<br>Se preferir, toque em <strong style="color:var(--gold);">Registrar sem foto</strong> abaixo.</div>
   <div class="selfie-circle">
     <video id="selfie-video" autoplay playsinline muted></video>
   </div>
@@ -1263,12 +1263,32 @@ function fecharModalAcao(){document.getElementById('modal-acao').classList.remov
 
 function iniciarAcao(tipo){
   _acaoPendente={tipo:tipo};
-  // Tenta abrir câmera — se não conseguir, registra direto
-  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
-    abrirSelfie();
-  } else {
-    registrarSemFoto();
-  }
+  // Mostra escolha primeiro — câmera ou sem foto
+  mostrarEscolhaRegistro();
+}
+
+function mostrarEscolhaRegistro(){
+  var ex=document.getElementById('modal-escolha-registro');
+  if(ex) ex.remove();
+  var tipos={entrada:'Entrada',saida:'Saída',ini_intervalo:'Início Intervalo',fim_intervalo:'Fim Intervalo'};
+  var tipo=_acaoPendente?_acaoPendente.tipo:'entrada';
+  var m=document.createElement('div');
+  m.id='modal-escolha-registro';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:450;display:flex;align-items:flex-end;justify-content:center;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(160deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:20px 20px 40px;">'+
+      '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.1em;color:var(--gold);text-align:center;margin-bottom:6px;">REGISTRAR '+tipos[tipo].toUpperCase()+'</div>'+
+      '<div style="font-size:0.76rem;color:var(--muted);text-align:center;margin-bottom:20px;">Como deseja confirmar sua presença?</div>'+
+      '<button onclick="document.getElementById(\'modal-escolha-registro\').remove();abrirSelfie();" style="width:100%;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--gold);border-radius:12px;padding:16px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">'+
+        '<span style="font-size:1.4rem;">📸</span><div style="text-align:left;"><div>Com selfie</div><div style="font-size:0.7rem;font-weight:400;opacity:0.7;">Tira uma foto pra confirmar</div></div>'+
+      '</button>'+
+      '<button onclick="document.getElementById(\'modal-escolha-registro\').remove();registrarSemFoto();" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:var(--text);border-radius:12px;padding:16px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">'+
+        '<span style="font-size:1.4rem;">📍</span><div style="text-align:left;"><div>Sem selfie</div><div style="font-size:0.7rem;font-weight:400;opacity:0.7;">Registra apenas com localização</div></div>'+
+      '</button>'+
+      '<button onclick="document.getElementById(\'modal-escolha-registro\').remove();_acaoPendente=null;" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;cursor:pointer;">Cancelar</button>'+
+    '</div>';
+  document.body.appendChild(m);
 }
 
 function registrarSemFoto(){
@@ -1733,6 +1753,33 @@ function toggleTarefaItemClData(tarefaId, itemId, el){
 }
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function abrirMenuUsuario(){
+  var ex=document.getElementById('menu-usuario');
+  if(ex){ ex.remove(); return; }
+  var btn=document.getElementById('header-menu-btn');
+  var m=document.createElement('div');
+  m.id='menu-usuario';
+  m.style.cssText='position:fixed;top:68px;right:14px;background:linear-gradient(135deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.25);border-radius:12px;z-index:300;min-width:180px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+  m.innerHTML=
+    '<div style="padding:12px 16px;border-bottom:1px solid rgba(212,168,67,0.1);">'+
+      '<div style="font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Logado como</div>'+
+      '<div style="font-weight:700;font-size:0.9rem;color:var(--gold);">'+(_func?(_func.nome||_func.nomeLogin):'—')+'</div>'+
+    '</div>'+
+    '<button onclick="document.getElementById(\'menu-usuario\').remove();fazerLogout();" style="width:100%;background:transparent;border:none;color:var(--danger);padding:13px 16px;font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:0.88rem;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px;">'+
+      '<span>🚪</span> Sair da conta'+
+    '</button>';
+  document.body.appendChild(m);
+  // Fecha ao tocar fora
+  setTimeout(function(){
+    document.addEventListener('click', function fechar(e){
+      if(!m.contains(e.target) && e.target!==btn){
+        m.remove();
+        document.removeEventListener('click', fechar);
+      }
+    });
+  }, 100);
+}
 
 function showToast(msg,erro){
   var t=document.getElementById('toast');

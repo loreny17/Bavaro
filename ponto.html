@@ -1221,7 +1221,25 @@ function onPontoClick(){
 function abrirModalAcao(){document.getElementById('modal-acao').style.display='flex';document.getElementById('modal-acao').classList.add('show');}
 function fecharModalAcao(){document.getElementById('modal-acao').classList.remove('show');setTimeout(function(){document.getElementById('modal-acao').style.display='none';},300);}
 
-function iniciarAcao(tipo){_acaoPendente={tipo:tipo};abrirSelfie();}
+function iniciarAcao(tipo){
+  _acaoPendente={tipo:tipo};
+  // Registra direto com localização — câmera é opcional
+  showToast('Registrando...', false);
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      function(p){
+        registrarPonto(null,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy});
+      },
+      function(){
+        // Sem GPS, registra mesmo assim
+        registrarPonto(null,null);
+      },
+      {timeout:5000,maximumAge:30000}
+    );
+  } else {
+    registrarPonto(null,null);
+  }
+}
 
 function abrirSelfie(){
   document.getElementById('modal-selfie').classList.add('show');
@@ -1505,61 +1523,65 @@ function carregarTarefas(){
   if(!lista) return;
   lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Carregando...</div>';
 
-  // Busca o tenantId da configuração global do ponto
-  // (salvo quando o gestor configurou o local/restaurante)
-  fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
-    var tenantId = doc.exists ? doc.data().tenantId : null;
-    var restId   = doc.exists ? doc.data().restId : 'bavaro';
+  var nomeFuncLower=(_func.nome||_func.nomeLogin||'').toLowerCase();
+  var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var diaHoje=diasSem[new Date().getDay()];
 
-    // Monta o caminho do clData igual ao app principal
-    var colRef;
-    if(tenantId){
-      colRef = fbDb.collection('tenants').doc(tenantId).collection('configuracoes');
-    } else {
-      colRef = fbDb.collection('configuracoes');
-    }
-
-    return colRef.doc('clData').get();
-  }).then(function(snap){
-    var data = snap && snap.exists ? (snap.data().data || []) : [];
-    // Filtra tarefas do funcionário pelo nome (case-insensitive) ou funcId linkado
-    var nomeFuncLower = (_func.nome||_func.nomeLogin||'').toLowerCase();
-    var funcIdLink = _func.appPrincipalFuncId || null; // campo opcional de link
-
-    var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
-    var diaHoje = diasSem[new Date().getDay()];
-
-    var minhasTarefas = data.filter(function(t){
-      // Filtra pelo funcId linkado ou pelo nome
-      var matchId = funcIdLink && (
-        String(t.funcId) === String(funcIdLink) ||
-        (t.funcIds||[]).some(function(id){ return String(id)===String(funcIdLink); })
-      );
-      var matchNome = !funcIdLink && (
-        (t.funcNome||'').toLowerCase() === nomeFuncLower ||
-        (t.funcNomes||[]).some(function(n){ return n.toLowerCase()===nomeFuncLower; })
-      );
-      if(!matchId && !matchNome) return false;
+  // Tenta buscar clData em múltiplos caminhos possíveis
+  function filtrarETarefas(allData){
+    return (allData||[]).filter(function(t){
+      // Sem funcionário definido = pra todos
+      var semFunc = !t.funcId && (!t.funcIds||!t.funcIds.length) && (!t.funcNomes||!t.funcNomes.length);
+      if(semFunc) return true;
+      // Match por nome
+      var matchNome = (t.funcNomes||[]).some(function(n){ return (n||'').toLowerCase()===nomeFuncLower; });
+      // Match pelo nome do funcId (pode estar no app principal como string numérica)
+      var matchNomeDireto = (t.funcNome||'').toLowerCase()===nomeFuncLower;
+      if(!matchNome && !matchNomeDireto) return false;
       // Filtra por dia
-      if(t.dia && t.dia !== '' && t.dia !== diaHoje) return false;
+      if(t.dia && t.dia!=='' && t.dia!==diaHoje) return false;
       return true;
     });
+  }
 
-    renderTarefas(minhasTarefas, snap ? snap.ref : null, data, snap);
-  }).catch(function(e){
-    console.warn('Tarefas erro:', e);
-    // Fallback: tenta ponto_tarefas
-    fbDb.collection('ponto_tarefas')
-      .where('funcId','==',_func.id)
-      .get().then(function(s){
+  // Passo 1: tenta pegar tenantId do ponto_configuracoes
+  fbDb.collection('ponto_configuracoes').doc('restaurante').get()
+    .then(function(doc){
+      var tenantId = doc.exists ? doc.data().tenantId : null;
+      if(tenantId){
+        return fbDb.collection('tenants').doc(tenantId).collection('configuracoes').doc('clData').get();
+      }
+      // Passo 2: sem tenantId, tenta direto na raiz (modo legado)
+      return fbDb.collection('configuracoes').doc('clData').get();
+    })
+    .then(function(snap){
+      if(snap && snap.exists){
+        var data=snap.data().data||[];
+        var minhas=filtrarETarefas(data);
+        if(minhas.length > 0){
+          renderTarefas(minhas);
+          return;
+        }
+      }
+      // Passo 3: se não achou nada, tenta ponto_tarefas
+      return fbDb.collection('ponto_tarefas').get().then(function(s){
         var t=[];
-        s.forEach(function(d){ t.push(Object.assign({id:d.id},d.data())); });
-        renderTarefas(t, null, null, null);
-      }).catch(function(){ renderTarefas([], null, null, null); });
-  });
+        s.forEach(function(d){
+          var item=Object.assign({id:d.id},d.data());
+          var matchId = item.funcId===_func.id;
+          var matchNome = (item.funcNome||'').toLowerCase()===nomeFuncLower;
+          if(matchId||matchNome) t.push(item);
+        });
+        renderTarefas(t);
+      });
+    })
+    .catch(function(e){
+      console.warn('Tarefas erro:',e);
+      lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Não foi possível carregar as tarefas.<br><span style="font-size:0.7rem;">'+e.message+'</span></div>';
+    });
 }
 
-function renderTarefas(tarefas, colRef, allData, snap){
+function renderTarefas(tarefas){
   var lista=document.getElementById('tarefas-lista');
   if(!lista) return;
   var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
@@ -1620,7 +1642,7 @@ function toggleTarefaItemClData(tarefaId, itemId, el){
     textEl.style.color = novoFeito ? 'var(--muted)' : 'var(--text)';
   }
 
-  // Salva no Firebase
+  // Salva no Firebase — mesmo caminho que carregarTarefas
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
     var tenantId = doc.exists ? doc.data().tenantId : null;
     var colRef = tenantId

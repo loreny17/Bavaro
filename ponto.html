@@ -311,20 +311,31 @@ function fazerLogout(){
 function iniciarAppFunc(){
   document.getElementById('app-nome').textContent=_func.nome||_func.nomeLogin;
   document.getElementById('app-cargo').textContent=_func.cargo||'funcionário';
+  // Renderiza botões imediatamente (status = livre por padrão)
+  // enquanto o listener carrega os dados do dia
+  renderStatus(); renderBotoes(); renderHistorico();
   escutarRegistros();
 }
 
 function escutarRegistros(){
   if(_unsubReg) _unsubReg();
   var hoje=diaKey(new Date());
+  // Sem orderBy pra não exigir índice composto no Firestore
+  // Ordena em JS depois de receber
   _unsubReg=fbDb.collection('ponto_registros')
-    .where('funcId','==',_func.id).where('diaKey','==',hoje)
-    .orderBy('ts','asc')
+    .where('funcId','==',_func.id)
+    .where('diaKey','==',hoje)
     .onSnapshot(function(snap){
       _registroHoje=[];
       snap.forEach(function(d){ _registroHoje.push(Object.assign({id:d.id},d.data())); });
+      // Ordena por timestamp crescente em JS
+      _registroHoje.sort(function(a,b){ return a.ts-b.ts; });
       renderStatus(); renderBotoes(); renderHistorico();
-    },function(e){ console.warn(e); });
+    },function(e){
+      console.warn('Erro listener registros:',e);
+      // Mesmo com erro, mantém os botões visíveis
+      renderStatus(); renderBotoes();
+    });
 }
 
 function getStatus(){

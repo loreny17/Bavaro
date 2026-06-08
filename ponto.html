@@ -883,7 +883,8 @@ body{
   </div>
   <canvas id="selfie-canvas" width="240" height="240"></canvas>
   <div class="selfie-action-row">
-    <button class="selfie-capture-btn" onclick="capturarSelfie()">📸 REGISTRAR PONTO</button>
+    <button class="selfie-capture-btn" onclick="capturarSelfie()">📸 REGISTRAR COM FOTO</button>
+    <button onclick="cancelarSelfie();registrarSemFoto();" style="width:100%;background:transparent;border:1px solid rgba(212,168,67,0.2);color:var(--gold);border-radius:var(--radius-sm);padding:12px;font-family:'Space Grotesk',sans-serif;font-size:0.88rem;font-weight:600;cursor:pointer;">Registrar sem foto →</button>
     <button class="selfie-cancel-btn" onclick="cancelarSelfie()">Cancelar</button>
   </div>
 </div>
@@ -1262,36 +1263,36 @@ function fecharModalAcao(){document.getElementById('modal-acao').classList.remov
 
 function iniciarAcao(tipo){
   _acaoPendente={tipo:tipo};
+  // Tenta abrir câmera — se não conseguir, registra direto
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    abrirSelfie();
+  } else {
+    registrarSemFoto();
+  }
+}
+
+function registrarSemFoto(){
   showToast('⏳ Registrando...', false);
-  // Registra imediatamente sem esperar GPS
-  // Tenta pegar localização em paralelo (não bloqueia)
-  var gpsObtido = false;
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(
-      function(p){
-        if(!gpsObtido){
-          gpsObtido = true;
-          registrarPonto(null,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy});
-        }
-      },
-      function(){ /* ignora erro de GPS */ },
+      function(p){ registrarPonto(null,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}); },
+      function(){ registrarPonto(null,null); },
       {timeout:4000,maximumAge:60000}
     );
+  } else {
+    registrarPonto(null,null);
   }
-  // Registra após 500ms independente do GPS
-  setTimeout(function(){
-    if(!gpsObtido){
-      gpsObtido = true;
-      registrarPonto(null, null);
-    }
-  }, 500);
 }
 
 function abrirSelfie(){
   document.getElementById('modal-selfie').classList.add('show');
   navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false})
     .then(function(s){_streamSelfie=s;document.getElementById('selfie-video').srcObject=s;})
-    .catch(function(){document.getElementById('modal-selfie').classList.remove('show');registrarPonto(null,null);});
+    .catch(function(){
+      // Câmera negada ou indisponível — registra sem foto
+      document.getElementById('modal-selfie').classList.remove('show');
+      registrarSemFoto();
+    });
 }
 
 function cancelarSelfie(){pararCam();document.getElementById('modal-selfie').classList.remove('show');_acaoPendente=null;}
@@ -1574,61 +1575,69 @@ function carregarTarefas(){
   if(!lista) return;
   lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Carregando...</div>';
 
-  var nomeFuncLower=(_func.nome||_func.nomeLogin||'').toLowerCase();
+  var nomeCompleto=(_func.nome||'').toLowerCase().trim();
+  var nomeLogin=(_func.nomeLogin||'').toLowerCase().trim();
   var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
   var diaHoje=diasSem[new Date().getDay()];
 
-  // Tenta buscar clData em múltiplos caminhos possíveis
-  function filtrarETarefas(allData){
+  function nomesBatem(nomeChecklist){
+    var nc=(nomeChecklist||'').toLowerCase().trim();
+    if(!nc) return false;
+    // Exato
+    if(nc===nomeCompleto||nc===nomeLogin) return true;
+    // Parcial: checklist contém o nome ou vice-versa
+    if(nomeCompleto && (nc.includes(nomeCompleto)||nomeCompleto.includes(nc))) return true;
+    if(nomeLogin && (nc.includes(nomeLogin)||nomeLogin.includes(nc))) return true;
+    // Primeiro nome
+    var primeiroNome=(nomeCompleto.split(' ')[0]||'').trim();
+    if(primeiroNome && nc.includes(primeiroNome)) return true;
+    return false;
+  }
+
+  function filtrarTarefas(allData){
     return (allData||[]).filter(function(t){
-      // Sem funcionário definido = pra todos
-      var semFunc = !t.funcId && (!t.funcIds||!t.funcIds.length) && (!t.funcNomes||!t.funcNomes.length);
+      // Sem funcionário = pra todos
+      var semFunc=!t.funcId&&(!t.funcIds||!t.funcIds.length)&&(!t.funcNomes||!t.funcNomes.length)&&!t.funcNome;
       if(semFunc) return true;
-      // Match por nome
-      var matchNome = (t.funcNomes||[]).some(function(n){ return (n||'').toLowerCase()===nomeFuncLower; });
-      // Match pelo nome do funcId (pode estar no app principal como string numérica)
-      var matchNomeDireto = (t.funcNome||'').toLowerCase()===nomeFuncLower;
-      if(!matchNome && !matchNomeDireto) return false;
+      // Match por qualquer nome na lista
+      var matchNomes=(t.funcNomes||[]).some(function(n){ return nomesBatem(n); });
+      var matchNome=nomesBatem(t.funcNome);
+      if(!matchNomes&&!matchNome) return false;
       // Filtra por dia
-      if(t.dia && t.dia!=='' && t.dia!==diaHoje) return false;
+      if(t.dia&&t.dia!==''&&t.dia!==diaHoje) return false;
       return true;
     });
   }
 
-  // Passo 1: tenta pegar tenantId do ponto_configuracoes
+  // Tenta pegar tenantId salvo pelo gestor
   fbDb.collection('ponto_configuracoes').doc('restaurante').get()
     .then(function(doc){
-      var tenantId = doc.exists ? doc.data().tenantId : null;
+      var tenantId=doc.exists?doc.data().tenantId:null;
+      console.log('[Tarefas] tenantId=',tenantId,'nome=',nomeCompleto);
       if(tenantId){
         return fbDb.collection('tenants').doc(tenantId).collection('configuracoes').doc('clData').get();
       }
-      // Passo 2: sem tenantId, tenta direto na raiz (modo legado)
       return fbDb.collection('configuracoes').doc('clData').get();
     })
     .then(function(snap){
-      if(snap && snap.exists){
+      if(snap&&snap.exists){
         var data=snap.data().data||[];
-        var minhas=filtrarETarefas(data);
-        if(minhas.length > 0){
-          renderTarefas(minhas);
-          return;
-        }
+        console.log('[Tarefas] total checklists=',data.length,'nomes disponíveis=',data.map(function(t){return t.funcNomes;}));
+        var minhas=filtrarTarefas(data);
+        console.log('[Tarefas] minhas=',minhas.length);
+        if(minhas.length>0){ renderTarefas(minhas); return; }
+        // Mostra debug se não encontrou
+        lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">'+
+          'Nenhuma tarefa para <strong style="color:var(--gold);">"'+(nomeCompleto||nomeLogin)+'"</strong> hoje.<br>'+
+          '<span style="font-size:0.68rem;opacity:0.6;">'+data.length+' checklist(s) encontrado(s) no sistema</span></div>';
+        return;
       }
-      // Passo 3: se não achou nada, tenta ponto_tarefas
-      return fbDb.collection('ponto_tarefas').get().then(function(s){
-        var t=[];
-        s.forEach(function(d){
-          var item=Object.assign({id:d.id},d.data());
-          var matchId = item.funcId===_func.id;
-          var matchNome = (item.funcNome||'').toLowerCase()===nomeFuncLower;
-          if(matchId||matchNome) t.push(item);
-        });
-        renderTarefas(t);
-      });
+      lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">'+
+        'Sem tarefas cadastradas.<br><span style="font-size:0.68rem;opacity:0.6;">Abra a aba Ponto no app principal para sincronizar.</span></div>';
     })
     .catch(function(e){
-      console.warn('Tarefas erro:',e);
-      lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Não foi possível carregar as tarefas.<br><span style="font-size:0.7rem;">'+e.message+'</span></div>';
+      console.warn('[Tarefas] erro:',e);
+      lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Erro ao carregar.<br><span style="font-size:0.68rem;">'+e.message+'</span></div>';
     });
 }
 

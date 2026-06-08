@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>Ponto — Gestão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+:root{
+  --bg:#0a0a0a;--surface:#141414;--surface2:#1e1e1e;
+  --border:#2a2a2a;--text:#f0f0f0;--muted:#555;
+  --green:#22c55e;--red:#f87171;--orange:#fb923c;--blue:#60a5fa;--accent:#f0f0f0;
+}
+html,body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;}
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;font-weight:800;font-size:1.4rem;letter-spacing:-0.02em;}
+
+/* ── HEADER ── */
+.header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg);z-index:50;}
+.header-logo{font-size:1.1rem;font-weight:800;letter-spacing:-0.02em;}
+.header-logo span{color:var(--muted);font-weight:400;}
+.header-actions{display:flex;gap:10px;}
+.btn-sm{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 14px;font-family:'Syne',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;transition:background 0.15s;}
+.btn-sm:hover{background:#2a2a2a;}
+.btn-sm.primary{background:var(--text);color:var(--bg);}
+.btn-sm.danger{color:var(--red);border-color:rgba(248,113,113,0.3);}
+
+/* ── TABS ── */
+.tabs{display:flex;border-bottom:1px solid var(--border);padding:0 24px;}
+.tab{background:transparent;border:none;color:var(--muted);font-family:'Syne',sans-serif;font-weight:700;font-size:0.82rem;padding:14px 16px;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.06em;}
+.tab.active{color:var(--text);border-bottom-color:var(--text);}
+
+/* ── CONTEÚDO ── */
+.conteudo{padding:24px;max-width:1100px;margin:0 auto;}
+
+/* ── FILTROS ── */
+.filtros{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;align-items:center;}
+.filtro-input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 14px;font-family:'Syne',sans-serif;font-size:0.88rem;outline:none;}
+.filtro-input:focus{border-color:#444;}
+
+/* ── CARDS RESUMO ── */
+.resumo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:28px;}
+.resumo-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
+.resumo-label{font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:8px;}
+.resumo-val{font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;}
+
+/* ── TABELA ── */
+.tabela-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--border);}
+table{width:100%;border-collapse:collapse;}
+thead th{background:var(--surface);padding:12px 16px;text-align:left;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;border-bottom:1px solid var(--border);}
+tbody td{padding:13px 16px;font-size:0.88rem;border-bottom:1px solid rgba(255,255,255,0.04);}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover td{background:rgba(255,255,255,0.02);}
+.td-mono{font-family:'JetBrains Mono',monospace;}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:0.7rem;font-weight:700;}
+.badge-green{background:rgba(34,197,94,0.15);color:var(--green);}
+.badge-red{background:rgba(248,113,113,0.15);color:var(--red);}
+.badge-orange{background:rgba(251,146,60,0.15);color:var(--orange);}
+.badge-muted{background:var(--surface2);color:var(--muted);}
+
+/* ── LISTA FUNCIONÁRIOS (agora) ── */
+.func-agora-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:28px;}
+.func-agora-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;display:flex;align-items:center;gap:14px;}
+.func-agora-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.func-agora-dot.on{background:var(--green);box-shadow:0 0 8px rgba(34,197,94,0.4);}
+.func-agora-dot.off{background:var(--muted);}
+.func-agora-dot.int{background:var(--orange);}
+.func-agora-info{flex:1;}
+.func-agora-nome{font-weight:700;font-size:0.95rem;}
+.func-agora-status{font-size:0.74rem;color:var(--muted);margin-top:3px;font-family:'JetBrains Mono',monospace;}
+.func-agora-tempo{font-family:'JetBrains Mono',monospace;font-size:0.88rem;color:var(--muted);}
+
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:200;align-items:center;justify-content:center;padding:20px;}
+.modal-overlay.show{display:flex;}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
+.modal-titulo{font-size:1rem;font-weight:800;margin-bottom:18px;}
+.campo{margin-bottom:14px;}
+.campo label{display:block;font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:5px;}
+.campo input,.campo select{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:11px 14px;font-family:'Syne',sans-serif;font-size:0.95rem;outline:none;}
+.campo input:focus,.campo select:focus{border-color:#444;}
+.modal-footer{display:flex;gap:10px;margin-top:18px;}
+.modal-footer button{flex:1;}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px 20px;font-size:0.85rem;font-weight:700;opacity:0;transition:all 0.25s;pointer-events:none;white-space:nowrap;z-index:900;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ── LOGIN ── */
+#login-screen{display:none;min-height:100vh;align-items:center;justify-content:center;padding:20px;}
+.login-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:380px;}
+.login-title{font-size:1.3rem;font-weight:800;margin-bottom:4px;}
+.login-sub{font-size:0.78rem;color:var(--muted);margin-bottom:22px;font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+
+<div id="loading">PONTO ·</div>
+
+<!-- Login Gestor -->
+<div id="login-screen" style="display:none;align-items:center;justify-content:center;min-height:100vh;">
+  <div class="login-box">
+    <div class="login-title">PONTO — GESTÃO</div>
+    <div class="login-sub">// acesso restrito</div>
+    <div class="campo"><label>Email</label><input id="g-email" type="email" placeholder="gestor@email.com" autocomplete="email"></div>
+    <div class="campo"><label>Senha</label><input id="g-senha" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+    <button class="btn-sm primary" style="width:100%;padding:13px;" onclick="loginGestor()">Entrar →</button>
+    <div id="g-erro" style="color:var(--red);font-size:0.8rem;margin-top:10px;text-align:center;"></div>
+  </div>
+</div>
+
+<!-- App Gestor -->
+<div id="app-gestor" style="display:none;">
+  <div class="header">
+    <div class="header-logo">PONTO <span>gestão</span></div>
+    <div class="header-actions">
+      <button class="btn-sm" onclick="abrirModalFuncionario()">+ Funcionário</button>
+      <button class="btn-sm" onclick="exportarCSV()">↓ Exportar</button>
+      <button class="btn-sm danger" onclick="logoutGestor()">Sair</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-agora" onclick="trocarTab('agora')">Agora</button>
+    <button class="tab" id="tab-historico" onclick="trocarTab('historico')">Histórico</button>
+    <button class="tab" id="tab-banco" onclick="trocarTab('banco')">Banco de horas</button>
+    <button class="tab" id="tab-funcionarios" onclick="trocarTab('funcionarios')">Funcionários</button>
+  </div>
+
+  <!-- ABA AGORA -->
+  <div id="aba-agora" class="conteudo">
+    <div class="resumo-grid" id="resumo-agora"></div>
+    <div id="lista-agora"></div>
+  </div>
+
+  <!-- ABA HISTÓRICO -->
+  <div id="aba-historico" class="conteudo" style="display:none;">
+    <div class="filtros">
+      <input class="filtro-input" id="filt-func" placeholder="Funcionário..." oninput="renderHistorico()" style="width:200px;">
+      <input class="filtro-input" id="filt-data-ini" type="date" onchange="renderHistorico()">
+      <input class="filtro-input" id="filt-data-fim" type="date" onchange="renderHistorico()">
+      <button class="btn-sm" onclick="filtroHoje()">Hoje</button>
+      <button class="btn-sm" onclick="filtroSemana()">Esta semana</button>
+      <button class="btn-sm" onclick="filtroMes()">Este mês</button>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>Funcionário</th><th>Data</th><th>Tipo</th><th>Hora</th><th>Localização</th>
+        </tr></thead>
+        <tbody id="tbody-historico"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA BANCO DE HORAS -->
+  <div id="aba-banco" class="conteudo" style="display:none;">
+    <div class="filtros">
+      <input class="filtro-input" id="banco-data-ini" type="date" onchange="renderBanco()">
+      <input class="filtro-input" id="banco-data-fim" type="date" onchange="renderBanco()">
+      <button class="btn-sm" onclick="bancoMes()">Este mês</button>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>Funcionário</th><th>Dias trabalhados</th><th>Total trabalhado</th><th>Carga esperada</th><th>Saldo</th><th>Horas extras</th>
+        </tr></thead>
+        <tbody id="tbody-banco"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA FUNCIONÁRIOS -->
+  <div id="aba-funcionarios" class="conteudo" style="display:none;">
+    <div id="lista-funcionarios"></div>
+  </div>
+</div>
+
+<!-- Modal Funcionário -->
+<div class="modal-overlay" id="modal-func">
+  <div class="modal-box">
+    <div class="modal-titulo" id="modal-func-titulo">Novo Funcionário</div>
+    <div class="campo"><label>Nome completo</label><input id="f-nome" type="text" placeholder="João Silva"></div>
+    <div class="campo"><label>Nome de login</label><input id="f-login" type="text" placeholder="joao (minúsculo, sem espaço)"></div>
+    <div class="campo"><label>Cargo</label><input id="f-cargo" type="text" placeholder="Garçom, Cozinheiro..."></div>
+    <div class="campo"><label>Senha</label><input id="f-senha" type="text" placeholder="senha123"></div>
+    <div class="campo"><label>Carga diária (min)</label><input id="f-carga" type="number" value="440" placeholder="440 = 7h20"></div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="fecharModalFuncionario()">Cancelar</button>
+      <button class="btn-sm primary" onclick="salvarFuncionario()">Salvar</button>
+    </div>
+    <input type="hidden" id="f-id">
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script>
+var firebaseConfig = {
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.firebasestorage.app",
+  messagingSenderId: "510785409925",
+  appId: "1:510785409925:web:e687e387509fb0605b6aec"
+};
+
+var CARGA_PADRAO_MIN = 440; // 7h20
+var fbDb, fbAuth;
+var _funcionarios = [];
+var _registros = [];  // todos os registros carregados
+var _tabAtual = 'agora';
+var _agoraInterval = null;
+
+window.addEventListener('load', function(){
+  firebase.initializeApp(firebaseConfig);
+  fbDb = firebase.firestore();
+  fbAuth = firebase.auth();
+  fbAuth.onAuthStateChanged(function(user){
+    document.getElementById('loading').style.display = 'none';
+    if(user){
+      iniciarGestor();
+    } else {
+      document.getElementById('login-screen').style.display = 'flex';
+    }
+  });
+  // Datas padrão
+  var hoje = diaKey(new Date());
+  document.getElementById('filt-data-ini').value = hoje;
+  document.getElementById('filt-data-fim').value = hoje;
+  bancoMes();
+});
+
+// ── LOGIN ──
+function loginGestor(){
+  var email = document.getElementById('g-email').value.trim();
+  var senha = document.getElementById('g-senha').value;
+  var erro = document.getElementById('g-erro');
+  erro.textContent = '';
+  fbAuth.signInWithEmailAndPassword(email, senha)
+    .then(function(){ })
+    .catch(function(e){
+      var msgs = {'auth/wrong-password':'Senha incorreta.','auth/user-not-found':'Email não encontrado.','auth/invalid-email':'Email inválido.'};
+      erro.textContent = msgs[e.code] || e.message;
+    });
+}
+function logoutGestor(){ fbAuth.signOut().then(function(){ location.reload(); }); }
+
+// ── INIT ──
+function iniciarGestor(){
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-gestor').style.display = 'block';
+  carregarFuncionarios();
+  carregarRegistros();
+}
+
+function carregarFuncionarios(){
+  fbDb.collection('ponto_funcionarios').onSnapshot(function(snap){
+    _funcionarios = [];
+    snap.forEach(function(d){ _funcionarios.push(Object.assign({id:d.id}, d.data())); });
+    renderFuncionarios();
+    renderAgora();
+    renderBanco();
+  });
+}
+
+function carregarRegistros(){
+  // Carrega últimos 60 dias
+  var limite = Date.now() - 60 * 24 * 60 * 60 * 1000;
+  fbDb.collection('ponto_registros')
+    .where('ts', '>=', limite)
+    .orderBy('ts', 'desc')
+    .onSnapshot(function(snap){
+      _registros = [];
+      snap.forEach(function(d){ _registros.push(Object.assign({id:d.id}, d.data())); });
+      renderAgora();
+      renderHistorico();
+      renderBanco();
+    });
+}
+
+// ── ABAS ──
+function trocarTab(aba){
+  _tabAtual = aba;
+  ['agora','historico','banco','funcionarios'].forEach(function(a){
+    document.getElementById('aba-'+a).style.display = a === aba ? '' : 'none';
+    document.getElementById('tab-'+a).classList.toggle('active', a === aba);
+  });
+  if(aba === 'agora') renderAgora();
+  if(aba === 'historico') renderHistorico();
+  if(aba === 'banco') renderBanco();
+  if(aba === 'funcionarios') renderFuncionarios();
+}
+
+// ── ABA AGORA ──
+function renderAgora(){
+  if(_tabAtual !== 'agora') return;
+  var hoje = diaKey(new Date());
+  var regHoje = _registros.filter(function(r){ return r.diaKey === hoje; });
+  // Status de cada funcionário
+  var statusMap = {}; // funcId → {status, desde}
+  _funcionarios.forEach(function(f){ statusMap[f.id] = {status:'livre', desde: null}; });
+  // Processa em ordem cronológica
+  var regOrdem = regHoje.slice().sort(function(a,b){ return a.ts - b.ts; });
+  regOrdem.forEach(function(r){
+    if(!statusMap[r.funcId]) return;
+    var s = 'livre';
+    if(r.tipo === 'entrada' || r.tipo === 'fim_intervalo') s = 'trabalhando';
+    else if(r.tipo === 'ini_intervalo') s = 'intervalo';
+    else if(r.tipo === 'saida') s = 'saiu';
+    statusMap[r.funcId] = {status: s, desde: r.ts};
+  });
+
+  var trabalhando = _funcionarios.filter(function(f){ return statusMap[f.id] && statusMap[f.id].status === 'trabalhando'; }).length;
+  var intervalo = _funcionarios.filter(function(f){ return statusMap[f.id] && statusMap[f.id].status === 'intervalo'; }).length;
+  var fora = _funcionarios.filter(function(f){ return statusMap[f.id] && (statusMap[f.id].status === 'livre' || statusMap[f.id].status === 'saiu'); }).length;
+
+  document.getElementById('resumo-agora').innerHTML =
+    '<div class="resumo-card"><div class="resumo-label">Trabalhando</div><div class="resumo-val" style="color:var(--green);">'+trabalhando+'</div></div>'+
+    '<div class="resumo-card"><div class="resumo-label">Intervalo</div><div class="resumo-val" style="color:var(--orange);">'+intervalo+'</div></div>'+
+    '<div class="resumo-card"><div class="resumo-label">Fora</div><div class="resumo-val" style="color:var(--muted);">'+fora+'</div></div>'+
+    '<div class="resumo-card"><div class="resumo-label">Total cadastrados</div><div class="resumo-val">'+_funcionarios.length+'</div></div>';
+
+  var html = '<div class="func-agora-grid">';
+  _funcionarios.forEach(function(f){
+    var st = statusMap[f.id] || {status:'livre', desde:null};
+    var dotCls = st.status === 'trabalhando' ? 'on' : st.status === 'intervalo' ? 'int' : 'off';
+    var labels = {trabalhando:'trabalhando',intervalo:'em intervalo',livre:'fora',saiu:'saiu'};
+    var desde = st.desde ? 'desde ' + fmtHora(new Date(st.desde)) : '—';
+    // Calcula horas trabalhadas hoje
+    var funcRegs = regOrdem.filter(function(r){ return r.funcId === f.id; });
+    var hTrab = calcHorasFunc(funcRegs, st.status);
+    html += '<div class="func-agora-card">'+
+      '<div class="func-agora-dot '+dotCls+'"></div>'+
+      '<div class="func-agora-info">'+
+        '<div class="func-agora-nome">'+esc(f.nome||f.nomeLogin)+'</div>'+
+        '<div class="func-agora-status">'+labels[st.status]+' · '+desde+'</div>'+
+      '</div>'+
+      '<div class="func-agora-tempo">'+fmtMin(hTrab)+'</div>'+
+    '</div>';
+  });
+  html += '</div>';
+  document.getElementById('lista-agora').innerHTML = html;
+}
+setInterval(function(){ if(_tabAtual === 'agora') renderAgora(); }, 30000);
+
+// ── ABA HISTÓRICO ──
+function renderHistorico(){
+  if(_tabAtual !== 'historico') return;
+  var filtFunc = (document.getElementById('filt-func').value||'').toLowerCase().trim();
+  var ini = document.getElementById('filt-data-ini').value;
+  var fim = document.getElementById('filt-data-fim').value;
+  var regs = _registros.filter(function(r){
+    if(filtFunc && !(r.funcNome||'').toLowerCase().includes(filtFunc)) return false;
+    if(ini && r.diaKey < ini) return false;
+    if(fim && r.diaKey > fim) return false;
+    return true;
+  });
+  regs.sort(function(a,b){ return b.ts - a.ts; });
+  var labels = {entrada:'Entrada',saida:'Saída',ini_intervalo:'Início intervalo',fim_intervalo:'Fim intervalo'};
+  var cores = {entrada:'badge-green',saida:'badge-red',ini_intervalo:'badge-orange',fim_intervalo:'badge-muted'};
+  var html = regs.map(function(r){
+    var loc = r.lat ? r.lat.toFixed(4)+','+r.lng.toFixed(4) : '—';
+    return '<tr>'+
+      '<td>'+esc(r.funcNome||'?')+'</td>'+
+      '<td class="td-mono">'+r.diaKey+'</td>'+
+      '<td><span class="badge '+(cores[r.tipo]||'badge-muted')+'">'+(labels[r.tipo]||r.tipo)+'</span></td>'+
+      '<td class="td-mono">'+fmtHora(new Date(r.ts))+'</td>'+
+      '<td class="td-mono" style="font-size:0.76rem;color:var(--muted);">'+loc+'</td>'+
+    '</tr>';
+  }).join('');
+  document.getElementById('tbody-historico').innerHTML = html || '<tr><td colspan="5" style="color:var(--muted);padding:20px;text-align:center;">Nenhum registro no período.</td></tr>';
+}
+
+function filtroHoje(){ var h=diaKey(new Date()); document.getElementById('filt-data-ini').value=h; document.getElementById('filt-data-fim').value=h; renderHistorico(); }
+function filtroSemana(){
+  var agora=new Date();
+  var dom=new Date(agora); dom.setDate(agora.getDate()-agora.getDay());
+  document.getElementById('filt-data-ini').value=diaKey(dom);
+  document.getElementById('filt-data-fim').value=diaKey(agora);
+  renderHistorico();
+}
+function filtroMes(){ var agora=new Date(); document.getElementById('filt-data-ini').value=agora.getFullYear()+'-'+String(agora.getMonth()+1).padStart(2,'0')+'-01'; document.getElementById('filt-data-fim').value=diaKey(agora); renderHistorico(); }
+
+// ── ABA BANCO DE HORAS ──
+function bancoMes(){
+  var agora=new Date();
+  document.getElementById('banco-data-ini').value=agora.getFullYear()+'-'+String(agora.getMonth()+1).padStart(2,'0')+'-01';
+  document.getElementById('banco-data-fim').value=diaKey(agora);
+  renderBanco();
+}
+
+function renderBanco(){
+  if(_tabAtual !== 'banco') return;
+  var ini = document.getElementById('banco-data-ini').value;
+  var fim = document.getElementById('banco-data-fim').value;
+  if(!ini||!fim) return;
+  // Calcula dias úteis no período (excluindo domingos) — simplificado
+  var diasPeriodo = diasUteisEntre(ini, fim);
+  var html = _funcionarios.map(function(f){
+    var carga = f.cargaMin || CARGA_PADRAO_MIN;
+    var regsFunc = _registros.filter(function(r){
+      return r.funcId === f.id && r.diaKey >= ini && r.diaKey <= fim;
+    }).sort(function(a,b){ return a.ts - b.ts; });
+    // Agrupa por dia
+    var porDia = {};
+    regsFunc.forEach(function(r){
+      if(!porDia[r.diaKey]) porDia[r.diaKey] = [];
+      porDia[r.diaKey].push(r);
+    });
+    var diasTrab = Object.keys(porDia).length;
+    var totalTrabMin = 0;
+    Object.values(porDia).forEach(function(regs){
+      totalTrabMin += calcHorasFunc(regs, 'saiu');
+    });
+    var cargaTotal = diasPeriodo * carga;
+    var saldo = totalTrabMin - cargaTotal;
+    var extras = Math.max(0, saldo);
+    return '<tr>'+
+      '<td>'+esc(f.nome||f.nomeLogin)+'</td>'+
+      '<td class="td-mono">'+diasTrab+' / '+diasPeriodo+'</td>'+
+      '<td class="td-mono">'+fmtMin(totalTrabMin)+'</td>'+
+      '<td class="td-mono" style="color:var(--muted);">'+fmtMin(cargaTotal)+'</td>'+
+      '<td class="td-mono" style="color:'+(saldo>=0?'var(--green)':'var(--red)')+';">'+(saldo>=0?'+':'')+fmtMin(saldo)+'</td>'+
+      '<td class="td-mono" style="color:'+(extras>0?'var(--orange)':'var(--muted)')+';">'+fmtMin(extras)+'</td>'+
+    '</tr>';
+  }).join('');
+  document.getElementById('tbody-banco').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted);padding:20px;text-align:center;">Nenhum dado.</td></tr>';
+}
+
+function diasUteisEntre(iniStr, fimStr){
+  var ini = new Date(iniStr+'T00:00:00');
+  var fim = new Date(fimStr+'T00:00:00');
+  var count = 0;
+  var cur = new Date(ini);
+  while(cur <= fim){
+    if(cur.getDay() !== 0) count++; // exclui domingos
+    cur.setDate(cur.getDate()+1);
+  }
+  return count;
+}
+
+// ── CÁLCULO HORAS ──
+function calcHorasFunc(regs, statusAtual){
+  var totalMin = 0;
+  var entradaTs = null;
+  var iniIntTs = null;
+  var agora = Date.now();
+  var sorted = regs.slice().sort(function(a,b){ return a.ts - b.ts; });
+  sorted.forEach(function(r){
+    if(r.tipo === 'entrada'){ entradaTs = r.ts; }
+    else if(r.tipo === 'ini_intervalo' && entradaTs){ totalMin += (r.ts - entradaTs)/60000; iniIntTs = r.ts; entradaTs = null; }
+    else if(r.tipo === 'fim_intervalo'){ iniIntTs = null; entradaTs = r.ts; }
+    else if(r.tipo === 'saida' && entradaTs){ totalMin += (r.ts - entradaTs)/60000; entradaTs = null; }
+  });
+  // Se ainda trabalhando
+  if(statusAtual === 'trabalhando' && entradaTs) totalMin += (agora - entradaTs)/60000;
+  return Math.floor(totalMin);
+}
+
+// ── ABA FUNCIONÁRIOS ──
+function renderFuncionarios(){
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">';
+  _funcionarios.forEach(function(f){
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">'+
+      '<div style="font-weight:700;margin-bottom:2px;">'+esc(f.nome||f.nomeLogin)+'</div>'+
+      '<div style="font-size:0.75rem;color:var(--muted);font-family:\'JetBrains Mono\',monospace;margin-bottom:12px;">'+esc(f.cargo||'funcionário')+' · login: '+esc(f.nomeLogin)+'</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button class="btn-sm" style="flex:1;" onclick="editarFuncionario(\''+f.id+'\')">Editar</button>'+
+        '<button class="btn-sm danger" onclick="excluirFuncionario(\''+f.id+'\',\''+esc(f.nome||f.nomeLogin)+'\')">Excluir</button>'+
+      '</div>'+
+    '</div>';
+  });
+  html += '</div>';
+  if(!_funcionarios.length) html = '<div style="color:var(--muted);padding:40px;text-align:center;">Nenhum funcionário cadastrado.<br>Clique em "+ Funcionário" pra adicionar.</div>';
+  document.getElementById('lista-funcionarios').innerHTML = html;
+}
+
+function abrirModalFuncionario(){
+  document.getElementById('f-id').value='';
+  document.getElementById('f-nome').value='';
+  document.getElementById('f-login').value='';
+  document.getElementById('f-cargo').value='';
+  document.getElementById('f-senha').value='';
+  document.getElementById('f-carga').value='440';
+  document.getElementById('modal-func-titulo').textContent='Novo Funcionário';
+  document.getElementById('modal-func').classList.add('show');
+}
+function fecharModalFuncionario(){ document.getElementById('modal-func').classList.remove('show'); }
+function editarFuncionario(id){
+  var f = _funcionarios.find(function(x){ return x.id===id; });
+  if(!f) return;
+  document.getElementById('f-id').value=f.id;
+  document.getElementById('f-nome').value=f.nome||'';
+  document.getElementById('f-login').value=f.nomeLogin||'';
+  document.getElementById('f-cargo').value=f.cargo||'';
+  document.getElementById('f-senha').value=f.senha||'';
+  document.getElementById('f-carga').value=f.cargaMin||440;
+  document.getElementById('modal-func-titulo').textContent='Editar Funcionário';
+  document.getElementById('modal-func').classList.add('show');
+}
+function salvarFuncionario(){
+  var id=document.getElementById('f-id').value;
+  var nome=document.getElementById('f-nome').value.trim();
+  var login=document.getElementById('f-login').value.trim().toLowerCase().replace(/\s+/g,'-');
+  var cargo=document.getElementById('f-cargo').value.trim();
+  var senha=document.getElementById('f-senha').value.trim();
+  var carga=parseInt(document.getElementById('f-carga').value)||440;
+  if(!nome||!login||!senha){ showToast('Preencha todos os campos obrigatórios','var(--red)'); return; }
+  var dados={nome:nome,nomeLogin:login,cargo:cargo,senha:senha,cargaMin:carga,ativo:true};
+  var prom = id
+    ? fbDb.collection('ponto_funcionarios').doc(id).update(dados)
+    : fbDb.collection('ponto_funcionarios').add(dados);
+  prom.then(function(){
+    fecharModalFuncionario();
+    showToast(id?'Funcionário atualizado':'Funcionário cadastrado','var(--green)');
+  }).catch(function(e){ showToast('Erro: '+e.message,'var(--red)'); });
+}
+function excluirFuncionario(id, nome){
+  if(!confirm('Excluir "'+nome+'"? Os registros de ponto serão mantidos.')) return;
+  fbDb.collection('ponto_funcionarios').doc(id).delete()
+    .then(function(){ showToast('Excluído','var(--muted)'); })
+    .catch(function(e){ showToast('Erro: '+e.message,'var(--red)'); });
+}
+
+// ── EXPORTAR CSV ──
+function exportarCSV(){
+  var ini = document.getElementById('filt-data-ini').value || diaKey(new Date());
+  var fim = document.getElementById('filt-data-fim').value || diaKey(new Date());
+  var regs = _registros.filter(function(r){ return r.diaKey >= ini && r.diaKey <= fim; });
+  regs.sort(function(a,b){ return a.ts - b.ts; });
+  var labels = {entrada:'Entrada',saida:'Saída',ini_intervalo:'Início intervalo',fim_intervalo:'Fim intervalo'};
+  var linhas = ['Funcionário,Data,Tipo,Hora,Latitude,Longitude'];
+  regs.forEach(function(r){
+    var d = new Date(r.ts);
+    linhas.push([
+      '"'+(r.funcNome||'')+'"',
+      r.diaKey,
+      labels[r.tipo]||r.tipo,
+      fmtHora(d),
+      r.lat||'',
+      r.lng||''
+    ].join(','));
+  });
+  var blob = new Blob([linhas.join('\n')], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'ponto_'+ini+'_a_'+fim+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV exportado ✓','var(--green)');
+}
+
+// ── UTILS ──
+function diaKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function fmtHora(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function fmtMin(min){
+  var abs=Math.abs(Math.round(min));
+  var h=Math.floor(abs/60);
+  var m=abs%60;
+  return (min<0?'-':'')+(h>0?h+'h ':'')+String(m).padStart(2,'0')+'m';
+}
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function showToast(msg,cor){
+  var t=document.getElementById('toast');
+  t.textContent=msg;
+  t.style.borderColor=cor||'var(--border)';
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); },3000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ponto">
+<title>Ponto Digital</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+:root{
+  --bg:#0a0a0a;
+  --surface:#141414;
+  --surface2:#1e1e1e;
+  --border:#2a2a2a;
+  --text:#f0f0f0;
+  --muted:#666;
+  --green:#22c55e;
+  --red:#f87171;
+  --orange:#fb923c;
+  --blue:#60a5fa;
+  --accent:#f0f0f0;
+}
+html,body{
+  background:var(--bg);color:var(--text);
+  font-family:'Syne',sans-serif;
+  min-height:100vh;min-height:100dvh;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+/* ── LOADING ── */
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:16px;}
+#loading .logo{font-size:2.4rem;font-weight:800;letter-spacing:-0.03em;}
+#loading .dot{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:pulse 1.2s ease-in-out infinite;}
+#loading .dot:nth-child(2){animation-delay:0.2s;}
+#loading .dot:nth-child(3){animation-delay:0.4s;}
+#loading .dots{display:flex;gap:6px;}
+@keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8);}50%{opacity:1;transform:scale(1.2);}}
+
+/* ── LOGIN ── */
+#login-screen{display:none;flex-direction:column;min-height:100dvh;padding:0;}
+.login-hero{
+  background:#0a0a0a;
+  padding:60px 28px 32px;
+  border-bottom:1px solid var(--border);
+}
+.login-hero-title{font-size:2.8rem;font-weight:800;letter-spacing:-0.04em;line-height:1;}
+.login-hero-sub{font-size:0.88rem;color:var(--muted);margin-top:8px;font-family:'JetBrains Mono',monospace;letter-spacing:0.02em;}
+.login-form{padding:32px 28px;flex:1;display:flex;flex-direction:column;gap:16px;}
+.login-label{font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;display:block;}
+.login-input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);border-radius:10px;padding:15px 16px;
+  font-family:'Syne',sans-serif;font-size:1rem;
+  transition:border-color 0.15s;outline:none;
+}
+.login-input:focus{border-color:#444;}
+.login-btn{
+  width:100%;background:var(--text);color:var(--bg);
+  border:none;border-radius:10px;padding:16px;
+  font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;
+  cursor:pointer;margin-top:8px;transition:opacity 0.15s;
+}
+.login-btn:active{opacity:0.8;}
+.login-erro{font-size:0.82rem;color:var(--red);text-align:center;min-height:20px;}
+
+/* ── APP PRINCIPAL ── */
+#app{display:none;flex-direction:column;min-height:100dvh;}
+.app-header{
+  padding:20px 20px 16px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.app-header-nome{font-weight:800;font-size:1.1rem;}
+.app-header-cargo{font-size:0.72rem;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:2px;}
+.btn-sair{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 14px;font-family:'Syne',sans-serif;font-size:0.78rem;cursor:pointer;}
+
+/* Relógio */
+.relogio-wrap{padding:32px 20px 24px;text-align:center;}
+.relogio{font-family:'JetBrains Mono',monospace;font-size:4rem;font-weight:700;letter-spacing:-0.02em;line-height:1;}
+.data-hoje{font-size:0.82rem;color:var(--muted);margin-top:6px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;}
+
+/* Status card */
+.status-card{
+  margin:0 20px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:18px 20px;
+}
+.status-label{font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:8px;}
+.status-row{display:flex;align-items:center;gap:10px;}
+.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.status-dot.livre{background:var(--muted);}
+.status-dot.trabalhando{background:var(--green);box-shadow:0 0 8px rgba(34,197,94,0.5);animation:blink 2s ease-in-out infinite;}
+.status-dot.intervalo{background:var(--orange);box-shadow:0 0 8px rgba(251,146,60,0.5);}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0.5;}}
+.status-text{font-weight:700;font-size:0.95rem;}
+.status-since{font-size:0.75rem;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:4px;}
+
+/* Horas do dia */
+.horas-grid{
+  margin:14px 20px 0;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
+}
+.hora-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 10px;text-align:center;}
+.hora-item-label{font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:5px;}
+.hora-item-val{font-family:'JetBrains Mono',monospace;font-size:1.05rem;font-weight:700;}
+
+/* Botões de ação */
+.acoes{padding:24px 20px;display:flex;flex-direction:column;gap:12px;}
+.btn-acao{
+  width:100%;border:none;border-radius:14px;padding:20px;
+  font-family:'Syne',sans-serif;font-weight:800;font-size:1.1rem;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;
+  transition:transform 0.1s,opacity 0.15s;
+  position:relative;overflow:hidden;
+}
+.btn-acao:active{transform:scale(0.97);}
+.btn-acao:disabled{opacity:0.35;cursor:not-allowed;}
+.btn-entrada{background:var(--green);color:#000;}
+.btn-saida{background:var(--red);color:#fff;}
+.btn-intervalo-ini{background:var(--orange);color:#000;}
+.btn-intervalo-fim{background:var(--blue);color:#000;}
+
+/* Histórico do dia */
+.historico{padding:0 20px 40px;}
+.historico-title{font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:12px;}
+.registro-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 0;border-bottom:1px solid var(--border);
+}
+.registro-item:last-child{border-bottom:none;}
+.registro-tipo-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.registro-info{flex:1;}
+.registro-tipo{font-size:0.82rem;font-weight:700;}
+.registro-loc{font-size:0.7rem;color:var(--muted);margin-top:2px;}
+.registro-hora{font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--muted);}
+
+/* ── MODAL SELFIE ── */
+#modal-selfie{
+  display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.95);z-index:800;
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:20px;
+}
+#modal-selfie.show{display:flex;}
+.selfie-titulo{font-size:1.1rem;font-weight:800;text-align:center;margin-bottom:6px;}
+.selfie-sub{font-size:0.8rem;color:var(--muted);text-align:center;margin-bottom:20px;line-height:1.5;}
+.selfie-video-wrap{position:relative;width:100%;max-width:320px;aspect-ratio:1;border-radius:50%;overflow:hidden;border:3px solid var(--green);margin-bottom:20px;}
+#selfie-video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+.selfie-overlay{position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 0 0 3px rgba(34,197,94,0.4);}
+#selfie-canvas{display:none;}
+.selfie-btn{
+  background:var(--green);color:#000;border:none;border-radius:12px;
+  padding:16px 40px;font-family:'Syne',sans-serif;font-weight:800;font-size:1rem;
+  cursor:pointer;margin-bottom:12px;
+}
+.selfie-cancelar{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:10px;padding:12px 30px;font-family:'Syne',sans-serif;font-size:0.88rem;cursor:pointer;}
+
+/* ── TOAST ── */
+#toast{
+  position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#1e1e1e;border:1px solid #333;border-radius:10px;
+  padding:12px 20px;font-size:0.88rem;font-weight:700;
+  opacity:0;transition:all 0.25s;pointer-events:none;
+  white-space:nowrap;z-index:900;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading">
+  <div class="logo">PONTO</div>
+  <div class="dots">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen" style="display:none;flex-direction:column;">
+  <div class="login-hero">
+    <div class="login-hero-title">PONTO<br>DIGITAL</div>
+    <div class="login-hero-sub">// registro de ponto eletrônico</div>
+  </div>
+  <div class="login-form">
+    <div>
+      <label class="login-label">Seu nome</label>
+      <input class="login-input" id="login-nome" type="text" placeholder="Como você é chamado" autocomplete="name" autocapitalize="words">
+    </div>
+    <div>
+      <label class="login-label">Senha</label>
+      <input class="login-input" id="login-senha" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="login-btn" onclick="fazerLogin()">Entrar →</button>
+    <div class="login-erro" id="login-erro"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none;flex-direction:column;">
+  <div class="app-header">
+    <div>
+      <div class="app-header-nome" id="app-nome">—</div>
+      <div class="app-header-cargo" id="app-cargo">funcionário</div>
+    </div>
+    <button class="btn-sair" onclick="fazerLogout()">Sair</button>
+  </div>
+
+  <!-- Relógio -->
+  <div class="relogio-wrap">
+    <div class="relogio" id="relogio">00:00:00</div>
+    <div class="data-hoje" id="data-hoje">—</div>
+  </div>
+
+  <!-- Status atual -->
+  <div class="status-card">
+    <div class="status-label">Status atual</div>
+    <div class="status-row">
+      <div class="status-dot livre" id="status-dot"></div>
+      <div class="status-text" id="status-text">Fora do trabalho</div>
+    </div>
+    <div class="status-since" id="status-since"></div>
+  </div>
+
+  <!-- Horas do dia -->
+  <div class="horas-grid">
+    <div class="hora-item">
+      <div class="hora-item-label">Trabalhadas</div>
+      <div class="hora-item-val" id="h-trabalhadas">—</div>
+    </div>
+    <div class="hora-item">
+      <div class="hora-item-label">Intervalo</div>
+      <div class="hora-item-val" id="h-intervalo">—</div>
+    </div>
+    <div class="hora-item">
+      <div class="hora-item-label">Saldo</div>
+      <div class="hora-item-val" id="h-saldo" style="color:var(--muted);">—</div>
+    </div>
+  </div>
+
+  <!-- Botões de ação -->
+  <div class="acoes" id="acoes">
+    <!-- Renderizado via JS conforme status -->
+  </div>
+
+  <!-- Histórico do dia -->
+  <div class="historico">
+    <div class="historico-title">Registros de hoje</div>
+    <div id="historico-lista"><div style="color:var(--muted);font-size:0.82rem;padding:12px 0;">Nenhum registro ainda.</div></div>
+  </div>
+</div>
+
+<!-- Modal selfie -->
+<div id="modal-selfie">
+  <div class="selfie-titulo">Confirme sua presença</div>
+  <div class="selfie-sub">Posicione seu rosto dentro do círculo<br>e toque em "Registrar"</div>
+  <div class="selfie-video-wrap">
+    <video id="selfie-video" autoplay playsinline muted></video>
+    <div class="selfie-overlay"></div>
+  </div>
+  <canvas id="selfie-canvas" width="320" height="320"></canvas>
+  <button class="selfie-btn" onclick="capturarSelfie()">📸 Registrar</button>
+  <button class="selfie-cancelar" onclick="cancelarSelfie()">Cancelar</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+<script>
+// ── CONFIG ──
+var firebaseConfig = {
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.firebasestorage.app",
+  messagingSenderId: "510785409925",
+  appId: "1:510785409925:web:e687e387509fb0605b6aec"
+};
+
+// Carga horária padrão: 7h20 + 1h intervalo
+var CARGA_MINUTOS = 7 * 60 + 20; // 440 min
+var INTERVALO_PADRAO_MIN = 60;
+
+var fbDb, fbAuth;
+var _func = null;       // funcionário logado
+var _registroHoje = []; // registros do dia
+var _unsubRegistros = null;
+var _acaoPendente = null; // {tipo} aguardando selfie/localização
+
+// ── INIT ──
+window.addEventListener('load', function(){
+  firebase.initializeApp(firebaseConfig);
+  fbDb = firebase.firestore();
+  fbAuth = firebase.auth();
+
+  fbAuth.onAuthStateChanged(function(user){
+    if(user){
+      carregarFuncionario(user.uid);
+    } else {
+      esconderLoading();
+      mostrarLogin();
+    }
+  });
+  iniciarRelogio();
+});
+
+function esconderLoading(){ document.getElementById('loading').style.display = 'none'; }
+function mostrarLogin(){
+  var s = document.getElementById('login-screen');
+  s.style.display = 'flex';
+}
+function mostrarApp(){
+  document.getElementById('login-screen').style.display = 'none';
+  var a = document.getElementById('app');
+  a.style.display = 'flex';
+}
+
+// ── RELÓGIO ──
+function iniciarRelogio(){
+  function tick(){
+    var agora = new Date();
+    var h = String(agora.getHours()).padStart(2,'0');
+    var m = String(agora.getMinutes()).padStart(2,'0');
+    var s = String(agora.getSeconds()).padStart(2,'0');
+    document.getElementById('relogio').textContent = h+':'+m+':'+s;
+    var dias = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+    var meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    document.getElementById('data-hoje').textContent =
+      dias[agora.getDay()] + ', ' + agora.getDate() + ' ' + meses[agora.getMonth()] + ' ' + agora.getFullYear();
+    atualizarHorasTrabalhadas();
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+// ── LOGIN ──
+function fazerLogin(){
+  var nome = document.getElementById('login-nome').value.trim();
+  var senha = document.getElementById('login-senha').value;
+  var erro = document.getElementById('login-erro');
+  erro.textContent = '';
+  if(!nome || !senha){ erro.textContent = 'Preencha nome e senha.'; return; }
+  erro.textContent = 'Verificando...';
+  // Busca funcionário pelo nome no Firestore
+  fbDb.collection('ponto_funcionarios')
+    .where('nomeLogin', '==', nome.toLowerCase())
+    .limit(1).get().then(function(snap){
+      if(snap.empty){ erro.textContent = 'Funcionário não encontrado.'; return; }
+      var doc = snap.docs[0];
+      var dados = doc.data();
+      if(dados.senha !== senha){ erro.textContent = 'Senha incorreta.'; return; }
+      // Login via Firebase Auth anônimo com dados persistidos
+      fbAuth.signInAnonymously().then(function(cred){
+        // Salva o funcId no doc do usuário anônimo
+        return fbDb.collection('ponto_funcionarios').doc(doc.id).update({
+          authUid: cred.user.uid
+        }).then(function(){
+          _func = Object.assign({id: doc.id}, dados);
+          erro.textContent = '';
+          esconderLoading();
+          mostrarApp();
+          iniciarAppFunc();
+        });
+      });
+    }).catch(function(e){ erro.textContent = 'Erro: '+e.message; });
+}
+
+function carregarFuncionario(uid){
+  fbDb.collection('ponto_funcionarios')
+    .where('authUid','==', uid)
+    .limit(1).get().then(function(snap){
+      esconderLoading();
+      if(snap.empty){ mostrarLogin(); return; }
+      var doc = snap.docs[0];
+      _func = Object.assign({id: doc.id}, doc.data());
+      mostrarApp();
+      iniciarAppFunc();
+    }).catch(function(){ esconderLoading(); mostrarLogin(); });
+}
+
+function fazerLogout(){
+  if(_unsubRegistros) _unsubRegistros();
+  fbAuth.signOut().then(function(){ location.reload(); });
+}
+
+// ── APP ──
+function iniciarAppFunc(){
+  document.getElementById('app-nome').textContent = _func.nome || _func.nomeLogin;
+  document.getElementById('app-cargo').textContent = _func.cargo || 'funcionário';
+  escutarRegistrosHoje();
+}
+
+function escutarRegistrosHoje(){
+  if(_unsubRegistros) _unsubRegistros();
+  var hoje = diaKey(new Date());
+  _unsubRegistros = fbDb.collection('ponto_registros')
+    .where('funcId','==', _func.id)
+    .where('diaKey','==', hoje)
+    .orderBy('ts','asc')
+    .onSnapshot(function(snap){
+      _registroHoje = [];
+      snap.forEach(function(d){ _registroHoje.push(Object.assign({id:d.id}, d.data())); });
+      renderStatus();
+      renderBotoes();
+      renderHistorico();
+    }, function(e){ console.warn('Listener registros:', e); });
+}
+
+// ── STATUS ──
+function getStatusAtual(){
+  if(!_registroHoje.length) return 'livre';
+  var ultimo = _registroHoje[_registroHoje.length - 1];
+  if(ultimo.tipo === 'entrada') return 'trabalhando';
+  if(ultimo.tipo === 'ini_intervalo') return 'intervalo';
+  if(ultimo.tipo === 'fim_intervalo') return 'trabalhando';
+  if(ultimo.tipo === 'saida') return 'saiu';
+  return 'livre';
+}
+
+function getUltimoTs(){
+  if(!_registroHoje.length) return null;
+  return _registroHoje[_registroHoje.length - 1].ts;
+}
+
+function renderStatus(){
+  var status = getStatusAtual();
+  var dot = document.getElementById('status-dot');
+  var txt = document.getElementById('status-text');
+  var since = document.getElementById('status-since');
+  dot.className = 'status-dot ' + (status === 'trabalhando' ? 'trabalhando' : status === 'intervalo' ? 'intervalo' : 'livre');
+  var labels = {livre:'Fora do trabalho', trabalhando:'Trabalhando', intervalo:'Em intervalo', saiu:'Saiu'};
+  txt.textContent = labels[status] || 'Fora do trabalho';
+  var ts = getUltimoTs();
+  if(ts) since.textContent = 'desde ' + fmtHora(new Date(ts));
+  else since.textContent = '';
+}
+
+function renderBotoes(){
+  var status = getStatusAtual();
+  var div = document.getElementById('acoes');
+  var btns = '';
+  if(status === 'livre'){
+    btns = '<button class="btn-acao btn-entrada" onclick="iniciarAcao(\'entrada\')">▶ Registrar Entrada</button>';
+  } else if(status === 'trabalhando'){
+    btns = '<button class="btn-acao btn-intervalo-ini" onclick="iniciarAcao(\'ini_intervalo\')">⏸ Iniciar Intervalo</button>'+
+           '<button class="btn-acao btn-saida" onclick="iniciarAcao(\'saida\')">■ Registrar Saída</button>';
+  } else if(status === 'intervalo'){
+    btns = '<button class="btn-acao btn-intervalo-fim" onclick="iniciarAcao(\'fim_intervalo\')">▶ Voltar do Intervalo</button>';
+  } else if(status === 'saiu'){
+    btns = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:0.88rem;">Turno encerrado. Até amanhã! 👋</div>';
+  }
+  div.innerHTML = btns;
+}
+
+// ── HORAS ──
+function calcularHorasTrabalhadas(){
+  var totalMs = 0;
+  var intervalMs = 0;
+  var entradaTs = null;
+  var iniIntTs = null;
+  var agora = Date.now();
+
+  _registroHoje.forEach(function(r){
+    if(r.tipo === 'entrada'){
+      entradaTs = r.ts;
+    } else if(r.tipo === 'ini_intervalo' && entradaTs){
+      totalMs += r.ts - entradaTs;
+      iniIntTs = r.ts;
+      entradaTs = null;
+    } else if(r.tipo === 'fim_intervalo'){
+      if(iniIntTs) intervalMs += r.ts - iniIntTs;
+      iniIntTs = null;
+      entradaTs = r.ts;
+    } else if(r.tipo === 'saida' && entradaTs){
+      totalMs += r.ts - entradaTs;
+      entradaTs = null;
+    }
+  });
+  // Se ainda trabalhando, conta até agora
+  var status = getStatusAtual();
+  if(status === 'trabalhando' && entradaTs) totalMs += agora - entradaTs;
+  if(status === 'intervalo' && iniIntTs) intervalMs += agora - iniIntTs;
+
+  return {trabalhadas: totalMs, intervalo: intervalMs};
+}
+
+function atualizarHorasTrabalhadas(){
+  if(!_func) return;
+  var calc = calcularHorasTrabalhadas();
+  var tMin = Math.floor(calc.trabalhadas / 60000);
+  var iMin = Math.floor(calc.intervalo / 60000);
+  var saldoMin = tMin - CARGA_MINUTOS;
+
+  document.getElementById('h-trabalhadas').textContent = fmtMin(tMin);
+  document.getElementById('h-intervalo').textContent = iMin > 0 ? fmtMin(iMin) : '—';
+  var sEl = document.getElementById('h-saldo');
+  if(tMin === 0){ sEl.textContent = '—'; sEl.style.color = 'var(--muted)'; return; }
+  sEl.textContent = (saldoMin >= 0 ? '+' : '') + fmtMin(saldoMin);
+  sEl.style.color = saldoMin >= 0 ? 'var(--green)' : 'var(--red)';
+}
+
+function renderHistorico(){
+  var lista = document.getElementById('historico-lista');
+  if(!_registroHoje.length){
+    lista.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:12px 0;">Nenhum registro ainda.</div>';
+    return;
+  }
+  var labels = {entrada:'Entrada',saida:'Saída',ini_intervalo:'Início intervalo',fim_intervalo:'Fim intervalo'};
+  var cores = {entrada:'var(--green)',saida:'var(--red)',ini_intervalo:'var(--orange)',fim_intervalo:'var(--blue)'};
+  var html = _registroHoje.map(function(r){
+    var cor = cores[r.tipo] || 'var(--muted)';
+    var loc = r.locDesc || (r.lat ? r.lat.toFixed(4)+', '+r.lng.toFixed(4) : '');
+    return '<div class="registro-item">'+
+      '<div class="registro-tipo-dot" style="background:'+cor+';"></div>'+
+      '<div class="registro-info">'+
+        '<div class="registro-tipo">'+( labels[r.tipo]||r.tipo)+'</div>'+
+        (loc ? '<div class="registro-loc">📍 '+loc+'</div>' : '')+
+      '</div>'+
+      '<div class="registro-hora">'+fmtHora(new Date(r.ts))+'</div>'+
+    '</div>';
+  }).join('');
+  lista.innerHTML = html;
+}
+
+// ── AÇÃO (Selfie + Localização) ──
+function iniciarAcao(tipo){
+  _acaoPendente = {tipo: tipo};
+  // Pede localização silenciosamente enquanto mostra câmera
+  abrirSelfie();
+}
+
+var _streamSelfie = null;
+function abrirSelfie(){
+  var modal = document.getElementById('modal-selfie');
+  modal.classList.add('show');
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false})
+    .then(function(stream){
+      _streamSelfie = stream;
+      document.getElementById('selfie-video').srcObject = stream;
+    })
+    .catch(function(){
+      // Câmera não disponível — registra sem foto
+      modal.classList.remove('show');
+      registrarPonto(null, null);
+    });
+}
+
+function cancelarSelfie(){
+  pararCamera();
+  document.getElementById('modal-selfie').classList.remove('show');
+  _acaoPendente = null;
+}
+
+function pararCamera(){
+  if(_streamSelfie){
+    _streamSelfie.getTracks().forEach(function(t){ t.stop(); });
+    _streamSelfie = null;
+  }
+}
+
+function capturarSelfie(){
+  var video = document.getElementById('selfie-video');
+  var canvas = document.getElementById('selfie-canvas');
+  var ctx = canvas.getContext('2d');
+  // Captura frame do vídeo
+  ctx.save();
+  ctx.scale(-1, 1); // desspelha (câmera frontal espelhada)
+  ctx.drawImage(video, -320, 0, 320, 320);
+  ctx.restore();
+  var fotoBase64 = canvas.toDataURL('image/jpeg', 0.6);
+  pararCamera();
+  document.getElementById('modal-selfie').classList.remove('show');
+  // Pega localização
+  obterLocalizacao(function(coords){
+    registrarPonto(fotoBase64, coords);
+  });
+}
+
+function obterLocalizacao(callback){
+  if(!navigator.geolocation){ callback(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    function(pos){ callback({lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy}); },
+    function(){ callback(null); },
+    {timeout: 8000, maximumAge: 30000}
+  );
+}
+
+function registrarPonto(foto, coords){
+  if(!_acaoPendente || !_func) return;
+  var tipo = _acaoPendente.tipo;
+  _acaoPendente = null;
+  var agora = Date.now();
+  var hoje = diaKey(new Date());
+  var registro = {
+    funcId: _func.id,
+    funcNome: _func.nome || _func.nomeLogin,
+    tipo: tipo,
+    ts: agora,
+    diaKey: hoje,
+    registradoEm: agora
+  };
+  if(coords){ registro.lat = coords.lat; registro.lng = coords.lng; registro.acc = coords.acc; }
+  if(foto) registro.foto = foto; // base64 — opcional
+  fbDb.collection('ponto_registros').add(registro).then(function(){
+    var labels = {entrada:'Entrada registrada ✓',saida:'Saída registrada ✓',ini_intervalo:'Intervalo iniciado',fim_intervalo:'Voltou do intervalo ✓'};
+    showToast(labels[tipo] || 'Registrado ✓', 'var(--green)');
+  }).catch(function(e){ showToast('Erro: '+e.message, 'var(--red)'); });
+}
+
+// ── UTILS ──
+function diaKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function fmtHora(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function fmtMin(min){
+  var abs = Math.abs(min);
+  var h = Math.floor(abs/60);
+  var m = abs%60;
+  return (min<0?'-':'')+(h>0?h+'h ':'')+String(m).padStart(2,'0')+'m';
+}
+function showToast(msg, cor){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = cor || '#333';
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 3000);
+}
+</script>
+</body>
+</html>

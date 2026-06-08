@@ -714,6 +714,11 @@ body{
           <div class="psb-txt" id="psb-txt">Fora do trabalho</div>
           <div class="psb-since" id="psb-since"></div>
         </div>
+        <!-- Badge localização -->
+        <div id="loc-status-badge" style="margin-top:10px;display:flex;align-items:center;gap:6px;font-size:0.72rem;padding:6px 16px;border-radius:20px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);color:var(--muted);transition:all 0.3s;">
+          <span id="loc-dot" style="width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:background 0.3s;"></span>
+          <span id="loc-txt">Verificando localização...</span>
+        </div>
       </div>
 
       <!-- Card resumo -->
@@ -877,14 +882,13 @@ body{
 <!-- Modal selfie -->
 <div id="modal-selfie">
   <div class="selfie-title">REGISTRAR PONTO</div>
-  <div class="selfie-sub">O browser pedirá permissão para a câmera.<br>Se preferir, toque em <strong style="color:var(--gold);">Registrar sem foto</strong> abaixo.</div>
+  <div class="selfie-sub" id="selfie-sub-txt">Posicione seu rosto no círculo e tire a foto para confirmar o registro.</div>
   <div class="selfie-circle">
     <video id="selfie-video" autoplay playsinline muted></video>
   </div>
   <canvas id="selfie-canvas" width="240" height="240"></canvas>
   <div class="selfie-action-row">
     <button class="selfie-capture-btn" onclick="capturarSelfie()">📸 REGISTRAR COM FOTO</button>
-    <button onclick="cancelarSelfie();registrarSemFoto();" style="width:100%;background:transparent;border:1px solid rgba(212,168,67,0.2);color:var(--gold);border-radius:var(--radius-sm);padding:12px;font-family:'Space Grotesk',sans-serif;font-size:0.88rem;font-weight:600;cursor:pointer;">Registrar sem foto →</button>
     <button class="selfie-cancel-btn" onclick="cancelarSelfie()">Cancelar</button>
   </div>
 </div>
@@ -1121,6 +1125,8 @@ function iniciarAppFunc(){
   });
   renderStatus();
   escutarRegistros();
+  // Inicia monitoramento de localização
+  _iniciarMonitorLocalizacao();
 }
 
 function getEmojiCargo(cargo){
@@ -1131,6 +1137,95 @@ function getEmojiCargo(cargo){
   if(c.includes('caixa'))return'💰';
   if(c.includes('gerente')||c.includes('gestor'))return'👑';
   return'👤';
+}
+
+var _locMonitorInterval=null;
+var _locBloqueado=false;
+
+function _iniciarMonitorLocalizacao(){
+  // Carrega configuração de local
+  if(!fbDb) return;
+  fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
+    if(!doc.exists){
+      // Sem local configurado — libera
+      _atualizarBadgeLoc(true,null,0);
+      return;
+    }
+    var cfg=doc.data();
+    // Monitora a cada 30 segundos
+    function verificar(){
+      if(!navigator.geolocation){ _atualizarBadgeLoc(true,null,0); return; }
+      navigator.geolocation.getCurrentPosition(function(pos){
+        var dist=_calcDistancia(pos.coords.latitude,pos.coords.longitude,cfg.lat,cfg.lng);
+        var raio=cfg.raioMetros||50;
+        _atualizarBadgeLoc(dist<=raio,dist,raio);
+      },function(){
+        _atualizarBadgeLoc(false,null,cfg.raioMetros||50);
+      },{timeout:8000,maximumAge:30000,enableHighAccuracy:true});
+    }
+    verificar();
+    if(_locMonitorInterval) clearInterval(_locMonitorInterval);
+    _locMonitorInterval=setInterval(verificar,30000);
+  }).catch(function(){
+    _atualizarBadgeLoc(true,null,0);
+  });
+}
+
+function _atualizarBadgeLoc(dentroDoRaio,dist,raio){
+  _locBloqueado=!dentroDoRaio;
+  var dot=document.getElementById('loc-dot');
+  var txt=document.getElementById('loc-txt');
+  var badge=document.getElementById('loc-status-badge');
+  var btn=document.getElementById('ponto-btn');
+  var st=getStatus();
+  if(!dot||!txt) return;
+  if(dentroDoRaio){
+    dot.style.background='var(--green)';
+    dot.style.boxShadow='0 0 6px rgba(46,204,113,0.6)';
+    txt.textContent=dist!==null?'No local ('+Math.round(dist)+'m)':'Local OK';
+    if(badge){
+      badge.style.borderColor='rgba(46,204,113,0.2)';
+      badge.style.color='var(--green)';
+    }
+    if(btn) btn.style.opacity='';
+  } else {
+    dot.style.background='var(--red)';
+    dot.style.boxShadow='0 0 6px rgba(231,76,60,0.6)';
+    var distTxt=dist!==null?Math.round(dist)+'m do local':'GPS indisponível';
+    txt.textContent=distTxt+' (raio: '+raio+'m)';
+    if(badge){
+      badge.style.borderColor='rgba(231,76,60,0.2)';
+      badge.style.color='var(--red)';
+    }
+    if(btn&&st==='livre') btn.style.opacity='0.4';
+  }
+}
+
+// Wrapper: bloqueia clique se fora do local e status=livre
+var _origOnPontoClick=null;
+function onPontoClick(){
+  var st=getStatus();
+  if(_locBloqueado && st==='livre'){
+    showToast('📍 Você está fora do local de trabalho', true);
+    return;
+  }
+  var btn=document.getElementById('ponto-btn');
+  if(btn){btn.classList.add('pulse-anim');setTimeout(function(){btn.classList.remove('pulse-anim');},400);}
+  if(st==='livre')iniciarAcao('entrada');
+  else if(st==='trabalhando')abrirModalAcao();
+  else if(st==='intervalo')iniciarAcao('fim_intervalo');
+  else showToast('Turno já encerrado hoje 👋');
+}
+
+// ── UTILS LOCALIZAÇÃO ──
+function _calcDistancia(lat1,lng1,lat2,lng2){
+  var R=6371000;
+  var dLat=(lat2-lat1)*Math.PI/180;
+  var dLng=(lng2-lng1)*Math.PI/180;
+  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+        Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+        Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
 // ── NAV ──
@@ -1248,23 +1343,13 @@ function atualizarHoras(){
 }
 
 // ── AÇÃO ──
-function onPontoClick(){
-  var st=getStatus();
-  var btn=document.getElementById('ponto-btn');
-  if(btn){btn.classList.add('pulse-anim');setTimeout(function(){btn.classList.remove('pulse-anim');},400);}
-  if(st==='livre')iniciarAcao('entrada');
-  else if(st==='trabalhando')abrirModalAcao();
-  else if(st==='intervalo')iniciarAcao('fim_intervalo');
-  else showToast('Turno já encerrado hoje 👋');
-}
-
 function abrirModalAcao(){document.getElementById('modal-acao').style.display='flex';document.getElementById('modal-acao').classList.add('show');}
 function fecharModalAcao(){document.getElementById('modal-acao').classList.remove('show');setTimeout(function(){document.getElementById('modal-acao').style.display='none';},300);}
 
 function iniciarAcao(tipo){
   _acaoPendente={tipo:tipo};
-  // Mostra escolha primeiro — câmera ou sem foto
-  mostrarEscolhaRegistro();
+  // Foto obrigatória — vai direto pra selfie
+  verificarLocalizacaoEAbrirSelfie();
 }
 
 function mostrarEscolhaRegistro(){
@@ -1304,14 +1389,165 @@ function registrarSemFoto(){
   }
 }
 
+// Verifica localização antes de abrir selfie
+function verificarLocalizacaoEAbrirSelfie(){
+  if(!navigator.geolocation){
+    // GPS não disponível — avisa mas permite continuar
+    showToast('⚠️ GPS não disponível', true);
+    abrirSelfie();
+    return;
+  }
+  showToast('📍 Verificando localização...', false);
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
+        if(!doc.exists){
+          // Sem local configurado — permite normalmente
+          abrirSelfie();
+          return;
+        }
+        var cfg=doc.data();
+        var dist=_calcDistancia(pos.coords.latitude,pos.coords.longitude,cfg.lat,cfg.lng);
+        var raio=cfg.raioMetros||50;
+        if(dist>raio){
+          // Fora do raio — bloqueia
+          _mostrarBloqueioLocalizacao(dist,raio);
+        } else {
+          // Dentro do raio — salva coords e abre selfie
+          _coordsParaRegistro={lat:pos.coords.latitude,lng:pos.coords.longitude,acc:pos.coords.accuracy};
+          abrirSelfie();
+        }
+      }).catch(function(){
+        // Erro ao buscar config — permite continuar
+        abrirSelfie();
+      });
+    },
+    function(err){
+      // Não conseguiu pegar GPS — verifica se há local configurado
+      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
+        if(doc.exists){
+          // Local configurado mas sem GPS — bloqueia
+          _mostrarBloqueioLocalizacao(null, doc.data().raioMetros||50);
+        } else {
+          abrirSelfie();
+        }
+      }).catch(function(){ abrirSelfie(); });
+    },
+    {timeout:8000,maximumAge:30000,enableHighAccuracy:true}
+  );
+}
+
+var _coordsParaRegistro=null;
+
+function _calcDistancia(lat1,lng1,lat2,lng2){
+  var R=6371000; // metros
+  var dLat=(lat2-lat1)*Math.PI/180;
+  var dLng=(lng2-lng1)*Math.PI/180;
+  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+        Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+        Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function _mostrarBloqueioLocalizacao(dist,raio){
+  _acaoPendente=null;
+  var ex=document.getElementById('modal-loc-bloqueio');
+  if(ex) ex.remove();
+  var distTxt=dist!==null?Math.round(dist)+'m de distância':'GPS indisponível';
+  var m=document.createElement('div');
+  m.id='modal-loc-bloqueio';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(160deg,#1a0a0a,#0e0808);border:1.5px solid rgba(231,76,60,0.4);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
+      '<div style="font-size:3rem;margin-bottom:12px;">🚫</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;letter-spacing:0.12em;color:#e74c3c;margin-bottom:8px;">FORA DO LOCAL</div>'+
+      '<div style="font-size:0.84rem;color:var(--text2);line-height:1.6;margin-bottom:6px;">Você está <strong style="color:#e74c3c;">'+distTxt+'</strong> do local de trabalho.</div>'+
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:20px;">O ponto só pode ser batido dentro de <strong style="color:var(--gold);">'+raio+'m</strong> do local configurado.</div>'+
+      '<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:0.7rem;color:#e74c3c;">'+
+        '📍 Se estiver no local correto, aguarde alguns segundos e tente novamente — o GPS pode estar impreciso.'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-loc-bloqueio\').remove()" style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:14px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
+    '</div>';
+  document.body.appendChild(m);
+}
+
+// Verifica localização antes de abrir selfie
+function verificarLocalizacaoEAbrirSelfie(){
+  if(!navigator.geolocation){
+    abrirSelfie();
+    return;
+  }
+  showToast('📍 Verificando localização...', false);
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
+        if(!doc.exists){ abrirSelfie(); return; }
+        var cfg=doc.data();
+        var dist=_calcDistancia(pos.coords.latitude,pos.coords.longitude,cfg.lat,cfg.lng);
+        var raio=cfg.raioMetros||50;
+        if(dist>raio){
+          _acaoPendente=null;
+          _mostrarBloqueioLocalizacao(dist,raio);
+        } else {
+          _coordsParaRegistro={lat:pos.coords.latitude,lng:pos.coords.longitude,acc:pos.coords.accuracy};
+          abrirSelfie();
+        }
+      }).catch(function(){ abrirSelfie(); });
+    },
+    function(){
+      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
+        if(doc.exists){ _acaoPendente=null; _mostrarBloqueioLocalizacao(null,doc.data().raioMetros||50); }
+        else { abrirSelfie(); }
+      }).catch(function(){ abrirSelfie(); });
+    },
+    {timeout:8000,maximumAge:30000,enableHighAccuracy:true}
+  );
+}
+
+var _coordsParaRegistro=null;
+
+function _mostrarBloqueioLocalizacao(dist,raio){
+  var ex=document.getElementById('modal-loc-bloqueio');
+  if(ex) ex.remove();
+  var distTxt=dist!==null?Math.round(dist)+'m de distância':'GPS indisponível';
+  var m=document.createElement('div');
+  m.id='modal-loc-bloqueio';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(160deg,#1a0a0a,#0e0808);border:1.5px solid rgba(231,76,60,0.4);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
+      '<div style="font-size:3rem;margin-bottom:12px;">🚫</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;letter-spacing:0.12em;color:#e74c3c;margin-bottom:8px;">FORA DO LOCAL</div>'+
+      '<div style="font-size:0.84rem;color:var(--text2);line-height:1.6;margin-bottom:6px;">Você está <strong style="color:#e74c3c;">'+distTxt+'</strong> do local de trabalho.</div>'+
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:20px;">O ponto só pode ser batido dentro de <strong style="color:var(--gold);">'+raio+'m</strong> do local configurado.</div>'+
+      '<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:0.7rem;color:#e74c3c;">'+
+        '📍 Se estiver no local correto, aguarde alguns segundos e tente novamente — o GPS pode estar impreciso.'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-loc-bloqueio\').remove()" style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:14px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
+    '</div>';
+  document.body.appendChild(m);
+}
+
 function abrirSelfie(){
   document.getElementById('modal-selfie').classList.add('show');
   navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false})
     .then(function(s){_streamSelfie=s;document.getElementById('selfie-video').srcObject=s;})
     .catch(function(){
-      // Câmera negada ou indisponível — registra sem foto
+      // Câmera negada — bloqueia (foto é obrigatória)
       document.getElementById('modal-selfie').classList.remove('show');
-      registrarSemFoto();
+      _acaoPendente=null;
+      var ex2=document.getElementById('modal-cam-bloqueio');
+      if(ex2) ex2.remove();
+      var mb=document.createElement('div');
+      mb.id='modal-cam-bloqueio';
+      mb.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
+      mb.innerHTML=
+        '<div style="background:linear-gradient(160deg,#1a0a0a,#0e0808);border:1.5px solid rgba(231,76,60,0.4);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
+          '<div style="font-size:3rem;margin-bottom:12px;">📷</div>'+
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.5rem;letter-spacing:0.12em;color:#e74c3c;margin-bottom:8px;">CÂMERA BLOQUEADA</div>'+
+          '<div style="font-size:0.82rem;color:var(--text2);line-height:1.6;margin-bottom:18px;">A foto é <strong>obrigatória</strong> para bater o ponto. Permita o acesso à câmera nas configurações do navegador e tente novamente.</div>'+
+          '<button onclick="document.getElementById(\'modal-cam-bloqueio\').remove()" style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:14px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
+        '</div>';
+      document.body.appendChild(mb);
     });
 }
 
@@ -1325,7 +1561,11 @@ function capturarSelfie(){
   ctx.save();ctx.scale(-1,1);ctx.drawImage(v,-240,0,240,240);ctx.restore();
   var foto=c.toDataURL('image/jpeg',0.6);
   pararCam();document.getElementById('modal-selfie').classList.remove('show');
-  if(navigator.geolocation){
+  // Usa coords já verificadas ou tenta pegar
+  if(_coordsParaRegistro){
+    registrarPonto(foto,_coordsParaRegistro);
+    _coordsParaRegistro=null;
+  } else if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(
       function(p){registrarPonto(foto,{lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy});},
       function(){registrarPonto(foto,null);},

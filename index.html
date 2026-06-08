@@ -12493,14 +12493,17 @@ function pontoRenderAgora(){
     _pNumCard(total,'Total','var(--accent)');
   var lista=document.getElementById('ponto-lista-agora');
   if(!lista) return;
-  lista.innerHTML=_pFuncs.map(function(f){
+  // Botão adicionar funcionário do ponto
+  var addBtnHtml='<button onclick="pontoAbrirModalAddFunc()" style="width:100%;background:rgba(212,168,67,0.08);border:1.5px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:10px;padding:11px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;margin-bottom:12px;letter-spacing:0.04em;">+ Adicionar funcionário ao ponto</button>';
+
+  lista.innerHTML=addBtnHtml+_pFuncs.map(function(f){
     var s=sm[f.id]||{st:'fora',ts:null};
     var fRegs=regH.filter(function(r){return r.funcId===f.id;}).sort(function(a,b){return a.ts-b.ts;});
     var hTrab=_pCalcH(fRegs,s.st);
     var entrada=fRegs.find(function(r){return r.tipo==='entrada';});
     var stCor={trabalhando:'#2ecc71',intervalo:'#f39c12',fora:'#444'}[s.st]||'#444';
     var stTxt={trabalhando:'Trabalhando',intervalo:'Intervalo',fora:'Fora'}[s.st]||'Fora';
-    return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;">'+
+    return '<div onclick="pontoAbrirModalFunc(\''+f.id+'\')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.3)\'" onmouseout="this.style.borderColor=\'rgba(212,168,67,0.08)\'">'+
       '<div style="width:8px;height:8px;border-radius:50%;background:'+stCor+';flex-shrink:0;'+(s.st==='trabalhando'?'box-shadow:0 0 6px '+stCor+';':'')+'"></div>'+
       '<div style="flex:1;">'+
         '<div style="font-weight:600;font-size:0.88rem;">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
@@ -12630,6 +12633,216 @@ function pontoRenderBanco(){
       '</div>'+
     '</div>';
   }).join('')||'<div style="color:var(--muted);text-align:center;padding:20px;">Nenhum dado.</div>';
+}
+
+// ── MODAL DETALHES DO FUNCIONÁRIO NO PONTO ──
+function pontoAbrirModalFunc(funcId){
+  var f=_pFuncs.find(function(x){return x.id===funcId;});
+  if(!f) return;
+  var ex=document.getElementById('ponto-modal-func');
+  if(ex) ex.remove();
+
+  var hoje=_pDiaKey(new Date());
+  var fRegs=_pRegs.filter(function(r){return r.funcId===funcId&&r.diaKey===hoje;}).sort(function(a,b){return a.ts-b.ts;});
+  var hTrab=_pCalcH(fRegs,'fora');
+  var tipoLabels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Iní. Intervalo',fim_intervalo:'Fim Intervalo'};
+  var tiposCores={entrada:'#2ecc71',saida:'#e74c3c',ini_intervalo:'#f39c12',fim_intervalo:'#3498db'};
+
+  // Registros de hoje com foto
+  var regHtml=fRegs.length?fRegs.map(function(r){
+    var cor=tiposCores[r.tipo]||'#666';
+    var fotoHtml=r.foto?'<img src="'+r.foto+'" style="width:40px;height:40px;border-radius:6px;object-fit:cover;border:1.5px solid rgba(212,168,67,0.3);flex-shrink:0;" alt="selfie">':'';
+    var locHtml=r.lat?'<div style="font-size:0.6rem;color:var(--muted);">📍 '+r.lat.toFixed(5)+', '+r.lng.toFixed(5)+'</div>':'';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'+
+      '<div style="width:6px;height:6px;border-radius:50%;background:'+cor+';flex-shrink:0;box-shadow:0 0 6px '+cor+';"></div>'+
+      '<div style="flex:1;">'+
+        '<div style="font-size:0.82rem;font-weight:600;color:'+cor+';">'+(tipoLabels[r.tipo]||r.tipo)+'</div>'+
+        locHtml+
+      '</div>'+
+      fotoHtml+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.04em;color:var(--muted);">'+_pFmtH(new Date(r.ts))+'</div>'+
+    '</div>';
+  }).join(''):'<div style="color:var(--muted);font-size:0.8rem;text-align:center;padding:12px;">Nenhum registro hoje.</div>';
+
+  var m=document.createElement('div');
+  m.id='ponto-modal-func';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1200;display:flex;align-items:flex-end;justify-content:center;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(170deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 40px;max-height:85vh;overflow-y:auto;">'+
+      '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'+
+        '<div>'+
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.1em;color:var(--accent);">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);">'+_pEsc(f.cargo||'Funcionário')+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;">'+
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.06em;">'+_pFmtMin(hTrab)+'</div>'+
+          '<div style="font-size:0.62rem;color:var(--muted);">hoje</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:8px;">Registros de hoje</div>'+
+      '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:8px 12px;margin-bottom:16px;">'+
+        regHtml+
+      '</div>'+
+      '<div style="display:flex;gap:10px;margin-bottom:10px;">'+
+        '<button onclick="this.closest(\'#ponto-modal-func\').remove();pontoAbrirEditarFunc(\''+funcId+'\')" style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer;">✏️ Editar</button>'+
+        '<button onclick="pontoExcluirFunc(\''+funcId+'\')" style="flex:1;background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.25);color:#e74c3c;border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer;">🗑️ Excluir</button>'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'ponto-modal-func\').remove()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;cursor:pointer;">Fechar</button>'+
+    '</div>';
+  document.body.appendChild(m);
+  m.addEventListener('click',function(e){ if(e.target===m) m.remove(); });
+}
+
+function pontoExcluirFunc(funcId){
+  var f=_pFuncs.find(function(x){return x.id===funcId;});
+  if(!f) return;
+  cvtConfirm('Remover "'+_pEsc(f.nome||f.nomeLogin)+'" do ponto?\n\nOs registros de ponto não serão apagados.', function(){
+    var modal=document.getElementById('ponto-modal-func');
+    if(modal) modal.remove();
+    fbDb.collection('ponto_funcionarios').doc(funcId).delete()
+      .then(function(){ showToast('✓ Funcionário removido do ponto'); })
+      .catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
+  });
+}
+
+function pontoAbrirEditarFunc(funcId){
+  var f=_pFuncs.find(function(x){return x.id===funcId;});
+  if(!f) return;
+  var ex=document.getElementById('ponto-modal-editar');
+  if(ex) ex.remove();
+  var m=document.createElement('div');
+  m.id='ponto-modal-editar';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1200;display:flex;align-items:flex-end;justify-content:center;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(170deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 40px;max-height:85vh;overflow-y:auto;">'+
+      '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.1em;color:var(--accent);margin-bottom:16px;">EDITAR FUNCIONÁRIO</div>'+
+      _pontoFormFieldHtml('Nome/Login','pef-nome',f.nome||f.nomeLogin,'')+
+      _pontoFormFieldHtml('Cargo','pef-cargo',f.cargo||'','')+
+      _pontoFormFieldHtml('Senha','pef-senha','','password')+
+      '<div style="font-size:0.7rem;color:var(--muted);margin:-10px 0 12px;">Deixe em branco para manter a senha atual.</div>'+
+      '<div style="display:flex;gap:10px;">'+
+        '<button onclick="document.getElementById(\'ponto-modal-editar\').remove()" style="flex:1;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:10px;padding:13px;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;cursor:pointer;">Cancelar</button>'+
+        '<button onclick="pontoSalvarEditarFunc(\''+funcId+'\')" style="flex:1.5;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:13px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">SALVAR</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(m);
+  m.addEventListener('click',function(e){ if(e.target===m) m.remove(); });
+}
+
+function _pontoFormFieldHtml(label,id,val,type){
+  return '<div style="margin-bottom:12px;">'+
+    '<label style="font-size:0.6rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;display:block;margin-bottom:5px;">'+label+'</label>'+
+    '<input id="'+id+'" type="'+(type||'text')+'" value="'+_pEsc(val)+'" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(212,168,67,0.15);border-radius:10px;color:var(--text);padding:12px 14px;font-family:\'Space Grotesk\',sans-serif;font-size:0.92rem;outline:none;">'+
+  '</div>';
+}
+
+function pontoSalvarEditarFunc(funcId){
+  var nome=(document.getElementById('pef-nome').value||'').trim();
+  var cargo=(document.getElementById('pef-cargo').value||'').trim();
+  var senha=(document.getElementById('pef-senha').value||'').trim();
+  if(!nome){ showToast('Informe o nome','#f7a34f'); return; }
+  var upd={nome:nome,nomeLogin:nome,cargo:cargo};
+  if(senha) upd.senha=senha;
+  fbDb.collection('ponto_funcionarios').doc(funcId).update(upd)
+    .then(function(){
+      var modal=document.getElementById('ponto-modal-editar');
+      if(modal) modal.remove();
+      showToast('✅ Funcionário atualizado!');
+    })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
+}
+
+// ── MODAL ADICIONAR FUNCIONÁRIO ──
+function pontoAbrirModalAddFunc(){
+  var ex=document.getElementById('ponto-modal-add');
+  if(ex) ex.remove();
+  // Pega funcionários do app principal que ainda não estão no ponto
+  var idsJaCadastrados=_pFuncs.map(function(f){return f.id;});
+  var funcDisp=funcionarios.filter(function(f){
+    return !idsJaCadastrados.includes(String(f.id));
+  });
+
+  var funcListHtml=funcDisp.length?
+    funcDisp.map(function(f){
+      var ini=(f.nome||'').split(' ').slice(0,2).map(function(p){return p[0]||'';}).join('').toUpperCase();
+      return '<div onclick="pontoAddFuncRapido(\''+f.id+'\')" style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.1);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.3)\'" onmouseout="this.style.borderColor=\'rgba(212,168,67,0.1)\'">'+
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);display:flex;align-items:center;justify-content:center;font-family:\'Bebas Neue\',sans-serif;font-size:0.9rem;color:var(--accent);flex-shrink:0;">'+ini+'</div>'+
+        '<div style="flex:1;">'+
+          '<div style="font-weight:600;font-size:0.9rem;">'+_pEsc(f.nome)+'</div>'+
+          '<div style="font-size:0.7rem;color:var(--muted);">'+_pEsc(f.cargo||'Sem cargo')+'</div>'+
+        '</div>'+
+        '<div style="color:rgba(212,168,67,0.5);font-size:1.1rem;">+</div>'+
+      '</div>';
+    }).join('')
+    :'<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:16px;">Todos os funcionários já estão no ponto.</div>';
+
+  var m=document.createElement('div');
+  m.id='ponto-modal-add';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1200;display:flex;align-items:flex-end;justify-content:center;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(170deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 40px;max-height:85vh;overflow-y:auto;">'+
+      '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.1em;color:var(--accent);margin-bottom:6px;">ADICIONAR AO PONTO</div>'+
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:16px;">Escolha um funcionário cadastrado ou crie um novo:</div>'+
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:8px;">Funcionários do app</div>'+
+      funcListHtml+
+      '<div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">'+
+        '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:10px;">Criar novo funcionário do ponto</div>'+
+        _pontoFormFieldHtml('Nome/Login','paf-nome','','')+
+        _pontoFormFieldHtml('Cargo','paf-cargo','','')+
+        _pontoFormFieldHtml('Senha','paf-senha','','password')+
+        '<div style="display:flex;gap:10px;">'+
+          '<button onclick="document.getElementById(\'ponto-modal-add\').remove()" style="flex:1;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:10px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;cursor:pointer;">Cancelar</button>'+
+          '<button onclick="pontoCriarNovoFunc()" style="flex:1.5;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:12px;font-family:\'Bebas Neue\',sans-serif;font-size:0.9rem;letter-spacing:0.08em;cursor:pointer;">CRIAR</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(m);
+  m.addEventListener('click',function(e){ if(e.target===m) m.remove(); });
+}
+
+function pontoAddFuncRapido(funcId){
+  var f=funcionarios.find(function(x){return String(x.id)===String(funcId);});
+  if(!f){ showToast('Funcionário não encontrado','#f7a34f'); return; }
+  var modal=document.getElementById('ponto-modal-add');
+  if(modal) modal.remove();
+  // Verifica se já existe no ponto
+  var jaExiste=_pFuncs.find(function(x){return x.id===String(funcId)||x.id===funcId;});
+  if(jaExiste){ showToast('Funcionário já está no ponto','#f7a34f'); return; }
+  var dados={
+    nome:f.nome||'',
+    nomeLogin:f.nome||'',
+    cargo:f.cargo||'',
+    senha:'1234',
+    cargaMin:440,
+    criadoEm:Date.now()
+  };
+  if(_tenantId) dados.tenantId=_tenantId;
+  fbDb.collection('ponto_funcionarios').doc(String(funcId)).set(dados)
+    .then(function(){ showToast('✅ '+f.nome+' adicionado ao ponto!'); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
+}
+
+function pontoCriarNovoFunc(){
+  var nome=(document.getElementById('paf-nome').value||'').trim();
+  var cargo=(document.getElementById('paf-cargo').value||'').trim();
+  var senha=(document.getElementById('paf-senha').value||'').trim();
+  if(!nome){ showToast('Informe o nome','#f7a34f'); return; }
+  if(!senha){ showToast('Informe a senha','#f7a34f'); return; }
+  var dados={
+    nome:nome, nomeLogin:nome, cargo:cargo, senha:senha,
+    cargaMin:440, criadoEm:Date.now()
+  };
+  if(_tenantId) dados.tenantId=_tenantId;
+  fbDb.collection('ponto_funcionarios').add(dados)
+    .then(function(){
+      var modal=document.getElementById('ponto-modal-add');
+      if(modal) modal.remove();
+      showToast('✅ Funcionário criado no ponto!');
+    })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
 }
 
 // ── CONFIG LOCAL ──

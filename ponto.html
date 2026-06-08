@@ -1035,6 +1035,8 @@ function fazerLogin(){
       if(d.senha!==senha){erro.textContent='Senha incorreta.';return;}
       _func=Object.assign({id:doc.id},d);
       localStorage.setItem('ponto_funcId',doc.id);
+      // Salva cache do funcionário pra modo offline
+      try{ localStorage.setItem('ponto_func_cache', JSON.stringify(_func)); }catch(ex){}
       erro.textContent='';
       mostrarApp();
       iniciarAppFunc();
@@ -1043,14 +1045,46 @@ function fazerLogin(){
 }
 
 function carregarFuncPorId(id){
-  fbDb.collection('ponto_funcionarios').doc(id).get()
-    .then(function(doc){
-      if(!doc.exists){localStorage.removeItem('ponto_funcId');mostrarLogin();return;}
-      _func=Object.assign({id:doc.id},doc.data());
-      mostrarApp();
-      iniciarAppFunc();
-    })
-    .catch(function(){mostrarLogin();});
+  // Tenta até 3 vezes antes de desistir (pode ser lentidão de rede)
+  var tentativas = 0;
+  function tentar(){
+    tentativas++;
+    fbDb.collection('ponto_funcionarios').doc(id).get()
+      .then(function(doc){
+        if(!doc.exists){
+          // Documento não existe mais — limpa e vai pro login
+          localStorage.removeItem('ponto_funcId');
+          mostrarLogin();
+          return;
+        }
+        _func = Object.assign({id:doc.id}, doc.data());
+        // Atualiza cache
+        try{ localStorage.setItem('ponto_func_cache', JSON.stringify(_func)); }catch(ex){}
+        mostrarApp();
+        iniciarAppFunc();
+      })
+      .catch(function(e){
+        console.warn('carregarFuncPorId erro (tentativa '+tentativas+'):', e.message);
+        if(tentativas < 3){
+          // Retry com backoff
+          setTimeout(tentar, tentativas * 1000);
+        } else {
+          // Falhou 3 vezes — mantém sessão mas mostra aviso
+          // Tenta usar cache do localStorage se disponível
+          var cache = null;
+          try{ cache = JSON.parse(localStorage.getItem('ponto_func_cache')); }catch(ex){}
+          if(cache && cache.id === id){
+            _func = cache;
+            mostrarApp();
+            iniciarAppFunc();
+            showToast('Modo offline — dados do cache', false);
+          } else {
+            mostrarLogin();
+          }
+        }
+      });
+  }
+  tentar();
 }
 
 function fazerLogout(){
@@ -1067,18 +1101,23 @@ function iniciarAppFunc(){
   var greet=h<12?'Bom dia,':h<18?'Boa tarde,':'Boa noite,';
   document.getElementById('header-greeting').textContent=greet;
   document.getElementById('header-name').textContent=primeiroNome.toUpperCase();
-  document.getElementById('perfil-nome').textContent=_func.nome||_func.nomeLogin;
-  document.getElementById('perfil-cargo').textContent=_func.cargo||'Funcionário';
+  var pN=document.getElementById('perfil-nome'); if(pN) pN.textContent=_func.nome||_func.nomeLogin;
+  var pC=document.getElementById('perfil-cargo'); if(pC) pC.textContent=_func.cargo||'Funcionário';
   var cMin=_func.cargaMin||CARGA_MIN;
-  document.getElementById('perfil-carga').textContent=Math.floor(cMin/60)+'h'+pad(cMin%60)+'min';
-  // Emoji por cargo
+  var pCg=document.getElementById('perfil-carga'); if(pCg) pCg.textContent=Math.floor(cMin/60)+'h'+pad(cMin%60)+'min';
   var emoji=getEmojiCargo(_func.cargo);
   document.getElementById('header-avatar').textContent=emoji;
-  document.getElementById('perfil-avatar').textContent=emoji;
-  // Escala mes
+  var pAv=document.getElementById('perfil-avatar'); if(pAv) pAv.textContent=emoji;
   var meses2=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   var n=new Date();
-  document.getElementById('escala-mes').textContent=meses2[n.getMonth()]+' '+n.getFullYear();
+  var esEl=document.getElementById('escala-mes'); if(esEl) esEl.textContent=meses2[n.getMonth()]+' '+n.getFullYear();
+  // Testa permissão de escrita no Firestore
+  fbDb.collection('ponto_registros').limit(1).get().catch(function(e){
+    console.warn('[Ponto] Sem permissão no Firestore:', e.message);
+    setTimeout(function(){
+      showToast('⚠️ Sem permissão no banco de dados. Fale com o gestor.', true);
+    }, 1500);
+  });
   renderStatus();
   escutarRegistros();
 }

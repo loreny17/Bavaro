@@ -529,7 +529,22 @@ window.addEventListener('load',function(){
   fbAuth=firebase.auth();
   fbAuth.onAuthStateChanged(function(user){
     document.getElementById('loading').style.display='none';
-    if(user){ iniciarGestor(); }
+    if(user){
+      // Busca tenantId do usuário pra linkar com as tarefas do app principal
+      fbDb.collection('users').doc(user.uid).get().then(function(doc){
+        if(doc.exists && doc.data().tenantId){
+          var tid = doc.data().tenantId;
+          try{ localStorage.setItem('ponto_gestor_tenantId', tid); }catch(e){}
+          // Salva no Firestore pra o app ponto conseguir ler
+          fbDb.collection('ponto_configuracoes').doc('restaurante').set({
+            tenantId: tid,
+            gestorUid: user.uid,
+            atualizadoEm: Date.now()
+          }, {merge:true}).catch(function(){});
+        }
+      }).catch(function(){});
+      iniciarGestor();
+    }
     else{ document.getElementById('login-screen').style.display='flex'; }
   });
   // Data no dashboard
@@ -708,7 +723,12 @@ function salvarLocalManual(){
   salvarLocal(lat,lng);
 }
 function salvarLocal(lat,lng){
-  fbDb.collection('ponto_configuracoes').doc('local').set({lat:lat,lng:lng,raioMetros:50,atualizadoEm:Date.now()})
+  // Também salva tenantId do gestor pra o app ponto saber onde buscar as tarefas
+  var tenantId = null;
+  try{ tenantId = localStorage.getItem('ponto_gestor_tenantId')||null; }catch(e){}
+  var dados = {lat:lat,lng:lng,raioMetros:50,atualizadoEm:Date.now()};
+  if(tenantId) dados.tenantId = tenantId;
+  fbDb.collection('ponto_configuracoes').doc('local').set(dados)
     .then(function(){
       showToast('Local salvo ✓');
       carregarLocalConfig();

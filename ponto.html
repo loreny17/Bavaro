@@ -1504,87 +1504,139 @@ function carregarTarefas(){
   var lista=document.getElementById('tarefas-lista');
   if(!lista) return;
   lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:20px;">Carregando...</div>';
-  // Busca tarefas do Firestore (criadas no app principal)
-  // Tenta na coleção ponto_tarefas (gestor pode criar também)
-  fbDb.collection('ponto_tarefas')
-    .where('funcIds','array-contains',_func.id)
-    .get().then(function(snap){
-      var tarefas=[];
-      snap.forEach(function(d){ tarefas.push(Object.assign({id:d.id},d.data())); });
-      // Também busca por funcId string
-      return fbDb.collection('ponto_tarefas')
-        .where('funcId','==',_func.id)
-        .get().then(function(snap2){
-          snap2.forEach(function(d){
-            var item=Object.assign({id:d.id},d.data());
-            if(!tarefas.find(function(t){return t.id===item.id;})) tarefas.push(item);
-          });
-          return tarefas;
-        });
-    }).then(function(tarefas){
-      renderTarefas(tarefas);
-    }).catch(function(){
-      renderTarefas([]);
+
+  // Busca o tenantId da configuração global do ponto
+  // (salvo quando o gestor configurou o local/restaurante)
+  fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
+    var tenantId = doc.exists ? doc.data().tenantId : null;
+    var restId   = doc.exists ? doc.data().restId : 'bavaro';
+
+    // Monta o caminho do clData igual ao app principal
+    var colRef;
+    if(tenantId){
+      colRef = fbDb.collection('tenants').doc(tenantId).collection('configuracoes');
+    } else {
+      colRef = fbDb.collection('configuracoes');
+    }
+
+    return colRef.doc('clData').get();
+  }).then(function(snap){
+    var data = snap && snap.exists ? (snap.data().data || []) : [];
+    // Filtra tarefas do funcionário pelo nome (case-insensitive) ou funcId linkado
+    var nomeFuncLower = (_func.nome||_func.nomeLogin||'').toLowerCase();
+    var funcIdLink = _func.appPrincipalFuncId || null; // campo opcional de link
+
+    var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+    var diaHoje = diasSem[new Date().getDay()];
+
+    var minhasTarefas = data.filter(function(t){
+      // Filtra pelo funcId linkado ou pelo nome
+      var matchId = funcIdLink && (
+        String(t.funcId) === String(funcIdLink) ||
+        (t.funcIds||[]).some(function(id){ return String(id)===String(funcIdLink); })
+      );
+      var matchNome = !funcIdLink && (
+        (t.funcNome||'').toLowerCase() === nomeFuncLower ||
+        (t.funcNomes||[]).some(function(n){ return n.toLowerCase()===nomeFuncLower; })
+      );
+      if(!matchId && !matchNome) return false;
+      // Filtra por dia
+      if(t.dia && t.dia !== '' && t.dia !== diaHoje) return false;
+      return true;
     });
+
+    renderTarefas(minhasTarefas, snap ? snap.ref : null, data, snap);
+  }).catch(function(e){
+    console.warn('Tarefas erro:', e);
+    // Fallback: tenta ponto_tarefas
+    fbDb.collection('ponto_tarefas')
+      .where('funcId','==',_func.id)
+      .get().then(function(s){
+        var t=[];
+        s.forEach(function(d){ t.push(Object.assign({id:d.id},d.data())); });
+        renderTarefas(t, null, null, null);
+      }).catch(function(){ renderTarefas([], null, null, null); });
+  });
 }
 
-function renderTarefas(tarefas){
+function renderTarefas(tarefas, colRef, allData, snap){
   var lista=document.getElementById('tarefas-lista');
   if(!lista) return;
-  var hoje=diaKey(new Date());
   var diasSem=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
   var diaHoje=diasSem[new Date().getDay()];
-  // Filtra tarefas do dia atual ou sem dia específico
-  var ativas=tarefas.filter(function(t){
-    if(t.status==='concluida') return false;
-    if(!t.dia||t.dia===''||t.dia===diaHoje) return true;
-    return false;
-  });
+
   if(!tarefas.length){
-    lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:30px;">Nenhuma tarefa atribuída a você.</div>';
+    lista.innerHTML='<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:30px;">Nenhuma tarefa para hoje.</div>';
     return;
   }
-  lista.innerHTML=ativas.map(function(t){
+
+  lista.innerHTML=tarefas.map(function(t){
     var totalItens=(t.itens||[]).length;
     var feitosItens=(t.itens||[]).filter(function(i){return i.feito;}).length;
     var pct=totalItens>0?Math.round(feitosItens/totalItens*100):0;
-    return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.1);border-radius:12px;padding:14px;margin-bottom:10px;">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-        '<div style="font-weight:700;font-size:0.92rem;">'+esc(t.titulo||'Tarefa')+'</div>'+
-        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.04em;color:var(--gold);">'+pct+'%</div>'+
+    var diaLabel=t.dia?{segunda:'Segunda',terca:'Terça',quarta:'Quarta',quinta:'Quinta',sexta:'Sexta',sabado:'Sábado',domingo:'Domingo'}[t.dia]||'':'Todos os dias';
+    return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.1);border-radius:14px;padding:16px;margin-bottom:12px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">'+
+        '<div style="font-weight:700;font-size:0.95rem;">'+esc(t.titulo||'Tarefa')+'</div>'+
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;letter-spacing:0.04em;color:'+(pct===100?'var(--green)':'var(--gold)')+';">'+pct+'%</div>'+
       '</div>'+
+      '<div style="font-size:0.64rem;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.08em;">📅 '+diaLabel+'</div>'+
       (totalItens>0?
-        '<div style="background:rgba(0,0,0,0.3);border-radius:4px;height:4px;margin-bottom:10px;overflow:hidden;">'+
-          '<div style="height:100%;background:linear-gradient(90deg,#d4a843,#22c55e);border-radius:4px;width:'+pct+'%;transition:width 0.4s;"></div>'+
+        '<div style="background:rgba(0,0,0,0.4);border-radius:4px;height:5px;margin-bottom:12px;overflow:hidden;">'+
+          '<div style="height:100%;background:linear-gradient(90deg,#d4a843,'+(pct===100?'#22c55e':'#d4a843')+');border-radius:4px;width:'+pct+'%;transition:width 0.5s;"></div>'+
         '</div>'+
-        '<div style="display:flex;flex-direction:column;gap:6px;">'+
+        '<div style="display:flex;flex-direction:column;gap:8px;">'+
           (t.itens||[]).map(function(item){
-            return '<div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="toggleTarefaItem(\''+t.id+'\',\''+item.id+'\',this)">'+
-              '<div style="width:18px;height:18px;border-radius:5px;border:1.5px solid '+(item.feito?'var(--success)':'rgba(212,168,67,0.3)')+';background:'+(item.feito?'var(--success)':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.7rem;color:#000;">'+(item.feito?'✓':'')+'</div>'+
-              '<div style="font-size:0.82rem;color:'+(item.feito?'var(--muted)':'var(--text)')+';text-decoration:'+(item.feito?'line-through':'none')+';">'+esc(item.texto)+'</div>'+
+            return '<div style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);" onclick="toggleTarefaItemClData(\''+t.id+'\',\''+item.id+'\')">'+
+              '<div style="width:20px;height:20px;border-radius:6px;border:1.5px solid '+(item.feito?'var(--green)':'rgba(212,168,67,0.3)')+';background:'+(item.feito?'var(--green)':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.75rem;color:#000;transition:all 0.2s;">'+(item.feito?'✓':'')+'</div>'+
+              '<div style="font-size:0.84rem;color:'+(item.feito?'var(--muted)':'var(--text)')+';text-decoration:'+(item.feito?'line-through':'none')+';flex:1;">'+esc(item.texto)+'</div>'+
             '</div>';
           }).join('')+
         '</div>'
       :'<div style="font-size:0.78rem;color:var(--muted);">Sem itens.</div>')+
     '</div>';
-  }).join('')||'<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:30px;">Nenhuma tarefa para hoje.</div>';
+  }).join('');
 }
 
-function toggleTarefaItem(tarefaId, itemId, el){
+// Cache do clData atual pro toggle funcionar
+var _clDataCache = null;
+var _clDataRef = null;
+
+function toggleTarefaItemClData(tarefaId, itemId){
   if(!_func) return;
-  fbDb.collection('ponto_tarefas').doc(tarefaId).get().then(function(doc){
-    if(!doc.exists) return;
-    var data=doc.data();
-    var itens=(data.itens||[]).map(function(i){
-      if(i.id===itemId){
-        return Object.assign({},i,{feito:!i.feito,feitoBy:_func.nome||_func.nomeLogin,feitoEm:new Date().toISOString()});
-      }
-      return i;
+  // Re-carrega os dados frescos e atualiza
+  fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
+    var tenantId = doc.exists ? doc.data().tenantId : null;
+    var colRef = tenantId
+      ? fbDb.collection('tenants').doc(tenantId).collection('configuracoes')
+      : fbDb.collection('configuracoes');
+    return colRef.doc('clData').get().then(function(snap){
+      if(!snap.exists) return;
+      var allData = snap.data().data || [];
+      var nomeFuncLower = (_func.nome||_func.nomeLogin||'').toLowerCase();
+      // Atualiza o item na tarefa
+      var novoData = allData.map(function(t){
+        if(String(t.id) !== String(tarefaId)) return t;
+        var novosItens = (t.itens||[]).map(function(i){
+          if(String(i.id) !== String(itemId)) return i;
+          return Object.assign({},i,{
+            feito: !i.feito,
+            feitoBy: _func.nome||_func.nomeLogin,
+            feitoEm: new Date().toISOString()
+          });
+        });
+        return Object.assign({},t,{itens: novosItens});
+      });
+      return snap.ref.set({data: novoData}).then(function(){
+        // Re-renderiza
+        carregarTarefas();
+        showToast('✓ Atualizado');
+      });
     });
-    return doc.ref.update({itens:itens});
-  }).then(function(){
-    carregarTarefas();
-  }).catch(function(e){ console.warn(e); });
+  }).catch(function(e){
+    console.warn('Toggle tarefa erro:', e);
+    showToast('Erro ao atualizar',true);
+  });
 }
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

@@ -1587,7 +1587,7 @@ function renderTarefas(tarefas, colRef, allData, snap){
         '</div>'+
         '<div style="display:flex;flex-direction:column;gap:8px;">'+
           (t.itens||[]).map(function(item){
-            return '<div style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);" onclick="toggleTarefaItemClData(\''+t.id+'\',\''+item.id+'\')">'+
+            return '<div style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);" onclick="toggleTarefaItemClData(\''+t.id+'\',\''+item.id+'\',this)">'+
               '<div style="width:20px;height:20px;border-radius:6px;border:1.5px solid '+(item.feito?'var(--green)':'rgba(212,168,67,0.3)')+';background:'+(item.feito?'var(--green)':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.75rem;color:#000;transition:all 0.2s;">'+(item.feito?'✓':'')+'</div>'+
               '<div style="font-size:0.84rem;color:'+(item.feito?'var(--muted)':'var(--text)')+';text-decoration:'+(item.feito?'line-through':'none')+';flex:1;">'+esc(item.texto)+'</div>'+
             '</div>';
@@ -1602,9 +1602,25 @@ function renderTarefas(tarefas, colRef, allData, snap){
 var _clDataCache = null;
 var _clDataRef = null;
 
-function toggleTarefaItemClData(tarefaId, itemId){
+function toggleTarefaItemClData(tarefaId, itemId, el){
   if(!_func) return;
-  // Re-carrega os dados frescos e atualiza
+
+  // UI otimista — atualiza visualmente na hora
+  var checkBox = el ? el.querySelector('div') : null;
+  var textEl = el ? el.querySelectorAll('div')[1] : null;
+  var jaFeito = checkBox && checkBox.textContent.trim() === '✓';
+  var novoFeito = !jaFeito;
+  if(checkBox){
+    checkBox.style.background = novoFeito ? 'var(--green)' : 'transparent';
+    checkBox.style.borderColor = novoFeito ? 'var(--green)' : 'rgba(212,168,67,0.3)';
+    checkBox.textContent = novoFeito ? '✓' : '';
+  }
+  if(textEl){
+    textEl.style.textDecoration = novoFeito ? 'line-through' : 'none';
+    textEl.style.color = novoFeito ? 'var(--muted)' : 'var(--text)';
+  }
+
+  // Salva no Firebase
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
     var tenantId = doc.exists ? doc.data().tenantId : null;
     var colRef = tenantId
@@ -1613,29 +1629,24 @@ function toggleTarefaItemClData(tarefaId, itemId){
     return colRef.doc('clData').get().then(function(snap){
       if(!snap.exists) return;
       var allData = snap.data().data || [];
-      var nomeFuncLower = (_func.nome||_func.nomeLogin||'').toLowerCase();
-      // Atualiza o item na tarefa
       var novoData = allData.map(function(t){
         if(String(t.id) !== String(tarefaId)) return t;
         var novosItens = (t.itens||[]).map(function(i){
           if(String(i.id) !== String(itemId)) return i;
           return Object.assign({},i,{
-            feito: !i.feito,
-            feitoBy: _func.nome||_func.nomeLogin,
-            feitoEm: new Date().toISOString()
+            feito: novoFeito,
+            feitoBy: novoFeito ? (_func.nome||_func.nomeLogin) : '',
+            feitoEm: novoFeito ? new Date().toISOString() : ''
           });
         });
         return Object.assign({},t,{itens: novosItens});
       });
-      return snap.ref.set({data: novoData}).then(function(){
-        // Re-renderiza
-        carregarTarefas();
-        showToast('✓ Atualizado');
-      });
+      return snap.ref.set({data: novoData});
     });
   }).catch(function(e){
     console.warn('Toggle tarefa erro:', e);
-    showToast('Erro ao atualizar',true);
+    // Reverte UI se falhou
+    carregarTarefas();
   });
 }
 

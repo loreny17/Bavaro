@@ -372,6 +372,33 @@ tbody tr:hover td{background:rgba(212,168,67,0.03);}
 </div>
 
 <div id="toast"></div>
+
+<!-- Modal histórico individual -->
+<div id="modal-hist-func" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;flex-direction:column;">
+  <div style="background:linear-gradient(135deg,#161200,#0e0c04);border-bottom:1px solid rgba(212,168,67,0.2);padding:14px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:1;">
+    <button onclick="fecharHistoricoFunc()" style="background:var(--accent-dim);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:8px;padding:7px 12px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;font-weight:700;cursor:pointer;">← Voltar</button>
+    <div style="flex:1;">
+      <div id="mhf-nome" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.08em;color:var(--accent);"></div>
+      <div id="mhf-cargo" style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;"></div>
+    </div>
+    <button onclick="pdfIndividual()" style="background:linear-gradient(135deg,#d4a843,#b88a2a);border:none;color:#000;border-radius:8px;padding:8px 14px;font-family:'Bebas Neue',sans-serif;font-size:0.85rem;letter-spacing:0.06em;cursor:pointer;">↓ PDF</button>
+  </div>
+  <!-- Filtro período -->
+  <div style="padding:12px 16px;border-bottom:1px solid rgba(212,168,67,0.08);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <input class="f-inp" id="mhf-ini" type="date" onchange="renderHistFunc()" style="width:130px;">
+    <input class="f-inp" id="mhf-fim" type="date" onchange="renderHistFunc()" style="width:130px;">
+    <button class="f-btn" onclick="mhfHoje()">Hoje</button>
+    <button class="f-btn" onclick="mhfMes()">Este mês</button>
+  </div>
+  <!-- Resumo período -->
+  <div id="mhf-resumo" style="padding:12px 16px;border-bottom:1px solid rgba(212,168,67,0.08);display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
+  <!-- Lista de registros por dia -->
+  <div id="mhf-lista" style="flex:1;overflow-y:auto;padding:14px 16px 40px;"></div>
+</div>
+
+<!-- jsPDF CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </body>
 </html>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -520,13 +547,14 @@ function renderDashboard(){
     var badgeTxt={trabalhando:'Presente',intervalo:'Intervalo',fora:'Fora'}[s.st]||'Fora';
     var horaEntrada=fRegs.find(function(r){return r.tipo==='entrada';});
     var horaStr=horaEntrada?fmtH(new Date(horaEntrada.ts)):'—:—';
-    return '<div class="colab-item">'+
+    return '<div class="colab-item" style="cursor:pointer;" onclick="abrirHistoricoFunc(\''+f.id+'\')">'+
       '<div class="colab-avatar">'+getEmoji(f.cargo)+'</div>'+
       '<div class="colab-info"><div class="colab-nome">'+esc(f.nome||f.nomeLogin)+'</div><div class="colab-cargo">'+esc(f.cargo||'Funcionário')+'</div></div>'+
       '<div class="colab-status">'+
         '<div class="colab-hora">'+horaStr+'</div>'+
         '<div class="colab-badge '+badgeCls+'">'+badgeTxt+'</div>'+
       '</div>'+
+      '<div style="color:var(--muted);font-size:0.9rem;margin-left:6px;">›</div>'+
     '</div>';
   }).join('');
 }
@@ -557,13 +585,14 @@ function renderColabs(){
     var horaStr=horaEntrada?fmtH(new Date(horaEntrada.ts)):'—:—';
     var badgeCls={trabalhando:'cb-presente',intervalo:'cb-intervalo',fora:'cb-fora'}[s.st]||'cb-fora';
     var badgeTxt={trabalhando:'Presente',intervalo:'Intervalo',fora:'Fora'}[s.st]||'Fora';
-    return '<div class="colab-item">'+
+    return '<div class="colab-item" style="cursor:pointer;" onclick="abrirHistoricoFunc(\''+f.id+'\')">'+
       '<div class="colab-avatar">'+getEmoji(f.cargo)+'</div>'+
       '<div class="colab-info"><div class="colab-nome">'+esc(f.nome||f.nomeLogin)+'</div><div class="colab-cargo">'+esc(f.cargo||'Funcionário')+'</div></div>'+
       '<div class="colab-status">'+
         '<div class="colab-hora">'+horaStr+'</div>'+
         '<div class="colab-badge '+badgeCls+'">'+badgeTxt+'</div>'+
       '</div>'+
+      '<div style="color:var(--muted);font-size:0.9rem;margin-left:6px;">›</div>'+
     '</div>';
   }).join('')||'<div style="color:var(--muted);text-align:center;padding:30px;">Nenhum colaborador encontrado.</div>';
 }
@@ -712,6 +741,307 @@ function pad(n){return String(n).padStart(2,'0');}
 function fMin(m){var abs=Math.abs(Math.round(m));var h=Math.floor(abs/60);var min=abs%60;return(m<0?'-':'')+(h>0?h+'h ':'')+pad(min)+'m';}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function setText(id,val){var el=document.getElementById(id);if(el)el.textContent=val;}
+// ── HISTÓRICO INDIVIDUAL ──
+var _funcAtual = null;
+
+function abrirHistoricoFunc(funcId){
+  var f=_funcs.find(function(x){return x.id===funcId;});
+  if(!f) return;
+  _funcAtual=f;
+  document.getElementById('mhf-nome').textContent=f.nome||f.nomeLogin;
+  document.getElementById('mhf-cargo').textContent=f.cargo||'Funcionário';
+  // Período padrão: mês atual
+  var n=new Date();
+  document.getElementById('mhf-ini').value=n.getFullYear()+'-'+pad(n.getMonth()+1)+'-01';
+  document.getElementById('mhf-fim').value=dKey(n);
+  var modal=document.getElementById('modal-hist-func');
+  modal.style.display='flex';
+  renderHistFunc();
+}
+
+function fecharHistoricoFunc(){
+  document.getElementById('modal-hist-func').style.display='none';
+  _funcAtual=null;
+}
+
+function mhfHoje(){var h=dKey(new Date());document.getElementById('mhf-ini').value=h;document.getElementById('mhf-fim').value=h;renderHistFunc();}
+function mhfMes(){var n=new Date();document.getElementById('mhf-ini').value=n.getFullYear()+'-'+pad(n.getMonth()+1)+'-01';document.getElementById('mhf-fim').value=dKey(n);renderHistFunc();}
+
+function renderHistFunc(){
+  if(!_funcAtual) return;
+  var ini=document.getElementById('mhf-ini').value;
+  var fim=document.getElementById('mhf-fim').value;
+  var regs=_regs.filter(function(r){
+    return r.funcId===_funcAtual.id && r.diaKey>=ini && r.diaKey<=fim;
+  }).sort(function(a,b){return a.ts-b.ts;});
+  // Agrupa por dia
+  var porDia={};
+  regs.forEach(function(r){
+    if(!porDia[r.diaKey]) porDia[r.diaKey]=[];
+    porDia[r.diaKey].push(r);
+  });
+  var dias=Object.keys(porDia).sort();
+  // Calcula totais do período
+  var totalMin=0; var diasComRegistro=dias.length;
+  var carga=_funcAtual.cargaMin||CARGA_PAD;
+  dias.forEach(function(d){
+    totalMin+=calcH(porDia[d],'fora');
+  });
+  var diasP=diasUteis(ini,fim);
+  var cargaTotal=diasP*carga;
+  var saldo=totalMin-cargaTotal;
+  // Resumo
+  var resumoEl=document.getElementById('mhf-resumo');
+  resumoEl.innerHTML=
+    '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">'+
+      '<div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Total trabalhado</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.04em;">'+fMin(totalMin)+'</div>'+
+    '</div>'+
+    '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">'+
+      '<div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Dias trabalhados</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.04em;">'+diasComRegistro+' / '+diasP+'</div>'+
+    '</div>'+
+    '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;text-align:center;">'+
+      '<div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Saldo</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.04em;color:'+(saldo>=0?'var(--success)':'var(--danger)')+';">'+(saldo>=0?'+':'')+fMin(saldo)+'</div>'+
+    '</div>';
+  // Lista por dia
+  var listaEl=document.getElementById('mhf-lista');
+  if(!dias.length){
+    listaEl.innerHTML='<div style="color:var(--muted);text-align:center;padding:30px;">Nenhum registro no período.</div>';
+    return;
+  }
+  var labels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Início intervalo',fim_intervalo:'Fim intervalo'};
+  var cores={entrada:'var(--success)',saida:'var(--danger)',ini_intervalo:'var(--warning)',fim_intervalo:'#60a5fa'};
+  listaEl.innerHTML=dias.map(function(d){
+    var regsD=porDia[d];
+    var minD=calcH(regsD,'fora');
+    var entrada=regsD.find(function(r){return r.tipo==='entrada';});
+    var saida=regsD.find(function(r){return r.tipo==='saida';});
+    var dataFmt=formatarData(d);
+    return '<div style="background:linear-gradient(135deg,#131008,#0e0c04);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:10px;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'+
+        '<div style="font-weight:700;font-size:0.92rem;">'+dataFmt+'</div>'+
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.05rem;letter-spacing:0.04em;color:var(--accent);">'+fMin(minD)+'</div>'+
+      '</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">'+
+        regsD.map(function(r){
+          return '<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(212,168,67,0.1);border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:6px;">'+
+            '<div style="width:6px;height:6px;border-radius:50%;background:'+(cores[r.tipo]||'var(--muted)')+';flex-shrink:0;"></div>'+
+            '<div style="font-size:0.74rem;color:var(--muted);">'+(labels[r.tipo]||r.tipo)+'</div>'+
+            '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.9rem;letter-spacing:0.04em;">'+fmtH(new Date(r.ts))+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function formatarData(diaKey){
+  var partes=diaKey.split('-');
+  var d=new Date(parseInt(partes[0]),parseInt(partes[1])-1,parseInt(partes[2]));
+  var dias=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+  var meses=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  return dias[d.getDay()]+', '+d.getDate()+' '+meses[d.getMonth()]+' '+d.getFullYear();
+}
+
+// ── PDF ──
+function construirDadosPDF(funcId, ini, fim){
+  var f=funcId?_funcs.find(function(x){return x.id===funcId;}):null;
+  var regs=_regs.filter(function(r){
+    var matchFunc=funcId?r.funcId===funcId:true;
+    return matchFunc && r.diaKey>=ini && r.diaKey<=fim;
+  }).sort(function(a,b){return a.ts-b.ts;});
+  // Agrupa por funcionário → por dia
+  var porFunc={};
+  regs.forEach(function(r){
+    if(!porFunc[r.funcId]) porFunc[r.funcId]={nome:r.funcNome,regs:{}};
+    if(!porFunc[r.funcId].regs[r.diaKey]) porFunc[r.funcId].regs[r.diaKey]=[];
+    porFunc[r.funcId].regs[r.diaKey].push(r);
+  });
+  // Se individual, mantém só o funcionário
+  if(funcId && !porFunc[funcId]){
+    porFunc[funcId]={nome:f?f.nome||f.nomeLogin:'Funcionário',regs:{}};
+  }
+  return{porFunc:porFunc,funcs:_funcs,ini:ini,fim:fim,funcSingle:f||null};
+}
+
+function pdfIndividual(){
+  if(!_funcAtual) return;
+  var ini=document.getElementById('mhf-ini').value;
+  var fim=document.getElementById('mhf-fim').value;
+  gerarPDF(_funcAtual.id, ini, fim);
+}
+
+function exportarCSV(){
+  var ini=document.getElementById('filt-ini').value||dKey(new Date());
+  var fim=document.getElementById('filt-fim').value||dKey(new Date());
+  gerarPDF(null, ini, fim);
+}
+
+function gerarPDF(funcId, ini, fim){
+  if(!window.jspdf){ showToast('Aguarde, carregando jsPDF...'); setTimeout(function(){ gerarPDF(funcId,ini,fim); },1500); return; }
+  var jsPDF=window.jspdf.jsPDF;
+  var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  var dados=construirDadosPDF(funcId,ini,fim);
+  var pageW=doc.internal.pageSize.getWidth();
+  var margin=15;
+  var y=margin;
+  // ── CABEÇALHO ──
+  doc.setFillColor(8,8,8);
+  doc.rect(0,0,pageW,38,'F');
+  // Linha dourada
+  doc.setDrawColor(212,168,67);
+  doc.setLineWidth(0.8);
+  doc.line(margin,38,pageW-margin,38);
+  // Título
+  doc.setTextColor(212,168,67);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(18);
+  doc.text('BÁVARO',margin,14);
+  doc.setFontSize(9);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(180,160,100);
+  doc.text('RELATÓRIO DE PONTO ELETRÔNICO',margin,20);
+  // Info período
+  doc.setTextColor(160,140,80);
+  doc.setFontSize(8);
+  doc.text('Período: '+fmtDataBr(ini)+' até '+fmtDataBr(fim),margin,27);
+  doc.text('Gerado em: '+fmtDataBr(dKey(new Date()))+' às '+fmtH(new Date()),margin,32);
+  if(dados.funcSingle){
+    doc.setTextColor(240,230,200);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(10);
+    doc.text('Funcionário: '+(dados.funcSingle.nome||dados.funcSingle.nomeLogin),pageW/2,22,{align:'center'});
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(160,140,80);
+    doc.text((dados.funcSingle.cargo||'Funcionário'),pageW/2,28,{align:'center'});
+  } else {
+    doc.setTextColor(240,230,200);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(10);
+    doc.text('RELATÓRIO GERAL — TODOS OS FUNCIONÁRIOS',pageW/2,26,{align:'center'});
+  }
+  y=46;
+  // ── CONTEÚDO POR FUNCIONÁRIO ──
+  var labels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Iní. Intervalo',fim_intervalo:'Fim Intervalo'};
+  Object.keys(dados.porFunc).forEach(function(fid,fi){
+    var fd=dados.porFunc[fid];
+    var fInfo=_funcs.find(function(x){return x.id===fid;})||{nome:fd.nome,cargaMin:CARGA_PAD};
+    var carga=fInfo.cargaMin||CARGA_PAD;
+    var dias=Object.keys(fd.regs).sort();
+    var diasP=diasUteis(ini,fim);
+    var totalMin=0;
+    dias.forEach(function(d){ totalMin+=calcH(fd.regs[d],'fora'); });
+    var saldo=totalMin-(diasP*carga);
+    // Cabeçalho do funcionário
+    if(fi>0){ doc.addPage(); y=margin; }
+    doc.setFillColor(20,16,0);
+    doc.roundedRect(margin,y,pageW-margin*2,10,2,2,'F');
+    doc.setTextColor(212,168,67);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(10);
+    doc.text((fd.nome||'Funcionário').toUpperCase(),margin+4,y+7);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(160,140,80);
+    doc.text((fInfo.cargo||''),pageW-margin-4,y+7,{align:'right'});
+    y+=14;
+    // Cards de resumo
+    var cards=[
+      {label:'Dias trabalhados',val:dias.length+' / '+diasP},
+      {label:'Total trabalhado',val:fMin(totalMin)},
+      {label:'Saldo',val:(saldo>=0?'+':'')+fMin(saldo),cor:saldo>=0?[76,175,125]:[224,82,82]}
+    ];
+    var cw=(pageW-margin*2-8)/3;
+    cards.forEach(function(card,ci){
+      var cx=margin+ci*(cw+4);
+      doc.setFillColor(18,14,2);
+      doc.setDrawColor(50,46,16);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(cx,y,cw,14,2,2,'FD');
+      doc.setTextColor(120,110,70);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(6.5);
+      doc.text(card.label,cx+cw/2,y+5,{align:'center'});
+      if(card.cor){ doc.setTextColor(card.cor[0],card.cor[1],card.cor[2]); }
+      else{ doc.setTextColor(240,230,200); }
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(10);
+      doc.text(String(card.val),cx+cw/2,y+11,{align:'center'});
+    });
+    y+=18;
+    // Tabela de registros por dia
+    var tableRows=[];
+    dias.forEach(function(d){
+      var regsD=fd.regs[d];
+      var entrada=regsD.find(function(r){return r.tipo==='entrada';});
+      var iniInt=regsD.find(function(r){return r.tipo==='ini_intervalo';});
+      var fimInt=regsD.find(function(r){return r.tipo==='fim_intervalo';});
+      var saida=regsD.find(function(r){return r.tipo==='saida';});
+      var minD=calcH(regsD,'fora');
+      var partes=d.split('-');
+      var dt=new Date(parseInt(partes[0]),parseInt(partes[1])-1,parseInt(partes[2]));
+      var diasSem=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+      var mesesAbr=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+      tableRows.push([
+        diasSem[dt.getDay()]+' '+dt.getDate()+'/'+mesesAbr[dt.getMonth()],
+        entrada?fmtH(new Date(entrada.ts)):'—',
+        iniInt?fmtH(new Date(iniInt.ts)):'—',
+        fimInt?fmtH(new Date(fimInt.ts)):'—',
+        saida?fmtH(new Date(saida.ts)):'—',
+        fMin(minD)
+      ]);
+    });
+    doc.autoTable({
+      startY:y,
+      head:[['Data','Entrada','Iní. Int.','Fim Int.','Saída','Total']],
+      body:tableRows,
+      margin:{left:margin,right:margin},
+      headStyles:{
+        fillColor:[20,16,0],textColor:[212,168,67],
+        fontStyle:'bold',fontSize:8,lineColor:[50,46,16],lineWidth:0.3
+      },
+      bodyStyles:{fillColor:[14,12,4],textColor:[220,210,180],fontSize:8,lineColor:[30,26,8],lineWidth:0.2},
+      alternateRowStyles:{fillColor:[18,14,4]},
+      columnStyles:{
+        0:{cellWidth:32,fontStyle:'bold'},
+        1:{cellWidth:20,halign:'center'},
+        2:{cellWidth:22,halign:'center'},
+        3:{cellWidth:22,halign:'center'},
+        4:{cellWidth:20,halign:'center'},
+        5:{cellWidth:22,halign:'center',fontStyle:'bold',textColor:[212,168,67]}
+      },
+      didDrawPage:function(data){
+        // Rodapé em cada página
+        var pfH=doc.internal.pageSize.getHeight();
+        doc.setDrawColor(212,168,67);
+        doc.setLineWidth(0.3);
+        doc.line(margin,pfH-12,pageW-margin,pfH-12);
+        doc.setTextColor(100,90,60);
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(7);
+        doc.text('Bávaro — Ponto Eletrônico',margin,pfH-7);
+        doc.text('Pág. '+doc.internal.getCurrentPageInfo().pageNumber,pageW-margin,pfH-7,{align:'right'});
+      }
+    });
+    y=doc.lastAutoTable.finalY+10;
+  });
+  // Salva
+  var nomeArq=dados.funcSingle
+    ?(dados.funcSingle.nomeLogin||'funcionario')+'_ponto_'+ini+'_'+fim+'.pdf'
+    :'bavaro_ponto_geral_'+ini+'_'+fim+'.pdf';
+  doc.save(nomeArq);
+  showToast('PDF gerado ✓');
+}
+
+function fmtDataBr(diaKey){
+  if(!diaKey) return '';
+  var p=diaKey.split('-');
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
+
 function showToast(msg,erro){
   var t=document.getElementById('toast');
   t.textContent=msg;

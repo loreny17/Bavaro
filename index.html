@@ -1754,6 +1754,9 @@ body.admin-mode .admin-only{display:flex!important;}
         <button onclick="pBancoMes()" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:0.74rem;font-weight:700;cursor:pointer;">Este mês</button>
       </div>
       <div id="ponto-banco-lista"></div>
+      <button onclick="gerarPDFGeralContab()" style="width:100%;margin-top:14px;padding:14px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.1em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+        📄 EXPORTAR PDF PARA CONTABILIDADE
+      </button>
     </div>
 
     <!-- CONFIG -->
@@ -13038,6 +13041,352 @@ function _pFmtH(d){return _pPad(d.getHours())+':'+_pPad(d.getMinutes());}
 function _pPad(n){return String(n).padStart(2,'0');}
 function _pFmtMin(m){var abs=Math.abs(Math.round(m));var h=Math.floor(abs/60);var min=abs%60;return(m<0?'-':'')+(h>0?h+'h ':'')+_pPad(min)+'m';}
 function _pEsc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ══════════════════════════════════════════════════════════
+// ── PDF CONTABILIDADE ──
+// ══════════════════════════════════════════════════════════
+
+function gerarPDFGeralContab(){
+  var ini=(document.getElementById('pbanco-ini')||{}).value||'';
+  var fim=(document.getElementById('pbanco-fim')||{}).value||'';
+  if(!ini||!fim){ showToast('Selecione o período primeiro','#f7a34f'); return; }
+  if(!_pFuncs||!_pFuncs.length){ showToast('Nenhum funcionário carregado','#f7a34f'); return; }
+  var jsPDF=(window.jspdf&&window.jspdf.jsPDF)||(typeof jspdf!=='undefined'&&jspdf.jsPDF)||null;
+  if(!jsPDF){ showToast('PDF ainda carregando, aguarde...','#f7a34f'); return; }
+
+  var diasP=_pDiasUteis(ini,fim);
+
+  // Monta dados por funcionário
+  var dadosFuncs=_pFuncs.map(function(f){
+    var carga=f.cargaMin||CARGA_PADRAO_PONTO;
+    var rf=_pRegs.filter(function(r){return r.funcId===f.id&&r.diaKey>=ini&&r.diaKey<=fim;}).sort(function(a,b){return a.ts-b.ts;});
+    var porDia={};
+    rf.forEach(function(r){if(!porDia[r.diaKey])porDia[r.diaKey]=[];porDia[r.diaKey].push(r);});
+    var dias=Object.keys(porDia).sort();
+    var totMin=0;
+    dias.forEach(function(dk){ totMin+=_pCalcH(porDia[dk],'fora'); });
+    var saldo=totMin-(diasP*carga);
+    // Busca vfData deste período (mês inicial)
+    var parIni=ini.split('-');
+    var mesKey=parIni[0]+'-'+parIni[1];
+    var vfd=vfData[mesKey]&&vfData[mesKey][f.id];
+    var totalVales=0;
+    if(vfd&&vfd.vales) vfd.vales.forEach(function(v){totalVales+=parseFloat(v.val||0);});
+    var totalFaltas=vfd?((vfd.faltas||[]).filter(function(x){return !x.atestado;}).length):0;
+    var totalFeriados=vfd?(vfd.feriados||[]).length:0;
+    return {func:f,porDia:porDia,dias:dias,totMin:totMin,saldo:saldo,diasP:diasP,carga:carga,totalVales:totalVales,totalFaltas:totalFaltas,totalFeriados:totalFeriados};
+  });
+
+  // Formata label do período
+  var meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  function fmtDataBR(s){ var p=s.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+  var periodoLabel=fmtDataBR(ini)+' a '+fmtDataBR(fim);
+  var parIniMes=ini.split('-');
+  var mesNome=meses[parseInt(parIniMes[1])-1]+' '+parIniMes[0];
+
+  _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome);
+}
+
+function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome){
+  var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  var pw=210, ph=297, mg=12;
+  var GOLD=[212,168,67], DARK=[15,12,3], WHITE=[240,240,240], GRAY=[110,110,110];
+  var GREEN=[46,204,113], RED=[231,76,60], ORANGE=[243,156,18], BLUE=[52,152,219];
+  var PAGE=0;
+
+  function _pPad2(n){ return String(n).padStart(2,'0'); }
+  function _fmtMin(m){
+    var neg=m<0; var abs=Math.abs(Math.round(m));
+    var h=Math.floor(abs/60); var min=abs%60;
+    return (neg?'-':'')+(h>0?h+'h ':'')+_pPad2(min)+'m';
+  }
+  function _fmtH(ts){ var d=new Date(ts); return _pPad2(d.getHours())+':'+_pPad2(d.getMinutes()); }
+
+  function cabecalho(subtitulo){
+    PAGE++;
+    doc.setFillColor(8,8,4);
+    doc.rect(0,0,pw,ph,'F');
+    // Faixa topo
+    doc.setFillColor(DARK[0],DARK[1],DARK[2]);
+    doc.rect(0,0,pw,24,'F');
+    doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.setLineWidth(0.5);
+    doc.line(0,24,pw,24);
+    // Título
+    doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.setFontSize(15);
+    doc.setFont('helvetica','bold');
+    doc.text('RELATÓRIO DE PONTO',mg,10);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text(subtitulo||'',mg,16);
+    doc.text('Período: '+periodoLabel,pw-mg,10,{align:'right'});
+    doc.text('Página '+PAGE,pw-mg,16,{align:'right'});
+    return 30;
+  }
+
+  // ── PÁGINA 1: RESUMO GERAL ──
+  var y=cabecalho('Resumo Geral da Equipe · '+dadosFuncs.length+' funcionários');
+
+  // Título seção
+  doc.setFontSize(9);
+  doc.setFont('helvetica','bold');
+  doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.text('CONSOLIDADO — '+mesNome.toUpperCase(),mg,y+6);
+  y+=12;
+
+  // Cabeçalho tabela resumo
+  var cw=[60,18,22,22,22,22,22];
+  var cx=[mg];
+  for(var ci=1;ci<cw.length;ci++) cx.push(cx[ci-1]+cw[ci-1]);
+
+  doc.setFillColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.rect(mg,y,pw-mg*2,7,'F');
+  doc.setTextColor(0,0,0);
+  doc.setFontSize(7);
+  doc.setFont('helvetica','bold');
+  var hdrs=['FUNCIONÁRIO','DIAS','HORAS TRAB.','SALDO','VALES (R$)','FALTAS','FERIADOS'];
+  hdrs.forEach(function(h,i){ doc.text(h,cx[i]+2,y+5); });
+  y+=7;
+
+  var gtMin=0,gtDias=0,gtVales=0,gtFaltas=0,gtFeriados=0;
+
+  dadosFuncs.forEach(function(d,idx){
+    if(y+7>ph-16){ y=cabecalho('Resumo Geral — continuação'); y+=4; }
+    doc.setFillColor(idx%2===0?18:14, idx%2===0?15:11, idx%2===0?3:2);
+    doc.rect(mg,y,pw-mg*2,7,'F');
+    // barra lateral colorida por saldo
+    var barCor=d.saldo>=0?GREEN:RED;
+    doc.setFillColor(barCor[0],barCor[1],barCor[2]);
+    doc.rect(mg,y,1.5,7,'F');
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica','bold');
+    doc.setTextColor(WHITE[0],WHITE[1],WHITE[2]);
+    doc.text((d.func.nome||d.func.nomeLogin||'—').substring(0,28),cx[0]+3,y+5);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text(String(d.dias.length),cx[1]+2,y+5);
+    doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.setFont('helvetica','bold');
+    doc.text(_fmtMin(d.totMin),cx[2]+2,y+5);
+    doc.setTextColor(d.saldo>=0?GREEN[0]:RED[0],d.saldo>=0?GREEN[1]:RED[1],d.saldo>=0?GREEN[2]:RED[2]);
+    doc.text((d.saldo>=0?'+':'')+_fmtMin(d.saldo),cx[3]+2,y+5);
+    doc.setTextColor(d.totalVales>0?GREEN[0]:GRAY[0],d.totalVales>0?GREEN[1]:GRAY[1],d.totalVales>0?GREEN[2]:GRAY[2]);
+    doc.text(d.totalVales>0?'R$'+d.totalVales.toFixed(2).replace('.',','):'—',cx[4]+2,y+5);
+    doc.setTextColor(d.totalFaltas>0?RED[0]:GRAY[0],d.totalFaltas>0?RED[1]:GRAY[1],d.totalFaltas>0?RED[2]:GRAY[2]);
+    doc.text(String(d.totalFaltas),cx[5]+2,y+5);
+    doc.setTextColor(d.totalFeriados>0?ORANGE[0]:GRAY[0],d.totalFeriados>0?ORANGE[1]:GRAY[1],d.totalFeriados>0?ORANGE[2]:GRAY[2]);
+    doc.text(String(d.totalFeriados),cx[6]+2,y+5);
+
+    doc.setDrawColor(30,24,6);
+    doc.setLineWidth(0.15);
+    doc.line(mg,y+7,mg+(pw-mg*2),y+7);
+    y+=7;
+
+    gtDias+=d.dias.length; gtMin+=d.totMin; gtVales+=d.totalVales; gtFaltas+=d.totalFaltas; gtFeriados+=d.totalFeriados;
+  });
+
+  // Linha totais
+  y+=3;
+  if(y+10>ph-16){ y=cabecalho('Totais'); y+=4; }
+  doc.setFillColor(DARK[0],DARK[1],DARK[2]);
+  doc.roundedRect(mg,y,pw-mg*2,9,2,2,'F');
+  doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(mg,y,pw-mg*2,9,2,2,'S');
+  doc.setFontSize(8);
+  doc.setFont('helvetica','bold');
+  doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.text('TOTAL GERAL',cx[0]+3,y+6);
+  doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  doc.text(String(gtDias)+' dias',cx[1]+2,y+6);
+  doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.text(_fmtMin(gtMin),cx[2]+2,y+6);
+  doc.setTextColor(GREEN[0],GREEN[1],GREEN[2]);
+  doc.text('R$'+gtVales.toFixed(2).replace('.',','),cx[4]+2,y+6);
+  doc.setTextColor(RED[0],RED[1],RED[2]);
+  doc.text(String(gtFaltas),cx[5]+2,y+6);
+  doc.setTextColor(ORANGE[0],ORANGE[1],ORANGE[2]);
+  doc.text(String(gtFeriados),cx[6]+2,y+6);
+  y+=14;
+
+  // ── PÁGINAS INDIVIDUAIS: um por funcionário ──
+  dadosFuncs.forEach(function(d){
+    doc.addPage();
+    y=cabecalho('Detalhado por Funcionário');
+
+    // Card nome
+    doc.setFillColor(DARK[0],DARK[1],DARK[2]);
+    doc.roundedRect(mg,y,pw-mg*2,20,3,3,'F');
+    doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(mg,y,pw-mg*2,20,3,3,'S');
+
+    doc.setFontSize(13);
+    doc.setFont('helvetica','bold');
+    doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.text((d.func.nome||d.func.nomeLogin||'—').toUpperCase(),mg+4,y+8);
+    doc.setFontSize(8);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text((d.func.cargo||'Funcionário')+' · Carga: '+Math.floor(d.carga/60)+'h'+_pPad2(d.carga%60)+'min/dia',mg+4,y+14);
+
+    // Resumo rápido no canto
+    doc.setFontSize(11);
+    doc.setFont('helvetica','bold');
+    doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.text(_fmtMin(d.totMin),pw-mg-4,y+8,{align:'right'});
+    doc.setFontSize(7);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text('total trabalhado',pw-mg-4,y+14,{align:'right'});
+    y+=26;
+
+    // Cards resumo (3 colunas)
+    var cardW=(pw-mg*2-8)/3;
+    var cards=[
+      {lbl:'HORAS TRABALHADAS',val:_fmtMin(d.totMin),cor:GOLD},
+      {lbl:'SALDO DO PERÍODO',val:(d.saldo>=0?'+':'')+_fmtMin(d.saldo),cor:d.saldo>=0?GREEN:RED},
+      {lbl:'DIAS PRESENTES',val:d.dias.length+'/'+d.diasP,cor:BLUE}
+    ];
+    if(d.totalVales>0) cards[2]={lbl:'VALES DESCONTADOS',val:'R$'+d.totalVales.toFixed(2).replace('.',','),cor:GREEN};
+    cards.forEach(function(c,i){
+      var rx=mg+i*(cardW+4);
+      doc.setFillColor(22,18,4);
+      doc.roundedRect(rx,y,cardW,14,2,2,'F');
+      doc.setDrawColor(c.cor[0],c.cor[1],c.cor[2]);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(rx,y,cardW,14,2,2,'S');
+      doc.setFontSize(9);
+      doc.setFont('helvetica','bold');
+      doc.setTextColor(c.cor[0],c.cor[1],c.cor[2]);
+      doc.text(c.val,rx+cardW/2,y+8,{align:'center'});
+      doc.setFontSize(5.5);
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+      doc.text(c.lbl,rx+cardW/2,y+12,{align:'center'});
+    });
+    y+=20;
+
+    // Tabela de registros diários
+    var diaSem=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    var labCurtos={entrada:'ENT',saida:'SAI',ini_intervalo:'INT',fim_intervalo:'RET'};
+    var coresReg={entrada:GREEN,saida:RED,ini_intervalo:ORANGE,fim_intervalo:BLUE};
+    var tcw=[18,10,pw-mg*2-18-10-20-20,20,20];
+    var tcx=[mg];
+    for(var ti=1;ti<tcw.length;ti++) tcx.push(tcx[ti-1]+tcw[ti-1]);
+
+    // Cabeçalho tabela
+    doc.setFillColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.rect(mg,y,pw-mg*2,6.5,'F');
+    doc.setTextColor(0,0,0);
+    doc.setFontSize(7);
+    doc.setFont('helvetica','bold');
+    ['DATA','DIA','REGISTROS','HORAS','STATUS'].forEach(function(h,i){ doc.text(h,tcx[i]+2,y+4.5); });
+    y+=6.5;
+
+    d.dias.forEach(function(dk,di){
+      if(y+7>ph-16){
+        doc.addPage();
+        y=cabecalho('Detalhado — '+(d.func.nome||d.func.nomeLogin));
+        y+=4;
+        // Repete cabeçalho tabela
+        doc.setFillColor(GOLD[0],GOLD[1],GOLD[2]);
+        doc.rect(mg,y,pw-mg*2,6.5,'F');
+        doc.setTextColor(0,0,0);
+        doc.setFontSize(7);
+        doc.setFont('helvetica','bold');
+        ['DATA','DIA','REGISTROS','HORAS','STATUS'].forEach(function(h,i){ doc.text(h,tcx[i]+2,y+4.5); });
+        y+=6.5;
+      }
+      var regsD=d.porDia[dk];
+      var prt=dk.split('-');
+      var dt=new Date(parseInt(prt[0]),parseInt(prt[1])-1,parseInt(prt[2]));
+      var minD=_pCalcH(regsD,'fora');
+      var ent=regsD.find(function(r){return r.tipo==='entrada';});
+      var sai=regsD.find(function(r){return r.tipo==='saida';});
+      var ok=!!(ent&&sai);
+
+      doc.setFillColor(di%2===0?18:14, di%2===0?14:11, di%2===0?3:2);
+      doc.rect(mg,y,pw-mg*2,7,'F');
+      doc.setFillColor(ok?GREEN[0]:RED[0],ok?GREEN[1]:RED[1],ok?GREEN[2]:RED[2]);
+      doc.rect(mg,y,1.5,7,'F');
+
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica','bold');
+      doc.setTextColor(WHITE[0],WHITE[1],WHITE[2]);
+      doc.text(_pPad2(dt.getDate())+'/'+_pPad2(dt.getMonth()+1),tcx[0]+2,y+5);
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+      doc.text(diaSem[dt.getDay()],tcx[1]+2,y+5);
+
+      // Registros inline
+      var regPartes=regsD.map(function(r){
+        var lab=labCurtos[r.tipo]||r.tipo;
+        return lab+' '+_fmtH(r.ts);
+      });
+      doc.setFontSize(7);
+      doc.setTextColor(WHITE[0],WHITE[1],WHITE[2]);
+      doc.text(regPartes.join('  '),tcx[2]+2,y+5,{maxWidth:tcw[2]-4});
+
+      doc.setFont('helvetica','bold');
+      doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+      doc.text(_fmtMin(minD),tcx[3]+2,y+5);
+
+      doc.setTextColor(ok?GREEN[0]:RED[0],ok?GREEN[1]:RED[1],ok?GREEN[2]:RED[2]);
+      doc.setFontSize(7.5);
+      doc.text(ok?'OK':'INCOMPLETO',tcx[4]+2,y+5);
+
+      doc.setDrawColor(30,24,6);
+      doc.setLineWidth(0.15);
+      doc.line(mg,y+7,mg+(pw-mg*2),y+7);
+      y+=7;
+    });
+
+    // Bloco vales/faltas/feriados se houver
+    if(d.totalVales>0||d.totalFaltas>0||d.totalFeriados>0){
+      y+=4;
+      if(y+10>ph-16){ doc.addPage(); y=cabecalho('Lançamentos — '+(d.func.nome||d.func.nomeLogin)); y+=4; }
+      doc.setFillColor(DARK[0],DARK[1],DARK[2]);
+      doc.roundedRect(mg,y,pw-mg*2,9,2,2,'F');
+      doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);
+      doc.setLineWidth(0.25);
+      doc.roundedRect(mg,y,pw-mg*2,9,2,2,'S');
+      doc.setFontSize(8);
+      doc.setFont('helvetica','bold');
+      var lx=mg+4;
+      if(d.totalVales>0){
+        doc.setTextColor(GREEN[0],GREEN[1],GREEN[2]);
+        doc.text('Vales: R$'+d.totalVales.toFixed(2).replace('.',','),lx,y+6); lx+=50;
+      }
+      if(d.totalFaltas>0){
+        doc.setTextColor(RED[0],RED[1],RED[2]);
+        doc.text('Faltas: '+d.totalFaltas,lx,y+6); lx+=40;
+      }
+      if(d.totalFeriados>0){
+        doc.setTextColor(ORANGE[0],ORANGE[1],ORANGE[2]);
+        doc.text('Feriados trab.: '+d.totalFeriados,lx,y+6);
+      }
+      y+=12;
+    }
+  });
+
+  // Rodapé em todas as páginas
+  var totalPags=doc.internal.getNumberOfPages();
+  doc.setFontSize(6.5);
+  doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  for(var pg=1;pg<=totalPags;pg++){
+    doc.setPage(pg);
+    doc.text('Funcionário App · Relatório de Ponto para Contabilidade · '+periodoLabel+' · Pág. '+pg+'/'+totalPags, pw/2, ph-4, {align:'center'});
+  }
+
+  var nomeArq='Ponto_Contabilidade_'+mesNome.replace(' ','_')+'.pdf';
+  doc.save(nomeArq);
+  showToast('PDF gerado com sucesso! ✓');
+}
+
 
 // Inicializa ao abrir a aba ponto
 var _pontoJaIniciado=false;

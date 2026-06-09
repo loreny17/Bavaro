@@ -11258,11 +11258,13 @@ function _iniciarListeners(){
   }, function(err){ console.warn('Firebase lixeira listener erro:', err.message); });
   _restListeners.push(u3);
 
-  carregarCVTFirebase();
-  carregarHistFirebase();
-  estCarregarFirebase();
-  clCarregarFirebase();
-  estCarregarReports();
+  // OTIMIZAÇÃO: carrega dados secundários com delay escalonado
+  // para não sobrecarregar a conexão no login
+  setTimeout(function(){ carregarCVTFirebase(); }, 800);
+  setTimeout(function(){ carregarHistFirebase(); }, 1200);
+  setTimeout(function(){ estCarregarFirebase(); }, 1600);
+  setTimeout(function(){ clCarregarFirebase(); }, 2000);
+  setTimeout(function(){ estCarregarReports(); }, 2400);
 }
 
 function iniciarFirebase(){
@@ -11652,12 +11654,42 @@ function authBootstrapTenant(){
       reject(new Error('Timeout ao buscar tenant'));
     }, 12000);
 
+    // OTIMIZAÇÃO: usa tenantId em cache pra pular requests sequenciais
+    var cachedTenantId = null;
+    var cachedUserDoc = null;
+    try{
+      cachedTenantId = localStorage.getItem('bavaro_tenant_id');
+      var cachedUserStr = localStorage.getItem('bavaro_user_doc');
+      if(cachedUserStr) cachedUserDoc = JSON.parse(cachedUserStr);
+    }catch(e){}
+
+    if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
+      // Login rápido: usa cache, resolve imediatamente, busca tenant info em background
+      _userDoc = cachedUserDoc;
+      _tenantId = cachedTenantId;
+      clearTimeout(timeout);
+      resolved = true;
+      if(overlay) overlay.classList.add('hidden');
+      if(loadingEl) loadingEl.style.display = 'none';
+      // Atualiza cache em background sem bloquear
+      fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
+        if(tDoc.exists){ _userDoc.tenantInfo = tDoc.data(); }
+      }).catch(function(){});
+      resolve(true);
+      return;
+    }
+
     fbDb.collection('users').doc(uid).get().then(function(doc){
       console.log('[Tenant] users/'+uid+' exists?', doc.exists);
       if(doc.exists && doc.data() && doc.data().tenantId){
         // Usuário já tem tenant
         _userDoc = doc.data();
         _tenantId = _userDoc.tenantId;
+        // Salva cache para próximo login
+        try{
+          localStorage.setItem('bavaro_tenant_id', _tenantId);
+          localStorage.setItem('bavaro_user_doc', JSON.stringify(_userDoc));
+        }catch(e){}
         console.log('[Tenant] Usuário existente, tenantId=', _tenantId);
         // Carrega info do tenant
         return fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
@@ -12252,6 +12284,7 @@ function authFazerLogout(){
     cvtConfirm(msg, function(){
       if(!fbAuth) return;
       // Logout SEM apagar biometria (mantém pra próximo login)
+      try{ localStorage.removeItem('bavaro_tenant_id'); localStorage.removeItem('bavaro_user_doc'); }catch(e){}
       fbAuth.signOut().then(function(){
         window.location.reload();
       }).catch(function(e){
@@ -12267,6 +12300,7 @@ function authFazerLogoutCompleto(){
   cvtConfirm('⚠️ Sair e remover biometria?\n\nTambém vai remover a digital cadastrada neste dispositivo. Use isso se outra pessoa for usar este celular.', function(){
     if(!fbAuth) return;
     biomApagar().finally(function(){
+      try{ localStorage.removeItem('bavaro_tenant_id'); localStorage.removeItem('bavaro_user_doc'); }catch(e){}
       fbAuth.signOut().then(function(){
         window.location.reload();
       }).catch(function(e){

@@ -12479,6 +12479,55 @@ function _pBuildStatus(){
   return{sm:sm,regH:regH};
 }
 
+function _pGetHorarioDia(f){
+  var diasMap=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var dow=new Date().getDay();
+  var dk=diasMap[dow];
+  if(!f.horarios) return null;
+  var h=f.horarios[dk];
+  if(!h||h.folga||!h.entrada||!h.saida) return null;
+  return h;
+}
+function _pHoraParaMin(hStr){
+  var p=(hStr||'').split(':');
+  if(p.length<2) return null;
+  return parseInt(p[0])*60+parseInt(p[1]);
+}
+function _pIndicadorPonto(f,fRegs,statusAtual){
+  var h=_pGetHorarioDia(f);
+  if(!h) return '';
+  var entMin=_pHoraParaMin(h.entrada);
+  var saiMin=_pHoraParaMin(h.saida);
+  if(entMin===null||saiMin===null) return '';
+  var cargaEsp=(saiMin-entMin);
+  var entReg=fRegs.find(function(r){return r.tipo==='entrada';});
+  var saiReg=fRegs.slice().reverse().find(function(r){return r.tipo==='saida';});
+  var badges=[];
+  if(entReg){
+    var entReal=new Date(entReg.ts);
+    var entRealMin=entReal.getHours()*60+entReal.getMinutes();
+    var diff=entRealMin-entMin;
+    if(diff>2) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(231,76,60,0.15);color:#e74c3c;border:1px solid rgba(231,76,60,0.3);">\u26a0 +'+diff+'min</span>');
+  }
+  if(saiReg){
+    var saiReal=new Date(saiReg.ts);
+    var saiRealMin=saiReal.getHours()*60+saiReal.getMinutes();
+    var hTrab=_pCalcH(fRegs,'fora');
+    var diffSai=saiMin-saiRealMin;
+    if(diffSai>2){
+      badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);">\u2199 -'+diffSai+'min</span>');
+    } else {
+      var extra=hTrab-cargaEsp;
+      if(extra>5) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">\u2b50 +'+_pFmtMin(extra)+'</span>');
+    }
+  } else if(statusAtual==='trabalhando'){
+    var hTrabAtual=_pCalcH(fRegs,'trabalhando');
+    var extraAtual=hTrabAtual-cargaEsp;
+    if(extraAtual>5) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">\u2b50 +'+_pFmtMin(extraAtual)+'</span>');
+  }
+  if(!badges.length) return '';
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">'+badges.join('')+'</div>';
+}
 function pontoRenderAgora(){
   var res=_pBuildStatus(); var sm=res.sm; var regH=res.regH;
   var total=_pFuncs.length;
@@ -12493,9 +12542,7 @@ function pontoRenderAgora(){
     _pNumCard(total,'Total','var(--accent)');
   var lista=document.getElementById('ponto-lista-agora');
   if(!lista) return;
-  // Botão adicionar funcionário do ponto
   var addBtnHtml='<button onclick="pontoAbrirModalAddFunc()" style="width:100%;background:rgba(212,168,67,0.08);border:1.5px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:10px;padding:11px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;margin-bottom:12px;letter-spacing:0.04em;">+ Adicionar funcionário ao ponto</button>';
-
   lista.innerHTML=addBtnHtml+_pFuncs.map(function(f){
     var s=sm[f.id]||{st:'fora',ts:null};
     var fRegs=regH.filter(function(r){return r.funcId===f.id;}).sort(function(a,b){return a.ts-b.ts;});
@@ -12503,20 +12550,27 @@ function pontoRenderAgora(){
     var entrada=fRegs.find(function(r){return r.tipo==='entrada';});
     var stCor={trabalhando:'#2ecc71',intervalo:'#f39c12',fora:'#444'}[s.st]||'#444';
     var stTxt={trabalhando:'Trabalhando',intervalo:'Intervalo',fora:'Fora'}[s.st]||'Fora';
-    return '<div onclick="pontoAbrirModalFunc(\''+f.id+'\')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.3)\'" onmouseout="this.style.borderColor=\'rgba(212,168,67,0.08)\'">'+
-      '<div style="width:8px;height:8px;border-radius:50%;background:'+stCor+';flex-shrink:0;'+(s.st==='trabalhando'?'box-shadow:0 0 6px '+stCor+';':'')+'"></div>'+
+    var hDia=_pGetHorarioDia(f);
+    var horPrevisto=hDia?'<span style="font-size:0.62rem;color:rgba(212,168,67,0.6);">'+hDia.entrada+'\u2013'+hDia.saida+'</span>':'';
+    var indicadores=_pIndicadorPonto(f,fRegs,s.st);
+    return '<div onclick="pontoAbrirModalFunc(\''+f.id+'\')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.3)\'" onmouseout="this.style.borderColor=\'rgba(212,168,67,0.08)\'">'+
+      '<div style="width:8px;height:8px;border-radius:50%;background:'+stCor+';flex-shrink:0;margin-top:5px;'+(s.st==='trabalhando'?'box-shadow:0 0 6px '+stCor+';':'')+'" ></div>'+
       '<div style="flex:1;">'+
         '<div style="font-weight:600;font-size:0.88rem;">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
-        '<div style="font-size:0.68rem;color:var(--muted);">'+_pEsc(f.cargo||'Funcionário')+(entrada?' · entrada: '+_pFmtH(new Date(entrada.ts)):'')+'</div>'+
+        '<div style="font-size:0.68rem;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
+          _pEsc(f.cargo||'Funcionário')+
+          (entrada?' \xb7 entrada: '+_pFmtH(new Date(entrada.ts)):'')+
+          (horPrevisto?' \xb7 '+horPrevisto:'')+
+        '</div>'+
+        indicadores+
       '</div>'+
-      '<div style="text-align:right;">'+
+      '<div style="text-align:right;flex-shrink:0;">'+
         '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.04em;">'+_pFmtMin(hTrab)+'</div>'+
         '<div style="font-size:0.64rem;font-weight:700;color:'+stCor+';">'+stTxt+'</div>'+
       '</div>'+
     '</div>';
   }).join('');
 }
-
 function _pNumCard(val,label,cor){
   return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:10px 8px;text-align:center;">'+
     '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;color:'+cor+';">'+val+'</div>'+
@@ -12711,24 +12765,52 @@ function pontoAbrirEditarFunc(funcId){
   if(!f) return;
   var ex=document.getElementById('ponto-modal-editar');
   if(ex) ex.remove();
+
+  var horarios=f.horarios||{};
+  var diasSem=[{key:'segunda',label:'Seg'},{key:'terca',label:'Ter'},{key:'quarta',label:'Qua'},{key:'quinta',label:'Qui'},{key:'sexta',label:'Sex'},{key:'sabado',label:'Sáb'},{key:'domingo',label:'Dom'}];
+
+  var horariosHtml=diasSem.map(function(d){
+    var h=horarios[d.key]||{entrada:'',saida:'',folga:false};
+    return '<div style="background:rgba(0,0,0,0.25);border-radius:8px;padding:9px 11px;margin-bottom:7px;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">'+
+        '<div style="font-weight:700;font-size:0.78rem;color:var(--accent);">'+d.label+'</div>'+
+        '<label style="display:flex;align-items:center;gap:5px;font-size:0.68rem;color:var(--muted);cursor:pointer;">'+
+          '<input type="checkbox" id="pef-folga-'+d.key+'" '+(h.folga?'checked':'')+' onchange="pefToggleFolga(\''+d.key+'\')" style="accent-color:var(--accent);">Folga'+
+        '</label>'+
+      '</div>'+
+      '<div id="pef-inp-'+d.key+'" style="display:'+(h.folga?'none':'flex')+';gap:8px;">'+
+        '<div style="flex:1;"><div style="font-size:0.56rem;color:var(--muted);margin-bottom:2px;">Entrada</div><input type="time" id="pef-e-'+d.key+'" value="'+(h.entrada||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:7px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+        '<div style="flex:1;"><div style="font-size:0.56rem;color:var(--muted);margin-bottom:2px;">Saída</div><input type="time" id="pef-s-'+d.key+'" value="'+(h.saida||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:7px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+
   var m=document.createElement('div');
   m.id='ponto-modal-editar';
   m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1200;display:flex;align-items:flex-end;justify-content:center;';
   m.innerHTML=
-    '<div style="background:linear-gradient(170deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 40px;max-height:85vh;overflow-y:auto;">'+
+    '<div style="background:linear-gradient(170deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 40px;max-height:90vh;overflow-y:auto;">'+
       '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>'+
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:0.1em;color:var(--accent);margin-bottom:16px;">EDITAR FUNCIONÁRIO</div>'+
       _pontoFormFieldHtml('Nome/Login','pef-nome',f.nome||f.nomeLogin,'')+
       _pontoFormFieldHtml('Cargo','pef-cargo',f.cargo||'','')+
       _pontoFormFieldHtml('Senha','pef-senha','','password')+
-      '<div style="font-size:0.7rem;color:var(--muted);margin:-10px 0 12px;">Deixe em branco para manter a senha atual.</div>'+
-      '<div style="display:flex;gap:10px;">'+
+      '<div style="font-size:0.7rem;color:var(--muted);margin:-10px 0 14px;">Deixe em branco para manter a senha atual.</div>'+
+      '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:10px;">⏰ Horário de trabalho</div>'+
+      horariosHtml+
+      '<div style="margin-top:14px;display:flex;gap:10px;">'+
         '<button onclick="document.getElementById(\'ponto-modal-editar\').remove()" style="flex:1;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:10px;padding:13px;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;cursor:pointer;">Cancelar</button>'+
         '<button onclick="pontoSalvarEditarFunc(\''+funcId+'\')" style="flex:1.5;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:13px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">SALVAR</button>'+
       '</div>'+
     '</div>';
   document.body.appendChild(m);
   m.addEventListener('click',function(e){ if(e.target===m) m.remove(); });
+}
+
+function pefToggleFolga(dia){
+  var cb=document.getElementById('pef-folga-'+dia);
+  var inp=document.getElementById('pef-inp-'+dia);
+  if(cb&&inp) inp.style.display=cb.checked?'none':'flex';
 }
 
 function _pontoFormFieldHtml(label,id,val,type){
@@ -12743,7 +12825,15 @@ function pontoSalvarEditarFunc(funcId){
   var cargo=(document.getElementById('pef-cargo').value||'').trim();
   var senha=(document.getElementById('pef-senha').value||'').trim();
   if(!nome){ showToast('Informe o nome','#f7a34f'); return; }
-  var upd={nome:nome,nomeLogin:nome,cargo:cargo};
+  var diasSem=['segunda','terca','quarta','quinta','sexta','sabado','domingo'];
+  var horarios={};
+  diasSem.forEach(function(dk){
+    var folga=document.getElementById('pef-folga-'+dk);
+    var e=document.getElementById('pef-e-'+dk);
+    var s=document.getElementById('pef-s-'+dk);
+    horarios[dk]={folga:folga?folga.checked:false,entrada:e?e.value:'',saida:s?s.value:''};
+  });
+  var upd={nome:nome,nomeLogin:nome,cargo:cargo,horarios:horarios};
   if(senha) upd.senha=senha;
   fbDb.collection('ponto_funcionarios').doc(funcId).update(upd)
     .then(function(){

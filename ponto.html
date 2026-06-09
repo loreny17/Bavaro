@@ -779,15 +779,10 @@ body{
         <div class="es-card"><div class="es-val" id="es-horas" style="color:var(--gold);">—</div><div class="es-label">Horas totais</div></div>
         <div class="es-card"><div class="es-val" id="es-saldo" style="color:var(--muted);">—</div><div class="es-label">Saldo</div></div>
       </div>
-      <div class="sec-title" style="font-size:0.9rem;margin-top:4px;">Próximos turnos</div>
-      <div class="prox-turno-card">
-        <div class="ptc-label">Próximo dia de trabalho</div>
-        <div class="ptc-dia" id="prox-dia">Segunda-feira</div>
-        <div class="ptc-hora">07:20 — 16:40</div>
-      </div>
-      <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:16px;line-height:1.5;">
-        Em breve: visualização da escala semanal completa.
-      </div>
+      <div class="sec-title" style="font-size:0.9rem;margin-top:4px;">Minha escala semanal</div>
+      <div id="escala-semana-lista"></div>
+      <div class="sec-title" style="font-size:0.9rem;margin-top:12px;">Próximo turno</div>
+      <div id="prox-turno-wrap"></div>
     </div>
 
     <!-- TELA SOLICITAÇÕES -->
@@ -1686,7 +1681,7 @@ function renderEscala(){
   if(!_func)return;
   var n=new Date();
   var ini=n.getFullYear()+'-'+pad(n.getMonth()+1)+'-01';
-  var fim=dKey(n);
+  var fim=diaKey(n);
   fbDb.collection('ponto_registros')
     .where('funcId','==',_func.id)
     .where('diaKey','>=',ini)
@@ -1706,6 +1701,91 @@ function renderEscala(){
       var esS=document.getElementById('es-saldo');
       if(esS){esS.textContent=(saldo>=0?'+':'')+fmtMin(saldo);esS.style.color=saldo>=0?'var(--green)':'var(--red)';}
     });
+
+  // ── Renderiza escala semanal configurada pelo gestor ──
+  var diasMap=[
+    {key:'domingo',label:'Dom'},
+    {key:'segunda',label:'Seg'},
+    {key:'terca',label:'Ter'},
+    {key:'quarta',label:'Qua'},
+    {key:'quinta',label:'Qui'},
+    {key:'sexta',label:'Sex'},
+    {key:'sabado',label:'Sáb'}
+  ];
+  var diasNomes=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+  var horarios=_func.horarios||{};
+  var hoje=new Date();
+  var dowHoje=hoje.getDay(); // 0=dom
+
+  var lista=document.getElementById('escala-semana-lista');
+  if(lista){
+    var html='';
+    var temEscala=false;
+    diasMap.forEach(function(d,i){
+      var h=horarios[d.key];
+      var isHoje=(i===dowHoje);
+      if(h&&h.folga){
+        temEscala=true;
+        html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px;margin-bottom:7px;background:'+(isHoje?'rgba(212,168,67,0.07)':'rgba(255,255,255,0.02)')+';border:1px solid '+(isHoje?'rgba(212,168,67,0.25)':'rgba(255,255,255,0.05)')+';opacity:0.5;">'+
+          '<div style="display:flex;align-items:center;gap:10px;">'+
+            '<div style="width:34px;height:34px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:var(--muted);">'+d.label+'</div>'+
+            '<div>'+
+              '<div style="font-size:0.85rem;font-weight:600;color:var(--muted);">'+(isHoje?'<span style="color:var(--gold);">Hoje — </span>':'')+diasNomes[i]+'</div>'+
+              '<div style="font-size:0.7rem;color:var(--muted);">Folga</div>'+
+            '</div>'+
+          '</div>'+
+          '<div style="font-size:0.7rem;color:var(--muted);font-weight:700;background:rgba(255,255,255,0.05);padding:3px 10px;border-radius:20px;">FOLGA</div>'+
+        '</div>';
+      } else if(h&&h.entrada&&h.saida){
+        temEscala=true;
+        var entMin=parseInt(h.entrada.split(':')[0])*60+parseInt(h.entrada.split(':')[1]);
+        var saiMin=parseInt(h.saida.split(':')[0])*60+parseInt(h.saida.split(':')[1]);
+        var cargaDia=saiMin-entMin;
+        html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px;margin-bottom:7px;background:'+(isHoje?'rgba(212,168,67,0.08)':'rgba(255,255,255,0.03)')+';border:1px solid '+(isHoje?'rgba(212,168,67,0.3)':'rgba(255,255,255,0.06)')+';box-shadow:'+(isHoje?'0 0 0 1px rgba(212,168,67,0.1)':'')+';>'+
+          '<div style="display:flex;align-items:center;gap:10px;">'+
+            '<div style="width:34px;height:34px;border-radius:8px;background:'+(isHoje?'rgba(212,168,67,0.15)':'rgba(255,255,255,0.06)')+';display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:'+(isHoje?'var(--gold)':'var(--muted)')+';">'+d.label+'</div>'+
+            '<div>'+
+              '<div style="font-size:0.85rem;font-weight:600;">'+(isHoje?'<span style="color:var(--gold);">Hoje — </span>':'')+diasNomes[i]+'</div>'+
+              '<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.05em;color:'+(isHoje?'var(--gold)':'var(--text)')+';">'+h.entrada+' — '+h.saida+'</div>'+
+            '</div>'+
+          '</div>'+
+          '<div style="text-align:right;">'+
+            '<div style="font-size:0.72rem;font-weight:700;color:var(--muted);">'+fmtMin(cargaDia)+'</div>'+
+            '<div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">carga</div>'+
+          '</div>'+
+        '</div>';
+      }
+    });
+    if(!temEscala){
+      lista.innerHTML='<div style="text-align:center;padding:20px 16px;color:var(--muted);font-size:0.82rem;line-height:1.6;">Nenhum horário configurado pelo gestor ainda.</div>';
+    } else {
+      lista.innerHTML=html;
+    }
+  }
+
+  // ── Próximo turno ──
+  var proxWrap=document.getElementById('prox-turno-wrap');
+  if(proxWrap){
+    var proxDia=null;
+    for(var i=1;i<=7;i++){
+      var dow=(dowHoje+i)%7;
+      var dk=diasMap[dow].key;
+      var h=horarios[dk];
+      if(h&&!h.folga&&h.entrada&&h.saida){
+        proxDia={dow:dow,label:diasNomes[dow],entrada:h.entrada,saida:h.saida};
+        break;
+      }
+    }
+    if(proxDia){
+      proxWrap.innerHTML='<div style="background:linear-gradient(135deg,rgba(212,168,67,0.08),rgba(212,168,67,0.03));border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:14px;margin-bottom:8px;">'+
+        '<div style="font-size:0.6rem;color:var(--gold);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Próximo dia de trabalho</div>'+
+        '<div style="font-weight:700;font-size:0.95rem;margin-bottom:2px;">'+proxDia.label+'</div>'+
+        '<div style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:0.05em;">'+proxDia.entrada+' — '+proxDia.saida+'</div>'+
+      '</div>';
+    } else {
+      proxWrap.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;padding:12px;">Nenhum turno encontrado.</div>';
+    }
+  }
 }
 
 function diasUteisMes(){

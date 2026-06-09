@@ -464,6 +464,7 @@ body{
   cursor:pointer;transition:all 0.2s;letter-spacing:0.04em;
 }
 .perfil-sair-btn:active{background:rgba(231,76,60,0.15);}
+@keyframes spin{to{transform:rotate(360deg);}}
 
 /* ═══ NAV BOTTOM ═══ */
 .nav-bottom{
@@ -676,8 +677,8 @@ body{
 
   <!-- HEADER -->
   <div class="app-header">
-    <div class="header-avatar" id="header-avatar">👤</div>
-    <div class="header-info">
+    <div class="header-avatar" id="header-avatar" onclick="abrirPerfil()" style="cursor:pointer;">👤</div>
+    <div class="header-info" onclick="abrirPerfil()" style="cursor:pointer;">
       <div class="header-greeting" id="header-greeting">Bom dia,</div>
       <div class="header-name" id="header-name">—</div>
     </div>
@@ -848,6 +849,75 @@ body{
       </button>
     </div>
   </nav>
+</div>
+
+<!-- Modal Perfil / Resumo Financeiro -->
+<div id="modal-perfil" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:500;align-items:flex-end;justify-content:center;">
+  <div id="modal-perfil-sheet" style="background:linear-gradient(160deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:0 0 40px;max-height:90vh;overflow-y:auto;transform:translateY(100%);transition:transform 0.32s cubic-bezier(0.32,0.72,0,1);">
+    <!-- Handle -->
+    <div style="padding:12px 0 0;display:flex;justify-content:center;"><div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;"></div></div>
+    <!-- Perfil Header -->
+    <div class="perfil-header">
+      <div class="perfil-avatar" id="perfil-avatar">👤</div>
+      <div class="perfil-nome" id="perfil-nome">—</div>
+      <div class="perfil-cargo-badge" id="perfil-cargo">Funcionário</div>
+    </div>
+    <!-- Conteúdo -->
+    <div style="padding:0 18px;">
+      <!-- Carga horária -->
+      <div class="perfil-item">
+        <div class="pi-icon">⏱️</div>
+        <div class="pi-info">
+          <div class="pi-label">Carga diária</div>
+          <div class="pi-val" id="perfil-carga">—</div>
+        </div>
+      </div>
+
+      <!-- Título da seção financeira -->
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.1em;color:var(--gold);margin:18px 0 10px;display:flex;align-items:center;gap:8px;">
+        💼 <span>Resumo do Mês</span>
+        <span id="perfil-mes-label" style="font-size:0.7rem;font-weight:400;font-family:'Space Grotesk',sans-serif;color:var(--muted);letter-spacing:0.04em;"></span>
+      </div>
+
+      <!-- Cards: Vales, Faltas, Feriados -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+        <!-- Vales -->
+        <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:12px;padding:12px 10px;text-align:center;">
+          <div style="font-size:1.2rem;margin-bottom:4px;">💰</div>
+          <div id="perfil-vales-val" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.04em;color:#4ade80;line-height:1.1;">R$0</div>
+          <div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;">Vales</div>
+        </div>
+        <!-- Faltas -->
+        <div style="background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.2);border-radius:12px;padding:12px 10px;text-align:center;">
+          <div style="font-size:1.2rem;margin-bottom:4px;">❌</div>
+          <div id="perfil-faltas-val" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.04em;color:#f87171;line-height:1.1;">0</div>
+          <div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;">Faltas</div>
+        </div>
+        <!-- Feriados trabalhados -->
+        <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:12px 10px;text-align:center;">
+          <div style="font-size:1.2rem;margin-bottom:4px;">🏛️</div>
+          <div id="perfil-feriados-val" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.04em;color:#f59e0b;line-height:1.1;">0</div>
+          <div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;">Feriados</div>
+        </div>
+      </div>
+
+      <!-- Lista detalhada (carregada dinamicamente) -->
+      <div id="perfil-detalhes-loading" style="text-align:center;padding:16px;color:var(--muted);font-size:0.78rem;display:none;">
+        <div style="width:20px;height:20px;border:2px solid rgba(212,168,67,0.3);border-top-color:var(--gold);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 8px;"></div>
+        Buscando dados...
+      </div>
+      <div id="perfil-detalhes"></div>
+
+      <!-- Atestados -->
+      <div id="perfil-atestados-wrap" style="display:none;">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#4a9ef7;margin:16px 0 8px;">🩺 Atestados</div>
+        <div id="perfil-atestados-lista"></div>
+      </div>
+
+      <!-- Sair -->
+      <button class="perfil-sair-btn" onclick="fecharPerfil();fazerLogout();">🚪 Sair da conta</button>
+    </div>
+  </div>
 </div>
 
 <!-- Modal ação (trabalhando: intervalo ou saída) -->
@@ -2074,6 +2144,205 @@ function toggleTarefaItemClData(tarefaId, itemId, el){
     // Reverte UI se falhou
     carregarTarefas();
   });
+}
+
+// ── PERFIL / RESUMO FINANCEIRO ──
+function abrirPerfil(){
+  var m=document.getElementById('modal-perfil');
+  var sh=document.getElementById('modal-perfil-sheet');
+  if(!m||!sh)return;
+  m.style.display='flex';
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      sh.style.transform='translateY(0)';
+    });
+  });
+  carregarResumoFunc();
+}
+
+function fecharPerfil(){
+  var m=document.getElementById('modal-perfil');
+  var sh=document.getElementById('modal-perfil-sheet');
+  if(!sh)return;
+  sh.style.transform='translateY(100%)';
+  setTimeout(function(){ if(m) m.style.display='none'; },320);
+}
+
+// Fecha ao tocar no overlay
+document.addEventListener('DOMContentLoaded',function(){
+  var m=document.getElementById('modal-perfil');
+  if(m) m.addEventListener('click',function(e){ if(e.target===m) fecharPerfil(); });
+});
+
+function _fmtMoney(v){
+  var n=parseFloat(v);
+  if(isNaN(n))return'R$ 0,00';
+  return'R$\u00a0'+n.toFixed(2).replace('.',',');
+}
+function _fmtDataBR(iso){
+  if(!iso)return'—';
+  var p=iso.split('-');
+  return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso;
+}
+
+function carregarResumoFunc(){
+  if(!_func||!fbDb)return;
+  var loading=document.getElementById('perfil-detalhes-loading');
+  var det=document.getElementById('perfil-detalhes');
+  if(loading)loading.style.display='block';
+  if(det)det.innerHTML='';
+
+  // Atualiza label do mês
+  var agora=new Date();
+  var meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var mesLabel=meses[agora.getMonth()]+' '+agora.getFullYear();
+  var mesEl=document.getElementById('perfil-mes-label');
+  if(mesEl)mesEl.textContent='— '+mesLabel;
+
+  // Chave de mês igual ao app principal
+  var vfKey=agora.getFullYear()+'-'+(agora.getMonth()<9?'0':'')+(agora.getMonth()+1);
+  var funcId=_func.id; // ID do doc em ponto_funcionarios (= ID no app principal quando adicionado via pontoAddFuncRapido)
+
+  // Busca vfData do app principal (mesma base Firebase)
+  fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
+    var tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
+    var vfRef;
+    if(tenantId){
+      vfRef=fbDb.collection('tenants').doc(tenantId).collection('configuracoes').doc('vfData');
+    } else {
+      vfRef=fbDb.collection('configuracoes').doc('vfData');
+    }
+    return vfRef.get();
+  }).then(function(snap){
+    if(loading)loading.style.display='none';
+    if(!snap||!snap.exists){
+      _renderResumoVazio();
+      return;
+    }
+    var allVf=snap.data().data||{};
+    var mesData=allVf[vfKey];
+
+    // Tenta pelo ID do doc de ponto (= funcId no app principal quando sincronizado)
+    var dados=mesData&&mesData[funcId];
+
+    // Se não achou pelo ID, tenta casar pelo nome
+    if(!dados&&mesData){
+      var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
+      Object.keys(mesData).forEach(function(k){
+        if(!dados){
+          // Precisaria carregar o funcionário do app principal pra comparar nome
+          // Tentativa alternativa: funcId numérico pode ter sido salvo como string
+          if(String(k)===String(funcId)) dados=mesData[k];
+        }
+      });
+    }
+
+    if(!dados){ _renderResumoVazio(); return; }
+
+    var vales=dados.vales||[];
+    var faltas=(dados.faltas||[]).filter(function(f){return !f.atestado;});
+    var atestados=(dados.faltas||[]).filter(function(f){return f.atestado;});
+    var feriados=dados.feriados||[];
+
+    // Totais
+    var totalVales=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
+    var totalFaltas=faltas.length;
+    var totalFeriados=feriados.length;
+
+    var vEl=document.getElementById('perfil-vales-val');
+    var fEl=document.getElementById('perfil-faltas-val');
+    var feEl=document.getElementById('perfil-feriados-val');
+    if(vEl)vEl.textContent=_fmtMoney(totalVales);
+    if(fEl)fEl.textContent=totalFaltas;
+    if(feEl)feEl.textContent=totalFeriados;
+
+    // Detalhes
+    var html='';
+
+    // Lista de vales
+    if(vales.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#4ade80;margin:16px 0 8px;">💰 Vales ('+vales.length+')</div>';
+      vales.forEach(function(v){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(v.desc||'Vale')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(v.data)+'</div>'+
+          '</div>'+
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;color:#4ade80;letter-spacing:0.04em;">'+_fmtMoney(v.val)+'</div>'+
+        '</div>';
+      });
+    }
+
+    // Lista de faltas
+    if(faltas.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f87171;margin:16px 0 8px;">❌ Faltas ('+faltas.length+')</div>';
+      faltas.forEach(function(f){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(248,113,113,0.05);border:1px solid rgba(248,113,113,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(f.desc||'Falta')+(f.horas?' ('+f.horas+'h parcial)':'')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(f.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:1rem;">'+(f.horas?'⏰':'❌')+'</div>'+
+        '</div>';
+      });
+    }
+
+    // Lista de feriados trabalhados
+    if(feriados.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f59e0b;margin:16px 0 8px;">🏛️ Feriados trabalhados ('+feriados.length+')</div>';
+      feriados.forEach(function(fe){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(fe.desc||'Feriado')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(fe.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:1rem;">🏛️</div>'+
+        '</div>';
+      });
+    }
+
+    if(!html){
+      html='<div style="text-align:center;padding:16px;color:var(--muted);font-size:0.8rem;">Nenhum lançamento neste mês.</div>';
+    }
+
+    if(det)det.innerHTML=html;
+
+    // Atestados
+    var atWrap=document.getElementById('perfil-atestados-wrap');
+    var atLista=document.getElementById('perfil-atestados-lista');
+    if(atestados.length&&atWrap&&atLista){
+      atWrap.style.display='block';
+      var atHtml='';
+      atestados.forEach(function(a){
+        atHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,158,247,0.05);border:1px solid rgba(74,158,247,0.15);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(a.desc||'Atestado')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(a.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:0.72rem;color:#4a9ef7;font-weight:700;background:rgba(74,158,247,0.1);padding:3px 8px;border-radius:20px;">ATESTADO</div>'+
+        '</div>';
+      });
+      atLista.innerHTML=atHtml;
+    } else if(atWrap){
+      atWrap.style.display='none';
+    }
+
+  }).catch(function(e){
+    if(loading)loading.style.display='none';
+    console.warn('[Perfil] Erro ao buscar vfData:',e);
+    _renderResumoVazio();
+  });
+}
+
+function _renderResumoVazio(){
+  var vEl=document.getElementById('perfil-vales-val');
+  var fEl=document.getElementById('perfil-faltas-val');
+  var feEl=document.getElementById('perfil-feriados-val');
+  if(vEl)vEl.textContent='R$0';
+  if(fEl)fEl.textContent='0';
+  if(feEl)feEl.textContent='0';
+  var det=document.getElementById('perfil-detalhes');
+  if(det)det.innerHTML='<div style="text-align:center;padding:16px;color:var(--muted);font-size:0.8rem;">Nenhum lançamento encontrado para este mês.</div>';
 }
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

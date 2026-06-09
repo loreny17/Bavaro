@@ -2199,45 +2199,75 @@ function carregarResumoFunc(){
   var mesEl=document.getElementById('perfil-mes-label');
   if(mesEl)mesEl.textContent='— '+mesLabel;
 
-  // Chave de mês igual ao app principal
-  var vfKey=agora.getFullYear()+'-'+(agora.getMonth()<9?'0':'')+(agora.getMonth()+1);
-  var funcId=_func.id; // ID do doc em ponto_funcionarios (= ID no app principal quando adicionado via pontoAddFuncRapido)
+  // Chave de mês igual ao app principal: "2025-06"
+  var vfKey=agora.getFullYear()+'-'+pad(agora.getMonth()+1);
+  var funcId=_func.id;
+  var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
 
-  // Busca vfData do app principal (mesma base Firebase)
+  var tenantId=null;
+
+  // Passo 1: pegar tenantId e restauranteId salvo
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
-    var tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
-    var vfRef;
-    if(tenantId){
-      vfRef=fbDb.collection('tenants').doc(tenantId).collection('configuracoes').doc('vfData');
-    } else {
-      vfRef=fbDb.collection('configuracoes').doc('vfData');
-    }
-    return vfRef.get();
-  }).then(function(snap){
+    tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
+    var restId=cfgDoc.exists?cfgDoc.data().restauranteId:null;
+    var base=tenantId
+      ?fbDb.collection('tenants').doc(tenantId)
+      :fbDb;
+
+    // Passo 2: buscar vfData E funcionários do app principal em paralelo
+    // Tenta coleção raiz de funcionários e também sub-coleção de restaurante se houver
+    var vfRef=base.collection('configuracoes').doc('vfData');
+    var funcsRef=base.collection('funcionarios');
+    var funcsRestRef=restId
+      ?base.collection('restaurantes').doc(restId).collection('funcionarios')
+      :null;
+    var promises=[vfRef.get(), funcsRef.get()];
+    if(funcsRestRef) promises.push(funcsRestRef.get());
+    return Promise.all(promises);
+
+  }).then(function(results){
     if(loading)loading.style.display='none';
-    if(!snap||!snap.exists){
-      _renderResumoVazio();
-      return;
-    }
-    var allVf=snap.data().data||{};
+    var vfSnap=results[0];
+    var funcsSnap=results[1];
+    var funcsRestSnap=results[2]||null;
+
+    if(!vfSnap||!vfSnap.exists){ _renderResumoVazio(); return; }
+
+    var allVf=vfSnap.data().data||{};
     var mesData=allVf[vfKey];
+    if(!mesData){ _renderResumoVazio(); return; }
 
-    // Tenta pelo ID do doc de ponto (= funcId no app principal quando sincronizado)
-    var dados=mesData&&mesData[funcId];
+    // --- Estratégia 1: ID direto (funcId do ponto == ID no app principal) ---
+    var dados=mesData[funcId]||mesData[String(funcId)];
 
-    // Se não achou pelo ID, tenta casar pelo nome
-    if(!dados&&mesData){
-      var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
-      Object.keys(mesData).forEach(function(k){
-        if(!dados){
-          // Precisaria carregar o funcionário do app principal pra comparar nome
-          // Tentativa alternativa: funcId numérico pode ter sido salvo como string
-          if(String(k)===String(funcId)) dados=mesData[k];
+    // --- Estratégia 2: casar por nome com a lista de funcionários do app principal ---
+    // Combina funcionários de ambas as coleções
+    var todosFuncs=[];
+    if(funcsSnap&&!funcsSnap.empty) funcsSnap.forEach(function(d){todosFuncs.push(d);});
+    if(funcsRestSnap&&!funcsRestSnap.empty) funcsRestSnap.forEach(function(d){todosFuncs.push(d);});
+
+    if(!dados && todosFuncs.length){
+      var primeiroNome=nomeFunc.split(' ')[0];
+      todosFuncs.forEach(function(fdoc){
+        if(dados)return;
+        var fdata=fdoc.data();
+        var nomeApp=(fdata.nome||'').toLowerCase().trim();
+        var bate=(nomeApp===nomeFunc)
+               ||(nomeApp && nomeFunc && nomeApp.includes(nomeFunc))
+               ||(nomeApp && nomeFunc && nomeFunc.includes(nomeApp))
+               ||(primeiroNome.length>2 && nomeApp.startsWith(primeiroNome));
+        if(bate && mesData[fdoc.id]){
+          dados=mesData[fdoc.id];
+          console.log('[Perfil] casou por nome:',fdata.nome,'->',fdoc.id);
         }
       });
     }
 
-    if(!dados){ _renderResumoVazio(); return; }
+    if(!dados){
+      console.warn('[Perfil] não achou dados para funcId='+funcId+' nome='+nomeFunc+' keys=',Object.keys(mesData));
+      _renderResumoVazio();
+      return;
+    }
 
     var vales=dados.vales||[];
     var faltas=(dados.faltas||[]).filter(function(f){return !f.atestado;});

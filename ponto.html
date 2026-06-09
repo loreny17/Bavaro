@@ -1098,8 +1098,14 @@ function fazerLogin(){
   fbDb.collection('ponto_funcionarios').where('nomeLogin','==',nome.toLowerCase()).limit(1).get()
     .then(function(snap){
       if(snap.empty){
-        return fbDb.collection('ponto_funcionarios').where('nomeLogin','==',nome.toLowerCase().replace(/\s+/g,'-')).limit(1).get()
-          .then(function(s2){return s2.empty?null:s2.docs[0];});
+        // Fallback: tenta com o nome original (caso antigo sem lowercase)
+        return fbDb.collection('ponto_funcionarios').where('nomeLogin','==',nome).limit(1).get()
+          .then(function(s2){
+            if(!s2.empty) return s2.docs[0];
+            // Fallback 2: tenta pelo campo nome (case-insensitive simulado)
+            return fbDb.collection('ponto_funcionarios').where('nome','==',nome).limit(1).get()
+              .then(function(s3){return s3.empty?null:s3.docs[0];});
+          });
       }
       return snap.docs[0];
     })

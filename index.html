@@ -11639,20 +11639,25 @@ function authBootstrapTenant(){
     var loadingEl = document.getElementById('auth-tela-loading');
     var loginEl = document.getElementById('auth-tela-login');
     var resetEl = document.getElementById('auth-tela-reset');
-    if(overlay) overlay.classList.remove('hidden');
-    if(loadingEl) loadingEl.style.display = 'block';
-    if(loginEl) loginEl.style.display = 'none';
-    if(resetEl) resetEl.style.display = 'none';
+    // Só mostra loading se o overlay não estava escondido (evita flash)
+    var overlayJaEscondido = overlay && overlay.classList.contains('hidden');
+    if(!overlayJaEscondido){
+      if(overlay) overlay.classList.remove('hidden');
+      if(loadingEl) loadingEl.style.display = 'block';
+      if(loginEl) loginEl.style.display = 'none';
+      if(resetEl) resetEl.style.display = 'none';
+    }
 
-    // Timeout de 12s — se não responder, é erro de regras
+    // Timeout reduzido de 12s → 5s
     var resolved = false;
     var timeout = setTimeout(function(){
       if(resolved) return;
       console.warn('[Tenant] Timeout — verifique regras Firestore');
-      var msg = 'Tempo esgotado. Verifique:\n\n1. Regras do Firestore permitem leitura em users/{uid}\n2. Sua internet está OK';
-      alert('⚠️ '+msg);
+      resolved = true;
+      clearTimeout(timeout);
+      // Não bloqueia com alert — só loga e rejeita
       reject(new Error('Timeout ao buscar tenant'));
-    }, 12000);
+    }, 5000);
 
     // OTIMIZAÇÃO: usa tenantId em cache pra pular requests sequenciais
     var cachedTenantId = null;
@@ -11682,27 +11687,23 @@ function authBootstrapTenant(){
     fbDb.collection('users').doc(uid).get().then(function(doc){
       console.log('[Tenant] users/'+uid+' exists?', doc.exists);
       if(doc.exists && doc.data() && doc.data().tenantId){
-        // Usuário já tem tenant
         _userDoc = doc.data();
         _tenantId = _userDoc.tenantId;
-        // Salva cache para próximo login
         try{
           localStorage.setItem('bavaro_tenant_id', _tenantId);
           localStorage.setItem('bavaro_user_doc', JSON.stringify(_userDoc));
         }catch(e){}
         console.log('[Tenant] Usuário existente, tenantId=', _tenantId);
-        // Carrega info do tenant
-        return fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
-          if(tDoc.exists){
-            _userDoc.tenantInfo = tDoc.data();
-          }
-          clearTimeout(timeout);
-          resolved = true;
-          // Esconde tela de auth completamente
-          if(overlay) overlay.classList.add('hidden');
-          if(loadingEl) loadingEl.style.display = 'none';
-          resolve(true);
-        });
+        // Resolve imediatamente — não espera carregar info do tenant
+        clearTimeout(timeout);
+        resolved = true;
+        if(overlay) overlay.classList.add('hidden');
+        if(loadingEl) loadingEl.style.display = 'none';
+        resolve(true);
+        // Carrega info do tenant em background
+        fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
+          if(tDoc.exists){ _userDoc.tenantInfo = tDoc.data(); }
+        }).catch(function(){});
       } else {
         // Primeiro acesso — mostra tela de boas-vindas pra criar tenant
         console.log('[Tenant] Primeiro acesso, mostrando boas-vindas');
@@ -13458,12 +13459,12 @@ function abrirPickerPDFIndividual(){
     var dias=Object.keys(porDia).length;
     var totMin=0;
     Object.values(porDia).forEach(function(rd){totMin+=_pCalcH(rd,'fora');});
-    return '<button onclick="gerarPDFIndividualUm(''+f.id+'')" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.12);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left;">'+
+    return '<button onclick="gerarPDFIndividualUm(\''+f.id+'\')" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.12);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left;">'+
       '<div>'+
         '<div style="font-weight:700;font-size:0.9rem;color:#f0f0f0;">'+nome+'</div>'+
         '<div style="font-size:0.68rem;color:#666;margin-top:2px;">'+cargo+' · '+dias+' dias · '+_pFmtMin(totMin)+'</div>'+
       '</div>'+
-      '<div style="font-family:'Bebas Neue',sans-serif;font-size:0.85rem;letter-spacing:0.06em;color:var(--accent);">PDF →</div>'+
+      '<div style="font-family:&quot;Bebas Neue&quot;,sans-serif;font-size:0.85rem;letter-spacing:0.06em;color:var(--accent);">PDF &#8594;</div>'+
     '</button>';
   }).join('');
 

@@ -1758,7 +1758,7 @@ body.admin-mode .admin-only{display:flex!important;}
         <button onclick="gerarPDFGeralContab('resumo')" style="padding:13px 8px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:0.88rem;letter-spacing:0.08em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           📊 RESUMO GERAL
         </button>
-        <button onclick="gerarPDFGeralContab('individual')" style="padding:13px 8px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:0.88rem;letter-spacing:0.08em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <button onclick="abrirPickerPDFIndividual()" style="padding:13px 8px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:0.88rem;letter-spacing:0.08em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           👤 INDIVIDUAL
         </button>
       </div>
@@ -1783,6 +1783,17 @@ body.admin-mode .admin-only{display:flex!important;}
 </div>
 
 <!-- MODAL -->
+<!-- Modal picker PDF individual -->
+<div id="modal-pdf-individual" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:1200;align-items:flex-end;justify-content:center;">
+  <div style="background:linear-gradient(160deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 18px 44px;max-height:80vh;overflow-y:auto;">
+    <div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px;"></div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.1em;color:var(--accent);margin-bottom:4px;">👤 Escolher Funcionário</div>
+    <div style="font-size:0.74rem;color:var(--muted);margin-bottom:16px;">Selecione para gerar o PDF individual do período.</div>
+    <div id="pdf-ind-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+    <button onclick="document.getElementById('modal-pdf-individual').style.display='none'" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:10px;padding:12px;font-family:'Space Grotesk',sans-serif;font-size:0.85rem;cursor:pointer;">Cancelar</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-overlay" onclick="fecharModalClick(event)">
   <div class="modal-sheet"><div class="modal-handle"></div><div id="modal-content"></div></div>
 </div>
@@ -13394,6 +13405,75 @@ function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome, modo){
   var nomeArq=(modo==='resumo'?'Ponto_Resumo_Geral_':'Ponto_Individual_')+mesNome.replace(' ','_')+'.pdf';
   doc.save(nomeArq);
   showToast('PDF gerado com sucesso! ✓');
+}
+
+
+function abrirPickerPDFIndividual(){
+  var ini=(document.getElementById('pbanco-ini')||{}).value||'';
+  var fim=(document.getElementById('pbanco-fim')||{}).value||'';
+  if(!ini||!fim){ showToast('Selecione o período primeiro','#f7a34f'); return; }
+  if(!_pFuncs||!_pFuncs.length){ showToast('Nenhum funcionário carregado','#f7a34f'); return; }
+
+  var lista=document.getElementById('pdf-ind-lista');
+  lista.innerHTML=_pFuncs.map(function(f){
+    var nome=f.nome||f.nomeLogin||'—';
+    var cargo=f.cargo||'Funcionário';
+    var rf=_pRegs.filter(function(r){return r.funcId===f.id&&r.diaKey>=ini&&r.diaKey<=fim;});
+    var porDia={};
+    rf.forEach(function(r){if(!porDia[r.diaKey])porDia[r.diaKey]=[];porDia[r.diaKey].push(r);});
+    var dias=Object.keys(porDia).length;
+    var totMin=0;
+    Object.values(porDia).forEach(function(rd){totMin+=_pCalcH(rd,'fora');});
+    return '<button onclick="gerarPDFIndividualUm(''+f.id+'')" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.12);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left;">'+
+      '<div>'+
+        '<div style="font-weight:700;font-size:0.9rem;color:#f0f0f0;">'+nome+'</div>'+
+        '<div style="font-size:0.68rem;color:#666;margin-top:2px;">'+cargo+' · '+dias+' dias · '+_pFmtMin(totMin)+'</div>'+
+      '</div>'+
+      '<div style="font-family:'Bebas Neue',sans-serif;font-size:0.85rem;letter-spacing:0.06em;color:var(--accent);">PDF →</div>'+
+    '</button>';
+  }).join('');
+
+  document.getElementById('modal-pdf-individual').style.display='flex';
+  document.getElementById('modal-pdf-individual').onclick=function(e){
+    if(e.target===this) this.style.display='none';
+  };
+}
+
+function gerarPDFIndividualUm(funcId){
+  document.getElementById('modal-pdf-individual').style.display='none';
+  var ini=(document.getElementById('pbanco-ini')||{}).value||'';
+  var fim=(document.getElementById('pbanco-fim')||{}).value||'';
+  var jsPDF=(window.jspdf&&window.jspdf.jsPDF)||(typeof jspdf!=='undefined'&&jspdf.jsPDF)||null;
+  if(!jsPDF){ showToast('PDF ainda carregando, aguarde...','#f7a34f'); return; }
+
+  var f=_pFuncs.find(function(x){return x.id===funcId;});
+  if(!f) return;
+
+  var parIni=ini.split('-');
+  var meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var mesNome=meses[parseInt(parIni[1])-1]+' '+parIni[0];
+  function fmtDataBR(s){ var p=s.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+  var periodoLabel=fmtDataBR(ini)+' a '+fmtDataBR(fim);
+  var diasP=_pDiasUteis(ini,fim);
+
+  var carga=f.cargaMin||CARGA_PADRAO_PONTO;
+  var rf=_pRegs.filter(function(r){return r.funcId===f.id&&r.diaKey>=ini&&r.diaKey<=fim;}).sort(function(a,b){return a.ts-b.ts;});
+  var porDia={};
+  rf.forEach(function(r){if(!porDia[r.diaKey])porDia[r.diaKey]=[];porDia[r.diaKey].push(r);});
+  var dias=Object.keys(porDia).sort();
+  var totMin=0;
+  dias.forEach(function(dk){totMin+=_pCalcH(porDia[dk],'fora');});
+  var saldo=totMin-(diasP*carga);
+
+  var mesKey=parIni[0]+'-'+parIni[1];
+  var vfd=vfData[mesKey]&&vfData[mesKey][f.id];
+  var totalVales=0;
+  if(vfd&&vfd.vales) vfd.vales.forEach(function(v){totalVales+=parseFloat(v.val||0);});
+  var totalFaltas=vfd?((vfd.faltas||[]).filter(function(x){return !x.atestado;}).length):0;
+  var totalFeriados=vfd?(vfd.feriados||[]).length:0;
+
+  var dadosFuncs=[{func:f,porDia:porDia,dias:dias,totMin:totMin,saldo:saldo,diasP:diasP,carga:carga,totalVales:totalVales,totalFaltas:totalFaltas,totalFeriados:totalFeriados}];
+  _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome, 'individual');
 }
 
 

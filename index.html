@@ -1754,9 +1754,14 @@ body.admin-mode .admin-only{display:flex!important;}
         <button onclick="pBancoMes()" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:0.74rem;font-weight:700;cursor:pointer;">Este mês</button>
       </div>
       <div id="ponto-banco-lista"></div>
-      <button onclick="gerarPDFGeralContab()" style="width:100%;margin-top:14px;padding:14px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:0.1em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-        📄 EXPORTAR PDF PARA CONTABILIDADE
-      </button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px;">
+        <button onclick="gerarPDFGeralContab('resumo')" style="padding:13px 8px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:0.88rem;letter-spacing:0.08em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          📊 RESUMO GERAL
+        </button>
+        <button onclick="gerarPDFGeralContab('individual')" style="padding:13px 8px;background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.07));border:1px solid rgba(212,168,67,0.35);border-radius:12px;color:var(--accent);font-family:'Bebas Neue',sans-serif;font-size:0.88rem;letter-spacing:0.08em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          👤 INDIVIDUAL
+        </button>
+      </div>
     </div>
 
     <!-- CONFIG -->
@@ -13046,7 +13051,7 @@ function _pEsc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'
 // ── PDF CONTABILIDADE ──
 // ══════════════════════════════════════════════════════════
 
-function gerarPDFGeralContab(){
+function gerarPDFGeralContab(modo){
   var ini=(document.getElementById('pbanco-ini')||{}).value||'';
   var fim=(document.getElementById('pbanco-fim')||{}).value||'';
   if(!ini||!fim){ showToast('Selecione o período primeiro','#f7a34f'); return; }
@@ -13084,10 +13089,10 @@ function gerarPDFGeralContab(){
   var parIniMes=ini.split('-');
   var mesNome=meses[parseInt(parIniMes[1])-1]+' '+parIniMes[0];
 
-  _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome);
+  _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome, modo||'resumo');
 }
 
-function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome){
+function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome, modo){
   var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
   var pw=210, ph=297, mg=12;
   var GOLD=[212,168,67], DARK=[15,12,3], WHITE=[240,240,240], GRAY=[110,110,110];
@@ -13127,7 +13132,10 @@ function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome){
   }
 
   // ── PÁGINA 1: RESUMO GERAL ──
-  var y=cabecalho('Resumo Geral da Equipe · '+dadosFuncs.length+' funcionários');
+  var y;
+  if(modo==='resumo') y=cabecalho('Resumo Geral da Equipe · '+dadosFuncs.length+' funcionários');
+  else y=cabecalho('Detalhes Individuais · '+dadosFuncs.length+' funcionários');
+  if(modo==='resumo'){
 
   // Título seção
   doc.setFontSize(9);
@@ -13211,10 +13219,11 @@ function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome){
   doc.setTextColor(ORANGE[0],ORANGE[1],ORANGE[2]);
   doc.text(String(gtFeriados),cx[6]+2,y+6);
   y+=14;
+  } // fim if resumo
 
   // ── PÁGINAS INDIVIDUAIS: um por funcionário ──
-  dadosFuncs.forEach(function(d){
-    doc.addPage();
+  if(modo!=='resumo') dadosFuncs.forEach(function(d,_di){
+    if(_di>0) doc.addPage();
     y=cabecalho('Detalhado por Funcionário');
 
     // Card nome
@@ -13382,7 +13391,7 @@ function _construirPDFContab(jsPDF, dadosFuncs, periodoLabel, mesNome){
     doc.text('Funcionário App · Relatório de Ponto para Contabilidade · '+periodoLabel+' · Pág. '+pg+'/'+totalPags, pw/2, ph-4, {align:'center'});
   }
 
-  var nomeArq='Ponto_Contabilidade_'+mesNome.replace(' ','_')+'.pdf';
+  var nomeArq=(modo==='resumo'?'Ponto_Resumo_Geral_':'Ponto_Individual_')+mesNome.replace(' ','_')+'.pdf';
   doc.save(nomeArq);
   showToast('PDF gerado com sucesso! ✓');
 }

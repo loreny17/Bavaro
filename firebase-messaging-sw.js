@@ -1,6 +1,6 @@
 // firebase-messaging-sw.js
 // Service Worker para notificações push com app fechado
-// ⚠️  Salvar na RAIZ do projeto Vercel (mesmo nível de ponto.html)
+// ⚠️  Salvar na RAIZ do projeto Vercel (mesmo nível de ponto.html e index.html)
 
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
@@ -16,26 +16,29 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Notificação recebida com app FECHADO
+// Notificação recebida com app FECHADO (background)
 messaging.onBackgroundMessage(function(payload) {
   console.log('[SW] Notificação background:', payload);
   const data = payload.data || payload.notification || {};
-  const notifTitle = data.title || 'Bávaro Ponto';
-  const notifBody  = data.body  || '';
+  const notifTitle = data.title || payload.notification && payload.notification.title || 'Bávaro Ponto';
+  const notifBody  = data.body  || payload.notification && payload.notification.body  || '';
   const notifTag   = data.tag   || 'ponto';
 
+  // Descobre de qual app veio pela URL do cliente
+  const targetUrl = data.url || '/ponto.html';
+
   return self.registration.showNotification(notifTitle, {
-    body: notifBody,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    vibrate: [200, 100, 200],
-    tag: notifTag,
+    body:              notifBody,
+    icon:              '/icon-192.png',
+    badge:             '/icon-192.png',
+    vibrate:           [200, 100, 200],
+    tag:               notifTag,
     requireInteraction: true,
-    data: { url: data.url || '/ponto.html' }
+    data: { url: targetUrl }
   });
 });
 
-// Clique na notificação → abre o app
+// Clique na notificação → abre o app correto
 self.addEventListener('notificationclick', function(e) {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/ponto.html';
@@ -47,4 +50,12 @@ self.addEventListener('notificationclick', function(e) {
       return clients.openWindow(url);
     })
   );
+});
+
+// Garante que o SW novo assume o controle imediatamente
+self.addEventListener('install', function(e) {
+  self.skipWaiting();
+});
+self.addEventListener('activate', function(e) {
+  e.waitUntil(clients.claim());
 });

@@ -2424,41 +2424,44 @@ function ativarNotificacoes(){
 }
 
 function notifRegistrarFCM(){
-  if(!('serviceWorker' in navigator)) return;
+  if(!('serviceWorker' in navigator)){ showToast('❌ SW não suportado', true); return; }
   var VAPID_KEY = 'BNGe1o--iQ5F3VolwBll8G9jr-tnQKeC6vVvpfIFLh-gOoyOvzpWfN88IYuFGanUEuADebkDoyJDjk0806JOEsU';
 
-  // Carrega o SDK do Firebase Messaging de forma lazy (não bloqueia o app)
   function registrarComSDK(){
+    showToast('⏳ Registrando FCM...');
     try{
       var messaging = firebase.messaging();
-      navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
-        .then(function(reg){
-          return messaging.getToken({
-            vapidKey: VAPID_KEY,
-            serviceWorkerRegistration: reg
-          });
-        })
-        .then(function(token){
-          if(!token){ console.warn('[FCM] Token não gerado'); return; }
-          console.log('[FCM] Token obtido');
+      // Tenta pegar SW já registrado primeiro
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        showToast('🔍 SWs: ' + regs.length);
+        // Usa o firebase-messaging-sw.js se já registrado, senão registra
+        var fmReg = regs.find(function(r){ return r.active && r.active.scriptURL && r.active.scriptURL.includes('firebase-messaging-sw'); });
+        var regPromise = fmReg
+          ? Promise.resolve(fmReg)
+          : navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        regPromise.then(function(reg){
+          showToast('✅ SW ok, pegando token...');
+          return messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+        }).then(function(token){
+          if(!token){ showToast('❌ Token vazio', true); return; }
+          showToast('✅ Token gerado!');
           if(_func && fbDb){
             fbDb.collection('ponto_funcionarios').doc(_func.id).update({
               fcmToken: token,
               fcmTokenAtualizadoEm: Date.now()
-            }).catch(function(){});
+            }).then(function(){ showToast('🔔 Notificações ativas!'); })
+              .catch(function(e){ showToast('❌ Erro ao salvar: '+e.message, true); });
           }
-        })
-        .catch(function(e){ console.warn('[FCM] Erro:', e.message); });
-    }catch(e){ console.warn('[FCM] SDK erro:', e.message); }
+        }).catch(function(e){ showToast('❌ FCM erro: '+e.message, true); });
+      });
+    }catch(e){ showToast('❌ SDK erro: '+e.message, true); }
   }
 
-  // Se SDK já carregado, usa direto
   if(typeof firebase !== 'undefined' && firebase.messaging){
     registrarComSDK();
     return;
   }
 
-  // Carrega SDK dinamicamente
   var script = document.createElement('script');
   script.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js';
   script.onload = function(){ setTimeout(registrarComSDK, 500); };

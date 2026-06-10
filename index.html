@@ -2229,13 +2229,18 @@ function showTab(tab){
       var n=new Date();
       var bi=document.getElementById('pbanco-ini'); if(bi) bi.value=n.getFullYear()+'-'+_pPad(n.getMonth()+1)+'-01';
       var bf=document.getElementById('pbanco-fim'); if(bf) bf.value=_pDiaKey(n);
-      // Pede permissão de notificação pro gestor
+      // Pede permissão de notificação pro gestor e registra token FCM
       if('Notification' in window && Notification.permission==='default'){
         setTimeout(function(){
           Notification.requestPermission().then(function(p){
-            if(p==='granted') showToast('🔔 Notificações ativadas!');
+            if(p==='granted'){
+              showToast('🔔 Notificações ativadas!');
+              _pRegistrarTokenGestor();
+            }
           });
         },2000);
+      } else if('Notification' in window && Notification.permission==='granted'){
+        _pRegistrarTokenGestor();
       }
     }
     pontoSubTab(_pSubTab);
@@ -13115,6 +13120,22 @@ function pontoSalvarHorarios(){
 
 // ── UTILS PONTO ──
 var _pNotifJaEnviadas={};
+function _pRegistrarTokenGestor(){
+  if(!firebase.messaging) return;
+  var VAPID='BNGe1o--iQ5F3VolwBll8G9jr-tnQKeC6vVvpfIFLh-gOoyOvzpWfN88IYuFGanUEuADebkDoyJDjk0806JOEsU';
+  navigator.serviceWorker.register('/firebase-messaging-sw.js').then(function(reg){
+    return firebase.messaging().getToken({vapidKey:VAPID,serviceWorkerRegistration:reg});
+  }).then(function(token){
+    if(!token) return;
+    // Salva token do gestor para receber alertas de atraso
+    var uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : 'gestor';
+    fbDb.collection('ponto_gestores_tokens').doc(uid).set({
+      fcmToken: token,
+      atualizadoEm: Date.now()
+    }).catch(function(){});
+    console.log('[FCM Gestor] Token registrado');
+  }).catch(function(e){ console.warn('[FCM Gestor]',e.message); });
+}
 function _pNotifGestorAtrasados(qtd){
   if(!('Notification' in window)||Notification.permission!=='granted') return;
   var chave='atrasados_'+_pDiaKey(new Date())+'_'+qtd;

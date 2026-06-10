@@ -3,6 +3,47 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<style>
+/* ─── Trava de orientação: força portrait ─── */
+@media screen and (orientation: landscape) and (max-height: 600px) {
+  #rotate-overlay { display: flex !important; }
+}
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #080808;
+  z-index: 99999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  text-align: center;
+  padding: 24px;
+}
+#rotate-overlay .rot-icon {
+  font-size: 3.5rem;
+  animation: rotAnim 1.6s ease-in-out infinite;
+}
+@keyframes rotAnim {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
+}
+#rotate-overlay .rot-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  letter-spacing: 0.12em;
+  background: linear-gradient(135deg, #f0c060, #d4a843, #b88a20);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+#rotate-overlay .rot-sub {
+  font-size: 0.82rem;
+  color: #6a6050;
+  letter-spacing: 0.06em;
+}
+</style>
 <meta name="theme-color" content="#d4a843">
 <title>PDV Bávaro</title>
 <!-- PWA Manifest do PDV (ícone e nome específicos) -->
@@ -13014,5 +13055,36 @@ function toggleAdminUsuario(garcomId, novoValor){
   </div>
 </div>
 
+<!-- Overlay de rotação — aparece quando o celular está na horizontal -->
+<div id="rotate-overlay">
+  <div class="rot-icon">📱</div>
+  <div class="rot-title">Gire o celular</div>
+  <div class="rot-sub">O PDV funciona apenas na orientação vertical</div>
+</div>
+
+<script>
+/* Tenta travar em portrait via API (funciona em Android Chrome/PWA instalado) */
+(function() {
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('portrait').catch(function(){});
+    }
+  } catch(e) {}
+
+  /* Fallback via CSS + JS para quando a API não está disponível (iOS Safari, etc.) */
+  function checkOrientation() {
+    var overlay = document.getElementById('rotate-overlay');
+    if (!overlay) return;
+    var isLandscape = window.innerWidth > window.innerHeight && window.innerHeight < 600;
+    overlay.style.display = isLandscape ? 'flex' : 'none';
+  }
+
+  window.addEventListener('orientationchange', function() {
+    setTimeout(checkOrientation, 150);
+  });
+  window.addEventListener('resize', checkOrientation);
+  checkOrientation();
+})();
+</script>
 </body>
 </html>

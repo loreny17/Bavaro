@@ -1514,15 +1514,8 @@ function verificarLocalizacaoEAbrirSelfie(){
 
 var _coordsParaRegistro=null;
 
-function _calcDistancia(lat1,lng1,lat2,lng2){
-  var R=6371000; // metros
-  var dLat=(lat2-lat1)*Math.PI/180;
-  var dLng=(lng2-lng1)*Math.PI/180;
-  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
-        Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
-        Math.sin(dLng/2)*Math.sin(dLng/2);
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
+
+var _coordsParaRegistro=null;
 
 function _mostrarBloqueioLocalizacao(dist,raio){
   _acaoPendente=null;
@@ -1536,66 +1529,10 @@ function _mostrarBloqueioLocalizacao(dist,raio){
     '<div style="background:linear-gradient(160deg,#1a0a0a,#0e0808);border:1.5px solid rgba(231,76,60,0.4);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
       '<div style="font-size:3rem;margin-bottom:12px;">🚫</div>'+
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;letter-spacing:0.12em;color:#e74c3c;margin-bottom:8px;">FORA DO LOCAL</div>'+
-      '<div style="font-size:0.84rem;color:var(--text2);line-height:1.6;margin-bottom:6px;">Você está <strong style="color:#e74c3c;">'+distTxt+'</strong> do local de trabalho.</div>'+
+      '<div style="font-size:0.84rem;line-height:1.6;margin-bottom:6px;">Você está <strong style="color:#e74c3c;">'+distTxt+'</strong> do local de trabalho.</div>'+
       '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:20px;">O ponto só pode ser batido dentro de <strong style="color:var(--gold);">'+raio+'m</strong> do local configurado.</div>'+
       '<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:0.7rem;color:#e74c3c;">'+
-        '📍 Se estiver no local correto, aguarde alguns segundos e tente novamente — o GPS pode estar impreciso.'+
-      '</div>'+
-      '<button onclick="document.getElementById(\'modal-loc-bloqueio\').remove()" style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:14px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
-    '</div>';
-  document.body.appendChild(m);
-}
-
-// Verifica localização antes de abrir selfie
-function verificarLocalizacaoEAbrirSelfie(){
-  if(!navigator.geolocation){
-    abrirSelfie();
-    return;
-  }
-  showToast('📍 Verificando localização...', false);
-  navigator.geolocation.getCurrentPosition(
-    function(pos){
-      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
-        if(!doc.exists){ abrirSelfie(); return; }
-        var cfg=doc.data();
-        var dist=_calcDistancia(pos.coords.latitude,pos.coords.longitude,cfg.lat,cfg.lng);
-        var raio=cfg.raioMetros||50;
-        if(dist>raio){
-          _acaoPendente=null;
-          _mostrarBloqueioLocalizacao(dist,raio);
-        } else {
-          _coordsParaRegistro={lat:pos.coords.latitude,lng:pos.coords.longitude,acc:pos.coords.accuracy};
-          abrirSelfie();
-        }
-      }).catch(function(){ abrirSelfie(); });
-    },
-    function(){
-      fbDb.collection('ponto_configuracoes').doc('local').get().then(function(doc){
-        if(doc.exists){ _acaoPendente=null; _mostrarBloqueioLocalizacao(null,doc.data().raioMetros||50); }
-        else { abrirSelfie(); }
-      }).catch(function(){ abrirSelfie(); });
-    },
-    {timeout:8000,maximumAge:30000,enableHighAccuracy:true}
-  );
-}
-
-var _coordsParaRegistro=null;
-
-function _mostrarBloqueioLocalizacao(dist,raio){
-  var ex=document.getElementById('modal-loc-bloqueio');
-  if(ex) ex.remove();
-  var distTxt=dist!==null?Math.round(dist)+'m de distância':'GPS indisponível';
-  var m=document.createElement('div');
-  m.id='modal-loc-bloqueio';
-  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
-  m.innerHTML=
-    '<div style="background:linear-gradient(160deg,#1a0a0a,#0e0808);border:1.5px solid rgba(231,76,60,0.4);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
-      '<div style="font-size:3rem;margin-bottom:12px;">🚫</div>'+
-      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;letter-spacing:0.12em;color:#e74c3c;margin-bottom:8px;">FORA DO LOCAL</div>'+
-      '<div style="font-size:0.84rem;color:var(--text2);line-height:1.6;margin-bottom:6px;">Você está <strong style="color:#e74c3c;">'+distTxt+'</strong> do local de trabalho.</div>'+
-      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:20px;">O ponto só pode ser batido dentro de <strong style="color:var(--gold);">'+raio+'m</strong> do local configurado.</div>'+
-      '<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:0.7rem;color:#e74c3c;">'+
-        '📍 Se estiver no local correto, aguarde alguns segundos e tente novamente — o GPS pode estar impreciso.'+
+        '📍 Se estiver no local correto, aguarde alguns segundos e tente novamente.'+
       '</div>'+
       '<button onclick="document.getElementById(\'modal-loc-bloqueio\').remove()" style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;border-radius:10px;padding:14px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
     '</div>';
@@ -1770,8 +1707,17 @@ function renderEscala(){
       var totMin=0;
       Object.values(porDia).forEach(function(rd){totMin+=calcHFunc(rd);});
       var carga=_func.cargaMin||CARGA_MIN;
-      var diasP=diasUteisMes();
-      var saldo=totMin-(diasP*carga);
+
+      // Saldo correto: compara só com os dias que o funcionário JÁ deveria ter trabalhado
+      // (dias úteis passados ATÉ HOJE, excluindo domingo)
+      // Dias sem registro = assume carga completa (não penaliza quem não bateu)
+      var diasDecorridos=diasUteisMes(); // dias úteis de 1º até hoje
+      // Horas esperadas = dias decorridos × carga
+      // Mas dias sem registro assumem carga cheia (saldo neutro nesses dias)
+      var diasSemRegistro=Math.max(0, diasDecorridos - diasT);
+      var totalEsperado=diasT*carga; // só cobra dos dias com registro
+      // Saldo = horas trabalhadas - horas esperadas nos dias trabalhados
+      var saldo=totMin-totalEsperado;
       var esT=document.getElementById('es-trabalhados');if(esT)esT.textContent=diasT;
       var esH=document.getElementById('es-horas');if(esH)esH.textContent=fmtMin(totMin);
       var esS=document.getElementById('es-saldo');

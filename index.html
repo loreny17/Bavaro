@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Gestão">
-<link rel="manifest" href="/manifest-gestao.json">
+<link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <title>Gestão de Funcionários</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12511,6 +12511,66 @@ function pontoIniciar(){
       tenantId:_tenantId,atualizadoEm:Date.now()
     },{merge:true}).catch(function(){});
   }
+  // Inicia verificador de atrasos a cada minuto
+  _pIniciarVerificadorAtraso();
+}
+
+// ── Verificador de atraso (notifica gestor) ──────────────────────────────────
+var _pVerifInterval = null;
+var _pNotifEnviadas = {};
+
+function _pIniciarVerificadorAtraso(){
+  if('Notification' in window && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+  _pVerificarAtrasos();
+  if(_pVerifInterval) clearInterval(_pVerifInterval);
+  _pVerifInterval = setInterval(_pVerificarAtrasos, 60000);
+}
+
+function _pVerificarAtrasos(){
+  if(!_pFuncs.length) return;
+  var agora = new Date();
+  var agoraMin = agora.getHours()*60 + agora.getMinutes();
+  var diasSem = ['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var diaHoje = diasSem[agora.getDay()];
+  var hoje = _pDiaKey(agora);
+
+  _pFuncs.forEach(function(f){
+    var h = _pGetHorarioDia(f);
+    if(!h||h.folga||!h.entrada) return;
+    var minE = _pHoraParaMin(h.entrada);
+    if(minE===null) return;
+    // Só notifica se passou 2+ minutos
+    if(agoraMin < minE+2) return;
+    // Já bateu o ponto?
+    var jaBateu = _pRegs.some(function(r){
+      return r.funcId===f.id && r.diaKey===hoje && r.tipo==='entrada';
+    });
+    if(jaBateu) return;
+    // Evita notificar 2x no mesmo dia
+    var chave = f.id+'_'+hoje;
+    if(_pNotifEnviadas[chave]) return;
+    _pNotifEnviadas[chave] = true;
+    var atraso = agoraMin - minE;
+    var nome = f.nome||f.nomeLogin||'Funcionário';
+    _pEnviarNotifLocal('⚠️ '+nome+' não bateu o ponto!','Deveria ter chegado às '+h.entrada+'. Atraso: '+atraso+'min.');
+  });
+}
+
+function _pEnviarNotifLocal(titulo, corpo){
+  // Sempre mostra toast no app
+  showToast('⚠️ '+titulo.replace('⚠️ ',''), '#f39c12');
+  // Tenta notificação do sistema
+  if(!('Notification' in window)) return;
+  if(Notification.permission!=='granted') return;
+  try{
+    var n = new Notification(titulo,{
+      body:corpo, icon:'/icon-192.png', badge:'/icon-192.png',
+      tag:'atraso_ponto', requireInteraction:true
+    });
+    n.onclick = function(){ window.focus(); showTab('ponto'); pontoSubTab('agora'); n.close(); };
+  }catch(e){}
 }
 
 function pontoSubTab(sub){

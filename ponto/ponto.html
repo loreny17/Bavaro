@@ -727,7 +727,13 @@ body{
       </div>
 
       <!-- Banner notificações -->
-      <div id="notif-banner" style="display:none;margin-top:10px;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);border-radius:12px;padding:12px 14px;align-items:center;gap:12px;">
+      <div id="notif-banner" style="display:none;margin-top:10px;background:linear-gradient(135deg,rgba(212,168,67,0.12),rgba(212,168,67,0.06));border:1px solid rgba(212,168,67,0.4);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;" onclick="ativarNotificacoes()">
+        <span style="font-size:1.4rem;">🔔</span>
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:0.82rem;color:var(--gold);">Ativar notificações de ponto</div>
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Receba alertas de entrada, saída e intervalo</div>
+        </div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:0.8rem;letter-spacing:0.06em;color:var(--gold);white-space:nowrap;">ATIVAR →</div>
         <span style="font-size:1.4rem;">🔔</span>
         <div style="flex:1;">
           <div style="font-size:0.82rem;font-weight:700;color:var(--gold);">Ativar notificações</div>
@@ -2410,17 +2416,71 @@ function notifPedirPermissao(){
 }
 
 function ativarNotificacoes(){
-  if(!('Notification' in window)) return;
+  if(!('Notification' in window)){
+    showToast('Notificações não suportadas neste navegador.', true);
+    return;
+  }
+
+  // Se já concedido, só registra o FCM
+  if(Notification.permission === 'granted'){
+    notifRegistrarFCM();
+    showToast('🔔 Notificações já ativadas!');
+    return;
+  }
+
+  // Se negado — não tem como pedir de novo via JS
+  // Precisa o usuário ir manualmente nas configurações
+  if(Notification.permission === 'denied'){
+    _mostrarModalConfiguracaoNotif();
+    return;
+  }
+
+  // Se 'default' — pede permissão
   Notification.requestPermission().then(function(perm){
     var banner = document.getElementById('notif-banner');
     if(perm === 'granted'){
       if(banner) banner.style.display = 'none';
       showToast('🔔 Notificações ativadas!');
       notifRegistrarFCM();
-    } else {
-      showToast('❌ Permissão negada. Ative nas configurações do navegador.', true);
+    } else if(perm === 'denied'){
+      _mostrarModalConfiguracaoNotif();
     }
   });
+}
+
+function _mostrarModalConfiguracaoNotif(){
+  var ex = document.getElementById('modal-notif-config');
+  if(ex) ex.remove();
+
+  var m = document.createElement('div');
+  m.id = 'modal-notif-config';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
+  m.innerHTML =
+    '<div style="background:linear-gradient(160deg,#1a1500,#0e0c04);border:1.5px solid rgba(212,168,67,0.3);border-radius:20px;width:100%;max-width:360px;padding:28px 22px;text-align:center;">'+
+      '<div style="font-size:2.5rem;margin-bottom:12px;">🔔</div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;letter-spacing:0.1em;color:var(--gold);margin-bottom:10px;">ATIVAR NOTIFICAÇÕES</div>'+
+      '<div style="font-size:0.82rem;color:var(--muted);line-height:1.6;margin-bottom:20px;">'+
+        'O navegador bloqueou as notificações.<br>Siga os passos abaixo para ativar:'+
+      '</div>'+
+      '<div style="text-align:left;background:rgba(255,255,255,0.04);border-radius:12px;padding:14px;margin-bottom:18px;">'+
+        '<div style="font-size:0.78rem;line-height:2;color:var(--text);">'+
+          '1️⃣ Toque nos <strong style="color:var(--gold);">3 pontinhos</strong> do Chrome (⋮)<br>'+
+          '2️⃣ Toque em <strong style="color:var(--gold);">Configurações</strong><br>'+
+          '3️⃣ <strong style="color:var(--gold);">Configurações do site</strong><br>'+
+          '4️⃣ <strong style="color:var(--gold);">Notificações</strong><br>'+
+          '5️⃣ Encontre <strong style="color:var(--gold);">bavaro-plum.vercel.app</strong><br>'+
+          '6️⃣ Mude para <strong style="color:var(--gold);">Permitir</strong>'+
+        '</div>'+
+      '</div>'+
+      '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:18px;">'+
+        'Depois volte ao app e toque em <strong>Ativar Notificações</strong> novamente.'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-notif-config\').remove()" '+
+        'style="width:100%;background:linear-gradient(135deg,#d4a843,#b88a20);border:none;color:#000;'+
+        'border-radius:10px;padding:13px;font-family:\'Bebas Neue\',sans-serif;font-size:1rem;'+
+        'letter-spacing:0.08em;cursor:pointer;">ENTENDIDO</button>'+
+    '</div>';
+  document.body.appendChild(m);
 }
 
 function notifRegistrarFCM(){

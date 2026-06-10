@@ -1031,6 +1031,7 @@ body{
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 <script>
 var firebaseConfig={apiKey:"AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",authDomain:"gestao-reataurante.firebaseapp.com",projectId:"gestao-reataurante",storageBucket:"gestao-reataurante.firebasestorage.app",messagingSenderId:"510785409925",appId:"1:510785409925:web:e687e387509fb0605b6aec"};
 var CARGA_MIN=440;
@@ -2389,48 +2390,54 @@ var _notifJaEnviadas = {}; // evita spam: {tipo_diaKey: true}
 
 function notifPedirPermissao(){
   if(!('Notification' in window)) return;
-  if(Notification.permission === 'default'){
-    // Pede permissão após 2s (não bloqueia o load)
+  if(Notification.permission === 'granted'){
+    notifRegistrarFCM();
+  } else if(Notification.permission === 'default'){
     setTimeout(function(){
       Notification.requestPermission().then(function(perm){
         if(perm === 'granted'){
           showToast('🔔 Notificações ativadas!');
-          notifRegistrarServiceWorker();
+          notifRegistrarFCM();
         }
       });
     }, 2000);
-  } else if(Notification.permission === 'granted'){
-    notifRegistrarServiceWorker();
   }
 }
 
-function notifRegistrarServiceWorker(){
+function notifRegistrarFCM(){
   if(!('serviceWorker' in navigator)) return;
-  // Service Worker inline como blob
-  var swCode = [
-    'self.addEventListener("push", function(e){',
-    '  var data = e.data ? e.data.json() : {};',
-    '  e.waitUntil(self.registration.showNotification(data.title||"Bávaro Ponto", {',
-    '    body: data.body||"",',
-    '    icon: "/icon-192.png",',
-    '    badge: "/icon-192.png",',
-    '    vibrate: [200,100,200],',
-    '    tag: data.tag||"ponto",',
-    '    requireInteraction: data.requireInteraction||false',
-    '  }));',
-    '});',
-    'self.addEventListener("notificationclick", function(e){',
-    '  e.notification.close();',
-    '  e.waitUntil(clients.openWindow("/ponto.html"));',
-    '});'
-  ].join('\n');
-  var blob = new Blob([swCode], {type:'application/javascript'});
-  var swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl).catch(function(){
-    // SW com blob pode falhar em alguns browsers — usa notif direta
-    console.log('[Notif] Service Worker não registrado, usando Notification API direta');
-  });
+  var VAPID_KEY = 'BNGe1o--iQ5F3VolwBll8G9jr-tnQKeC6vVvpfIFLh-gOoyOvzpWfN88IYuFGanUEuADebkDoyJDjk0806JOEsU';
+
+  // Registra o Service Worker oficial do Firebase
+  navigator.serviceWorker.register('/firebase-messaging-sw.js')
+    .then(function(reg){
+      console.log('[FCM] Service Worker registrado');
+      // Só disponível se firebase/messaging estiver carregado
+      if(!firebase.messaging) return;
+      var messaging = firebase.messaging();
+      return messaging.getToken({
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: reg
+      });
+    })
+    .then(function(token){
+      if(!token){ console.warn('[FCM] Token não gerado'); return; }
+      console.log('[FCM] Token:', token);
+      // Salva token no Firestore para o gestor poder enviar notificações
+      if(_func && fbDb){
+        fbDb.collection('ponto_funcionarios').doc(_func.id).update({
+          fcmToken: token,
+          fcmTokenAtualizadoEm: Date.now()
+        }).catch(function(){});
+      }
+    })
+    .catch(function(e){
+      console.warn('[FCM] Erro:', e.message);
+      // Fallback: usa Notification API direta (funciona com app aberto)
+    });
 }
+
+function notifRegistrarServiceWorker(){ notifRegistrarFCM(); } // alias
 
 function notifEnviar(titulo, corpo, tag){
   if(!('Notification' in window) || Notification.permission !== 'granted') return;

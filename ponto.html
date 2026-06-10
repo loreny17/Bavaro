@@ -726,6 +726,16 @@ body{
         </div>
       </div>
 
+      <!-- Banner notificações -->
+      <div id="notif-banner" style="display:none;margin-top:10px;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);border-radius:12px;padding:12px 14px;align-items:center;gap:12px;">
+        <span style="font-size:1.4rem;">🔔</span>
+        <div style="flex:1;">
+          <div style="font-size:0.82rem;font-weight:700;color:var(--gold);">Ativar notificações</div>
+          <div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">Receba alertas de ponto no celular</div>
+        </div>
+        <button onclick="ativarNotificacoes()" style="background:var(--gold);border:none;border-radius:8px;color:#000;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.78rem;padding:8px 12px;cursor:pointer;white-space:nowrap;">ATIVAR</button>
+      </div>
+
       <!-- Card resumo -->
       <div class="resumo-card">
         <div class="resumo-header">
@@ -2393,15 +2403,24 @@ function notifPedirPermissao(){
   if(Notification.permission === 'granted'){
     notifRegistrarFCM();
   } else if(Notification.permission === 'default'){
-    setTimeout(function(){
-      Notification.requestPermission().then(function(perm){
-        if(perm === 'granted'){
-          showToast('🔔 Notificações ativadas!');
-          notifRegistrarFCM();
-        }
-      });
-    }, 2000);
+    // Mostra banner visível em vez de popup automático
+    var banner = document.getElementById('notif-banner');
+    if(banner) banner.style.display = 'flex';
   }
+}
+
+function ativarNotificacoes(){
+  if(!('Notification' in window)) return;
+  Notification.requestPermission().then(function(perm){
+    var banner = document.getElementById('notif-banner');
+    if(perm === 'granted'){
+      if(banner) banner.style.display = 'none';
+      showToast('🔔 Notificações ativadas!');
+      notifRegistrarFCM();
+    } else {
+      showToast('❌ Permissão negada. Ative nas configurações do navegador.', true);
+    }
+  });
 }
 
 function notifRegistrarFCM(){

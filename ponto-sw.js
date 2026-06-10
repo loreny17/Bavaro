@@ -8,8 +8,8 @@ var CACHE_NAME = 'funcionario-ponto-v1';
 
 // Recursos para cache offline (só o próprio app)
 var CACHE_URLS = [
-  '/ponto.html',
-  '/ponto-manifest.json'
+  '/ponto/',
+  '/ponto/manifest-ponto.json'
 ];
 
 // INSTALL — cria cache inicial
@@ -64,7 +64,7 @@ self.addEventListener('fetch', function(event) {
   if (!url.startsWith(self.location.origin)) return;
 
   // Estratégia: Cache-first para o ponto.html, network-first para o resto
-  if (url.includes('ponto.html') || url.includes('ponto-manifest.json')) {
+  if (url.includes('/ponto/')) {
     event.respondWith(
       caches.match(event.request).then(function(cached) {
         var networkFetch = fetch(event.request).then(function(response) {

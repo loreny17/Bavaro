@@ -1191,7 +1191,6 @@ function iniciarAppFunc(){
   var meses2=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   var n=new Date();
   var esEl=document.getElementById('escala-mes'); if(esEl) esEl.textContent=meses2[n.getMonth()]+' '+n.getFullYear();
-  // Testa permissão de escrita no Firestore
   fbDb.collection('ponto_registros').limit(1).get().catch(function(e){
     console.warn('[Ponto] Sem permissão no Firestore:', e.message);
     setTimeout(function(){
@@ -1200,8 +1199,10 @@ function iniciarAppFunc(){
   });
   renderStatus();
   escutarRegistros();
-  // Inicia monitoramento de localização
   _iniciarMonitorLocalizacao();
+  // Inicia sistema de notificações
+  notifPedirPermissao();
+  notifIniciarVerificador();
 }
 
 function getEmojiCargo(cargo){
@@ -1708,15 +1709,23 @@ function renderEscala(){
       Object.values(porDia).forEach(function(rd){totMin+=calcHFunc(rd);});
       var carga=_func.cargaMin||CARGA_MIN;
 
-      // Saldo correto: compara só com os dias que o funcionário JÁ deveria ter trabalhado
-      // (dias úteis passados ATÉ HOJE, excluindo domingo)
-      // Dias sem registro = assume carga completa (não penaliza quem não bateu)
-      var diasDecorridos=diasUteisMes(); // dias úteis de 1º até hoje
-      // Horas esperadas = dias decorridos × carga
-      // Mas dias sem registro assumem carga cheia (saldo neutro nesses dias)
-      var diasSemRegistro=Math.max(0, diasDecorridos - diasT);
-      var totalEsperado=diasT*carga; // só cobra dos dias com registro
-      // Saldo = horas trabalhadas - horas esperadas nos dias trabalhados
+      // Saldo mensal:
+      // - Dias passados SEM registro → desconsiderados (não penaliza)
+      // - Dias passados COM registro → conta normalmente
+      // - Dias futuros até fim do mês → projeta como carga a cumprir
+      var hoje=new Date();
+      var fimMes=new Date(hoje.getFullYear(),hoje.getMonth()+1,0); // último dia do mês
+
+      // Dias úteis futuros (amanhã até fim do mês, excluindo domingos)
+      var diasFuturos=0;
+      var cur=new Date(hoje); cur.setDate(hoje.getDate()+1); // começa amanhã
+      while(cur<=fimMes){
+        if(cur.getDay()!==0) diasFuturos++;
+        cur.setDate(cur.getDate()+1);
+      }
+
+      // Carga total = dias com registro + dias futuros
+      var totalEsperado=(diasT + diasFuturos)*carga;
       var saldo=totMin-totalEsperado;
       var esT=document.getElementById('es-trabalhados');if(esT)esT.textContent=diasT;
       var esH=document.getElementById('es-horas');if(esH)esH.textContent=fmtMin(totMin);
@@ -2370,6 +2379,191 @@ function abrirMenuUsuario(){
       }
     });
   }, 100);
+}
+
+// ═══════════════════════════════════════
+// SISTEMA DE NOTIFICAÇÕES PUSH
+// ═══════════════════════════════════════
+var _notifInterval = null;
+var _notifJaEnviadas = {}; // evita spam: {tipo_diaKey: true}
+
+function notifPedirPermissao(){
+  if(!('Notification' in window)) return;
+  if(Notification.permission === 'default'){
+    // Pede permissão após 2s (não bloqueia o load)
+    setTimeout(function(){
+      Notification.requestPermission().then(function(perm){
+        if(perm === 'granted'){
+          showToast('🔔 Notificações ativadas!');
+          notifRegistrarServiceWorker();
+        }
+      });
+    }, 2000);
+  } else if(Notification.permission === 'granted'){
+    notifRegistrarServiceWorker();
+  }
+}
+
+function notifRegistrarServiceWorker(){
+  if(!('serviceWorker' in navigator)) return;
+  // Service Worker inline como blob
+  var swCode = [
+    'self.addEventListener("push", function(e){',
+    '  var data = e.data ? e.data.json() : {};',
+    '  e.waitUntil(self.registration.showNotification(data.title||"Bávaro Ponto", {',
+    '    body: data.body||"",',
+    '    icon: "/icon-192.png",',
+    '    badge: "/icon-192.png",',
+    '    vibrate: [200,100,200],',
+    '    tag: data.tag||"ponto",',
+    '    requireInteraction: data.requireInteraction||false',
+    '  }));',
+    '});',
+    'self.addEventListener("notificationclick", function(e){',
+    '  e.notification.close();',
+    '  e.waitUntil(clients.openWindow("/ponto.html"));',
+    '});'
+  ].join('\n');
+  var blob = new Blob([swCode], {type:'application/javascript'});
+  var swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl).catch(function(){
+    // SW com blob pode falhar em alguns browsers — usa notif direta
+    console.log('[Notif] Service Worker não registrado, usando Notification API direta');
+  });
+}
+
+function notifEnviar(titulo, corpo, tag){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  // Evita enviar a mesma notificação 2x no mesmo dia
+  var chave = (tag||titulo) + '_' + diaKey(new Date());
+  if(_notifJaEnviadas[chave]) return;
+  _notifJaEnviadas[chave] = true;
+  try{
+    var n = new Notification(titulo, {
+      body: corpo,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      vibrate: [200,100,200],
+      tag: tag||'ponto',
+      requireInteraction: true
+    });
+    n.onclick = function(){ window.focus(); n.close(); };
+    // Auto-fecha após 10s
+    setTimeout(function(){ n.close(); }, 10000);
+  }catch(e){ console.warn('Notif erro:', e); }
+}
+
+// ── Verifica horários e dispara notificações ──
+function notifIniciarVerificador(){
+  // Verifica imediatamente e depois a cada minuto
+  notifVerificar();
+  if(_notifInterval) clearInterval(_notifInterval);
+  _notifInterval = setInterval(function(){
+    notifVerificar();
+    notifSalvarStatusAtraso();
+  }, 60000);
+}
+
+function notifVerificar(){
+  if(!_func || !_func.horarios) return;
+  var agora = new Date();
+  var diasSem = ['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var diaHoje = diasSem[agora.getDay()];
+  var horario = _func.horarios[diaHoje];
+  // Sem horário configurado pra hoje → ignora
+  if(!horario || horario.folga || !horario.entrada) return;
+
+  var horaAgora = agora.getHours();
+  var minAgora = agora.getMinutes();
+  var totalMinAgora = horaAgora * 60 + minAgora;
+
+  var status = getStatus();
+  var hoje = diaKey(agora);
+
+  // ── Notificação de ENTRADA ──
+  if(horario.entrada){
+    var partes = horario.entrada.split(':');
+    var minEntrada = parseInt(partes[0])*60 + parseInt(partes[1]);
+    // Dispara exatamente no horário (±1 min de tolerância)
+    if(Math.abs(totalMinAgora - minEntrada) <= 1 && status === 'livre'){
+      notifEnviar(
+        '⏰ Hora de bater o ponto!',
+        'Sua entrada está marcada para ' + horario.entrada + '. Abra o app e registre.',
+        'entrada_' + hoje
+      );
+    }
+    // Lembrete 5 min antes
+    if(totalMinAgora === minEntrada - 5 && status === 'livre'){
+      notifEnviar(
+        '🔔 Lembrete: ponto em 5 minutos',
+        'Sua entrada é às ' + horario.entrada + '.',
+        'lembrete_entrada_' + hoje
+      );
+    }
+  }
+
+  // ── Notificação de SAÍDA ──
+  if(horario.saida){
+    var partesS = horario.saida.split(':');
+    var minSaida = parseInt(partesS[0])*60 + parseInt(partesS[1]);
+    if(Math.abs(totalMinAgora - minSaida) <= 1 && (status === 'trabalhando' || status === 'intervalo')){
+      notifEnviar(
+        '🏠 Hora de registrar saída!',
+        'Seu horário de saída é ' + horario.saida + '. Não esqueça de bater o ponto.',
+        'saida_' + hoje
+      );
+    }
+  }
+
+  // ── Notificação de INTERVALO ──
+  // Avisa na metade do turno se ainda não fez intervalo
+  if(horario.entrada && horario.saida){
+    var partsE2 = horario.entrada.split(':');
+    var partsS2 = horario.saida.split(':');
+    var minE2 = parseInt(partsE2[0])*60 + parseInt(partsE2[1]);
+    var minS2 = parseInt(partsS2[0])*60 + parseInt(partsS2[1]);
+    var meioDia = Math.floor((minE2 + minS2) / 2);
+    if(Math.abs(totalMinAgora - meioDia) <= 1 && status === 'trabalhando'){
+      notifEnviar(
+        '☕ Hora do intervalo!',
+        'Você está trabalhando há ' + Math.round((meioDia - minE2)/60) + 'h. Registre seu intervalo.',
+        'intervalo_' + hoje
+      );
+    }
+  }
+}
+
+// ═══════════════════════════════════════
+// ALERTA DE ATRASO — para o gestor ler no index.html
+// Salva no Firestore para o gestor ver em tempo real
+// ═══════════════════════════════════════
+function notifSalvarStatusAtraso(){
+  if(!_func || !_func.horarios || !fbDb) return;
+  var agora = new Date();
+  var diasSem = ['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  var diaHoje = diasSem[agora.getDay()];
+  var horario = _func.horarios[diaHoje];
+  if(!horario || horario.folga || !horario.entrada) return;
+
+  var status = getStatus();
+  var partes = horario.entrada.split(':');
+  var minEntrada = parseInt(partes[0])*60 + parseInt(partes[1]);
+  var totalMinAgora = agora.getHours()*60 + agora.getMinutes();
+
+  if(totalMinAgora > minEntrada && status === 'livre'){
+    var atrasoMin = totalMinAgora - minEntrada;
+    // Salva status de atraso no Firestore para o gestor ver
+    fbDb.collection('ponto_status_hoje').doc(_func.id).set({
+      funcId: _func.id,
+      funcNome: _func.nome||_func.nomeLogin,
+      cargo: _func.cargo||'',
+      status: 'atrasado',
+      atrasoMin: atrasoMin,
+      horaEntradaEsperada: horario.entrada,
+      diaKey: diaKey(agora),
+      atualizadoEm: Date.now()
+    }, {merge:true}).catch(function(){});
+  }
 }
 
 function showToast(msg,erro){

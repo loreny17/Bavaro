@@ -2226,10 +2226,17 @@ function showTab(tab){
     if(!_pontoJaIniciado && fbDb){
       _pontoJaIniciado=true;
       pontoIniciar();
-      // Datas padrão banco de horas
       var n=new Date();
       var bi=document.getElementById('pbanco-ini'); if(bi) bi.value=n.getFullYear()+'-'+_pPad(n.getMonth()+1)+'-01';
       var bf=document.getElementById('pbanco-fim'); if(bf) bf.value=_pDiaKey(n);
+      // Pede permissão de notificação pro gestor
+      if('Notification' in window && Notification.permission==='default'){
+        setTimeout(function(){
+          Notification.requestPermission().then(function(p){
+            if(p==='granted') showToast('🔔 Notificações ativadas!');
+          });
+        },2000);
+      }
     }
     pontoSubTab(_pSubTab);
   }
@@ -12564,31 +12571,42 @@ function _pIndicadorPonto(f,fRegs,statusAtual){
   var cargaEsp=(saiMin-entMin);
   var entReg=fRegs.find(function(r){return r.tipo==='entrada';});
   var saiReg=fRegs.slice().reverse().find(function(r){return r.tipo==='saida';});
+  var agora=new Date();
+  var agoraMin=agora.getHours()*60+agora.getMinutes();
   var badges=[];
+
+  if(!entReg && statusAtual==='fora'){
+    if(agoraMin > entMin){
+      // Passou do horário e não chegou
+      var atrasoMin=agoraMin-entMin;
+      badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(231,76,60,0.18);color:#e74c3c;border:1px solid rgba(231,76,60,0.4);">⚠️ Não chegou · +'+atrasoMin+'min</span>');
+    } else if(agoraMin >= entMin-5){
+      // Chegando em 5 min
+      badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);">🕐 Entra às '+h.entrada+'</span>');
+    }
+  }
   if(entReg){
     var entReal=new Date(entReg.ts);
     var entRealMin=entReal.getHours()*60+entReal.getMinutes();
     var diff=entRealMin-entMin;
-    if(diff>2) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(231,76,60,0.15);color:#e74c3c;border:1px solid rgba(231,76,60,0.3);">\u26a0 +'+diff+'min</span>');
+    if(diff>2) badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(231,76,60,0.15);color:#e74c3c;border:1px solid rgba(231,76,60,0.3);">⚠️ +'+diff+'min atraso</span>');
   }
   if(saiReg){
     var saiReal=new Date(saiReg.ts);
     var saiRealMin=saiReal.getHours()*60+saiReal.getMinutes();
-    var hTrab=_pCalcH(fRegs,'fora');
     var diffSai=saiMin-saiRealMin;
     if(diffSai>2){
-      badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);">\u2199 -'+diffSai+'min</span>');
+      badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);">↙ -'+diffSai+'min</span>');
     } else {
-      var extra=hTrab-cargaEsp;
-      if(extra>5) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">\u2b50 +'+_pFmtMin(extra)+'</span>');
+      var extra=_pCalcH(fRegs,'fora')-cargaEsp;
+      if(extra>5) badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">⭐ +'+_pFmtMin(extra)+'</span>');
     }
   } else if(statusAtual==='trabalhando'){
-    var hTrabAtual=_pCalcH(fRegs,'trabalhando');
-    var extraAtual=hTrabAtual-cargaEsp;
-    if(extraAtual>5) badges.push('<span style="font-size:0.58rem;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">\u2b50 +'+_pFmtMin(extraAtual)+'</span>');
+    var extra2=_pCalcH(fRegs,'trabalhando')-cargaEsp;
+    if(extra2>5) badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">⭐ +'+_pFmtMin(extra2)+'</span>');
   }
   if(!badges.length) return '';
-  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">'+badges.join('')+'</div>';
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;">'+badges.join('')+'</div>';
 }
 function pontoRenderAgora(){
   var res=_pBuildStatus(); var sm=res.sm; var regH=res.regH;
@@ -12596,12 +12614,27 @@ function pontoRenderAgora(){
   var trab=_pFuncs.filter(function(f){return sm[f.id]&&sm[f.id].st==='trabalhando';}).length;
   var intv=_pFuncs.filter(function(f){return sm[f.id]&&sm[f.id].st==='intervalo';}).length;
   var fora=total-trab-intv;
+
+  // Conta atrasados: horário configurado passou, não chegou
+  var agora=new Date();
+  var agoraMin=agora.getHours()*60+agora.getMinutes();
+  var atrasados=_pFuncs.filter(function(f){
+    if(sm[f.id]&&sm[f.id].st!=='fora') return false; // já chegou
+    var h=_pGetHorarioDia(f);
+    if(!h||h.folga||!h.entrada) return false;
+    var entMin=_pHoraParaMin(h.entrada);
+    return entMin!==null && agoraMin>entMin;
+  }).length;
+
   var cards=document.getElementById('ponto-resumo-cards');
   if(cards) cards.innerHTML=
     _pNumCard(trab,'Trabalhando','#2ecc71')+
     _pNumCard(intv,'Intervalo','#f39c12')+
-    _pNumCard(fora,'Fora','#666')+
+    (atrasados>0?_pNumCard(atrasados,'Atrasados','#e74c3c'):_pNumCard(fora,'Fora','#666'))+
     _pNumCard(total,'Total','var(--accent)');
+
+  // Notificação no gestor se há atrasados
+  if(atrasados>0) _pNotifGestorAtrasados(atrasados);
   var lista=document.getElementById('ponto-lista-agora');
   if(!lista) return;
   var addBtnHtml='<button onclick="pontoAbrirModalAddFunc()" style="width:100%;background:rgba(212,168,67,0.08);border:1.5px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:10px;padding:11px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;margin-bottom:12px;letter-spacing:0.04em;">+ Adicionar funcionário ao ponto</button>';
@@ -12737,11 +12770,17 @@ function pontoRenderBanco(){
     var diasT=Object.keys(porDia).length;
     var totMin=0;
     Object.values(porDia).forEach(function(rd){totMin+=_pCalcH(rd,'fora');});
-    // Saldo: compara só com dias que têm registro (dias sem registro = neutro)
-    var hoje=_pDiaKey(new Date());
-    var fimEfetivo=fim>hoje?hoje:fim;
-    var diasDecorridos=_pDiasUteis(ini,fimEfetivo);
-    var saldo=totMin-(diasT*carga);
+    // Dias passados sem registro → ignorados
+    // Dias futuros até fim do mês → projeta como carga a cumprir
+    var hoje=new Date();
+    var fimMes=new Date(hoje.getFullYear(),hoje.getMonth()+1,0);
+    var diasFuturos=0;
+    var cur=new Date(hoje); cur.setDate(hoje.getDate()+1);
+    while(cur<=fimMes){
+      if(cur.getDay()!==0) diasFuturos++;
+      cur.setDate(cur.getDate()+1);
+    }
+    var saldo=totMin-((diasT+diasFuturos)*carga);
     return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">'+
       '<div>'+
         '<div style="font-weight:600;font-size:0.88rem;">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
@@ -13075,6 +13114,36 @@ function pontoSalvarHorarios(){
 }
 
 // ── UTILS PONTO ──
+var _pNotifJaEnviadas={};
+function _pNotifGestorAtrasados(qtd){
+  if(!('Notification' in window)||Notification.permission!=='granted') return;
+  var chave='atrasados_'+_pDiaKey(new Date())+'_'+qtd;
+  if(_pNotifJaEnviadas[chave]) return;
+  _pNotifJaEnviadas[chave]=true;
+  // Pede permissão se ainda não tem
+  if(Notification.permission==='default'){
+    Notification.requestPermission();
+    return;
+  }
+  try{
+    var nomes=_pFuncs.filter(function(f){
+      var sm=_pBuildStatus().sm;
+      if(sm[f.id]&&sm[f.id].st!=='fora') return false;
+      var h=_pGetHorarioDia(f);
+      if(!h||h.folga||!h.entrada) return false;
+      var agora=new Date();
+      var agoraMin=agora.getHours()*60+agora.getMinutes();
+      return _pHoraParaMin(h.entrada)<agoraMin;
+    }).map(function(f){return f.nome||f.nomeLogin;}).slice(0,3).join(', ');
+    new Notification('⚠️ '+qtd+' funcionário'+(qtd>1?'s':'')+' atrasado'+(qtd>1?'s':'')+'!',{
+      body: nomes+(qtd>3?' e mais...':''),
+      icon:'/icon-192.png',
+      tag:'gestor_atrasados_'+_pDiaKey(new Date()),
+      requireInteraction:true
+    });
+  }catch(e){}
+}
+
 function _pCalcH(regs,statusAtual){
   var tot=0,entTs=null,agora=Date.now();
   regs.forEach(function(r){

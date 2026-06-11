@@ -30,7 +30,7 @@ messaging.onBackgroundMessage(function(payload) {
   return self.registration.showNotification(notifTitle, {
     body:              notifBody,
     icon:              '/ponto-icon-192.png',
-    badge:             '/icon-192.png',
+    badge:             '/ponto-icon-192.png',
     vibrate:           [200, 100, 200],
     tag:               notifTag,
     requireInteraction: true,

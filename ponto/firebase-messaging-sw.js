@@ -28,20 +28,27 @@ messaging.onBackgroundMessage(function(payload) {
   const targetUrl = data.url || '/ponto.html';
 
   return self.registration.showNotification(notifTitle, {
-    body:              notifBody,
-    icon:              '/ponto-icon-192.png',
-    badge:             '/ponto-badge.png',
-    vibrate:           [200, 100, 200],
-    tag:               notifTag,
+    body:               notifBody,
+    icon:               '/ponto-icon-192.png',
+    badge:              '/ponto-badge.png',
+    vibrate:            [200, 100, 200],
+    tag:                notifTag,
     requireInteraction: true,
+    actions: [
+      {
+        action: 'abrir',
+        title: '🕐 Bater ponto agora'
+      }
+    ],
     data: { url: targetUrl }
   });
 });
 
-// Clique na notificação → abre o app correto
+// Clique na notificação (corpo ou botão) → abre o app correto
 self.addEventListener('notificationclick', function(e) {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/ponto.html';
+
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cs) {
       for (var c of cs) {

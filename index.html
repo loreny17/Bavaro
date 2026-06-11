@@ -13221,39 +13221,67 @@ var _pNotifJaEnviadas={};
 function _pRegistrarTokenGestor(){
   var VAPID='BD72O-qPd2S1QRvOVboEN0K3DFr1f7i6EZSrrW8feb4N_gaKQXjuHZuVmNxFZ4JpooBF70WK-XJUyX1W9a-C1pk';
 
+  function log(msg, cor){
+    cor = cor||'var(--muted)';
+    showToast(msg, cor);
+    console.log('[FCM]', msg);
+    // Painel visual na tela
+    var p = document.getElementById('fcm-debug-panel');
+    if(!p){
+      p = document.createElement('div');
+      p.id = 'fcm-debug-panel';
+      p.style.cssText = 'position:fixed;bottom:80px;left:10px;right:10px;background:rgba(0,0,0,0.92);border:1px solid rgba(212,168,67,0.3);border-radius:10px;padding:10px;z-index:9999;font-size:0.7rem;font-family:monospace;max-height:200px;overflow-y:auto;';
+      p.innerHTML = '<div style="color:var(--gold);margin-bottom:4px;display:flex;justify-content:space-between;"><b>FCM Debug</b><span onclick="document.getElementById(\'fcm-debug-panel\').remove()" style="cursor:pointer;">✕</span></div>';
+      document.body.appendChild(p);
+    }
+    var linha = document.createElement('div');
+    linha.style.color = cor;
+    linha.textContent = '› ' + msg;
+    p.appendChild(linha);
+    p.scrollTop = p.scrollHeight;
+  }
+
   function registrar(){
-    if(!('serviceWorker' in navigator)){ console.warn('[FCM] SW não suportado'); return; }
+    if(!('serviceWorker' in navigator)){ log('❌ SW não suportado','#e74c3c'); return; }
+    log('🔄 Registrando SW...','#f39c12');
     navigator.serviceWorker.register('/firebase-messaging-sw.js')
       .then(function(reg){
-        console.log('[FCM Gestor] SW registrado');
+        log('✅ SW registrado: '+reg.scope,'#2ecc71');
+        if(typeof firebase.messaging !== 'function'){
+          log('❌ firebase.messaging não é função','#e74c3c');
+          return null;
+        }
         var messaging = firebase.messaging();
+        log('🔄 Obtendo token FCM...','#f39c12');
         return messaging.getToken({vapidKey:VAPID, serviceWorkerRegistration:reg});
       })
       .then(function(token){
-        if(!token){ console.warn('[FCM Gestor] Token não gerado — verifique permissão'); return; }
-        console.log('[FCM Gestor] Token obtido ✓');
+        if(!token){ log('❌ Token vazio — permissão negada?','#e74c3c'); return; }
+        log('✅ Token: '+token.substring(0,20)+'...','#2ecc71');
         var uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : 'gestor';
         fbDb.collection('ponto_gestores_tokens').doc(uid).set({
           fcmToken: token,
           atualizadoEm: Date.now(),
           dominio: window.location.hostname
-        }).then(function(){ console.log('[FCM Gestor] Token salvo no Firestore ✓'); })
-          .catch(function(e){ console.warn('[FCM Gestor] Erro ao salvar:', e.message); });
+        }).then(function(){ log('✅ Token salvo no Firestore!','#2ecc71'); })
+          .catch(function(e){ log('❌ Erro ao salvar: '+e.message,'#e74c3c'); });
       })
-      .catch(function(e){ console.warn('[FCM Gestor] Erro:', e.message); });
+      .catch(function(e){ log('❌ Erro: '+e.message,'#e74c3c'); });
   }
 
-  // Se SDK já carregado usa direto
+  log('🔄 Carregando SDK messaging...','#f39c12');
   if(typeof firebase !== 'undefined' && typeof firebase.messaging === 'function'){
+    log('✅ SDK já carregado','#2ecc71');
     registrar();
     return;
   }
-
-  // Carrega SDK de forma lazy
   var script = document.createElement('script');
   script.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js';
-  script.onload = function(){ setTimeout(registrar, 500); };
-  script.onerror = function(){ console.warn('[FCM Gestor] Falha ao carregar SDK'); };
+  script.onload = function(){
+    log('✅ SDK carregado','#2ecc71');
+    setTimeout(registrar, 500);
+  };
+  script.onerror = function(){ log('❌ Falha ao carregar SDK','#e74c3c'); };
   document.head.appendChild(script);
 }
 function _pNotifGestorAtrasados(qtd){

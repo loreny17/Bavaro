@@ -11626,12 +11626,26 @@ function _apagarTenantCompleto(tenantId){
 
 function _iniciarAppAposLogin(){
   fbExecutarFila();
-  // Antes de carregar dados, faz bootstrap do tenant do usuário
   authBootstrapTenant().then(function(){
     showToast('☁️ Conectado como '+_usuarioAtual.email, 'var(--surface3)');
     restIniciar();
     _iniciarListeners();
     _restSyncNuvem();
+    // Registra token FCM do gestor logo após login
+    setTimeout(function(){
+      if('Notification' in window){
+        if(Notification.permission==='granted'){
+          _pRegistrarTokenGestor();
+        } else if(Notification.permission==='default'){
+          Notification.requestPermission().then(function(p){
+            if(p==='granted'){
+              showToast('🔔 Notificações ativadas!');
+              _pRegistrarTokenGestor();
+            }
+          });
+        }
+      }
+    }, 3000);
   }).catch(function(err){
     console.error('Bootstrap tenant erro:', err);
     showToast('⚠️ Erro ao carregar conta: '+(err.message||''),'#f75a5a');
@@ -12498,12 +12512,26 @@ function pontoIniciar(){
     snap.forEach(function(d){ _pRegs.push(Object.assign({id:d.id},d.data())); });
     pontoRenderSubTab();
   });
-  // Badge solicitações
+  // Badge solicitações + notificação
+  var _pSolsAnterior = 0;
   fbDb.collection('ponto_solicitacoes').where('status','==','pendente').onSnapshot(function(snap){
     var n=snap.size;
     var b=document.getElementById('ponto-sols-badge');
     if(b){ b.textContent=n; b.style.display=n>0?'block':'none'; }
     if(_pSubTab==='solicitacoes') pontoRenderSols();
+    // Notifica gestor se chegou nova solicitação
+    if(n > _pSolsAnterior && _pSolsAnterior >= 0){
+      var novas = n - _pSolsAnterior;
+      // Pega o nome do funcionário da solicitação mais recente
+      var nomes = [];
+      snap.forEach(function(d){ nomes.push(d.data().funcNome||'Funcionário'); });
+      _pEnviarNotifLocal(
+        '📨 Nova solicitação de ponto!',
+        (novas===1 ? nomes[0] : novas+' funcionários') + ' aguarda'+(novas>1?'m':'')+' aprovação.',
+        'solicitacoes'
+      );
+    }
+    _pSolsAnterior = n;
   });
   // Salva tenantId pra o app ponto saber onde buscar tarefas
   if(_tenantId){
@@ -12554,23 +12582,33 @@ function _pVerificarAtrasos(){
     _pNotifEnviadas[chave] = true;
     var atraso = agoraMin - minE;
     var nome = f.nome||f.nomeLogin||'Funcionário';
-    _pEnviarNotifLocal('⚠️ '+nome+' não bateu o ponto!','Deveria ter chegado às '+h.entrada+'. Atraso: '+atraso+'min.');
+    _pEnviarNotifLocal('⚠️ '+nome+' não bateu o ponto!','Deveria ter chegado às '+h.entrada+'. Atraso: '+atraso+'min.', 'agora');
   });
 }
 
-function _pEnviarNotifLocal(titulo, corpo){
-  // Sempre mostra toast no app
-  showToast('⚠️ '+titulo.replace('⚠️ ',''), '#f39c12');
-  // Tenta notificação do sistema
-  if(!('Notification' in window)) return;
-  if(Notification.permission!=='granted') return;
-  try{
-    var n = new Notification(titulo,{
-      body:corpo, icon:'/icon-192.png', badge:'/icon-192.png',
-      tag:'atraso_ponto', requireInteraction:true
-    });
-    n.onclick = function(){ window.focus(); showTab('ponto'); pontoSubTab('agora'); n.close(); };
-  }catch(e){}
+function _pEnviarNotifLocal(titulo, corpo, aba){
+  aba = aba || 'agora';
+  // Tenta notificação do sistema (com app em background)
+  if('Notification' in window && Notification.permission==='granted'){
+    try{
+      var n = new Notification(titulo,{
+        body: corpo,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'ponto_'+aba,
+        requireInteraction: true
+      });
+      n.onclick = function(){
+        window.focus();
+        showTab('ponto');
+        pontoSubTab(aba);
+        n.close();
+      };
+      return; // Se notificação do sistema funcionou, não precisa toast
+    }catch(e){}
+  }
+  // Fallback: toast no app (app aberto)
+  showToast(titulo, '#f39c12');
 }
 
 function pontoSubTab(sub){
@@ -13181,20 +13219,42 @@ function pontoSalvarHorarios(){
 // ── UTILS PONTO ──
 var _pNotifJaEnviadas={};
 function _pRegistrarTokenGestor(){
-  if(!firebase.messaging) return;
   var VAPID='BD72O-qPd2S1QRvOVboEN0K3DFr1f7i6EZSrrW8feb4N_gaKQXjuHZuVmNxFZ4JpooBF70WK-XJUyX1W9a-C1pk';
-  navigator.serviceWorker.register('/firebase-messaging-sw.js').then(function(reg){
-    return firebase.messaging().getToken({vapidKey:VAPID,serviceWorkerRegistration:reg});
-  }).then(function(token){
-    if(!token) return;
-    // Salva token do gestor para receber alertas de atraso
-    var uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : 'gestor';
-    fbDb.collection('ponto_gestores_tokens').doc(uid).set({
-      fcmToken: token,
-      atualizadoEm: Date.now()
-    }).catch(function(){});
-    console.log('[FCM Gestor] Token registrado');
-  }).catch(function(e){ console.warn('[FCM Gestor]',e.message); });
+
+  function registrar(){
+    if(!('serviceWorker' in navigator)){ console.warn('[FCM] SW não suportado'); return; }
+    navigator.serviceWorker.register('/firebase-messaging-sw.js')
+      .then(function(reg){
+        console.log('[FCM Gestor] SW registrado');
+        var messaging = firebase.messaging();
+        return messaging.getToken({vapidKey:VAPID, serviceWorkerRegistration:reg});
+      })
+      .then(function(token){
+        if(!token){ console.warn('[FCM Gestor] Token não gerado — verifique permissão'); return; }
+        console.log('[FCM Gestor] Token obtido ✓');
+        var uid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : 'gestor';
+        fbDb.collection('ponto_gestores_tokens').doc(uid).set({
+          fcmToken: token,
+          atualizadoEm: Date.now(),
+          dominio: window.location.hostname
+        }).then(function(){ console.log('[FCM Gestor] Token salvo no Firestore ✓'); })
+          .catch(function(e){ console.warn('[FCM Gestor] Erro ao salvar:', e.message); });
+      })
+      .catch(function(e){ console.warn('[FCM Gestor] Erro:', e.message); });
+  }
+
+  // Se SDK já carregado usa direto
+  if(typeof firebase !== 'undefined' && typeof firebase.messaging === 'function'){
+    registrar();
+    return;
+  }
+
+  // Carrega SDK de forma lazy
+  var script = document.createElement('script');
+  script.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js';
+  script.onload = function(){ setTimeout(registrar, 500); };
+  script.onerror = function(){ console.warn('[FCM Gestor] Falha ao carregar SDK'); };
+  document.head.appendChild(script);
 }
 function _pNotifGestorAtrasados(qtd){
   if(!('Notification' in window)||Notification.permission!=='granted') return;

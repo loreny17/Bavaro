@@ -2144,8 +2144,6 @@ function fecharPerfil(){
   if(!sh)return;
   sh.style.transform='translateY(100%)';
   setTimeout(function(){ if(m) m.style.display='none'; },320);
-  // Cancela o listener em tempo real ao fechar
-  if(_resumoUnsubscribe){ _resumoUnsubscribe(); _resumoUnsubscribe=null; }
 }
 
 // Fecha ao tocar no overlay
@@ -2165,29 +2163,23 @@ function _fmtDataBR(iso){
   return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso;
 }
 
-// Guarda o unsubscribe do listener de resumo para cancelar ao fechar
-var _resumoUnsubscribe=null;
+function _buscarDadosResumo(base, restId){
+  var vfRef=base.collection('configuracoes').doc('vfData');
+  var funcsRef=base.collection('funcionarios');
+  var funcsRestRef=restId
+    ?base.collection('restaurantes').doc(restId).collection('funcionarios')
+    :null;
+  var promises=[vfRef.get(), funcsRef.get()];
+  if(funcsRestRef) promises.push(funcsRestRef.get());
+  return Promise.all(promises);
+}
 
 function carregarResumoFunc(){
-  var det=document.getElementById('perfil-detalhes');
+  if(!_func||!fbDb)return;
   var loading=document.getElementById('perfil-detalhes-loading');
-
-  function _dbg(msg,cor){
-    console.log('[Resumo]',msg);
-    if(det) det.innerHTML+='<div style="font-size:0.7rem;padding:4px 8px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);color:'+(cor||'#aaa')+';">'+msg+'</div>';
-  }
-
-  if(det) det.innerHTML='';
-  if(loading) loading.style.display='none';
-
-  if(!_func){ _dbg('❌ _func é null — usuário não carregado','#f87171'); return; }
-  if(!fbDb){ _dbg('❌ fbDb é null — Firebase não inicializado','#f87171'); return; }
-
-  _dbg('✅ _func: '+(_func.nome||_func.nomeLogin||'?')+' (id: '+_func.id+')','#4ade80');
-  _dbg('✅ fbDb OK','#4ade80');
-
-  // Cancela listener anterior se existir
-  if(_resumoUnsubscribe){ _resumoUnsubscribe(); _resumoUnsubscribe=null; }
+  var det=document.getElementById('perfil-detalhes');
+  if(loading)loading.style.display='block';
+  if(det)det.innerHTML='';
 
   // Atualiza label do mês
   var agora=new Date();
@@ -2196,174 +2188,187 @@ function carregarResumoFunc(){
   var mesEl=document.getElementById('perfil-mes-label');
   if(mesEl)mesEl.textContent='— '+mesLabel;
 
+  // Chave de mês igual ao app principal: "2025-06"
   var vfKey=agora.getFullYear()+'-'+pad(agora.getMonth()+1);
   var funcId=_func.id;
   var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
 
-  _dbg('🔍 Buscando mês: '+vfKey+' | funcId: '+funcId);
+  var tenantId=null;
 
-  // Passo 1: pegar tenantId e restauranteId — depois ativa o listener em tempo real
+  // Passo 1: pegar tenantId e restauranteId salvo
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
-    var tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
+    tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
     var restId=cfgDoc.exists?cfgDoc.data().restauranteId:null;
-    _dbg('📋 tenantId: '+(tenantId||'null')+' | restId: '+(restId||'null'));
+    var base=tenantId
+      ?fbDb.collection('tenants').doc(tenantId)
+      :fbDb;
 
-    var base=tenantId?fbDb.collection('tenants').doc(tenantId):fbDb;
-
-    var vfRef=base.collection('configuracoes').doc('vfData');
-    var funcsRef=base.collection('funcionarios');
-    var funcsRestRef=restId?base.collection('restaurantes').doc(restId).collection('funcionarios'):null;
-
-    var funcsPromises=[funcsRef.get()];
-    if(funcsRestRef) funcsPromises.push(funcsRestRef.get());
-
-    Promise.all(funcsPromises).then(function(funcsResults){
-      var todosFuncs=[];
-      funcsResults.forEach(function(snap){
-        if(snap&&!snap.empty) snap.forEach(function(d){todosFuncs.push(d);});
+    // Se não tem restId, tenta descobrir automaticamente
+    if(!restId && tenantId){
+      return base.collection('restaurantes').get().then(function(snap){
+        if(!snap.empty){
+          // Pega o primeiro restaurante disponível
+          restId = snap.docs[0].id;
+          // Salva para próximas vezes
+          fbDb.collection('ponto_configuracoes').doc('restaurante').set({
+            restauranteId: restId
+          },{merge:true}).catch(function(){});
+        }
+        return _buscarDadosResumo(base, restId);
       });
-      _dbg('👥 Funcionários encontrados: '+todosFuncs.length);
+    }
+    return _buscarDadosResumo(base, restId);
+  }).then(function(results){
+    if(loading)loading.style.display='none';
+    var vfSnap=results[0];
+    var funcsSnap=results[1];
+    var funcsRestSnap=results[2]||null;
 
-      // ── LISTENER EM TEMPO REAL no vfData ──
-      _dbg('👂 Ativando listener no vfData...');
-      _resumoUnsubscribe=vfRef.onSnapshot(function(vfSnap){
-        _dbg('🔔 onSnapshot disparou! exists: '+(!!(vfSnap&&vfSnap.exists)));
+    if(!vfSnap||!vfSnap.exists){ _renderResumoVazio(); return; }
 
-        if(!vfSnap||!vfSnap.exists){ _dbg('⚠️ vfData não existe no Firestore','#f59e0b'); _renderResumoVazio(); return; }
+    var allVf=vfSnap.data().data||{};
+    var mesData=allVf[vfKey];
+    if(!mesData){ _renderResumoVazio(); return; }
 
-        var allVf=vfSnap.data().data||{};
-        var mesesDisponiveis=Object.keys(allVf);
-        _dbg('📅 Meses no vfData: ['+mesesDisponiveis.join(', ')+']');
+    // --- Estratégia 1: ID direto (funcId do ponto == ID no app principal) ---
+    var dados=mesData[funcId]||mesData[String(funcId)];
 
-        var mesData=allVf[vfKey];
-        if(!mesData){ _dbg('⚠️ Mês '+vfKey+' não encontrado no vfData','#f59e0b'); _renderResumoVazio(); return; }
+    // --- Estratégia 2: casar por nome com a lista de funcionários do app principal ---
+    // Combina funcionários de ambas as coleções
+    var todosFuncs=[];
+    if(funcsSnap&&!funcsSnap.empty) funcsSnap.forEach(function(d){todosFuncs.push(d);});
+    if(funcsRestSnap&&!funcsRestSnap.empty) funcsRestSnap.forEach(function(d){todosFuncs.push(d);});
 
-        var keysNoMes=Object.keys(mesData);
-        _dbg('🔑 IDs no mês '+vfKey+': ['+keysNoMes.join(', ')+']');
-
-        // Estratégia 1: ID direto
-        var dados=mesData[funcId]||mesData[String(funcId)];
-        if(dados) _dbg('✅ Achou por ID direto','#4ade80');
-
-        // Estratégia 2: casar por nome
-        if(!dados && todosFuncs.length){
-          var primeiroNome=nomeFunc.split(' ')[0];
-          todosFuncs.forEach(function(fdoc){
-            if(dados)return;
-            var fdata=fdoc.data();
-            var nomeApp=(fdata.nome||'').toLowerCase().trim();
-            var bate=(nomeApp===nomeFunc)
-                   ||(nomeApp&&nomeFunc&&nomeApp.includes(nomeFunc))
-                   ||(nomeApp&&nomeFunc&&nomeFunc.includes(nomeApp))
-                   ||(primeiroNome.length>2&&nomeApp.startsWith(primeiroNome));
-            if(bate&&mesData[fdoc.id]){
-              dados=mesData[fdoc.id];
-              _dbg('✅ Casou por nome: "'+nomeApp+'" → '+fdoc.id,'#4ade80');
-            }
-          });
+    if(!dados && todosFuncs.length){
+      var primeiroNome=nomeFunc.split(' ')[0];
+      todosFuncs.forEach(function(fdoc){
+        if(dados)return;
+        var fdata=fdoc.data();
+        var nomeApp=(fdata.nome||'').toLowerCase().trim();
+        var bate=(nomeApp===nomeFunc)
+               ||(nomeApp && nomeFunc && nomeApp.includes(nomeFunc))
+               ||(nomeApp && nomeFunc && nomeFunc.includes(nomeApp))
+               ||(primeiroNome.length>2 && nomeApp.startsWith(primeiroNome));
+        if(bate && mesData[fdoc.id]){
+          dados=mesData[fdoc.id];
+          console.log('[Perfil] casou por nome:',fdata.nome,'->',fdoc.id);
         }
-
-        if(!dados){
-          _dbg('❌ Não encontrou dados para este funcionário','#f87171');
-          _dbg('   Nome buscado: "'+nomeFunc+'"','#f87171');
-          _dbg('   IDs disponíveis: '+keysNoMes.join(', '),'#f87171');
-          _renderResumoVazio(); return;
-        }
-
-        var vales=dados.vales||[];
-        var faltas=(dados.faltas||[]).filter(function(f){return !f.atestado;});
-        var atestados=(dados.faltas||[]).filter(function(f){return f.atestado;});
-        var feriados=dados.feriados||[];
-
-        var totalVales=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
-        var totalFaltas=faltas.length;
-        var totalFeriados=feriados.length;
-
-        var vEl=document.getElementById('perfil-vales-val');
-        var fEl=document.getElementById('perfil-faltas-val');
-        var feEl=document.getElementById('perfil-feriados-val');
-        if(vEl)vEl.textContent=_fmtMoney(totalVales);
-        if(fEl)fEl.textContent=totalFaltas;
-        if(feEl)feEl.textContent=totalFeriados;
-
-        var html='';
-
-        if(vales.length){
-          html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#4ade80;margin:16px 0 8px;">💰 Vales ('+vales.length+')</div>';
-          vales.forEach(function(v){
-            html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.12);border-radius:10px;margin-bottom:6px;">'+
-              '<div>'+
-                '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(v.desc||'Vale')+'</div>'+
-                '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(v.data)+'</div>'+
-              '</div>'+
-              '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;color:#4ade80;letter-spacing:0.04em;">'+_fmtMoney(v.val)+'</div>'+
-            '</div>';
-          });
-        }
-
-        if(faltas.length){
-          html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f87171;margin:16px 0 8px;">❌ Faltas ('+faltas.length+')</div>';
-          faltas.forEach(function(f){
-            html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(248,113,113,0.05);border:1px solid rgba(248,113,113,0.12);border-radius:10px;margin-bottom:6px;">'+
-              '<div>'+
-                '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(f.desc||'Falta')+(f.horas?' ('+f.horas+'h parcial)':'')+'</div>'+
-                '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(f.data)+'</div>'+
-              '</div>'+
-              '<div style="font-size:1rem;">'+(f.horas?'⏰':'❌')+'</div>'+
-            '</div>';
-          });
-        }
-
-        if(feriados.length){
-          html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f59e0b;margin:16px 0 8px;">🏛️ Feriados trabalhados ('+feriados.length+')</div>';
-          feriados.forEach(function(fe){
-            html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.12);border-radius:10px;margin-bottom:6px;">'+
-              '<div>'+
-                '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(fe.desc||'Feriado')+'</div>'+
-                '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(fe.data)+'</div>'+
-              '</div>'+
-              '<div style="font-size:1rem;">🏛️</div>'+
-            '</div>';
-          });
-        }
-
-        if(!html){
-          html='<div style="text-align:center;padding:16px;color:var(--muted);font-size:0.8rem;">Nenhum lançamento neste mês.</div>';
-        }
-
-        if(det)det.innerHTML=html;
-
-        var atWrap=document.getElementById('perfil-atestados-wrap');
-        var atLista=document.getElementById('perfil-atestados-lista');
-        if(atestados.length&&atWrap&&atLista){
-          atWrap.style.display='block';
-          var atHtml='';
-          atestados.forEach(function(a){
-            atHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,158,247,0.05);border:1px solid rgba(74,158,247,0.15);border-radius:10px;margin-bottom:6px;">'+
-              '<div>'+
-                '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(a.desc||'Atestado')+'</div>'+
-                '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(a.data)+'</div>'+
-              '</div>'+
-              '<div style="font-size:0.72rem;color:#4a9ef7;font-weight:700;background:rgba(74,158,247,0.1);padding:3px 8px;border-radius:20px;">ATESTADO</div>'+
-            '</div>';
-          });
-          atLista.innerHTML=atHtml;
-        } else if(atWrap){
-          atWrap.style.display='none';
-        }
-
-      }, function(e){
-        _dbg('❌ Erro no listener: '+e.message,'#f87171');
-        _renderResumoVazio();
       });
+    }
 
-    }).catch(function(e){
-      _dbg('❌ Erro ao buscar funcionários: '+e.message,'#f87171');
+    if(!dados){
+      // Estratégia 3: tenta todas as chaves do mês e casa por nome parcial
+      var primeiroNomeCurto = nomeFunc.split(' ')[0];
+      Object.keys(mesData).forEach(function(key){
+        if(dados) return;
+        // Tenta casar pelo ID do funcionário no app principal
+        var fDoc = todosFuncs.find(function(d){ return d.id===key; });
+        if(fDoc){
+          var nomeApp2=(fDoc.data().nome||'').toLowerCase().trim();
+          var bate2 = nomeApp2===nomeFunc
+            || (nomeApp2 && nomeFunc && nomeApp2.includes(primeiroNomeCurto))
+            || (nomeApp2 && nomeFunc && nomeFunc.includes(nomeApp2.split(' ')[0]));
+          if(bate2) dados=mesData[key];
+        }
+      });
+    }
+
+    if(!dados){
       _renderResumoVazio();
-    });
+      return;
+    }
+
+    var vales=dados.vales||[];
+    var faltas=(dados.faltas||[]).filter(function(f){return !f.atestado;});
+    var atestados=(dados.faltas||[]).filter(function(f){return f.atestado;});
+    var feriados=dados.feriados||[];
+
+    // Totais
+    var totalVales=vales.reduce(function(s,v){return s+parseFloat(v.val||0);},0);
+    var totalFaltas=faltas.length;
+    var totalFeriados=feriados.length;
+
+    var vEl=document.getElementById('perfil-vales-val');
+    var fEl=document.getElementById('perfil-faltas-val');
+    var feEl=document.getElementById('perfil-feriados-val');
+    if(vEl)vEl.textContent=_fmtMoney(totalVales);
+    if(fEl)fEl.textContent=totalFaltas;
+    if(feEl)feEl.textContent=totalFeriados;
+
+    // Detalhes
+    var html='';
+
+    // Lista de vales
+    if(vales.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#4ade80;margin:16px 0 8px;">💰 Vales ('+vales.length+')</div>';
+      vales.forEach(function(v){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(v.desc||'Vale')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(v.data)+'</div>'+
+          '</div>'+
+          '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;color:#4ade80;letter-spacing:0.04em;">'+_fmtMoney(v.val)+'</div>'+
+        '</div>';
+      });
+    }
+
+    // Lista de faltas
+    if(faltas.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f87171;margin:16px 0 8px;">❌ Faltas ('+faltas.length+')</div>';
+      faltas.forEach(function(f){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(248,113,113,0.05);border:1px solid rgba(248,113,113,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(f.desc||'Falta')+(f.horas?' ('+f.horas+'h parcial)':'')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(f.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:1rem;">'+(f.horas?'⏰':'❌')+'</div>'+
+        '</div>';
+      });
+    }
+
+    // Lista de feriados trabalhados
+    if(feriados.length){
+      html+='<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.1em;color:#f59e0b;margin:16px 0 8px;">🏛️ Feriados trabalhados ('+feriados.length+')</div>';
+      feriados.forEach(function(fe){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.12);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(fe.desc||'Feriado')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(fe.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:1rem;">🏛️</div>'+
+        '</div>';
+      });
+    }
+
+    if(!html){
+      html='<div style="text-align:center;padding:16px;color:var(--muted);font-size:0.8rem;">Nenhum lançamento neste mês.</div>';
+    }
+
+    if(det)det.innerHTML=html;
+
+    // Atestados
+    var atWrap=document.getElementById('perfil-atestados-wrap');
+    var atLista=document.getElementById('perfil-atestados-lista');
+    if(atestados.length&&atWrap&&atLista){
+      atWrap.style.display='block';
+      var atHtml='';
+      atestados.forEach(function(a){
+        atHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(74,158,247,0.05);border:1px solid rgba(74,158,247,0.15);border-radius:10px;margin-bottom:6px;">'+
+          '<div>'+
+            '<div style="font-size:0.82rem;font-weight:600;color:var(--text);">'+(a.desc||'Atestado')+'</div>'+
+            '<div style="font-size:0.66rem;color:var(--muted);">'+_fmtDataBR(a.data)+'</div>'+
+          '</div>'+
+          '<div style="font-size:0.72rem;color:#4a9ef7;font-weight:700;background:rgba(74,158,247,0.1);padding:3px 8px;border-radius:20px;">ATESTADO</div>'+
+        '</div>';
+      });
+      atLista.innerHTML=atHtml;
+    } else if(atWrap){
+      atWrap.style.display='none';
+    }
 
   }).catch(function(e){
-    _dbg('❌ Erro ao buscar ponto_configuracoes: '+e.message,'#f87171');
+    if(loading)loading.style.display='none';
+    console.warn('[Perfil] Erro ao buscar vfData:',e);
     _renderResumoVazio();
   });
 }

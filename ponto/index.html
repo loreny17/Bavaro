@@ -1947,6 +1947,7 @@ function _dbgDiagnostico(){
 }
 function fmtH(d){return pad(d.getHours())+':'+pad(d.getMinutes());}
 function pad(n){return String(n).padStart(2,'0');}
+function diaKey(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function fmtMin(m){
   var abs=Math.abs(Math.round(m));var h=Math.floor(abs/60);var min=abs%60;
   return(m<0?'-':'')+(h>0?h+'h ':'')+pad(min)+'m';
@@ -2264,14 +2265,32 @@ function _fmtDataBR(iso){
 }
 
 function _buscarDadosResumo(base, restId){
-  var vfRef=base.collection('configuracoes').doc('vfData');
-  var funcsRef=base.collection('funcionarios');
-  var funcsRestRef=restId
-    ?base.collection('restaurantes').doc(restId).collection('funcionarios')
-    :null;
-  var promises=[vfRef.get(), funcsRef.get()];
+  // O vfData pode estar em 2 lugares dependendo do restaurante ativo:
+  // 1. Direto no tenant (restaurante "bavaro"): tenants/{id}/configuracoes/vfData
+  // 2. Dentro do restaurante: tenants/{id}/restaurantes/{restId}/configuracoes/vfData
+  // Tenta os dois em paralelo e usa o que existir
+  var vfRef1 = base.collection('configuracoes').doc('vfData');
+  var vfRef2 = restId
+    ? base.collection('restaurantes').doc(restId).collection('configuracoes').doc('vfData')
+    : null;
+
+  var funcsRef = base.collection('funcionarios');
+  var funcsRestRef = restId
+    ? base.collection('restaurantes').doc(restId).collection('funcionarios')
+    : null;
+
+  var promises = [vfRef1.get(), vfRef2?vfRef2.get():Promise.resolve(null), funcsRef.get()];
   if(funcsRestRef) promises.push(funcsRestRef.get());
-  return Promise.all(promises);
+
+  return Promise.all(promises).then(function(results){
+    // Combina os dois vfData — usa o que existir
+    var vf1 = results[0];
+    var vf2 = results[1];
+    // Prefere o que tiver dados
+    var vfFinal = (vf1 && vf1.exists) ? vf1 : (vf2 && vf2.exists) ? vf2 : null;
+    _dbgLog('vfRef1 existe: '+(vf1&&vf1.exists?'SIM':'NÃO')+' | vfRef2 existe: '+(vf2&&vf2.exists?'SIM':'NÃO'));
+    return [vfFinal, results[2], results[3]||null];
+  });
 }
 
 function carregarResumoFunc(){

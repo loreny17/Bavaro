@@ -12864,11 +12864,45 @@ function pontoResponderSol(solId, status){
     if(!doc.exists) return;
     var s=doc.data();
     if(status==='aprovado'){
-      fbDb.collection('ponto_registros').add({
-        funcId:s.funcId,funcNome:s.funcNome,tipo:s.tipoRegistro,
-        ts:s.tsRequisitado,diaKey:s.diaKey,registradoEm:Date.now(),
-        aprovadoPorGestor:true
-      }).catch(function(){});
+      if(s.tipo==='ajuste'){
+        // Procura o registro original do mesmo funcionário/dia/tipo para corrigir o horário
+        return fbDb.collection('ponto_registros')
+          .where('funcId','==',s.funcId)
+          .where('diaKey','==',s.diaKey)
+          .where('tipo','==',s.tipoRegistro)
+          .get()
+          .then(function(snap){
+            if(!snap.empty){
+              // Corrige o registro mais próximo do horário solicitado
+              var docs=[]; snap.forEach(function(d){docs.push(d);});
+              docs.sort(function(a,b){
+                return Math.abs(a.data().ts-s.tsRequisitado)-Math.abs(b.data().ts-s.tsRequisitado);
+              });
+              return docs[0].ref.update({ts:s.tsRequisitado,ajustadoPorGestor:true});
+            }else{
+              // Não achou registro original: cria um novo
+              return fbDb.collection('ponto_registros').add({
+                funcId:s.funcId,funcNome:s.funcNome,tipo:s.tipoRegistro,
+                ts:s.tsRequisitado,diaKey:s.diaKey,registradoEm:Date.now(),
+                aprovadoPorGestor:true
+              });
+            }
+          })
+          .then(function(){
+            return doc.ref.update({status:status,respondidoEm:Date.now()});
+          })
+          .catch(function(){
+            return doc.ref.update({status:status,respondidoEm:Date.now()});
+          });
+      }else{
+        return fbDb.collection('ponto_registros').add({
+          funcId:s.funcId,funcNome:s.funcNome,tipo:s.tipoRegistro,
+          ts:s.tsRequisitado,diaKey:s.diaKey,registradoEm:Date.now(),
+          aprovadoPorGestor:true
+        }).then(function(){
+          return doc.ref.update({status:status,respondidoEm:Date.now()});
+        });
+      }
     }
     return doc.ref.update({status:status,respondidoEm:Date.now()});
   }).then(function(){

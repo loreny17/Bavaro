@@ -2199,9 +2199,17 @@ function carregarResumoFunc(){
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
     tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
     var restId=cfgDoc.exists?cfgDoc.data().restauranteId:null;
-    var base=tenantId
-      ?fbDb.collection('tenants').doc(tenantId)
-      :fbDb;
+
+    // DEBUG TEMPORÁRIO
+    if(det) det.innerHTML='<div style="font-size:0.7rem;color:var(--muted);padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;margin-bottom:8px;">'+
+      '🔑 tenantId: '+(tenantId||'NULL')+'<br>'+
+      '🏪 restId: '+(restId||'NULL')+'<br>'+
+      '👤 nome: '+nomeFunc+'<br>'+
+      '🔢 funcId: '+funcId+'<br>'+
+      '📅 vfKey: '+vfKey+
+    '</div>';
+
+    var base=tenantId?fbDb.collection('tenants').doc(tenantId):fbDb;
 
     // Se não tem restId, tenta descobrir automaticamente
     if(!restId && tenantId){
@@ -2224,11 +2232,24 @@ function carregarResumoFunc(){
     var funcsSnap=results[1];
     var funcsRestSnap=results[2]||null;
 
-    if(!vfSnap||!vfSnap.exists){ _renderResumoVazio(); return; }
+    if(!vfSnap||!vfSnap.exists){
+      if(det) det.innerHTML+='<div style="font-size:0.7rem;color:#e74c3c;padding:6px;">❌ vfData não existe no caminho buscado</div>';
+      _renderResumoVazio(); return;
+    }
 
     var allVf=vfSnap.data().data||{};
     var mesData=allVf[vfKey];
-    if(!mesData){ _renderResumoVazio(); return; }
+
+    // DEBUG
+    if(det) det.innerHTML+='<div style="font-size:0.7rem;color:var(--muted);padding:6px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:4px;">'+
+      '✅ vfData existe<br>'+
+      '📦 Chaves do mês '+vfKey+': '+Object.keys(allVf[vfKey]||{}).slice(0,5).join(', ')+(Object.keys(allVf[vfKey]||{}).length>5?' ...':'')+
+    '</div>';
+
+    if(!mesData){
+      if(det) det.innerHTML+='<div style="font-size:0.7rem;color:#f39c12;padding:6px;">⚠️ Mês '+vfKey+' não encontrado.<br>Meses disponíveis: '+Object.keys(allVf).join(', ')+'</div>';
+      _renderResumoVazio(); return;
+    }
 
     // --- Estratégia 1: ID direto (funcId do ponto == ID no app principal) ---
     var dados=mesData[funcId]||mesData[String(funcId)];

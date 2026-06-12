@@ -677,7 +677,7 @@ body{
 
   <!-- HEADER -->
   <div class="app-header">
-    <div class="header-avatar" id="header-avatar" onclick="abrirPerfil()" style="cursor:pointer;">👤</div>
+    <div class="header-avatar" id="header-avatar" onclick="abrirPerfil();_dbgTap();" style="cursor:pointer;">👤</div>
     <div class="header-info" onclick="abrirPerfil()" style="cursor:pointer;">
       <div class="header-greeting" id="header-greeting">Bom dia,</div>
       <div class="header-name" id="header-name">—</div>
@@ -1843,8 +1843,108 @@ function diasUteisMes(){
   return count;
 }
 
-// ── UTILS ──
-function diaKey(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+// ── DEBUG SECRETO: 5 toques no avatar ──
+var _dbgTaps=0, _dbgTimer=null, _dbgLogs=[];
+function _dbgLog(msg){
+  _dbgLogs.push(new Date().toLocaleTimeString('pt-BR')+' '+msg);
+  if(_dbgLogs.length>100) _dbgLogs.shift();
+}
+function _dbgTap(){
+  _dbgTaps++;
+  if(_dbgTimer) clearTimeout(_dbgTimer);
+  _dbgTimer=setTimeout(function(){ _dbgTaps=0; },1500);
+  if(_dbgTaps>=5){ _dbgTaps=0; _dbgAbrirPainel(); }
+}
+function _dbgAbrirPainel(){
+  var ex=document.getElementById('debug-painel');
+  if(ex){ ex.remove(); return; }
+  var p=document.createElement('div');
+  p.id='debug-painel';
+  p.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.97);z-index:9999;display:flex;flex-direction:column;padding:16px;';
+  var texto=_dbgLogs.join('\n')||'Nenhum log ainda.';
+  p.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;color:#d4a843;letter-spacing:0.1em;">DEBUG PANEL</div>'+
+      '<button onclick="document.getElementById(\'debug-painel\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ Fechar</button>'+
+    '</div>'+
+    '<textarea id="debug-txt" style="flex:1;background:#111;color:#0f0;font-family:monospace;font-size:0.65rem;border:1px solid #333;border-radius:8px;padding:10px;resize:none;white-space:pre;" readonly>'+texto+'</textarea>'+
+    '<div style="display:flex;gap:8px;margin-top:10px;">'+
+      '<button onclick="_dbgCopiar()" style="flex:1;background:rgba(212,168,67,0.2);border:1px solid rgba(212,168,67,0.4);color:#d4a843;border-radius:8px;padding:12px;font-family:\'Bebas Neue\',sans-serif;font-size:0.9rem;cursor:pointer;">📋 COPIAR TUDO</button>'+
+      '<button onclick="_dbgLimpar()" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#999;border-radius:8px;padding:12px;font-size:0.8rem;cursor:pointer;">🗑️</button>'+
+    '</div>';
+  document.body.appendChild(p);
+  // Executa diagnóstico ao abrir
+  _dbgDiagnostico();
+}
+function _dbgCopiar(){
+  var el=document.getElementById('debug-txt');
+  if(!el) return;
+  el.select();
+  try{
+    navigator.clipboard.writeText(el.value).then(function(){
+      showToast('✅ Copiado!');
+    }).catch(function(){
+      document.execCommand('copy');
+      showToast('✅ Copiado!');
+    });
+  }catch(e){ document.execCommand('copy'); showToast('✅ Copiado!'); }
+}
+function _dbgLimpar(){
+  _dbgLogs=[];
+  var el=document.getElementById('debug-txt');
+  if(el) el.value='';
+}
+function _dbgDiagnostico(){
+  _dbgLog('=== DIAGNÓSTICO ===');
+  _dbgLog('Firebase: '+(typeof firebase!=='undefined'?'OK':'AUSENTE'));
+  _dbgLog('fbDb: '+(fbDb?'OK':'NULL'));
+  _dbgLog('_func: '+(_func?JSON.stringify({id:_func.id,nome:_func.nome,nomeLogin:_func.nomeLogin}):'NULL'));
+  _dbgLog('Notification: '+('Notification' in window?Notification.permission:'N/A'));
+  // Atualiza textarea
+  var el=document.getElementById('debug-txt');
+  if(el) el.value=_dbgLogs.join('\n');
+
+  if(!_func||!fbDb){ _dbgLog('❌ Sem func ou fbDb'); return; }
+
+  // Testa ponto_configuracoes
+  fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(doc){
+    if(doc.exists){
+      var d=doc.data();
+      _dbgLog('ponto_config/restaurante: '+JSON.stringify(d));
+    } else {
+      _dbgLog('❌ ponto_config/restaurante NÃO EXISTE');
+    }
+    // Testa vfData
+    var tenantId=doc.exists?doc.data().tenantId:null;
+    var restId=(doc.exists?doc.data().restauranteId:null)||'default';
+    var base=tenantId?fbDb.collection('tenants').doc(tenantId):fbDb;
+    var vfPath='tenants/'+tenantId+'/restaurantes/'+restId+'/configuracoes/vfData';
+    _dbgLog('Buscando vfData em: '+vfPath);
+    return base.collection('restaurantes').doc(restId).collection('configuracoes').doc('vfData').get();
+  }).then(function(snap){
+    if(!snap) return;
+    _dbgLog('vfData existe: '+(snap.exists?'SIM':'NÃO'));
+    if(snap.exists){
+      var data=snap.data().data||{};
+      _dbgLog('Meses no vfData: '+Object.keys(data).join(', '));
+      var mesAtual=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+      var mesData=data[mesAtual]||{};
+      _dbgLog('Chaves no mês '+mesAtual+': '+Object.keys(mesData).slice(0,10).join(', '));
+      _dbgLog('ID func: '+_func.id+' — está no mês? '+(mesData[_func.id]?'SIM':'NÃO'));
+      // Tenta casar por nome
+      var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
+      var funcsPrincipal=Object.keys(mesData);
+      _dbgLog('Nome buscado: "'+nomeFunc+'" | Total chaves: '+funcsPrincipal.length);
+    }
+    var el=document.getElementById('debug-txt');
+    if(el) el.value=_dbgLogs.join('\n');
+    el.scrollTop=el.scrollHeight;
+  }).catch(function(e){
+    _dbgLog('❌ ERRO: '+e.message);
+    var el=document.getElementById('debug-txt');
+    if(el){ el.value=_dbgLogs.join('\n'); el.scrollTop=el.scrollHeight; }
+  });
+}
 function fmtH(d){return pad(d.getHours())+':'+pad(d.getMinutes());}
 function pad(n){return String(n).padStart(2,'0');}
 function fmtMin(m){
@@ -2199,18 +2299,8 @@ function carregarResumoFunc(){
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
     tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
     var restId=cfgDoc.exists?cfgDoc.data().restauranteId:null;
-    // Se não tem restId configurado, usa 'default' (padrão do app principal)
     if(!restId) restId='default';
-
-    // DEBUG TEMPORÁRIO
-    if(det) det.innerHTML='<div style="font-size:0.7rem;color:var(--muted);padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;margin-bottom:8px;">'+
-      '🔑 tenantId: '+(tenantId||'NULL')+'<br>'+
-      '🏪 restId: '+restId+'<br>'+
-      '👤 nome: '+nomeFunc+'<br>'+
-      '🔢 funcId: '+funcId+'<br>'+
-      '📅 vfKey: '+vfKey+
-    '</div>';
-
+    _dbgLog('tenantId='+tenantId+' restId='+restId);
     var base=tenantId?fbDb.collection('tenants').doc(tenantId):fbDb;
 
     // Se não tem restId, tenta descobrir automaticamente
@@ -2235,23 +2325,13 @@ function carregarResumoFunc(){
     var funcsRestSnap=results[2]||null;
 
     if(!vfSnap||!vfSnap.exists){
-      if(det) det.innerHTML+='<div style="font-size:0.7rem;color:#e74c3c;padding:6px;">❌ vfData não existe no caminho buscado</div>';
+      _dbgLog('❌ vfData não existe');
       _renderResumoVazio(); return;
     }
-
     var allVf=vfSnap.data().data||{};
     var mesData=allVf[vfKey];
-
-    // DEBUG
-    if(det) det.innerHTML+='<div style="font-size:0.7rem;color:var(--muted);padding:6px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:4px;">'+
-      '✅ vfData existe<br>'+
-      '📦 Chaves do mês '+vfKey+': '+Object.keys(allVf[vfKey]||{}).slice(0,5).join(', ')+(Object.keys(allVf[vfKey]||{}).length>5?' ...':'')+
-    '</div>';
-
-    if(!mesData){
-      if(det) det.innerHTML+='<div style="font-size:0.7rem;color:#f39c12;padding:6px;">⚠️ Mês '+vfKey+' não encontrado.<br>Meses disponíveis: '+Object.keys(allVf).join(', ')+'</div>';
-      _renderResumoVazio(); return;
-    }
+    _dbgLog('vfData OK | meses: '+Object.keys(allVf).join(',')+' | mesData: '+(mesData?'SIM':'NÃO'));
+    if(!mesData){ _dbgLog('❌ Mês '+vfKey+' não encontrado'); _renderResumoVazio(); return; }
 
     // --- Estratégia 1: ID direto (funcId do ponto == ID no app principal) ---
     var dados=mesData[funcId]||mesData[String(funcId)];
@@ -2391,9 +2471,7 @@ function carregarResumoFunc(){
 
   }).catch(function(e){
     if(loading)loading.style.display='none';
-    console.warn('[Perfil] Erro ao buscar vfData:',e);
-    var det=document.getElementById('perfil-detalhes');
-    if(det) det.innerHTML+='<div style="font-size:0.7rem;color:#e74c3c;padding:8px;background:rgba(231,76,60,0.1);border-radius:6px;margin-top:6px;">❌ Erro: '+e.message+'</div>';
+    _dbgLog('❌ ERRO carregarResumoFunc: '+e.message);
     _renderResumoVazio();
   });
 }

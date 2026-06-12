@@ -2169,15 +2169,25 @@ function _fmtDataBR(iso){
 var _resumoUnsubscribe=null;
 
 function carregarResumoFunc(){
-  if(!_func||!fbDb)return;
+  var det=document.getElementById('perfil-detalhes');
+  var loading=document.getElementById('perfil-detalhes-loading');
+
+  function _dbg(msg,cor){
+    console.log('[Resumo]',msg);
+    if(det) det.innerHTML+='<div style="font-size:0.7rem;padding:4px 8px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);color:'+(cor||'#aaa')+';">'+msg+'</div>';
+  }
+
+  if(det) det.innerHTML='';
+  if(loading) loading.style.display='none';
+
+  if(!_func){ _dbg('❌ _func é null — usuário não carregado','#f87171'); return; }
+  if(!fbDb){ _dbg('❌ fbDb é null — Firebase não inicializado','#f87171'); return; }
+
+  _dbg('✅ _func: '+(_func.nome||_func.nomeLogin||'?')+' (id: '+_func.id+')','#4ade80');
+  _dbg('✅ fbDb OK','#4ade80');
 
   // Cancela listener anterior se existir
   if(_resumoUnsubscribe){ _resumoUnsubscribe(); _resumoUnsubscribe=null; }
-
-  var loading=document.getElementById('perfil-detalhes-loading');
-  var det=document.getElementById('perfil-detalhes');
-  if(loading)loading.style.display='block';
-  if(det)det.innerHTML='';
 
   // Atualiza label do mês
   var agora=new Date();
@@ -2190,17 +2200,20 @@ function carregarResumoFunc(){
   var funcId=_func.id;
   var nomeFunc=(_func.nome||_func.nomeLogin||'').toLowerCase().trim();
 
+  _dbg('🔍 Buscando mês: '+vfKey+' | funcId: '+funcId);
+
   // Passo 1: pegar tenantId e restauranteId — depois ativa o listener em tempo real
   fbDb.collection('ponto_configuracoes').doc('restaurante').get().then(function(cfgDoc){
     var tenantId=cfgDoc.exists?cfgDoc.data().tenantId:null;
     var restId=cfgDoc.exists?cfgDoc.data().restauranteId:null;
+    _dbg('📋 tenantId: '+(tenantId||'null')+' | restId: '+(restId||'null'));
+
     var base=tenantId?fbDb.collection('tenants').doc(tenantId):fbDb;
 
     var vfRef=base.collection('configuracoes').doc('vfData');
     var funcsRef=base.collection('funcionarios');
     var funcsRestRef=restId?base.collection('restaurantes').doc(restId).collection('funcionarios'):null;
 
-    // Busca funcionários uma vez (para casar por nome)
     var funcsPromises=[funcsRef.get()];
     if(funcsRestRef) funcsPromises.push(funcsRestRef.get());
 
@@ -2209,19 +2222,28 @@ function carregarResumoFunc(){
       funcsResults.forEach(function(snap){
         if(snap&&!snap.empty) snap.forEach(function(d){todosFuncs.push(d);});
       });
+      _dbg('👥 Funcionários encontrados: '+todosFuncs.length);
 
       // ── LISTENER EM TEMPO REAL no vfData ──
+      _dbg('👂 Ativando listener no vfData...');
       _resumoUnsubscribe=vfRef.onSnapshot(function(vfSnap){
-        if(loading)loading.style.display='none';
+        _dbg('🔔 onSnapshot disparou! exists: '+(!!(vfSnap&&vfSnap.exists)));
 
-        if(!vfSnap||!vfSnap.exists){ _renderResumoVazio(); return; }
+        if(!vfSnap||!vfSnap.exists){ _dbg('⚠️ vfData não existe no Firestore','#f59e0b'); _renderResumoVazio(); return; }
 
         var allVf=vfSnap.data().data||{};
+        var mesesDisponiveis=Object.keys(allVf);
+        _dbg('📅 Meses no vfData: ['+mesesDisponiveis.join(', ')+']');
+
         var mesData=allVf[vfKey];
-        if(!mesData){ _renderResumoVazio(); return; }
+        if(!mesData){ _dbg('⚠️ Mês '+vfKey+' não encontrado no vfData','#f59e0b'); _renderResumoVazio(); return; }
+
+        var keysNoMes=Object.keys(mesData);
+        _dbg('🔑 IDs no mês '+vfKey+': ['+keysNoMes.join(', ')+']');
 
         // Estratégia 1: ID direto
         var dados=mesData[funcId]||mesData[String(funcId)];
+        if(dados) _dbg('✅ Achou por ID direto','#4ade80');
 
         // Estratégia 2: casar por nome
         if(!dados && todosFuncs.length){
@@ -2236,12 +2258,17 @@ function carregarResumoFunc(){
                    ||(primeiroNome.length>2&&nomeApp.startsWith(primeiroNome));
             if(bate&&mesData[fdoc.id]){
               dados=mesData[fdoc.id];
-              console.log('[Perfil] casou por nome:',fdata.nome,'->',fdoc.id);
+              _dbg('✅ Casou por nome: "'+nomeApp+'" → '+fdoc.id,'#4ade80');
             }
           });
         }
 
-        if(!dados){ _renderResumoVazio(); return; }
+        if(!dados){
+          _dbg('❌ Não encontrou dados para este funcionário','#f87171');
+          _dbg('   Nome buscado: "'+nomeFunc+'"','#f87171');
+          _dbg('   IDs disponíveis: '+keysNoMes.join(', '),'#f87171');
+          _renderResumoVazio(); return;
+        }
 
         var vales=dados.vales||[];
         var faltas=(dados.faltas||[]).filter(function(f){return !f.atestado;});
@@ -2326,20 +2353,17 @@ function carregarResumoFunc(){
         }
 
       }, function(e){
-        if(loading)loading.style.display='none';
-        console.warn('[Perfil] Erro listener vfData:',e);
+        _dbg('❌ Erro no listener: '+e.message,'#f87171');
         _renderResumoVazio();
       });
 
     }).catch(function(e){
-      if(loading)loading.style.display='none';
-      console.warn('[Perfil] Erro ao buscar funcionários:',e);
+      _dbg('❌ Erro ao buscar funcionários: '+e.message,'#f87171');
       _renderResumoVazio();
     });
 
   }).catch(function(e){
-    if(loading)loading.style.display='none';
-    console.warn('[Perfil] Erro ao buscar config:',e);
+    _dbg('❌ Erro ao buscar ponto_configuracoes: '+e.message,'#f87171');
     _renderResumoVazio();
   });
 }

@@ -258,14 +258,17 @@ button{cursor:pointer;border:none;background:none;}
 .mesa-card.livre:hover{border-color:var(--accent);background:rgba(212,168,67,0.06);}
 .mesa-card.ocupada{border-color:rgba(248,113,113,0.5);background:rgba(248,113,113,0.05);}
 .mesa-card.minha{border-color:rgba(74,222,128,0.5);background:rgba(74,222,128,0.05);}
+.mesa-card.fechada{border-color:rgba(59,130,246,0.6);background:rgba(59,130,246,0.08);}
 .mesa-num{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:0.05em;color:var(--text);line-height:1;}
 .mesa-status{font-size:0.64rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;}
 .mesa-card.livre .mesa-status{color:var(--muted);}
 .mesa-card.ocupada .mesa-status{color:var(--danger);}
 .mesa-card.minha .mesa-status{color:var(--success);}
+.mesa-card.fechada .mesa-status{color:#60a5fa;font-weight:700;}
 .mesa-dot{width:7px;height:7px;border-radius:50%;position:absolute;top:8px;right:8px;}
 .mesa-card.ocupada .mesa-dot{background:var(--danger);}
 .mesa-card.minha .mesa-dot{background:var(--success);animation:pulse 2s infinite;}
+.mesa-card.fechada .mesa-dot{background:#3b82f6;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
 
 /* ─── App Principal ─── */
@@ -2466,7 +2469,7 @@ function atualizarBadgesCozinha(){
   // 2. Sininhos individuais nos cards das mesas
   var grid = document.getElementById('mesas-grid');
   if(!grid) return;
-  var cards = grid.querySelectorAll('.mesa-card.ocupada, .mesa-card.minha');
+  var cards = grid.querySelectorAll('.mesa-card.ocupada, .mesa-card.minha, .mesa-card.fechada');
   cards.forEach(function(card){
     var num = parseInt(card.getAttribute('data-mesa-num') || '0');
     if(!num) return;
@@ -3982,62 +3985,37 @@ function renderMesas(){
     var info = _mesasOcupadas[num];
     var eOcupada = !!info;
     var eMinha = eOcupada && info.garcom === _nomeGarcom;
-    var cls = 'mesa-card ' + (eMinha ? 'minha' : eOcupada ? 'ocupada' : 'livre');
+    var conta = _contasMesaCache && _contasMesaCache[num];
+    var eFechada = conta && conta.status === 'fechada';
+    var cls = 'mesa-card ';
+    if(eFechada) cls += 'fechada';
+    else if(eOcupada) cls += 'ocupada';
+    else cls += 'livre';
+    var status = eFechada ? 'Conta fechada' : eOcupada ? 'Ocupada' : 'Livre';
+    var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;
     el.setAttribute('data-mesa-num', num);
-
-    if(eOcupada){
-      // Card ocupado — número + 2 botões de ação rápida
-      el.style.cssText = 'padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;';
-      var dot = '<div class="mesa-dot" style="position:absolute;top:8px;right:8px;"></div>';
-      var btnCor = eMinha ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.12)';
-      var btnBorder = eMinha ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)';
-      var btnTxt = eMinha ? '#4ade80' : '#f87171';
-      el.innerHTML = dot +
-        '<div class="mesa-num" style="margin-bottom:2px;">'+num+'</div>'+
-        '<div style="display:flex;gap:5px;width:100%;">'+
-          '<button onclick="event.stopPropagation();_acaoRapidaMesa(\'pedido\',\''+num+'\')" '+
-            'style="flex:1;background:'+btnCor+';border:1px solid '+btnBorder+';color:'+btnTxt+';border-radius:6px;padding:5px 2px;font-size:0.62rem;font-weight:800;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.06em;cursor:pointer;line-height:1.1;">'+
-            'PEDIR'+
-          '</button>'+
-          '<button onclick="event.stopPropagation();_acaoRapidaMesa(\'fechar\',\''+num+'\')" '+
-            'style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:6px;padding:5px 2px;font-size:0.62rem;font-weight:800;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.06em;cursor:pointer;line-height:1.1;">'+
-            'CONTA'+
-          '</button>'+
-        '</div>';
-      // Toque no número → abre menu completo
-      el.onclick = (function(n){ return function(){
-        if(_longPressDisparou){ _longPressDisparou = false; return; }
-        abrirMenuMesa(n, true);
-      }; })(num);
-      anexarLongPress(el, num);
-      anexarSwipe(el, num);
-    } else {
-      // Card livre — igual antes
-      el.innerHTML = '<div class="mesa-num">'+num+'</div><div class="mesa-status">Livre</div>';
-      el.onclick = (function(n){ return function(){
-        if(_longPressDisparou){ _longPressDisparou = false; return; }
+    el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
+      '<div class="mesa-status">' + status + '</div>';
+    el.onclick = (function(n, ocupada){ return function(){
+      if(_longPressDisparou){ _longPressDisparou = false; return; }
+      if(!ocupada){
         abrirContaMesa(n);
         pushHistory('cardapio:null');
-      }; })(num);
+        return;
+      }
+      abrirMenuMesa(n, ocupada);
+    }; })(num, eOcupada);
+    if(eOcupada){
+      anexarLongPress(el, num);
+      anexarSwipe(el, num);
     }
     grid.appendChild(el);
   }
   setTimeout(function(){
     try{ atualizarBadgesCozinha(); }catch(e){}
   }, 50);
-}
-
-function _acaoRapidaMesa(acao, num){
-  if(_longPressDisparou){ _longPressDisparou = false; return; }
-  _mesaMenuAtual = num;
-  if(acao === 'pedido'){
-    selecionarMesa(num);
-    pushHistory('cardapio:null');
-  } else if(acao === 'fechar'){
-    abrirFecharConta(num);
-  }
 }
 
 // ═══ LONG PRESS — Pedido rápido ═══

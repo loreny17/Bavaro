@@ -3986,7 +3986,7 @@ function renderMesas(){
     var eOcupada = !!info;
     var eMinha = eOcupada && info.garcom === _nomeGarcom;
     var conta = _contasMesaCache && _contasMesaCache[num];
-    var eFechada = conta && conta.status === 'fechada';
+    var eFechada = conta && conta.contaImpressaSolicitada === true;
     var cls = 'mesa-card ';
     if(eFechada) cls += 'fechada';
     else if(eOcupada) cls += 'ocupada';
@@ -11478,7 +11478,9 @@ function enviarPedido(){
           total: totais.total,
           pagoTotal: totais.pagoTotal,
           restante: totais.restante,
-          atualizadoEm: Date.now()
+          atualizadoEm: Date.now(),
+          // Novo pedido → remove flag de conta impressa (mesa volta ao normal)
+          contaImpressaSolicitada: false
         });
       });
     }).then(function(){
@@ -13581,6 +13583,13 @@ function imprimirContaMesa(tipo){
     solicitadoEm:Date.now()
   }).then(function(){
     showToast('🖨️ Solicitação enviada','#4ade80');
+    // Marca conta como "impressa" → mesa fica azul
+    if(_fecharContaId){
+      fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+        contaImpressaSolicitada: true,
+        contaImpressaEm: Date.now()
+      }).catch(function(){});
+    }
     var m = document.getElementById('modal-imp-conta'); if(m) m.remove();
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }

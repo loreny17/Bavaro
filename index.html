@@ -12727,11 +12727,14 @@ function _pIndicadorPonto(f,fRegs,statusAtual){
 
   if(!entReg && statusAtual==='fora'){
     if(agoraMin > entMin){
-      // Passou do horário e não chegou
       var atrasoMin=agoraMin-entMin;
-      badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(231,76,60,0.18);color:#e74c3c;border:1px solid rgba(231,76,60,0.4);">⚠️ Não chegou · +'+atrasoMin+'min</span>');
+      // Só mostra badge de atraso se for até 3h (pode ter sido folga não configurada)
+      if(atrasoMin <= 180){
+        badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(231,76,60,0.18);color:#e74c3c;border:1px solid rgba(231,76,60,0.4);">⚠️ +'+atrasoMin+'min</span>');
+      } else {
+        badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(100,100,100,0.15);color:var(--muted);border:1px solid rgba(100,100,100,0.2);">Esperado '+h.entrada+'</span>');
+      }
     } else if(agoraMin >= entMin-5){
-      // Chegando em 5 min
       badges.push('<span style="font-size:0.62rem;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);">🕐 Entra às '+h.entrada+'</span>');
     }
   }
@@ -12760,64 +12763,106 @@ function _pIndicadorPonto(f,fRegs,statusAtual){
 }
 function pontoRenderAgora(){
   var res=_pBuildStatus(); var sm=res.sm; var regH=res.regH;
-  var total=_pFuncs.length;
-  var trab=_pFuncs.filter(function(f){return sm[f.id]&&sm[f.id].st==='trabalhando';}).length;
-  var intv=_pFuncs.filter(function(f){return sm[f.id]&&sm[f.id].st==='intervalo';}).length;
-  var fora=total-trab-intv;
-
-  // Conta atrasados: horário configurado passou, não chegou
   var agora=new Date();
   var agoraMin=agora.getHours()*60+agora.getMinutes();
-  var atrasados=_pFuncs.filter(function(f){
-    if(sm[f.id]&&sm[f.id].st!=='fora') return false; // já chegou
-    var h=_pGetHorarioDia(f);
-    if(!h||h.folga||!h.entrada) return false;
-    var entMin=_pHoraParaMin(h.entrada);
-    return entMin!==null && agoraMin>entMin;
-  }).length;
 
-  var cards=document.getElementById('ponto-resumo-cards');
-  if(cards) cards.innerHTML=
-    _pNumCard(trab,'Trabalhando','#2ecc71')+
-    _pNumCard(intv,'Intervalo','#f39c12')+
-    (atrasados>0?_pNumCard(atrasados,'Atrasados','#e74c3c'):_pNumCard(fora,'Fora','#666'))+
-    _pNumCard(total,'Total','var(--accent)');
-
-  // Notificação no gestor se há atrasados
-  if(atrasados>0) _pNotifGestorAtrasados(atrasados);
-  var lista=document.getElementById('ponto-lista-agora');
-  if(!lista) return;
-  var addBtnHtml='<button onclick="pontoAbrirModalAddFunc()" style="width:100%;background:rgba(212,168,67,0.08);border:1.5px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:10px;padding:11px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;margin-bottom:12px;letter-spacing:0.04em;">+ Adicionar funcionário ao ponto</button>';
-  lista.innerHTML=addBtnHtml+_pFuncs.map(function(f){
+  // Classifica cada funcionário
+  var grupos={trabalhando:[],intervalo:[],atrasado:[],previsto:[],semHorario:[]};
+  _pFuncs.forEach(function(f){
     var s=sm[f.id]||{st:'fora',ts:null};
     var fRegs=regH.filter(function(r){return r.funcId===f.id;}).sort(function(a,b){return a.ts-b.ts;});
+    var h=_pGetHorarioDia(f);
+    if(s.st==='trabalhando'){ grupos.trabalhando.push({f:f,s:s,fRegs:fRegs,h:h}); return; }
+    if(s.st==='intervalo'){ grupos.intervalo.push({f:f,s:s,fRegs:fRegs,h:h}); return; }
+    if(s.st==='fora'){
+      var jaSaiu=fRegs.some(function(r){return r.tipo==='saida';});
+      if(jaSaiu){ grupos.semHorario.push({f:f,s:s,fRegs:fRegs,h:h,jaSaiu:true}); return; }
+      if(!h){ grupos.semHorario.push({f:f,s:s,fRegs:fRegs,h:null}); return; }
+      var entMin=_pHoraParaMin(h.entrada);
+      if(entMin===null){ grupos.semHorario.push({f:f,s:s,fRegs:fRegs,h:h}); return; }
+      if(agoraMin > entMin+2) grupos.atrasado.push({f:f,s:s,fRegs:fRegs,h:h});
+      else grupos.previsto.push({f:f,s:s,fRegs:fRegs,h:h});
+    }
+  });
+
+  // Cards resumo
+  var cards=document.getElementById('ponto-resumo-cards');
+  if(cards) cards.innerHTML=
+    _pNumCard(grupos.trabalhando.length,'Trabalhando','#2ecc71')+
+    _pNumCard(grupos.intervalo.length,'Intervalo','#f39c12')+
+    _pNumCard(grupos.atrasado.length,'Atrasados','#e74c3c')+
+    _pNumCard(_pFuncs.length,'Total','var(--accent)');
+
+  if(grupos.atrasado.length>0) _pNotifGestorAtrasados(grupos.atrasado.length);
+
+  var lista=document.getElementById('ponto-lista-agora');
+  if(!lista) return;
+
+  var html='<button onclick="pontoAbrirModalAddFunc()" style="width:100%;background:rgba(212,168,67,0.06);border:1.5px dashed rgba(212,168,67,0.25);color:var(--accent);border-radius:10px;padding:11px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;margin-bottom:14px;letter-spacing:0.04em;">+ Adicionar funcionário ao ponto</button>';
+
+  // Seção trabalhando
+  if(grupos.trabalhando.length){
+    html+=_pSecaoAgora('🟢 Trabalhando', grupos.trabalhando, sm, regH, '#2ecc71');
+  }
+  // Seção intervalo
+  if(grupos.intervalo.length){
+    html+=_pSecaoAgora('🟡 Em Intervalo', grupos.intervalo, sm, regH, '#f39c12');
+  }
+  // Seção atrasados
+  if(grupos.atrasado.length){
+    html+=_pSecaoAgora('⚠️ Atrasados', grupos.atrasado, sm, regH, '#e74c3c');
+  }
+  // Seção previstos
+  if(grupos.previsto.length){
+    html+=_pSecaoAgora('🕐 Previstos hoje', grupos.previsto, sm, regH, 'var(--muted)');
+  }
+  // Seção sem horário / já saíram
+  if(grupos.semHorario.length){
+    html+=_pSecaoAgora('⚫ Sem turno hoje', grupos.semHorario, sm, regH, '#444');
+  }
+
+  lista.innerHTML=html;
+}
+
+function _pSecaoAgora(titulo, itens, sm, regH, cor){
+  var html='<div style="margin-bottom:14px;">'+
+    '<div style="font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:'+cor+';margin-bottom:6px;padding-left:2px;">'+titulo+' ('+itens.length+')</div>';
+  itens.forEach(function(item){
+    var f=item.f; var s=item.s; var fRegs=item.fRegs; var h=item.h;
     var hTrab=_pCalcH(fRegs,s.st);
     var entrada=fRegs.find(function(r){return r.tipo==='entrada';});
-    var stCor={trabalhando:'#2ecc71',intervalo:'#f39c12',fora:'#444'}[s.st]||'#444';
-    var stTxt={trabalhando:'Trabalhando',intervalo:'Intervalo',fora:'Fora'}[s.st]||'Fora';
-    var hDia=_pGetHorarioDia(f);
-    var horPrevisto=hDia?'<span style="font-size:0.62rem;color:rgba(212,168,67,0.6);">'+hDia.entrada+'\u2013'+hDia.saida+'</span>':'';
+    var emoji=getEmojiCargo?getEmojiCargo(f.cargo):'👤';
     var indicadores=_pIndicadorPonto(f,fRegs,s.st);
-    return '<div onclick="pontoAbrirModalFunc(\''+f.id+'\')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.3)\'" onmouseout="this.style.borderColor=\'rgba(212,168,67,0.08)\'">'+
-      '<div style="width:8px;height:8px;border-radius:50%;background:'+stCor+';flex-shrink:0;margin-top:5px;'+(s.st==='trabalhando'?'box-shadow:0 0 6px '+stCor+';':'')+'" ></div>'+
-      '<div style="flex:1;">'+
-        '<div style="font-weight:600;font-size:0.88rem;">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
-        '<div style="font-size:0.68rem;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
-          _pEsc(f.cargo||'Funcionário')+
-          (entrada?' \xb7 entrada: '+_pFmtH(new Date(entrada.ts)):'')+
-          (horPrevisto?' \xb7 '+horPrevisto:'')+
+
+    // Info de horário previsto
+    var horInfo='';
+    if(h && !item.jaSaiu){
+      horInfo='<span style="color:rgba(212,168,67,0.55);font-size:0.62rem;">'+h.entrada+'–'+h.saida+'</span>';
+    } else if(item.jaSaiu){
+      horInfo='<span style="color:var(--muted);font-size:0.62rem;">Já saiu</span>';
+    }
+
+    html+='<div onclick="pontoAbrirModalFunc(\''+f.id+'\')" style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:11px 13px;margin-bottom:6px;display:flex;align-items:center;gap:11px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor=\'rgba(212,168,67,0.25)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.05)\'">'+
+      '<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.05);border:2px solid '+cor+';display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">'+emoji+'</div>'+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-weight:600;font-size:0.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_pEsc(f.nome||f.nomeLogin)+'</div>'+
+        '<div style="font-size:0.66rem;color:var(--muted);display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:1px;">'+
+          '<span>'+_pEsc(f.cargo||'Funcionário')+'</span>'+
+          (entrada?'<span>·</span><span>entrou '+_pFmtH(new Date(entrada.ts))+'</span>':'')+
+          (horInfo?'<span>·</span>'+horInfo:'')+
         '</div>'+
-        indicadores+
+        (indicadores||'')+
       '</div>'+
       '<div style="text-align:right;flex-shrink:0;">'+
-        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.04em;">'+_pFmtMin(hTrab)+'</div>'+
-        '<div style="font-size:0.64rem;font-weight:700;color:'+stCor+';">'+stTxt+'</div>'+
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1rem;letter-spacing:0.04em;color:var(--text);">'+_pFmtMin(hTrab)+'</div>'+
       '</div>'+
     '</div>';
-  }).join('');
+  });
+  return html+'</div>';
 }
+
 function _pNumCard(val,label,cor){
-  return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(212,168,67,0.08);border-radius:10px;padding:10px 8px;text-align:center;">'+
+  return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 8px;text-align:center;">'+
     '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;color:'+cor+';">'+val+'</div>'+
     '<div style="font-size:0.56rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">'+label+'</div>'+
   '</div>';

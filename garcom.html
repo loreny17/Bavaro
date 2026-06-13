@@ -3974,7 +3974,6 @@ function escutarMesasOcupadas(){
 function renderMesas(){
   var busca = (document.getElementById('mesa-search-input').value||'').trim();
   var grid = document.getElementById('mesas-grid');
-  // Aplica colunas conforme preferência
   grid.className = 'mesas-grid cols-' + _colsMesas;
   grid.innerHTML = '';
   for(var i = 1; i <= _TOTAL_MESAS; i++){
@@ -3982,38 +3981,63 @@ function renderMesas(){
     if(busca && !num.includes(busca)) continue;
     var info = _mesasOcupadas[num];
     var eOcupada = !!info;
-    var cls = 'mesa-card ' + (eOcupada ? 'ocupada' : 'livre');
-    var status = eOcupada ? 'Ocupada' : 'Livre';
-    var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
+    var eMinha = eOcupada && info.garcom === _nomeGarcom;
+    var cls = 'mesa-card ' + (eMinha ? 'minha' : eOcupada ? 'ocupada' : 'livre');
     var el = document.createElement('div');
     el.className = cls;
     el.setAttribute('data-mesa-num', num);
-    el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
-      '<div class="mesa-status">' + status + '</div>';
-    el.onclick = (function(n, ocupada){ return function(){
-      // Se acabou de disparar long press, ignora click subsequente
-      if(_longPressDisparou){ _longPressDisparou = false; return; }
-      // Mesa LIVRE → cria conta e vai direto pro cardápio (não precisa confirmar)
-      if(!ocupada){
+
+    if(eOcupada){
+      // Card ocupado — número + 2 botões de ação rápida
+      el.style.cssText = 'padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;';
+      var dot = '<div class="mesa-dot" style="position:absolute;top:8px;right:8px;"></div>';
+      var btnCor = eMinha ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.12)';
+      var btnBorder = eMinha ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)';
+      var btnTxt = eMinha ? '#4ade80' : '#f87171';
+      el.innerHTML = dot +
+        '<div class="mesa-num" style="margin-bottom:2px;">'+num+'</div>'+
+        '<div style="display:flex;gap:5px;width:100%;">'+
+          '<button onclick="event.stopPropagation();_acaoRapidaMesa(\'pedido\',\''+num+'\')" '+
+            'style="flex:1;background:'+btnCor+';border:1px solid '+btnBorder+';color:'+btnTxt+';border-radius:6px;padding:5px 2px;font-size:0.62rem;font-weight:800;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.06em;cursor:pointer;line-height:1.1;">'+
+            'PEDIR'+
+          '</button>'+
+          '<button onclick="event.stopPropagation();_acaoRapidaMesa(\'fechar\',\''+num+'\')" '+
+            'style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:6px;padding:5px 2px;font-size:0.62rem;font-weight:800;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.06em;cursor:pointer;line-height:1.1;">'+
+            'CONTA'+
+          '</button>'+
+        '</div>';
+      // Toque no número → abre menu completo
+      el.onclick = (function(n){ return function(){
+        if(_longPressDisparou){ _longPressDisparou = false; return; }
+        abrirMenuMesa(n, true);
+      }; })(num);
+      anexarLongPress(el, num);
+      anexarSwipe(el, num);
+    } else {
+      // Card livre — igual antes
+      el.innerHTML = '<div class="mesa-num">'+num+'</div><div class="mesa-status">Livre</div>';
+      el.onclick = (function(n){ return function(){
+        if(_longPressDisparou){ _longPressDisparou = false; return; }
         abrirContaMesa(n);
         pushHistory('cardapio:null');
-        return;
-      }
-      // Mesa OCUPADA → abre menu de opções (Pedir / Ver / Transferir / Pagar)
-      abrirMenuMesa(n, ocupada);
-    }; })(num, eOcupada);
-    // Long press apenas pra mesas ocupadas (mesas livres não tem o que reaproveitar)
-    if(eOcupada){
-      anexarLongPress(el, num);
-      // Swipe pra esquerda → fechar mesa (só admin)
-      anexarSwipe(el, num);
+      }; })(num);
     }
     grid.appendChild(el);
   }
-  // Atualiza badges de cozinha (sininho) após renderizar
   setTimeout(function(){
     try{ atualizarBadgesCozinha(); }catch(e){}
   }, 50);
+}
+
+function _acaoRapidaMesa(acao, num){
+  if(_longPressDisparou){ _longPressDisparou = false; return; }
+  _mesaMenuAtual = num;
+  if(acao === 'pedido'){
+    selecionarMesa(num);
+    pushHistory('cardapio:null');
+  } else if(acao === 'fechar'){
+    abrirFecharConta(num);
+  }
 }
 
 // ═══ LONG PRESS — Pedido rápido ═══

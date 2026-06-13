@@ -774,15 +774,33 @@ body{
       </div>
     </div>
 
-    <!-- TELA HISTÓRICO -->
+    <!-- TELA RESUMO DO MÊS (era Histórico) -->
     <div id="tela-historico" class="tela">
-      <div class="sec-title">Histórico</div>
-      <div class="hist-month-picker">
-        <span class="hmp-nav" onclick="mesAnterior()">‹</span>
-        <span class="hmp-label" id="hist-mes-label">—</span>
-        <span class="hmp-nav" onclick="mesSeguinte()">›</span>
+      <div class="sec-title">Resumo do Mês</div>
+      <!-- Conteúdo do perfil/resumo -->
+      <div class="perfil-header" style="padding:20px 0 10px;">
+        <div class="perfil-avatar" id="perfil-avatar2">👤</div>
+        <div class="perfil-nome" id="perfil-nome2">—</div>
+        <div class="perfil-cargo-badge" id="perfil-cargo2">Funcionário</div>
       </div>
-      <div id="hist-lista"><div style="color:var(--muted);text-align:center;padding:30px;">Nenhum registro.</div></div>
+      <div class="perfil-item">
+        <div class="pi-icon">⏱</div>
+        <div class="pi-info">
+          <div class="pi-label">Carga diária</div>
+          <div class="pi-val" id="perfil-carga2">—</div>
+        </div>
+      </div>
+      <!-- Cards resumo do mês -->
+      <div id="perfil-resumo-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;">
+        <div class="es-card"><div class="es-val" id="pr-vales" style="color:var(--green);">R$0</div><div class="es-label">Vales</div></div>
+        <div class="es-card"><div class="es-val" id="pr-faltas" style="color:var(--red);">0</div><div class="es-label">Faltas</div></div>
+        <div class="es-card"><div class="es-val" id="pr-feriados" style="color:var(--gold);">0</div><div class="es-label">Feriados</div></div>
+      </div>
+      <!-- Detalhes -->
+      <div id="perfil-detalhes-loading" style="text-align:center;padding:16px;color:var(--muted);font-size:0.78rem;display:none;">
+        <div style="font-size:1.2rem;margin-bottom:6px;">⏳</div>Buscando dados...
+      </div>
+      <div id="perfil-detalhes"></div>
     </div>
 
     <!-- TELA ESCALA -->
@@ -839,8 +857,8 @@ body{
     <div class="nav-glass"></div>
     <div class="nav-inner">
       <button class="nav-btn" id="nav-historico" onclick="trocarTela('historico')">
-        <span class="nav-btn-icon">📋</span>
-        <span class="nav-btn-label">Histórico</span>
+        <span class="nav-btn-icon">📊</span>
+        <span class="nav-btn-label">Resumo</span>
       </button>
       <button class="nav-btn" id="nav-escala" onclick="trocarTela('escala')">
         <span class="nav-btn-icon">📆</span>
@@ -1334,7 +1352,7 @@ function trocarTela(t){
     var nb=document.getElementById('nav-'+id);
     if(nb) nb.classList.toggle('active',id===t);
   });
-  if(t==='historico') renderHistorico();
+  if(t==='historico') carregarResumoMes();
   if(t==='escala') renderEscala();
   if(t==='sol') carregarSolicitacoes();
   if(t==='tarefas') carregarTarefas();
@@ -1630,6 +1648,22 @@ function mostrarFeedback(icon){
   var fi=document.getElementById('fp-icon');
   if(fi)fi.textContent=icon;
   if(fp){fp.classList.add('show');setTimeout(function(){fp.classList.remove('show');},1200);}
+}
+
+// ── RESUMO DO MÊS (aba Resumo) ──
+function carregarResumoMes(){
+  if(!_func) return;
+  // Sincroniza info básica do funcionário
+  var av2=document.getElementById('perfil-avatar2');
+  var nm2=document.getElementById('perfil-nome2');
+  var cg2=document.getElementById('perfil-cargo2');
+  var cg3=document.getElementById('perfil-carga2');
+  if(av2) av2.textContent=getEmojiCargo(_func.cargo);
+  if(nm2) nm2.textContent=_func.nome||_func.nomeLogin;
+  if(cg2) cg2.textContent=_func.cargo||'Funcionário';
+  if(cg3){ var cm=_func.cargaMin||CARGA_MIN; cg3.textContent=Math.floor(cm/60)+'h'+pad(cm%60)+'min'; }
+  // Chama a função existente que já busca vales/faltas/feriados
+  carregarResumoFunc();
 }
 
 // ── HISTÓRICO ──

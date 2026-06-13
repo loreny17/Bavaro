@@ -12809,19 +12809,106 @@ function pontoRenderHistorico(){
     return true;
   }).sort(function(a,b){return b.ts-a.ts;});
   var labels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Iní. Intervalo',fim_intervalo:'Fim Intervalo'};
+  var cores={entrada:'#2ecc71',saida:'#e74c3c',ini_intervalo:'#f39c12',fim_intervalo:'#3498db'};
   var lista=document.getElementById('ponto-hist-lista');
   if(!lista) return;
-  lista.innerHTML=regs.map(function(r){
+  // Botão para adicionar registro manual
+  var addBtn='<button onclick="pAbrirAddRegistro()" style="width:100%;background:rgba(212,168,67,0.08);border:1px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:10px;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;margin-bottom:10px;">+ Adicionar registro manual</button>';
+  lista.innerHTML=addBtn+regs.map(function(r){
     var loc=r.lat?r.lat.toFixed(4)+', '+r.lng.toFixed(4):'';
+    var cor=cores[r.tipo]||'#666';
     return '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">'+
-      '<div style="width:6px;height:6px;border-radius:50%;background:'+({entrada:'#2ecc71',saida:'#e74c3c',ini_intervalo:'#f39c12',fim_intervalo:'#3498db'}[r.tipo]||'#666')+';flex-shrink:0;"></div>'+
+      '<div style="width:6px;height:6px;border-radius:50%;background:'+cor+';flex-shrink:0;"></div>'+
       '<div style="flex:1;">'+
         '<div style="font-weight:600;font-size:0.82rem;">'+_pEsc(r.funcNome||'?')+'</div>'+
         '<div style="font-size:0.68rem;color:var(--muted);">'+(labels[r.tipo]||r.tipo)+' · '+r.diaKey+(loc?' · 📍'+loc:'')+'</div>'+
       '</div>'+
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.04em;color:var(--muted);">'+_pFmtH(new Date(r.ts))+'</div>'+
+      '<button onclick="pAbrirEditRegistro(\''+r.id+'\')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--muted);border-radius:6px;padding:4px 8px;font-size:0.7rem;cursor:pointer;flex-shrink:0;">✏️</button>'+
     '</div>';
-  }).join('')||'<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhum registro no período.</div>';
+  }).join('')||addBtn+'<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhum registro no período.</div>';
+}
+
+var _pEditRegId=null;
+function pAbrirEditRegistro(regId){
+  var r=_pRegs.find(function(x){return x.id===regId;});
+  if(!r) return;
+  _pEditRegId=regId;
+  var dt=new Date(r.ts);
+  _pAbrirModalRegistro(r.funcId, r.funcNome, r.tipo, _pDiaKey(dt), _pFmtH(dt), regId);
+}
+
+function pAbrirAddRegistro(){
+  _pEditRegId=null;
+  var hoje=_pDiaKey(new Date());
+  // Pré-seleciona funcionário filtrado se houver
+  var ff=(document.getElementById('pfilt-func')||{}).value||'';
+  var funcEncontrado=_pFuncs.find(function(f){return (f.nome||f.nomeLogin||'').toLowerCase().includes(ff.toLowerCase());});
+  _pAbrirModalRegistro(funcEncontrado?funcEncontrado.id:'', funcEncontrado?funcEncontrado.nome||funcEncontrado.nomeLogin:'', 'entrada', hoje, _pFmtH(new Date()), null);
+}
+
+function _pAbrirModalRegistro(funcId, funcNome, tipo, data, hora, editId){
+  var ex=document.getElementById('modal-ponto-registro');
+  if(ex) ex.remove();
+  var m=document.createElement('div');
+  m.id='modal-ponto-registro';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:500;display:flex;align-items:flex-end;justify-content:center;';
+  var optsFunc=_pFuncs.map(function(f){
+    return '<option value="'+f.id+'" '+(f.id===funcId?'selected':'')+'>'+_pEsc(f.nome||f.nomeLogin)+'</option>';
+  }).join('');
+  var inpStyle='width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:11px 12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.88rem;outline:none;';
+  var lblStyle='font-size:0.6rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;';
+  m.innerHTML=
+    '<div style="background:linear-gradient(160deg,#1a1500,#0e0c04);border:1px solid rgba(212,168,67,0.2);border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:20px 20px 36px;">'+
+      '<div style="width:40px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 14px;"></div>'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.1rem;letter-spacing:0.1em;color:var(--accent);margin-bottom:14px;">'+(editId?'EDITAR REGISTRO':'ADICIONAR REGISTRO')+'</div>'+
+      '<div style="margin-bottom:10px;"><label style="'+lblStyle+'">Funcionário</label>'+
+        '<select id="pr-func" style="'+inpStyle+'">'+optsFunc+'</select></div>'+
+      '<div style="margin-bottom:10px;"><label style="'+lblStyle+'">Tipo</label>'+
+        '<select id="pr-tipo" style="'+inpStyle+'">'+
+          '<option value="entrada" '+(tipo==='entrada'?'selected':'')+'>Entrada</option>'+
+          '<option value="saida" '+(tipo==='saida'?'selected':'')+'>Saída</option>'+
+          '<option value="ini_intervalo" '+(tipo==='ini_intervalo'?'selected':'')+'>Início Intervalo</option>'+
+          '<option value="fim_intervalo" '+(tipo==='fim_intervalo'?'selected':'')+'>Fim Intervalo</option>'+
+        '</select></div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
+        '<div style="flex:1;"><label style="'+lblStyle+'">Data</label><input type="date" id="pr-data" value="'+data+'" style="'+inpStyle+'"></div>'+
+        '<div style="flex:1;"><label style="'+lblStyle+'">Horário</label><input type="time" id="pr-hora" value="'+hora+'" style="'+inpStyle+'"></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button onclick="document.getElementById(\'modal-ponto-registro\').remove()" style="flex:1;background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:8px;padding:12px;font-family:\'Space Grotesk\',sans-serif;font-size:0.85rem;cursor:pointer;">Cancelar</button>'+
+        (editId?'<button onclick="pExcluirRegistro(\''+editId+'\')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.25);color:#e74c3c;border-radius:8px;padding:12px 14px;font-size:0.82rem;cursor:pointer;">🗑️</button>':'')+
+        '<button onclick="pSalvarRegistro('+(editId?'\''+editId+'\'':'null')+')" style="flex:1.5;background:linear-gradient(135deg,var(--accent),#b88a20);border:none;color:#000;border-radius:8px;padding:12px;font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.08em;cursor:pointer;">SALVAR</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(m);
+}
+
+function pSalvarRegistro(editId){
+  var funcId=document.getElementById('pr-func').value;
+  var tipo=document.getElementById('pr-tipo').value;
+  var data=document.getElementById('pr-data').value;
+  var hora=document.getElementById('pr-hora').value;
+  if(!funcId||!data||!hora){ showToast('Preencha todos os campos','#f7a34f'); return; }
+  var f=_pFuncs.find(function(x){return x.id===funcId;});
+  var p=data.split('-'); var h=hora.split(':');
+  var dt=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]),parseInt(h[0]),parseInt(h[1]),0);
+  var reg={funcId:funcId,funcNome:f?f.nome||f.nomeLogin:'?',tipo:tipo,ts:dt.getTime(),diaKey:data,registradoEm:Date.now(),editadoPorGestor:true};
+  var promise=editId
+    ?fbDb.collection('ponto_registros').doc(editId).set(reg)
+    :fbDb.collection('ponto_registros').add(reg);
+  promise.then(function(){
+    document.getElementById('modal-ponto-registro').remove();
+    showToast('✅ Registro salvo!');
+  }).catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
+}
+
+function pExcluirRegistro(regId){
+  if(!confirm('Excluir este registro?')) return;
+  fbDb.collection('ponto_registros').doc(regId).delete().then(function(){
+    document.getElementById('modal-ponto-registro').remove();
+    showToast('🗑️ Registro excluído');
+  }).catch(function(e){ showToast('Erro: '+e.message,'#f75a5a'); });
 }
 function pFiltHoje(){ var h=_pDiaKey(new Date()); document.getElementById('pfilt-ini').value=h; document.getElementById('pfilt-fim').value=h; pontoRenderHistorico(); }
 function pFiltSemana(){ var n=new Date(),d=new Date(n); d.setDate(n.getDate()-n.getDay()); document.getElementById('pfilt-ini').value=_pDiaKey(d); document.getElementById('pfilt-fim').value=_pDiaKey(n); pontoRenderHistorico(); }
@@ -13271,22 +13358,61 @@ function pontoRenderHorarios(){
   if(!editor||!funcId) return;
   var f=_pFuncs.find(function(x){return x.id===funcId;});
   var horarios=f&&f.horarios?f.horarios:{};
-  editor.innerHTML=_pDiasSem.map(function(d){
-    var h=horarios[d.key]||{entrada:'',saida:'',folga:false};
-    return '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:8px;">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'+
-        '<div style="font-weight:600;font-size:0.82rem;">'+d.label+'</div>'+
-        '<label style="display:flex;align-items:center;gap:6px;font-size:0.7rem;color:var(--muted);cursor:pointer;">'+
-          '<input type="checkbox" id="ph-folga-'+d.key+'" '+(h.folga?'checked':'')+' onchange="pToggleFolga(\''+d.key+'\')" style="accent-color:var(--accent);">Folga'+
-        '</label>'+
+  editor.innerHTML=
+    // Atalho: aplicar mesmo horário para todos os dias
+    '<div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:12px;">'+
+      '<div style="font-size:0.68rem;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">⚡ Aplicar para todos os dias</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:8px;">'+
+        '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Entrada</div><input type="time" id="ph-todos-e" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+        '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Saída</div><input type="time" id="ph-todos-s" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
       '</div>'+
-      '<div id="ph-inp-'+d.key+'" style="display:'+(h.folga?'none':'flex')+';gap:8px;">'+
-        '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Entrada</div><input type="time" id="ph-e-'+d.key+'" value="'+(h.entrada||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
-        '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Saída</div><input type="time" id="ph-s-'+d.key+'" value="'+(h.saida||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+        '<button onclick="pAplicarTodos(\'seg-sex\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-weight:700;cursor:pointer;">Seg-Sex</button>'+
+        '<button onclick="pAplicarTodos(\'seg-sab\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-weight:700;cursor:pointer;">Seg-Sáb</button>'+
+        '<button onclick="pAplicarTodos(\'todos\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-weight:700;cursor:pointer;">Todos os dias</button>'+
       '</div>'+
-    '</div>';
-  }).join('')+
-  '<button onclick="pontoSalvarHorarios()" style="width:100%;background:linear-gradient(135deg,var(--accent),#b88a20);border:none;color:#000;border-radius:8px;padding:12px;font-family:\'Bebas Neue\',sans-serif;font-size:0.92rem;letter-spacing:0.08em;cursor:pointer;margin-top:4px;">SALVAR HORÁRIOS</button>';
+    '</div>'+
+    // Dias individualmente
+    _pDiasSem.map(function(d){
+      var h=horarios[d.key]||{entrada:'',saida:'',folga:false};
+      return '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:8px;">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'+
+          '<div style="font-weight:600;font-size:0.82rem;">'+d.label+'</div>'+
+          '<label style="display:flex;align-items:center;gap:6px;font-size:0.7rem;color:var(--muted);cursor:pointer;">'+
+            '<input type="checkbox" id="ph-folga-'+d.key+'" '+(h.folga?'checked':'')+' onchange="pToggleFolga(\''+d.key+'\')" style="accent-color:var(--accent);">Folga'+
+          '</label>'+
+        '</div>'+
+        '<div id="ph-inp-'+d.key+'" style="display:'+(h.folga?'none':'flex')+';gap:8px;">'+
+          '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Entrada</div><input type="time" id="ph-e-'+d.key+'" value="'+(h.entrada||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+          '<div style="flex:1;"><div style="font-size:0.58rem;color:var(--muted);margin-bottom:2px;">Saída</div><input type="time" id="ph-s-'+d.key+'" value="'+(h.saida||'')+'" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:6px;color:var(--text);padding:8px;font-family:\'Space Grotesk\',sans-serif;font-size:0.82rem;outline:none;"></div>'+
+        '</div>'+
+      '</div>';
+    }).join('')+
+    '<button onclick="pontoSalvarHorarios()" style="width:100%;background:linear-gradient(135deg,var(--accent),#b88a20);border:none;color:#000;border-radius:8px;padding:12px;font-family:\'Bebas Neue\',sans-serif;font-size:0.92rem;letter-spacing:0.08em;cursor:pointer;margin-top:4px;">SALVAR HORÁRIOS</button>';
+}
+
+function pAplicarTodos(modo){
+  var e=document.getElementById('ph-todos-e').value;
+  var s=document.getElementById('ph-todos-s').value;
+  if(!e||!s){ showToast('Informe entrada e saída primeiro','#f7a34f'); return; }
+  var diasSemana={
+    'seg-sex':['segunda','terca','quarta','quinta','sexta'],
+    'seg-sab':['segunda','terca','quarta','quinta','sexta','sabado'],
+    'todos':['segunda','terca','quarta','quinta','sexta','sabado','domingo']
+  }[modo]||[];
+  _pDiasSem.forEach(function(d){
+    var eEl=document.getElementById('ph-e-'+d.key);
+    var sEl=document.getElementById('ph-s-'+d.key);
+    var fEl=document.getElementById('ph-folga-'+d.key);
+    var inpEl=document.getElementById('ph-inp-'+d.key);
+    if(diasSemana.includes(d.key)){
+      if(eEl) eEl.value=e;
+      if(sEl) sEl.value=s;
+      if(fEl) fEl.checked=false;
+      if(inpEl) inpEl.style.display='flex';
+    }
+  });
+  showToast('✅ Aplicado!');
 }
 function pToggleFolga(dia){
   var cb=document.getElementById('ph-folga-'+dia);

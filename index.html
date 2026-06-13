@@ -1729,9 +1729,22 @@ body.admin-mode .admin-only{display:flex!important;}
     <!-- HISTÓRICO -->
     <div id="psub-historico" style="display:none;">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        <input type="text" id="pfilt-func" placeholder="Funcionário..." oninput="pontoRenderHistorico()" style="flex:1;min-width:120px;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:9px 12px;font-family:'Space Grotesk',sans-serif;font-size:0.82rem;outline:none;">
-        <input type="date" id="pfilt-ini" onchange="pontoRenderHistorico()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:9px 10px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;outline:none;">
-        <input type="date" id="pfilt-fim" onchange="pontoRenderHistorico()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:9px 10px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;outline:none;">
+        <input type="text" id="pfilt-func" placeholder="🔍 Filtrar por funcionário..." oninput="pontoRenderHistorico()" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:10px 12px;font-family:'Space Grotesk',sans-serif;font-size:0.84rem;outline:none;margin-bottom:8px;">
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <div style="flex:1;">
+            <div style="font-size:0.58rem;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.06em;">De</div>
+            <input type="date" id="pfilt-ini" onchange="pontoRenderHistorico()" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:9px 10px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;outline:none;">
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:0.58rem;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.06em;">Até</div>
+            <input type="date" id="pfilt-fim" onchange="pontoRenderHistorico()" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(212,168,67,0.15);border-radius:8px;color:var(--text);padding:9px 10px;font-family:'Space Grotesk',sans-serif;font-size:0.78rem;outline:none;">
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:4px;">
+          <button onclick="pFiltHoje()" style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:8px;font-size:0.74rem;font-weight:700;cursor:pointer;">Hoje</button>
+          <button onclick="pFiltSemana()" style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:8px;font-size:0.74rem;font-weight:700;cursor:pointer;">Semana</button>
+          <button onclick="pFiltMes()" style="flex:1;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:8px;font-size:0.74rem;font-weight:700;cursor:pointer;">Mês</button>
+        </div>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:12px;">
         <button onclick="pFiltHoje()" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.2);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:0.74rem;font-weight:700;cursor:pointer;">Hoje</button>
@@ -12821,25 +12834,78 @@ function pontoRenderHistorico(){
     if(fim&&r.diaKey>fim) return false;
     return true;
   }).sort(function(a,b){return b.ts-a.ts;});
-  var labels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Iní. Intervalo',fim_intervalo:'Fim Intervalo'};
-  var cores={entrada:'#2ecc71',saida:'#e74c3c',ini_intervalo:'#f39c12',fim_intervalo:'#3498db'};
+
   var lista=document.getElementById('ponto-hist-lista');
   if(!lista) return;
-  // Botão para adicionar registro manual
-  var addBtn='<button onclick="pAbrirAddRegistro()" style="width:100%;background:rgba(212,168,67,0.08);border:1px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:10px;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;margin-bottom:10px;">+ Adicionar registro manual</button>';
-  lista.innerHTML=addBtn+regs.map(function(r){
-    var loc=r.lat?r.lat.toFixed(4)+', '+r.lng.toFixed(4):'';
-    var cor=cores[r.tipo]||'#666';
-    return '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">'+
-      '<div style="width:6px;height:6px;border-radius:50%;background:'+cor+';flex-shrink:0;"></div>'+
-      '<div style="flex:1;">'+
-        '<div style="font-weight:600;font-size:0.82rem;">'+_pEsc(r.funcNome||'?')+'</div>'+
-        '<div style="font-size:0.68rem;color:var(--muted);">'+(labels[r.tipo]||r.tipo)+' · '+r.diaKey+(loc?' · 📍'+loc:'')+'</div>'+
-      '</div>'+
-      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.04em;color:var(--muted);">'+_pFmtH(new Date(r.ts))+'</div>'+
-      '<button onclick="pAbrirEditRegistro(\''+r.id+'\')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--muted);border-radius:6px;padding:4px 8px;font-size:0.7rem;cursor:pointer;flex-shrink:0;">✏️</button>'+
-    '</div>';
-  }).join('')||addBtn+'<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhum registro no período.</div>';
+
+  var labels={entrada:'Entrada',saida:'Saída',ini_intervalo:'Iní. Intervalo',fim_intervalo:'Fim Intervalo'};
+  var cores={entrada:'#2ecc71',saida:'#e74c3c',ini_intervalo:'#f39c12',fim_intervalo:'#3498db'};
+  var icones={entrada:'🟢',saida:'🔴',ini_intervalo:'🟡',fim_intervalo:'🔵'};
+
+  // Agrupa por dia
+  var porDia={};
+  regs.forEach(function(r){
+    if(!porDia[r.diaKey]) porDia[r.diaKey]=[];
+    porDia[r.diaKey].push(r);
+  });
+
+  var diasOrdenados=Object.keys(porDia).sort(function(a,b){return b.localeCompare(a);});
+
+  if(!diasOrdenados.length){
+    lista.innerHTML=
+      '<button onclick="pAbrirAddRegistro()" style="width:100%;background:rgba(212,168,67,0.06);border:1px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:10px;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;margin-bottom:10px;">+ Adicionar registro manual</button>'+
+      '<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhum registro no período.</div>';
+    return;
+  }
+
+  var html='<button onclick="pAbrirAddRegistro()" style="width:100%;background:rgba(212,168,67,0.06);border:1px dashed rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:10px;font-family:\'Space Grotesk\',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;margin-bottom:12px;">+ Adicionar registro manual</button>';
+
+  diasOrdenados.forEach(function(dia){
+    var regsD=porDia[dia].sort(function(a,b){return a.ts-b.ts;});
+    // Formata data ex: "Hoje · Sex, 12/06" ou "Sex, 12/06"
+    var d=new Date(dia+'T12:00:00');
+    var hoje=_pDiaKey(new Date());
+    var diasSemNome=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    var nomeDia=diasSemNome[d.getDay()];
+    var dataFmt=nomeDia+', '+_pPad(d.getDate())+'/'+_pPad(d.getMonth()+1);
+    var isHoje=dia===hoje;
+    var dataLabel=(isHoje?'<span style="background:var(--accent);color:#000;font-size:0.58rem;font-weight:800;padding:2px 7px;border-radius:10px;margin-right:6px;vertical-align:middle;">HOJE</span>':'')+dataFmt;
+
+    // Agrupa por funcionário dentro do dia
+    var porFunc={};
+    regsD.forEach(function(r){
+      var k=r.funcNome||r.funcId||'?';
+      if(!porFunc[k]) porFunc[k]=[];
+      porFunc[k].push(r);
+    });
+
+    html+='<div style="margin-bottom:14px;">'+
+      '<div style="font-size:0.72rem;font-weight:700;color:var(--accent);letter-spacing:0.06em;margin-bottom:6px;display:flex;align-items:center;">'+dataLabel+'</div>'+
+      '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(212,168,67,0.08);border-radius:12px;overflow:hidden;">';
+
+    Object.keys(porFunc).forEach(function(funcNome, fi){
+      var fRegs=porFunc[funcNome];
+      if(fi>0) html+='<div style="height:1px;background:rgba(255,255,255,0.04);margin:0 12px;"></div>';
+      html+='<div style="padding:10px 12px;">'+
+        '<div style="font-size:0.72rem;font-weight:700;color:var(--text);margin-bottom:6px;">'+_pEsc(funcNome)+'</div>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      fRegs.forEach(function(r){
+        var cor=cores[r.tipo]||'#666';
+        html+='<div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:5px 10px;cursor:pointer;" onclick="pAbrirEditRegistro(\''+r.id+'\')">'+
+          '<div style="width:7px;height:7px;border-radius:50%;background:'+cor+';flex-shrink:0;"></div>'+
+          '<div>'+
+            '<div style="font-size:0.65rem;color:var(--muted);line-height:1.2;">'+(labels[r.tipo]||r.tipo)+'</div>'+
+            '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:0.95rem;letter-spacing:0.04em;color:var(--text);">'+_pFmtH(new Date(r.ts))+'</div>'+
+          '</div>'+
+        '</div>';
+      });
+      html+='</div></div>';
+    });
+
+    html+='</div></div>';
+  });
+
+  lista.innerHTML=html;
 }
 
 var _pEditRegId=null;

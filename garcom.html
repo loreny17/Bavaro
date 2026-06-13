@@ -2355,9 +2355,36 @@ function _almPopularFormulario(){
   }
 
   // Bebidas — mini cards estilo cardápio (4 colunas)
+  // Filtra só itens das categorias associadas à impressora caixa
   var bebGrid = document.getElementById('alm-bebidas-grid');
   if(bebGrid){
-    var itensBeb = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda !== 'kg'; });
+    // Pega categorias da impressora caixa (modelo com tipo caixa ou nome caixa)
+    var catsCaixa = [];
+    (_modelosCozinha||[]).forEach(function(m){
+      var imp = (_impressorasCozinha||[]).find(function(i){ return i.id === m.impressoraId; });
+      if(imp && (imp.tipo==='caixa' || (imp.nome||'').toLowerCase().includes('caixa'))){
+        catsCaixa = catsCaixa.concat(m.categorias||[]);
+      }
+    });
+    // Se não achou pela impressora, tenta pelo modelo com 'caixa' no nome
+    if(!catsCaixa.length){
+      (_modelosCozinha||[]).forEach(function(m){
+        if((m.nome||'').toLowerCase().includes('caixa') || (m.nome||'').toLowerCase().includes('bebida')){
+          catsCaixa = catsCaixa.concat(m.categorias||[]);
+        }
+      });
+    }
+    // Filtra itens
+    var itensBeb;
+    if(catsCaixa.length){
+      itensBeb = (_itens||[]).filter(function(i){
+        return i.disponivel && i.tipoVenda !== 'kg' && catsCaixa.includes(i.categoriaId);
+      });
+    } else {
+      // Fallback: todos não-kg
+      itensBeb = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda !== 'kg'; });
+    }
+
     if(itensBeb.length){
       bebGrid.innerHTML = '';
       // Card "Nenhuma"
@@ -2373,7 +2400,6 @@ function _almPopularFormulario(){
       noneCard.onclick = function(){ _almSelecionarBebida(''); };
       bebGrid.appendChild(noneCard);
 
-      // Cards de bebidas
       itensBeb.forEach(function(it){
         var card = document.createElement('div');
         card.id = 'alm-beb-'+it.id;
@@ -2392,7 +2418,7 @@ function _almPopularFormulario(){
         bebGrid.appendChild(card);
       });
     } else {
-      bebGrid.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;grid-column:1/-1;">Nenhuma bebida cadastrada</div>';
+      bebGrid.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;grid-column:1/-1;">Nenhuma bebida encontrada na impressora caixa</div>';
     }
   }
 }

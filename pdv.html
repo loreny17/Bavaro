@@ -2455,6 +2455,8 @@ function iniciarListenerPedidos() {
       var v = doc.data();
       // Filtro manual de data se a query veio sem filtro
       if(!comFiltroData && v.criadoEm && v.criadoEm < inicioDia) return;
+      // Filtro manual de tenantId (não incluído na query com índice)
+      if(_tenantId && v.tenantId && v.tenantId !== _tenantId) return;
       _pedidosPDV.push(Object.assign({id: doc.id}, v));
     });
     _pedidosPDV.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
@@ -2473,16 +2475,16 @@ function iniciarListenerPedidos() {
 
   function _assinarComData(){
     // Query otimizada — filtra só hoje
+    // Usa só restauranteId + criadoEm para funcionar com índice de 2 campos
+    // tenantId é filtrado manualmente no _processarSnap
     var q = fbDb.collection('pedidos')
       .where('restauranteId','==', restId)
       .where('criadoEm','>=', inicioDia);
-    if(_tenantId) q = q.where('tenantId','==', _tenantId);
     _unsubPedidosPDV = q.onSnapshot(
       function(snap){ _processarSnap(snap, true); },
       function(e){
         console.warn('Erro pedidos snapshot:', e.code);
         if(e.code === 'failed-precondition'){
-          // Índice ainda não ativo — fallback sem filtro de data
           console.warn('[PDV] Índice pendente, fallback sem filtro de data');
           showToast('⚠️ Índice criando... carregando todos os pedidos', '#f59e0b', 5000);
           _assinarSemData();

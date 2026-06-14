@@ -4114,24 +4114,51 @@ function carregarTenantParaMesas(){
 }
 
 function escutarMesasOcupadas(){
-  // Cancela escuta anterior se existe (pra reconexão)
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
-  // Escuta as contas abertas das mesas E das comandas avulsas
   var ref = fbDb.collection('contas_mesa')
     .where('restauranteId','==',_restauranteId)
     .where('status','==','aberta');
   _unsubMesas = ref.onSnapshot(function(snap){
-    registrarUpdateListener('mesas'); // ✓ listener vivo
+    registrarUpdateListener('mesas');
     _mesasOcupadas = {};
     _contasMesaCache = {};
     _comandasAvulsas = [];
     snap.forEach(function(doc){
       var d = doc.data();
-      var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
-      // Comanda avulsa OU almoço (ambas ficam no array _comandasAvulsas)
+
+      // ⚡ OTIMIZAÇÃO: no listener principal guardamos só metadados leves
+      // Os itens completos só são lidos quando o garçom abre a mesa (_carregarItensMesa)
+      // Isso reduz drasticamente o processamento no pico com muitas mesas cheias
+      var meta = {
+        id: doc.id,
+        mesa: d.mesa,
+        tipoConta: d.tipoConta,
+        garcomPrincipal: d.garcomPrincipal||'',
+        vinculadoPor: d.vinculadoPor||'',
+        abertaEm: d.abertaEm||0,
+        total: d.total||0,
+        restante: d.restante||0,
+        subtotal: d.subtotal||0,
+        taxa10: d.taxa10||0,
+        pagoTotal: d.pagoTotal||0,
+        status: d.status,
+        cliente: d.cliente||'',
+        contaImpressaSolicitada: d.contaImpressaSolicitada||false,
+        // Guarda contagem de itens mas não os itens em si
+        _totalItens: (d.itens||[]).length,
+        _itensAbertosCount: (d.itens||[]).filter(function(i){ return i.status!=='pago'&&i.status!=='cancelado'; }).length,
+        _temPagamento: (d.pagamentos||[]).length > 0,
+        pagamentos: d.pagamentos||[], // pagamentos são pequenos, ok guardar
+        taxaServico: d.taxaServico,
+        taxaServicoAtiva: d.taxaServicoAtiva,
+        // NÃO guarda d.itens aqui — carregado sob demanda
+      };
+
+      // Comanda avulsa OU almoço
       if(d.tipoConta === 'avulsa' || d.tipoConta === 'almoco'){
-        _comandasAvulsas.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
-        // Se almoço já tem mesa vinculada → também aparece no mapa de mesas
+        // Para comandas avulsas precisamos dos itens (lista de comandas é pequena)
+        var contaCompleta = Object.assign({}, meta, {itens: d.itens||[]});
+        _comandasAvulsas.push(contaCompleta);
         if(d.tipoConta === 'almoco' && d.mesa){
           var mesaAlm = String(d.mesa);
           if(!_mesasOcupadas[mesaAlm]){
@@ -4139,47 +4166,47 @@ function escutarMesasOcupadas(){
               contaId: doc.id,
               garcom: d.garcomPrincipal||d.vinculadoPor||_nomeGarcom||'',
               abertaEm: d.abertaEm||0,
-              count: itensAbertos.length,
+              count: meta._itensAbertosCount,
               total: d.total||0,
               restante: d.restante||0,
               tipoConta: 'almoco'
             };
           }
-          _contasMesaCache[mesaAlm] = Object.assign({id: doc.id}, d);
+          _contasMesaCache[mesaAlm] = contaCompleta;
         }
         return;
       }
-      // Senão é mesa
+
+      // Mesa normal
       var mesa = String(d.mesa||'');
-      if(mesa){
-        // Mesa só "ocupada" se tem itens em aberto OU pagamentos
-        var temPagamento = (d.pagamentos||[]).length > 0;
-        var temItem = itensAbertos.length > 0;
-        if(!temItem && !temPagamento){
-          // Conta aberta sem itens nem pagamentos = mesa ainda livre na visualização
-          // mas mantém no cache pra continuar usando a conta
-          _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
-          return;
-        }
-        _mesasOcupadas[mesa] = {
-          contaId: doc.id,
-          garcom: d.garcomPrincipal||'',
-          abertaEm: d.abertaEm||0,
-          count: itensAbertos.length,
-          total: d.total||0,
-          restante: d.restante||0
-        };
-        _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
+      if(!mesa) return;
+
+      var temPagamento = meta._temPagamento;
+      var temItem = meta._itensAbertosCount > 0;
+
+      if(!temItem && !temPagamento){
+        // Mesa sem itens — guarda meta mas não marca ocupada
+        _contasMesaCache[mesa] = meta;
+        return;
       }
+
+      _mesasOcupadas[mesa] = {
+        contaId: doc.id,
+        garcom: d.garcomPrincipal||'',
+        abertaEm: d.abertaEm||0,
+        count: meta._itensAbertosCount,
+        total: d.total||0,
+        restante: d.restante||0
+      };
+      _contasMesaCache[mesa] = meta;
     });
-    // Ordena comandas por mais recente
+
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
-    atualizarBadgeAlmoco(); // badge de pesagens pendentes
+    atualizarBadgeAlmoco();
     if(_abaAtual === 'comandas') renderComandas();
     if(_abaAtual === 'almoco') renderAlmocos();
-    // Se o garçom está dentro de uma mesa e o contaId mudou (ex: cache atualizou após abrir mesa),
-    // refaz o listener de pedidos pra apontar pra conta correta.
+
     if(_mesaAtiva !== null && _mesaAtiva !== undefined){
       var contaAt = _contasMesaCache[String(_mesaAtiva)] || _contasMesaCache[_mesaAtiva];
       var idNovo = contaAt ? contaAt.id : null;
@@ -4194,6 +4221,41 @@ function escutarMesasOcupadas(){
     console.warn('[Health] Erro listener mesas, retry em', delay+'ms:', e && e.code);
     setTimeout(function(){ escutarMesasOcupadas(); }, delay);
   });
+}
+
+// ⚡ Carrega itens completos de uma mesa sob demanda (lazy loading)
+var _itensMesaCache = {}; // {contaId: {itens, carregadoEm}}
+function _carregarItensMesa(contaId, callback){
+  var CACHE_TTL = 30000; // 30s — reusa cache se recente
+  var cached = _itensMesaCache[contaId];
+  if(cached && Date.now() - cached.carregadoEm < CACHE_TTL){
+    callback(cached.itens, cached.pagamentos);
+    return;
+  }
+  fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+    if(!doc.exists){ callback([], []); return; }
+    var d = doc.data();
+    _itensMesaCache[contaId] = {
+      itens: d.itens||[],
+      pagamentos: d.pagamentos||[],
+      carregadoEm: Date.now()
+    };
+    // Atualiza o cache principal com itens completos
+    var mesa = String(d.mesa||'');
+    if(mesa && _contasMesaCache[mesa]){
+      _contasMesaCache[mesa].itens = d.itens||[];
+      _contasMesaCache[mesa].pagamentos = d.pagamentos||[];
+    }
+    callback(d.itens||[], d.pagamentos||[]);
+  }).catch(function(e){
+    console.warn('[LAZY] Erro ao carregar itens da mesa:', e.message);
+    callback([], []);
+  });
+}
+
+// Invalida cache de itens quando novo pedido é enviado
+function _invalidarCacheItens(contaId){
+  if(_itensMesaCache[contaId]) delete _itensMesaCache[contaId];
 }
 
 var _filtroMesas = 'todas';
@@ -10247,35 +10309,29 @@ function perguntarReimpressao(pedidoId, motivo){
 }
 
 function executarReimpressaoAposCancelamento(pedidoId, motivo){
-  fbDb.collection('comandos_impressao').add({
+  _imprimirComRetry({
     tipo: 'reimpressao',
     restauranteId: _restauranteId,
     pedidoId: pedidoId,
     motivo: motivo || 'Reimpressão após cancelamento',
     solicitadoPor: _nomeGarcom,
     solicitadoEm: Date.now()
-  }).then(function(){
-    showToast('🖨️ Reimpressão enviada','#4ade80');
-    var m = document.getElementById('modal-pergunta-reimp'); if(m) m.remove();
-  }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
   });
+  showToast('🖨️ Reimpressão enviada','#4ade80');
+  var m = document.getElementById('modal-pergunta-reimp'); if(m) m.remove();
 }
 
 // ── REIMPRIMIR PEDIDO ──
 function reimprimirPedidoGarcom(pedidoId){
   if(!confirm('Reimprimir este pedido?')) return;
-  fbDb.collection('comandos_impressao').add({
+  _imprimirComRetry({
     tipo: 'reimprimir',
     restauranteId: _restauranteId,
     pedidoId: pedidoId,
     solicitadoPor: _nomeGarcom,
     solicitadoEm: Date.now()
-  }).then(function(){
-    showToast('🖨️ Solicitação enviada ao PDV','#4ade80');
-  }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
   });
+  showToast('🖨️ Solicitação enviada ao PDV','#4ade80');
 }
 
 // ── Editar item de pedido (garçom) ──
@@ -11564,6 +11620,16 @@ function devolverEstoque(itemId, qtd){
 
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
+
+  // Proteção duplo envio
+  var agora = Date.now();
+  if(_enviandoPedido && agora - _ultimoPedidoEnviadoTs < 5000){
+    showToast('⏳ Aguarde...', '#f59e0b');
+    return;
+  }
+  _enviandoPedido = true;
+  _ultimoPedidoEnviadoTs = agora;
+
   var btn = document.getElementById('btn-enviar-pedido');
   btn.disabled = true;
   btn.textContent = 'Enviando...';
@@ -11734,12 +11800,13 @@ function enviarPedido(){
       return ref;
     });
   }).then(function(ref){
-    // Sucesso confirmado pelo Firebase. UI já mostrou tudo.
-    // Atualiza o toast com o número correto se disponível
+    _enviandoPedido = false;
+    _invalidarCacheItens(contaId); // força reload dos itens na próxima abertura
     if(pedido.numeroSequencial){
       showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
     }
   }).catch(function(e){
+    _enviandoPedido = false;
     console.error('[ENVIAR-PEDIDO] ❌ FALHOU:', e);
     // Falhou no envio. Verifica se é problema de conexão.
     var ehProblemaConexao = !_estaOnline || navigator.onLine === false ||
@@ -11782,7 +11849,77 @@ function enviarPedido(){
   });
 }
 
-// ─── Cálculo de totais da conta ───
+// ═══════════════════════════════════════════════════════
+// 🛡️ PROTEÇÕES PARA PICO DE MOVIMENTO
+// ═══════════════════════════════════════════════════════
+
+// 1. Proteção contra duplo envio
+var _enviandoPedido = false;
+var _ultimoPedidoEnviadoTs = 0;
+
+// 2. Debounce para renderMesas (evita re-render a cada update do Firestore)
+var _renderMesasTimer = null;
+var _renderMesasOriginal = renderMesas;
+renderMesas = function(){
+  if(_renderMesasTimer) clearTimeout(_renderMesasTimer);
+  _renderMesasTimer = setTimeout(function(){
+    _renderMesasOriginal();
+  }, 80); // agrupa updates em janela de 80ms
+};
+
+// 3. Retry automático de impressão com backoff
+function _imprimirComRetry(comando, tentativas, delay){
+  tentativas = tentativas || 0;
+  delay = delay || 1000;
+  if(tentativas >= 4){
+    console.warn('[IMPRESSAO] Falhou após 4 tentativas:', comando);
+    showToast('⚠️ Impressão pode ter falhado — verifique a impressora', '#f59e0b', 5000);
+    return;
+  }
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
+    console.log('[IMPRESSAO] ✓ enviado na tentativa', tentativas+1);
+  }).catch(function(e){
+    console.warn('[IMPRESSAO] tentativa', tentativas+1, 'falhou:', e.message);
+    setTimeout(function(){
+      _imprimirComRetry(comando, tentativas+1, delay*2);
+    }, delay);
+  });
+}
+
+// 4. Proteção contra comandas duplicadas (mesmo garçom, mesmo valor, < 3s)
+var _ultimasComandas = {};
+function _ehComandaDuplicada(contaId, total){
+  var chave = contaId + '_' + Math.round(total);
+  var agora = Date.now();
+  if(_ultimasComandas[chave] && agora - _ultimasComandas[chave] < 3000){
+    return true;
+  }
+  _ultimasComandas[chave] = agora;
+  return false;
+}
+
+// 5. Watchdog — reconecta listeners se ficarem sem update por muito tempo
+var _watchdogTimer = null;
+var _ultimoUpdateListener = Date.now();
+function registrarUpdateListener(nome){
+  _ultimoUpdateListener = Date.now();
+}
+function _iniciarWatchdog(){
+  if(_watchdogTimer) clearInterval(_watchdogTimer);
+  _watchdogTimer = setInterval(function(){
+    var agora = Date.now();
+    var semUpdate = agora - _ultimoUpdateListener;
+    // Se ficou mais de 3 minutos sem update e está online
+    if(semUpdate > 180000 && navigator.onLine !== false && _restauranteId){
+      console.warn('[WATCHDOG] Sem updates há', Math.round(semUpdate/1000)+'s — reconectando listeners...');
+      try{ escutarMesasOcupadas(); }catch(e){}
+      showToast('🔄 Reconectando...', '#f59e0b', 2000);
+    }
+  }, 30000); // verifica a cada 30s
+}
+
+// Inicia watchdog quando app carregar
+setTimeout(_iniciarWatchdog, 10000);
 function calcularTotaisConta(c){
   // Helper: calcula valor de um item (item por kg = preço total da pesagem; senão = preço * qtd)
   function valorItem(i){
@@ -12221,11 +12358,22 @@ function abrirContaMesa(num){
   // PRIMEIRO: verifica cache
   var cached = _contasMesaCache[String(num)];
   if(cached && cached.id){
+    // Carrega itens completos se não estiverem no cache (lazy loading)
+    if(!cached.itens){
+      _carregarItensMesa(cached.id, function(itens, pagamentos){
+        cached.itens = itens;
+        cached.pagamentos = pagamentos;
+        if(contaEhVazia(cached)){
+          entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
+        } else {
+          entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
+        }
+      });
+      return;
+    }
     if(contaEhVazia(cached)){
-      // Conta vazia — reusa silenciosamente, sem mensagem confusa
       entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
     } else {
-      // Conta com itens reais — informa o garçom
       entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
     }
     return;
@@ -13821,24 +13969,24 @@ function abrirMenuImpressaoConta(){
 }
 
 function imprimirContaMesa(tipo){
-  fbDb.collection('comandos_impressao').add({
+  var comando = {
     tipo:'conta_mesa', subtipo:tipo,
     restauranteId:_restauranteId,
     contaId:_fecharContaId,
     mesa:_fecharConta?_fecharConta.mesa:null,
     solicitadoPor:_nomeGarcom,
     solicitadoEm:Date.now()
-  }).then(function(){
-    showToast('🖨️ Solicitação enviada','#4ade80');
-    // Marca mesa como azul (conta impressa)
-    if(_fecharContaId){
-      fbDb.collection('contas_mesa').doc(_fecharContaId).update({
-        contaImpressaSolicitada: true,
-        contaImpressaEm: Date.now()
-      }).catch(function(){});
-    }
-    var m = document.getElementById('modal-imp-conta'); if(m) m.remove();
-  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+  };
+  _imprimirComRetry(comando);
+  showToast('🖨️ Solicitação enviada','#4ade80');
+  // Marca mesa como azul (conta impressa)
+  if(_fecharContaId){
+    fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+      contaImpressaSolicitada: true,
+      contaImpressaEm: Date.now()
+    }).catch(function(){});
+  }
+  var m = document.getElementById('modal-imp-conta'); if(m) m.remove();
 }
 
 // ════════════════════════════════════════

@@ -426,6 +426,13 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 
   <!-- Painel Histórico -->
   <div id="painel-historico" style="display:none;padding:14px;padding-bottom:90px;">
+    <!-- Filtros de período -->
+    <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px;">
+      <button onclick="_histSetPeriodo('hoje')" id="hist-btn-hoje" style="flex-shrink:0;padding:7px 14px;border-radius:20px;font-size:0.74rem;font-weight:700;font-family:inherit;cursor:pointer;background:var(--accent);color:#000;border:none;">Hoje</button>
+      <button onclick="_histSetPeriodo('7d')" id="hist-btn-7d" style="flex-shrink:0;padding:7px 14px;border-radius:20px;font-size:0.74rem;font-weight:700;font-family:inherit;cursor:pointer;background:var(--surface2);color:var(--muted);border:1px solid var(--border2);">7 dias</button>
+      <button onclick="_histSetPeriodo('30d')" id="hist-btn-30d" style="flex-shrink:0;padding:7px 14px;border-radius:20px;font-size:0.74rem;font-weight:700;font-family:inherit;cursor:pointer;background:var(--surface2);color:var(--muted);border:1px solid var(--border2);">30 dias</button>
+      <button onclick="_histSetPeriodo('tudo')" id="hist-btn-tudo" style="flex-shrink:0;padding:7px 14px;border-radius:20px;font-size:0.74rem;font-weight:700;font-family:inherit;cursor:pointer;background:var(--surface2);color:var(--muted);border:1px solid var(--border2);">Tudo</button>
+    </div>
     <div id="historico-pdv-lista"></div>
   </div>
 
@@ -2323,6 +2330,40 @@ document.addEventListener('DOMContentLoaded', function(){
 var _unsubPedidosPDV = null;
 var _pedidosPDV = [];
 var _filtroStatus = 'todos';
+var _histFiltroInicio = null; // null = hoje por padrão
+var _histFiltroFim = null;
+var _histPeriodoAtivo = 'hoje';
+
+function _histSetPeriodo(periodo){
+  _histPeriodoAtivo = periodo;
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  if(periodo === 'hoje'){
+    _histFiltroInicio = hoje.getTime();
+    _histFiltroFim = null;
+  } else if(periodo === '7d'){
+    var d7 = new Date(hoje); d7.setDate(d7.getDate()-6);
+    _histFiltroInicio = d7.getTime();
+    _histFiltroFim = null;
+  } else if(periodo === '30d'){
+    var d30 = new Date(hoje); d30.setDate(d30.getDate()-29);
+    _histFiltroInicio = d30.getTime();
+    _histFiltroFim = null;
+  } else {
+    _histFiltroInicio = 0;
+    _histFiltroFim = null;
+  }
+  // Atualiza visual dos botões
+  ['hoje','7d','30d','tudo'].forEach(function(p){
+    var btn = document.getElementById('hist-btn-'+p);
+    if(!btn) return;
+    if(p === periodo){
+      btn.style.background = 'var(--accent)'; btn.style.color = '#000'; btn.style.border = 'none';
+    } else {
+      btn.style.background = 'var(--surface2)'; btn.style.color = 'var(--muted)'; btn.style.border = '1px solid var(--border2)';
+    }
+  });
+  carregarHistoricoPDV();
+}
 
 // ═══════════════════════════════════════════════════════
 // 🛡️ PROTEÇÕES PDV — PICO DE MOVIMENTO
@@ -2453,10 +2494,11 @@ function iniciarListenerPedidos() {
     _pedidosPDV = [];
     snap.forEach(function(doc){
       var v = doc.data();
-      // Filtro manual de data se a query veio sem filtro
       if(!comFiltroData && v.criadoEm && v.criadoEm < inicioDia) return;
-      // Filtro manual de tenantId (não incluído na query com índice)
       if(_tenantId && v.tenantId && v.tenantId !== _tenantId) return;
+      // ⚡ D: pedidos entregues ficam só na aba Histórico (não no listener ativo)
+      // Isso reduz o volume de documentos monitorados em tempo real
+      if(v.status === 'entregue') return;
       _pedidosPDV.push(Object.assign({id: doc.id}, v));
     });
     _pedidosPDV.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
@@ -2474,9 +2516,7 @@ function iniciarListenerPedidos() {
   }
 
   function _assinarComData(){
-    // Query otimizada — filtra só hoje
-    // Usa só restauranteId + criadoEm para funcionar com índice de 2 campos
-    // tenantId é filtrado manualmente no _processarSnap
+    // Query otimizada — filtra só hoje (índice: restauranteId + criadoEm)
     var q = fbDb.collection('pedidos')
       .where('restauranteId','==', restId)
       .where('criadoEm','>=', inicioDia);
@@ -2790,13 +2830,25 @@ function executarLimpezaAutomatica(){
 }
 
 function carregarHistoricoPDV(){
-  executarLimpezaAutomatica(); // tenta limpar antes de carregar
+  executarLimpezaAutomatica();
   var lista = document.getElementById('historico-pdv-lista');
   if(!lista) return;
   lista.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
   var restId = _restauranteAtivo ? _restauranteAtivo.id : 'default';
-  var queryHist = fbDb.collection('contas_fechadas').where('restauranteId','==', restId);
+
+  // ⚡ B: Filtro de data — carrega só os últimos 7 dias por padrão
+  // Reduz leituras drasticamente em restaurantes com histórico longo
+  var filtroInicio = _histFiltroInicio || (function(){
+    var d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-6); return d.getTime();
+  })();
+  var filtroFim = _histFiltroFim || null;
+
+  var queryHist = fbDb.collection('contas_fechadas')
+    .where('restauranteId','==', restId)
+    .where('fechadoEm','>=', filtroInicio);
+  if(filtroFim) queryHist = queryHist.where('fechadoEm','<=', filtroFim);
   if(_tenantId) queryHist = queryHist.where('tenantId','==', _tenantId);
+
   queryHist.get().then(function(snap){
       var contas = [];
       snap.forEach(function(d){ contas.push(Object.assign({id: d.id}, d.data())); });

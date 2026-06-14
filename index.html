@@ -12543,33 +12543,45 @@ var _fbInterval = setInterval(function(){
 var _pFuncs=[], _pRegs=[], _pSubTab='agora';
 var CARGA_PADRAO_PONTO=440; // 7h20
 
+// Referências dos listeners do ponto — evita duplicatas
+var _unsubPontoFuncs = null;
+var _unsubPontoRegs = null;
+var _unsubPontoSols = null;
+var _unsubPontoStatus = null;
+
 function pontoIniciar(){
   if(!fbDb) return;
-  // Carrega funcionários do ponto
-  fbDb.collection('ponto_funcionarios').onSnapshot(function(snap){
+
+  // Cancela listeners anteriores antes de criar novos
+  if(_unsubPontoFuncs){ try{ _unsubPontoFuncs(); }catch(e){} _unsubPontoFuncs=null; }
+  if(_unsubPontoRegs){ try{ _unsubPontoRegs(); }catch(e){} _unsubPontoRegs=null; }
+  if(_unsubPontoSols){ try{ _unsubPontoSols(); }catch(e){} _unsubPontoSols=null; }
+  if(_unsubPontoStatus){ try{ _unsubPontoStatus(); }catch(e){} _unsubPontoStatus=null; }
+
+  // Funcionários — listener único guardado em referência
+  _unsubPontoFuncs = fbDb.collection('ponto_funcionarios').onSnapshot(function(snap){
     _pFuncs=[];
     snap.forEach(function(d){ _pFuncs.push(Object.assign({id:d.id},d.data())); });
     pontoRenderSubTab();
     _pontoAtualizarSelectHorarios();
-  });
-  // Carrega registros (últimos 60 dias)
+  }, function(e){ console.warn('[PONTO] erro listener funcs:', e.code); });
+
+  // Registros (últimos 60 dias)
   var lim=Date.now()-60*24*60*60*1000;
-  fbDb.collection('ponto_registros').where('ts','>=',lim).onSnapshot(function(snap){
+  _unsubPontoRegs = fbDb.collection('ponto_registros').where('ts','>=',lim).onSnapshot(function(snap){
     _pRegs=[];
     snap.forEach(function(d){ _pRegs.push(Object.assign({id:d.id},d.data())); });
     pontoRenderSubTab();
-  });
-  // Badge solicitações + notificação
+  }, function(e){ console.warn('[PONTO] erro listener regs:', e.code); });
+  // Solicitações pendentes
   var _pSolsAnterior = 0;
-  fbDb.collection('ponto_solicitacoes').where('status','==','pendente').onSnapshot(function(snap){
+  _unsubPontoSols = fbDb.collection('ponto_solicitacoes').where('status','==','pendente').onSnapshot(function(snap){
     var n=snap.size;
     var b=document.getElementById('ponto-sols-badge');
     if(b){ b.textContent=n; b.style.display=n>0?'block':'none'; }
     if(_pSubTab==='solicitacoes') pontoRenderSols();
-    // Notifica gestor se chegou nova solicitação
     if(n > _pSolsAnterior && _pSolsAnterior >= 0){
       var novas = n - _pSolsAnterior;
-      // Pega o nome do funcionário da solicitação mais recente
       var nomes = [];
       snap.forEach(function(d){ nomes.push(d.data().funcNome||'Funcionário'); });
       _pEnviarNotifLocal(

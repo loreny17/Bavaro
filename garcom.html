@@ -2354,71 +2354,106 @@ function _almPopularFormulario(){
     if(nomeEl2) nomeEl2.textContent = '⚠️ Nenhum item por kg cadastrado';
   }
 
-  // Bebidas — mini cards estilo cardápio (4 colunas)
-  // Filtra só itens das categorias associadas à impressora caixa
+  // Bebidas — mini categorias clicáveis que expandem
   var bebGrid = document.getElementById('alm-bebidas-grid');
   if(bebGrid){
-    // Pega categorias da impressora caixa (modelo com tipo caixa ou nome caixa)
-    var catsCaixa = [];
-    (_modelosCozinha||[]).forEach(function(m){
-      var imp = (_impressorasCozinha||[]).find(function(i){ return i.id === m.impressoraId; });
-      if(imp && (imp.tipo==='caixa' || (imp.nome||'').toLowerCase().includes('caixa'))){
-        catsCaixa = catsCaixa.concat(m.categorias||[]);
-      }
+    // Categorias permitidas para bebidas no almoço
+    var nomesCatsBebidas = ['suco','sucos','chope','chopes','vinho','vinhos','refrigerante','refrigerantes','refri','dose','doses'];
+    var catsBebidas = (_categorias||[]).filter(function(cat){
+      var n = (cat.nome||'').toLowerCase();
+      return nomesCatsBebidas.some(function(k){ return n.includes(k); });
     });
-    // Se não achou pela impressora, tenta pelo modelo com 'caixa' no nome
-    if(!catsCaixa.length){
+
+    // Fallback: usa categorias da impressora caixa
+    if(!catsBebidas.length){
+      var catsCaixa = [];
       (_modelosCozinha||[]).forEach(function(m){
-        if((m.nome||'').toLowerCase().includes('caixa') || (m.nome||'').toLowerCase().includes('bebida')){
+        var imp = (_impressorasCozinha||[]).find(function(i){ return i.id === m.impressoraId; });
+        if(imp && (imp.tipo==='caixa' || (imp.nome||'').toLowerCase().includes('caixa'))){
           catsCaixa = catsCaixa.concat(m.categorias||[]);
         }
       });
-    }
-    // Filtra itens
-    var itensBeb;
-    if(catsCaixa.length){
-      itensBeb = (_itens||[]).filter(function(i){
-        return i.disponivel && i.tipoVenda !== 'kg' && catsCaixa.includes(i.categoriaId);
-      });
-    } else {
-      // Fallback: todos não-kg
-      itensBeb = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda !== 'kg'; });
+      catsBebidas = (_categorias||[]).filter(function(c){ return catsCaixa.includes(c.id); });
     }
 
-    if(itensBeb.length){
+    if(catsBebidas.length){
       bebGrid.innerHTML = '';
-      // Card "Nenhuma"
+      bebGrid.style.display = 'flex';
+      bebGrid.style.flexDirection = 'column';
+      bebGrid.style.gap = '6px';
+
+      // Card "Nenhuma" no topo
       var noneCard = document.createElement('div');
       noneCard.id = 'alm-beb-none';
       noneCard.className = 'alm-beb-chip';
-      noneCard.style.cssText = 'background:var(--accent);border:2px solid var(--accent);border-radius:10px;padding:0;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;';
-      noneCard.innerHTML =
-        '<div style="width:100%;height:55px;background:rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:1.4rem;">✕</div>'+
-        '<div style="padding:4px 4px 6px;text-align:center;">'+
-          '<div style="font-size:0.62rem;font-weight:700;color:#000;line-height:1.2;">Nenhuma</div>'+
-        '</div>';
-      noneCard.onclick = function(){ _almSelecionarBebida(''); };
+      noneCard.style.cssText = 'background:var(--accent);border:2px solid var(--accent);border-radius:10px;padding:8px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;';
+      noneCard.innerHTML = '<span style="font-size:1rem;">✕</span><span style="font-size:0.78rem;font-weight:700;color:#000;">Sem bebida</span>';
+      noneCard.onclick = function(){
+        _almSelecionarBebida('');
+        // Fecha todas as categorias
+        document.querySelectorAll('.alm-cat-items').forEach(function(el){ el.style.display='none'; });
+      };
       bebGrid.appendChild(noneCard);
 
-      itensBeb.forEach(function(it){
-        var card = document.createElement('div');
-        card.id = 'alm-beb-'+it.id;
-        card.className = 'alm-beb-chip';
-        card.style.cssText = 'background:var(--surface2);border:2px solid var(--border2);border-radius:10px;padding:0;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;transition:border-color 0.15s,background 0.15s;';
-        var fotoHtml = it.foto
-          ? '<img src="'+it.foto+'" style="width:100%;height:55px;object-fit:cover;" loading="lazy" onerror="this.parentNode.innerHTML=\'🥤\'">'
-          : '<div style="width:100%;height:55px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;background:rgba(255,255,255,0.03);">'+(it.emoji||'🥤')+'</div>';
-        card.innerHTML =
-          fotoHtml+
-          '<div style="padding:4px 4px 6px;text-align:center;width:100%;">'+
-            '<div style="font-size:0.6rem;font-weight:700;color:var(--text);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+'</div>'+
-            '<div style="font-size:0.58rem;color:var(--accent);font-weight:700;">R$'+fmtPreco(it.preco||0)+'</div>'+
-          '</div>';
-        card.onclick = (function(id){ return function(){ _almSelecionarBebida(id); }; })(it.id);
-        bebGrid.appendChild(card);
+      // Mini cards de categoria
+      catsBebidas.forEach(function(cat){
+        var itenscat = (_itens||[]).filter(function(i){ return i.disponivel && i.categoriaId===cat.id && i.tipoVenda!=='kg'; });
+        if(!itenscat.length) return;
+
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'border-radius:10px;overflow:hidden;border:1.5px solid var(--border2);';
+
+        // Cabeçalho da categoria
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--surface2);cursor:pointer;';
+        header.innerHTML =
+          '<div style="display:flex;align-items:center;gap:8px;">'+
+            '<span style="font-size:1.1rem;">'+(cat.emoji||'🥤')+'</span>'+
+            '<span style="font-size:0.8rem;font-weight:700;color:var(--text);">'+esc(cat.nome)+'</span>'+
+            '<span style="font-size:0.66rem;color:var(--muted);">('+itenscat.length+')</span>'+
+          '</div>'+
+          '<span class="alm-cat-seta" style="color:var(--muted);font-size:0.8rem;transition:transform 0.2s;">▾</span>';
+
+        // Grid de itens (oculto inicialmente)
+        var itemsDiv = document.createElement('div');
+        itemsDiv.className = 'alm-cat-items';
+        itemsDiv.style.cssText = 'display:none;padding:8px;background:var(--surface);display:none;grid-template-columns:repeat(4,1fr);gap:6px;';
+
+        itenscat.forEach(function(it){
+          var card = document.createElement('div');
+          card.id = 'alm-beb-'+it.id;
+          card.className = 'alm-beb-chip';
+          card.style.cssText = 'background:var(--surface2);border:2px solid var(--border2);border-radius:8px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;transition:border-color 0.15s;';
+          var fotoHtml = it.foto
+            ? '<img src="'+it.foto+'" style="width:100%;height:50px;object-fit:cover;" loading="lazy" onerror="this.parentNode.innerHTML=\'🥤\'">'
+            : '<div style="width:100%;height:50px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">'+(it.emoji||'🥤')+'</div>';
+          card.innerHTML = fotoHtml+
+            '<div style="padding:3px 4px 5px;text-align:center;width:100%;">'+
+              '<div style="font-size:0.58rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+'</div>'+
+              '<div style="font-size:0.56rem;color:var(--accent);font-weight:700;">R$'+fmtPreco(it.preco||0)+'</div>'+
+            '</div>';
+          card.onclick = (function(id){ return function(){ _almSelecionarBebida(id); }; })(it.id);
+          itemsDiv.appendChild(card);
+        });
+
+        // Toggle expand/collapse
+        header.onclick = function(){
+          var aberto = itemsDiv.style.display === 'grid';
+          // Fecha todos
+          document.querySelectorAll('.alm-cat-items').forEach(function(el){ el.style.display='none'; });
+          document.querySelectorAll('.alm-cat-seta').forEach(function(el){ el.style.transform=''; });
+          if(!aberto){
+            itemsDiv.style.display = 'grid';
+            header.querySelector('.alm-cat-seta').style.transform = 'rotate(180deg)';
+          }
+        };
+
+        wrap.appendChild(header);
+        wrap.appendChild(itemsDiv);
+        bebGrid.appendChild(wrap);
       });
     } else {
-      bebGrid.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;grid-column:1/-1;">Nenhuma bebida encontrada na impressora caixa</div>';
+      bebGrid.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;">Nenhuma categoria de bebida encontrada</div>';
     }
   }
 }
@@ -4145,7 +4180,6 @@ function escutarMesasOcupadas(){
 function renderMesas(){
   var busca = (document.getElementById('mesa-search-input').value||'').trim();
   var grid = document.getElementById('mesas-grid');
-  // Aplica colunas conforme preferência
   grid.className = 'mesas-grid cols-' + _colsMesas;
   grid.innerHTML = '';
   for(var i = 1; i <= _TOTAL_MESAS; i++){
@@ -4153,8 +4187,21 @@ function renderMesas(){
     if(busca && !num.includes(busca)) continue;
     var info = _mesasOcupadas[num];
     var eOcupada = !!info;
-    var cls = 'mesa-card ' + (eOcupada ? 'ocupada' : 'livre');
-    var status = eOcupada ? 'Ocupada' : 'Livre';
+    var eMinha = eOcupada && info.garcom === _nomeGarcom;
+    var conta = _contasMesaCache && _contasMesaCache[num];
+    var eFechada = conta && conta.contaImpressaSolicitada === true;
+
+    // Filtro rápido
+    if(_filtroMesas === 'minhas' && !eMinha) continue;
+    if(_filtroMesas === 'livres' && eOcupada) continue;
+    if(_filtroMesas === 'ocupadas' && !eOcupada) continue;
+
+    var cls = 'mesa-card ';
+    if(eFechada) cls += 'fechada';
+    else if(eMinha) cls += 'minha';
+    else if(eOcupada) cls += 'ocupada';
+    else cls += 'livre';
+    var status = eFechada ? 'Conta impressa' : eMinha ? 'Minha' : eOcupada ? 'Ocupada' : 'Livre';
     var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;
@@ -4162,26 +4209,20 @@ function renderMesas(){
     el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
       '<div class="mesa-status">' + status + '</div>';
     el.onclick = (function(n, ocupada){ return function(){
-      // Se acabou de disparar long press, ignora click subsequente
       if(_longPressDisparou){ _longPressDisparou = false; return; }
-      // Mesa LIVRE → cria conta e vai direto pro cardápio (não precisa confirmar)
       if(!ocupada){
         abrirContaMesa(n);
         pushHistory('cardapio:null');
         return;
       }
-      // Mesa OCUPADA → abre menu de opções (Pedir / Ver / Transferir / Pagar)
       abrirMenuMesa(n, ocupada);
     }; })(num, eOcupada);
-    // Long press apenas pra mesas ocupadas (mesas livres não tem o que reaproveitar)
     if(eOcupada){
       anexarLongPress(el, num);
-      // Swipe pra esquerda → fechar mesa (só admin)
       anexarSwipe(el, num);
     }
     grid.appendChild(el);
   }
-  // Atualiza badges de cozinha (sininho) após renderizar
   setTimeout(function(){
     try{ atualizarBadgesCozinha(); }catch(e){}
   }, 50);

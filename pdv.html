@@ -11345,11 +11345,40 @@ function abrirPainelDebugPDV(){
   var ex = document.getElementById('modal-debug-pdv');
   if(ex) ex.remove();
 
+  // Métricas de performance em tempo real
+  var agora = Date.now();
+  var semUpdateMs = agora - (_pdvUltimoUpdate||agora);
+  var semUpdateStr = semUpdateMs < 60000
+    ? Math.round(semUpdateMs/1000)+'s atrás'
+    : Math.round(semUpdateMs/60000)+'min atrás';
+
+  var pedidosHoje = _pedidosPDV.length;
+  var aguardando = _pedidosPDV.filter(function(p){ return p.status==='aguardando'; }).length;
+  var preparo = _pedidosPDV.filter(function(p){ return p.status==='preparo'; }).length;
+  var pronto = _pedidosPDV.filter(function(p){ return p.status==='pronto'; }).length;
+  var entregue = _pedidosPDV.filter(function(p){ return p.status==='entregue'; }).length;
+
+  // Latência média (tempo entre criadoEm e agora para pedidos aguardando)
+  var latencias = _pedidosPDV
+    .filter(function(p){ return p.status==='aguardando' && p.criadoEm; })
+    .map(function(p){ return Math.round((agora - p.criadoEm)/1000); });
+  var latMedia = latencias.length
+    ? Math.round(latencias.reduce(function(a,b){return a+b;},0)/latencias.length)
+    : 0;
+  var latMax = latencias.length ? Math.max.apply(null,latencias) : 0;
+
+  // Pedido mais antigo aguardando
+  var maisAntigo = _pedidosPDV
+    .filter(function(p){ return p.status==='aguardando' && p.criadoEm; })
+    .sort(function(a,b){ return a.criadoEm - b.criadoEm; })[0];
+  var maisAntigoStr = maisAntigo
+    ? Math.round((agora-maisAntigo.criadoEm)/60000)+'min (#'+(maisAntigo.numeroSequencial||maisAntigo.id.slice(-4))+')'
+    : 'Nenhum';
+
   var info = {
     userEmail: (_user && _user.email) || '(não logado)',
-    userUid: (_user && _user.uid) || '(sem uid)',
     tenantId: _tenantId || '(null)',
-    restauranteAtivo: _restauranteAtivo ? (_restauranteAtivo.id + ' (' + _restauranteAtivo.nome + ')') : '(null)',
+    restaurante: _restauranteAtivo ? _restauranteAtivo.nome : '(null)',
     online: navigator.onLine
   };
 
@@ -11357,39 +11386,83 @@ function abrirPainelDebugPDV(){
     return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  function metricaCard(label, valor, cor, detalhe){
+    return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;text-align:center;">'+
+      '<div style="font-family:\'Bebas Neue\',monospace;font-size:1.8rem;color:'+(cor||'#fff')+';line-height:1;">'+valor+'</div>'+
+      '<div style="font-size:0.6rem;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-top:2px;">'+label+'</div>'+
+      (detalhe?'<div style="font-size:0.62rem;color:#888;margin-top:4px;">'+detalhe+'</div>':'')+
+    '</div>';
+  }
+
   var logsHtml = _debugLogsPDV.slice().reverse().map(function(l){
-    var cor = l.tipo === 'err' ? '#f87171' : (l.tipo === 'warn' ? '#f7a34f' : '#9ca3af');
-    return '<div style="border-bottom:1px solid rgba(255,255,255,0.05);padding:6px 0;font-family:monospace;font-size:0.72rem;line-height:1.4;">' +
-      '<span style="color:#666;">[' + l.hora + ']</span> ' +
-      '<span style="color:' + cor + ';">' + escDebug(l.msg) + '</span>' +
+    var cor = l.tipo === 'err' ? '#f87171' : (l.tipo === 'warn' ? '#f7a34f' : '#6b7280');
+    return '<div style="border-bottom:1px solid rgba(255,255,255,0.04);padding:5px 0;font-family:monospace;font-size:0.68rem;line-height:1.4;">'+
+      '<span style="color:#555;">['+l.hora+']</span> '+
+      '<span style="color:'+cor+';">'+escDebug(l.msg)+'</span>'+
     '</div>';
   }).join('');
-  if(!logsHtml) logsHtml = '<div style="color:#666;text-align:center;padding:20px;">Sem logs ainda</div>';
+  if(!logsHtml) logsHtml = '<div style="color:#555;text-align:center;padding:20px;font-size:0.8rem;">Sem logs ainda</div>';
+
+  var statusOnline = navigator.onLine
+    ? '<span style="color:#4ade80;">● Online</span>'
+    : '<span style="color:#f87171;">● OFFLINE ⚠️</span>';
 
   var mod = document.createElement('div');
   mod.id = 'modal-debug-pdv';
-  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:99999;display:flex;flex-direction:column;';
+  mod.style.cssText = 'position:fixed;inset:0;background:#080808;z-index:99999;display:flex;flex-direction:column;font-family:\'Space Grotesk\',sans-serif;';
   mod.innerHTML =
-    '<div style="background:#1a1a1a;border-bottom:1px solid rgba(255,255,255,0.1);padding:14px;display:flex;justify-content:space-between;align-items:center;">' +
-      '<div style="color:#4ade80;font-weight:700;font-size:1rem;">🔧 DEBUG PDV</div>' +
-      '<button onclick="document.getElementById(\'modal-debug-pdv\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.2rem;">×</button>' +
-    '</div>' +
-    '<div style="flex:1;overflow-y:auto;padding:14px;background:#0a0a0a;color:#fff;">' +
-      '<div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:8px;padding:10px;margin-bottom:14px;font-family:monospace;font-size:0.78rem;line-height:1.6;color:#9ca3af;">' +
-        '<div><strong style="color:#4ade80;">ESTADO ATUAL:</strong></div>' +
-        '<div>Email: <span style="color:#fff;">' + escDebug(info.userEmail) + '</span></div>' +
-        '<div>UID: <span style="color:#fff;font-size:0.7rem;">' + escDebug(info.userUid) + '</span></div>' +
-        '<div>Tenant: <span style="color:#fff;">' + escDebug(info.tenantId) + '</span></div>' +
-        '<div>Restaurante: <span style="color:#fff;">' + escDebug(info.restauranteAtivo) + '</span></div>' +
-        '<div>Online: <span style="color:#fff;">' + (info.online ? 'Sim' : 'NÃO ⚠️') + '</span></div>' +
-      '</div>' +
-      '<div style="font-size:0.78rem;color:#999;margin-bottom:8px;font-weight:700;">LOGS (' + _debugLogsPDV.length + ', mais recentes primeiro)</div>' +
-      '<div style="background:#000;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;">' + logsHtml + '</div>' +
-    '</div>' +
-    '<div style="padding:12px;background:#1a1a1a;border-top:1px solid rgba(255,255,255,0.1);display:flex;gap:8px;">' +
-      '<button onclick="copiarLogsDebugPDV()" style="flex:1;padding:10px;background:#4ade80;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;">📋 Copiar Tudo</button>' +
-      '<button onclick="_debugLogsPDV=[];abrirPainelDebugPDV();" style="flex:1;padding:10px;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;">🗑️ Limpar</button>' +
+    // Header
+    '<div style="background:#111;border-bottom:1px solid rgba(255,255,255,0.08);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">'+
+      '<div>'+
+        '<div style="color:#4ade80;font-weight:800;font-size:0.95rem;">🔧 DIAGNÓSTICO PDV</div>'+
+        '<div style="font-size:0.65rem;color:#555;margin-top:1px;">'+escDebug(info.userEmail)+' · '+statusOnline+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;">'+
+        '<button onclick="abrirPainelDebugPDV()" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);color:#4ade80;border-radius:6px;padding:5px 10px;font-size:0.7rem;cursor:pointer;font-family:inherit;">↻ Atualizar</button>'+
+        '<button onclick="document.getElementById(\'modal-debug-pdv\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.1rem;">×</button>'+
+      '</div>'+
+    '</div>'+
+
+    // Conteúdo scrollável
+    '<div style="flex:1;overflow-y:auto;padding:14px;background:#080808;">'+
+
+      // Métricas principais
+      '<div style="font-size:0.6rem;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">📊 Pedidos de Hoje</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px;">'+
+        metricaCard('Total', pedidosHoje, '#fff')+
+        metricaCard('Aguardando', aguardando, aguardando>5?'#f87171':'#f59e0b')+
+        metricaCard('Preparo', preparo, '#3b82f6')+
+        metricaCard('Entregue', entregue, '#4ade80')+
+      '</div>'+
+
+      // Métricas de performance
+      '<div style="font-size:0.6rem;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">⚡ Performance</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:14px;">'+
+        metricaCard('Último update', semUpdateStr, semUpdateMs>60000?'#f87171':'#4ade80')+
+        metricaCard('Mais antigo', maisAntigoStr, latMax>300?'#f87171':latMax>120?'#f59e0b':'#4ade80')+
+        metricaCard('Latência média', latMedia>0?latMedia+'s':'—', latMedia>120?'#f87171':latMedia>60?'#f59e0b':'#4ade80', 'pedidos aguardando')+
+        metricaCard('Latência max', latMax>0?latMax+'s':'—', latMax>300?'#f87171':latMax>120?'#f59e0b':'#4ade80', 'pedidos aguardando')+
+      '</div>'+
+
+      // Info do sistema
+      '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:10px;margin-bottom:14px;font-size:0.72rem;line-height:1.8;color:#6b7280;">'+
+        '<div>🏠 Restaurante: <span style="color:#e2e8f0;">'+escDebug(info.restaurante)+'</span></div>'+
+        '<div>🔑 Tenant: <span style="color:#e2e8f0;font-size:0.65rem;">'+escDebug(info.tenantId)+'</span></div>'+
+        '<div>📱 User Agent: <span style="color:#e2e8f0;font-size:0.62rem;">'+navigator.userAgent.split(' ').slice(-2).join(' ')+'</span></div>'+
+        '<div>💾 Memória: <span style="color:#e2e8f0;">'+(performance&&performance.memory?Math.round(performance.memory.usedJSHeapSize/1048576)+'MB usado':'N/D')+'</span></div>'+
+      '</div>'+
+
+      // Logs
+      '<div style="font-size:0.6rem;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">📋 Logs ('+_debugLogsPDV.length+' entradas)</div>'+
+      '<div style="background:#000;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:10px;">'+logsHtml+'</div>'+
+    '</div>'+
+
+    // Footer
+    '<div style="padding:12px;background:#111;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;flex-shrink:0;">'+
+      '<button onclick="copiarLogsDebugPDV()" style="flex:1;padding:10px;background:#4ade80;color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.82rem;">📋 Copiar Tudo</button>'+
+      '<button onclick="_debugLogsPDV=[];abrirPainelDebugPDV();" style="flex:0 0 auto;padding:10px 14px;background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.25);border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:0.82rem;">🗑️ Limpar</button>'+
     '</div>';
+
   document.body.appendChild(mod);
 }
 

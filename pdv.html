@@ -78,9 +78,9 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 .h-btn:hover,.h-btn:active{background:rgba(212,168,67,0.12);border-color:var(--accent);color:var(--accent);}
 
 /* ─── Tabs ─── */
-.tabs{position:sticky;top:60px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;gap:0;padding:0 4px;z-index:40;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.tabs{position:sticky;top:60px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;gap:0;padding:0 4px;z-index:40;justify-content:space-around;}
 .tabs::-webkit-scrollbar{display:none;}
-.tab{padding:12px 14px;font-size:0.74rem;font-weight:600;color:var(--muted);white-space:nowrap;position:relative;flex-shrink:0;background:none;border:none;font-family:inherit;cursor:pointer;text-align:center;}
+.tab{padding:12px 4px;font-size:0.74rem;font-weight:600;color:var(--muted);white-space:nowrap;position:relative;flex:1;min-width:0;background:none;border:none;font-family:inherit;cursor:pointer;text-align:center;overflow:hidden;text-overflow:ellipsis;}
 .tab .tab-text{display:inline;}
 @media(max-width:480px){.tab{font-size:1.1rem;padding:12px 2px;}.tab .tab-text{display:none;}}
 .tab.active{color:var(--accent);}
@@ -2323,6 +2323,44 @@ document.addEventListener('DOMContentLoaded', function(){
 var _unsubPedidosPDV = null;
 var _pedidosPDV = [];
 var _filtroStatus = 'todos';
+
+// ═══════════════════════════════════════════════════════
+// 🛡️ PROTEÇÕES PDV — PICO DE MOVIMENTO
+// ═══════════════════════════════════════════════════════
+
+// Retry de impressão com backoff exponencial
+function _pdvImprimirComRetry(comando, tentativas, delay){
+  tentativas = tentativas || 0;
+  delay = delay || 1000;
+  if(tentativas >= 4){
+    console.warn('[PDV-IMP] Falhou após 4 tentativas');
+    showToast('⚠️ Impressão pode ter falhado — verifique a impressora', '#f59e0b', 5000);
+    return;
+  }
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
+    console.log('[PDV-IMP] ✓ enviado na tentativa', tentativas+1);
+  }).catch(function(e){
+    console.warn('[PDV-IMP] tentativa', tentativas+1, 'falhou:', e.message);
+    setTimeout(function(){
+      _pdvImprimirComRetry(comando, tentativas+1, delay*2);
+    }, delay);
+  });
+}
+
+// Watchdog PDV — reconecta se ficar sem update por 3min
+var _pdvUltimoUpdate = Date.now();
+var _pdvWatchdog = null;
+function _pdvIniciarWatchdog(){
+  if(_pdvWatchdog) clearInterval(_pdvWatchdog);
+  _pdvWatchdog = setInterval(function(){
+    if(Date.now() - _pdvUltimoUpdate > 180000 && navigator.onLine !== false){
+      console.warn('[PDV-WATCHDOG] Sem updates — reconectando...');
+      try{ escutarPedidosPDV && escutarPedidosPDV(); }catch(e){}
+      showToast('🔄 Reconectando PDV...', '#f59e0b', 2000);
+    }
+  }, 30000);
+}
+setTimeout(_pdvIniciarWatchdog, 15000);
 var _tabAtual = 'cardapio';
 
 function showTab(tab) {
@@ -2406,11 +2444,24 @@ function iniciarListenerPedidos() {
   var restId = _restauranteAtivo.id || 'default';
   // Filtra por tenantId E restauranteId pra garantir isolamento entre restaurantes
   // (importante quando restauranteId é genérico como 'default')
-  var query = fbDb.collection('pedidos').where('restauranteId','==', restId);
+  // ⚡ OTIMIZAÇÃO CRÍTICA: filtra só pedidos de hoje + limite de 200
+  // Sem isso, com 1000+ pedidos históricos o app carrega TUDO a cada update
+  var hoje = new Date();
+  hoje.setHours(0,0,0,0);
+  var inicioDia = hoje.getTime();
+
+  var query = fbDb.collection('pedidos')
+    .where('restauranteId','==', restId)
+    .where('criadoEm','>=', inicioDia);
   if(_tenantId){
     query = query.where('tenantId','==', _tenantId);
   }
+
+  // Debounce do render para não re-renderizar a cada pedido individual no pico
+  var _renderDebounce = null;
+
   _unsubPedidosPDV = query.onSnapshot(function(snap) {
+      _pdvUltimoUpdate = Date.now(); // watchdog ativo
       var anterior = _pedidosPDV.map(function(p){ return p.id; });
       _pedidosPDV = [];
       snap.forEach(function(doc){
@@ -2421,7 +2472,13 @@ function iniciarListenerPedidos() {
       var ativos = _pedidosPDV.filter(function(p){ return p.status !== 'entregue'; }).length;
       var badge = document.getElementById('pedidos-badge');
       if(badge){ badge.textContent = ativos; badge.style.display = ativos > 0 ? 'inline' : 'none'; }
-      if(_tabAtual === 'pedidos') renderPedidosPDV();
+
+      // Debounce: agrupa renders em janela de 150ms no pico
+      if(_renderDebounce) clearTimeout(_renderDebounce);
+      _renderDebounce = setTimeout(function(){
+        if(_tabAtual === 'pedidos') renderPedidosPDV();
+      }, 150);
+
       if(anterior.length > 0) {
         var novos = _pedidosPDV.filter(function(p){ return anterior.indexOf(p.id) === -1 && p.status === 'aguardando'; });
         if(novos.length > 0) showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
@@ -2438,7 +2495,6 @@ function filtrarPedidos(btn, status) {
 
 function renderPedidosPDV() {
   var lista = _pedidosPDV.filter(function(p){
-    // Esconde pedidos que são só pra impressão (conta da mesa almoço)
     if(p.tipoImpressao === 'conta_mesa_almoco') return false;
     return _filtroStatus === 'todos' || p.status === _filtroStatus;
   });
@@ -2448,7 +2504,11 @@ function renderPedidosPDV() {
     wrap.innerHTML = '<div class="empty"><div class="empty-icon">🧾</div><div class="empty-titulo">Nenhum pedido</div><div class="empty-sub">' + (_filtroStatus === 'todos' ? 'Aguardando pedidos dos garçons...' : 'Nenhum pedido com este status.') + '</div></div>';
     return;
   }
-  wrap.innerHTML = '';
+
+  // ⚡ DocumentFragment — monta tudo em memória, insere uma vez só
+  // Evita reflow/repaint a cada card no pico com muitos pedidos
+  var frag = document.createDocumentFragment();
+
   var statusMap = {aguardando:'⏳ Aguardando',preparo:'👨‍🍳 Preparo',pronto:'✅ Pronto',entregue:'🚀 Entregue'};
   var proximoMap = {aguardando:'preparo',preparo:'pronto',pronto:'entregue',entregue:null};
   lista.forEach(function(p) {
@@ -2491,8 +2551,7 @@ function renderPedidosPDV() {
           '<span class="pedido-item-nome">' + escapeHtml(it.nome||'') + '</span>' +
           '<span class="pedido-item-preco">R$ ' + formatarPreco(precoTotal) + '</span>' +
         '</div>' +
-        pesoEl +
-        selecoesEl +
+        pesoEl + selecoesEl +
         (it.obs ? '<div class="pedido-item-obs" style="'+styleCancel+'">📝 ' + escapeHtml(it.obs) + '</div>' : '') +
         tagCancel +
       '</div>';
@@ -2504,12 +2563,8 @@ function renderPedidosPDV() {
         '<span class="pedido-garcom">👤 ' + escapeHtml(p.garcom||'—') + '</span>' +
         '<span class="pedido-hora">' + hora + '</span>' +
       '</div>' +
-      (p.teste === true
-        ? '<div style="background:linear-gradient(90deg,#f7a34f,#f59e0b);color:#000;font-size:0.68rem;font-weight:800;padding:3px 8px;border-radius:6px;display:inline-block;margin-bottom:8px;letter-spacing:0.03em;">🧪 PEDIDO DE TESTE</div>'
-        : '') +
-      '<div style="margin-bottom:8px;">' +
-        '<span class="pedido-status-tag ' + st + '">' + (statusMap[st]||st) + '</span>' +
-      '</div>' +
+      (p.teste === true ? '<div style="background:linear-gradient(90deg,#f7a34f,#f59e0b);color:#000;font-size:0.68rem;font-weight:800;padding:3px 8px;border-radius:6px;display:inline-block;margin-bottom:8px;">🧪 PEDIDO DE TESTE</div>' : '') +
+      '<div style="margin-bottom:8px;"><span class="pedido-status-tag ' + st + '">' + (statusMap[st]||st) + '</span></div>' +
       '<div class="pedido-itens-lista">' + itensHtml + '</div>' +
       '<div class="pedido-total-row">' +
         '<span class="pedido-total-label">Total</span>' +
@@ -2517,10 +2572,25 @@ function renderPedidosPDV() {
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button class="p-btn secondary" style="flex:1;" onclick="reimprimirPedido(\'' + p.id + '\')">🖨️ Reimprimir</button>' +
-        '<button class="p-btn secondary" style="flex:0 0 auto;background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.3);color:#f87171;" onclick="excluirPedidoVisualizacao(\'' + p.id + '\')" title="Remover este pedido da lista">🗑</button>' +
+        '<button class="p-btn secondary" style="flex:0 0 auto;background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.3);color:#f87171;" onclick="excluirPedidoVisualizacao(\'' + p.id + '\')" title="Remover">🗑</button>' +
       '</div>';
-    wrap.appendChild(card);
+
+    // Botão avançar status
+    if(proximo){
+      var btnAv = document.createElement('button');
+      btnAv.className = 'p-btn primary';
+      btnAv.style.cssText = 'width:100%;margin-top:8px;';
+      btnAv.textContent = 'Avançar → ' + (statusMap[proximo]||proximo);
+      btnAv.onclick = (function(pid, prx){ return function(){ avancarStatusPedido(pid, prx); }; })(p.id, proximo);
+      card.appendChild(btnAv);
+    }
+
+    frag.appendChild(card);
   });
+
+  // Uma única operação DOM — evita reflow múltiplo
+  wrap.innerHTML = '';
+  wrap.appendChild(frag);
 }
 
 function excluirPedidoVisualizacao(pedidoId){

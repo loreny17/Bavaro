@@ -2442,48 +2442,66 @@ function iniciarListenerPedidos() {
   if(!fbDb || !_restauranteAtivo) return;
   if(_unsubPedidosPDV) _unsubPedidosPDV();
   var restId = _restauranteAtivo.id || 'default';
-  // Filtra por tenantId E restauranteId pra garantir isolamento entre restaurantes
-  // (importante quando restauranteId é genérico como 'default')
-  // ⚡ OTIMIZAÇÃO CRÍTICA: filtra só pedidos de hoje + limite de 200
-  // Sem isso, com 1000+ pedidos históricos o app carrega TUDO a cada update
   var hoje = new Date();
   hoje.setHours(0,0,0,0);
   var inicioDia = hoje.getTime();
-
-  var query = fbDb.collection('pedidos')
-    .where('restauranteId','==', restId)
-    .where('criadoEm','>=', inicioDia);
-  if(_tenantId){
-    query = query.where('tenantId','==', _tenantId);
-  }
-
-  // Debounce do render para não re-renderizar a cada pedido individual no pico
   var _renderDebounce = null;
 
-  _unsubPedidosPDV = query.onSnapshot(function(snap) {
-      _pdvUltimoUpdate = Date.now(); // watchdog ativo
-      var anterior = _pedidosPDV.map(function(p){ return p.id; });
-      _pedidosPDV = [];
-      snap.forEach(function(doc){
-        var v = doc.data();
-        _pedidosPDV.push(Object.assign({id: doc.id}, v));
-      });
-      _pedidosPDV.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
-      var ativos = _pedidosPDV.filter(function(p){ return p.status !== 'entregue'; }).length;
-      var badge = document.getElementById('pedidos-badge');
-      if(badge){ badge.textContent = ativos; badge.style.display = ativos > 0 ? 'inline' : 'none'; }
+  function _processarSnap(snap, comFiltroData){
+    _pdvUltimoUpdate = Date.now();
+    var anterior = _pedidosPDV.map(function(p){ return p.id; });
+    _pedidosPDV = [];
+    snap.forEach(function(doc){
+      var v = doc.data();
+      // Filtro manual de data se a query veio sem filtro
+      if(!comFiltroData && v.criadoEm && v.criadoEm < inicioDia) return;
+      _pedidosPDV.push(Object.assign({id: doc.id}, v));
+    });
+    _pedidosPDV.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
+    var ativos = _pedidosPDV.filter(function(p){ return p.status !== 'entregue'; }).length;
+    var badge = document.getElementById('pedidos-badge');
+    if(badge){ badge.textContent = ativos; badge.style.display = ativos > 0 ? 'inline' : 'none'; }
+    if(_renderDebounce) clearTimeout(_renderDebounce);
+    _renderDebounce = setTimeout(function(){
+      if(_tabAtual === 'pedidos') renderPedidosPDV();
+    }, 150);
+    if(anterior.length > 0){
+      var novos = _pedidosPDV.filter(function(p){ return anterior.indexOf(p.id) === -1 && p.status === 'aguardando'; });
+      if(novos.length > 0) showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
+    }
+  }
 
-      // Debounce: agrupa renders em janela de 150ms no pico
-      if(_renderDebounce) clearTimeout(_renderDebounce);
-      _renderDebounce = setTimeout(function(){
-        if(_tabAtual === 'pedidos') renderPedidosPDV();
-      }, 150);
-
-      if(anterior.length > 0) {
-        var novos = _pedidosPDV.filter(function(p){ return anterior.indexOf(p.id) === -1 && p.status === 'aguardando'; });
-        if(novos.length > 0) showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
+  function _assinarComData(){
+    // Query otimizada — filtra só hoje
+    var q = fbDb.collection('pedidos')
+      .where('restauranteId','==', restId)
+      .where('criadoEm','>=', inicioDia);
+    if(_tenantId) q = q.where('tenantId','==', _tenantId);
+    _unsubPedidosPDV = q.onSnapshot(
+      function(snap){ _processarSnap(snap, true); },
+      function(e){
+        console.warn('Erro pedidos snapshot:', e.code);
+        if(e.code === 'failed-precondition'){
+          // Índice ainda não ativo — fallback sem filtro de data
+          console.warn('[PDV] Índice pendente, fallback sem filtro de data');
+          showToast('⚠️ Índice criando... carregando todos os pedidos', '#f59e0b', 5000);
+          _assinarSemData();
+        }
       }
-    }, function(e){ console.warn('Erro pedidos snapshot:', e); });
+    );
+  }
+
+  function _assinarSemData(){
+    // Query sem filtro de data (funciona sem índice, mais lento com histórico)
+    var q = fbDb.collection('pedidos').where('restauranteId','==', restId);
+    if(_tenantId) q = q.where('tenantId','==', _tenantId);
+    _unsubPedidosPDV = q.onSnapshot(
+      function(snap){ _processarSnap(snap, false); },
+      function(e){ console.warn('Erro pedidos snapshot fallback:', e.code); }
+    );
+  }
+
+  _assinarComData();
 }
 
 function filtrarPedidos(btn, status) {

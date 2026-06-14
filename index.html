@@ -12604,7 +12604,27 @@ function pontoIniciar(){
 
 // ── Verificador de atraso (notifica gestor) ──────────────────────────────────
 var _pVerifInterval = null;
-var _pNotifEnviadas = {};
+
+// Carrega notificações já enviadas do localStorage para sobreviver reloads
+var _pNotifEnviadas = (function(){
+  try{
+    var saved = localStorage.getItem('_pNotifEnviadas');
+    if(saved){
+      var obj = JSON.parse(saved);
+      // Limpa entradas de dias anteriores
+      var hoje = new Date().toISOString().slice(0,10);
+      Object.keys(obj).forEach(function(k){
+        if(k.indexOf(hoje) === -1) delete obj[k];
+      });
+      return obj;
+    }
+  }catch(e){}
+  return {};
+})();
+
+function _pSalvarNotifEnviadas(){
+  try{ localStorage.setItem('_pNotifEnviadas', JSON.stringify(_pNotifEnviadas)); }catch(e){}
+}
 
 function _pIniciarVerificadorAtraso(){
   if('Notification' in window && Notification.permission==='default'){
@@ -12639,6 +12659,7 @@ function _pVerificarAtrasos(){
     var chave = f.id+'_'+hoje;
     if(_pNotifEnviadas[chave]) return;
     _pNotifEnviadas[chave] = true;
+    _pSalvarNotifEnviadas(); // persiste para sobreviver reloads
     var atraso = agoraMin - minE;
     var nome = f.nome||f.nomeLogin||'Funcionário';
     _pEnviarNotifLocal('⚠️ '+nome+' não bateu o ponto!','Deveria ter chegado às '+h.entrada+'. Atraso: '+atraso+'min.', 'agora');

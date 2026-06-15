@@ -1309,6 +1309,11 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
+    // Login anônimo — necessário para as regras do Firestore funcionarem
+    // O garçom não tem email/senha Firebase, mas precisa de request.auth != null
+    firebase.auth().signInAnonymously().catch(function(e){
+      console.warn('[GARCOM] auth anônimo falhou:', e.code);
+    });
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // Quando o app abre, dados são lidos do cache local INSTANTANEAMENTE,
     // depois sincronizados com servidor em background.
@@ -4288,7 +4293,7 @@ function renderMesas(){
     if(busca && !num.includes(busca)) continue;
     var info = _mesasOcupadas[num];
     var eOcupada = !!info;
-    var eMinha = eOcupada && info.garcom === _nomeGarcom;
+    var eMinha = eOcupada && info.garcom === _nomeGarcom; // mantido só pro filtro "Minhas"
     var conta = _contasMesaCache && _contasMesaCache[num];
     var eFechada = conta && conta.contaImpressaSolicitada === true;
 
@@ -4299,10 +4304,9 @@ function renderMesas(){
 
     var cls = 'mesa-card ';
     if(eFechada) cls += 'fechada';
-    else if(eMinha) cls += 'minha';
-    else if(eOcupada) cls += 'ocupada';
+    else if(eOcupada) cls += 'ocupada'; // todas vermelhas, sem distinção de "minha"
     else cls += 'livre';
-    var status = eFechada ? 'Conta impressa' : eMinha ? 'Minha' : eOcupada ? 'Ocupada' : 'Livre';
+    var status = eFechada ? 'Conta impressa' : eOcupada ? 'Ocupada' : 'Livre';
     var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;

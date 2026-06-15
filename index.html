@@ -1236,7 +1236,7 @@ body.admin-mode .admin-only{display:flex!important;}
 
 <!-- HOME SCREEN -->
 <!-- TELA DE RESTAURANTE -->
-<div id="rest-screen">
+<div id="rest-screen" class="hidden">
   <div class="rest-title">🍽️ GESTÃO</div>
   <div class="rest-sub">SELECIONE O RESTAURANTE</div>
   <div class="rest-list" id="rest-list"></div>
@@ -11210,7 +11210,6 @@ function iniciarFirebase(){
     // Observer principal: detecta login/logout e libera o app
     fbAuth.onAuthStateChanged(function(user){
       if(user){
-        // Usuário logado — esconde tela de login e inicia o app
         _usuarioAtual = {
           uid: user.uid,
           email: user.email,
@@ -11223,6 +11222,18 @@ function iniciarFirebase(){
           _appJaIniciado = true;
           _iniciarAppAposLogin();
         }
+        // Safety net: se após 10s ainda estiver na tela de loading, força esconder
+        setTimeout(function(){
+          var ov = document.getElementById('auth-overlay');
+          if(ov && !ov.classList.contains('hidden')){
+            console.warn('[Auth] Safety timeout — forçando esconder overlay');
+            ov.classList.add('hidden');
+          }
+          var ls = document.getElementById('loading-screen');
+          if(ls && !ls.classList.contains('hidden')){
+            ls.classList.add('hidden');
+          }
+        }, 10000);
       } else {
         // Usuário não logado — mostra tela de login
         _usuarioAtual = null;

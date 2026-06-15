@@ -14271,7 +14271,6 @@ function cancelarItemOrfaoConta(contaId, idx){
     var itens = c.itens || [];
     if(idx < 0 || idx >= itens.length){ showToast('Item não encontrado', '#f87171'); return; }
     var item = itens[idx];
-    // Marca como cancelado
     itens[idx] = Object.assign({}, item, {
       status: 'cancelado',
       canceladoEm: Date.now(),
@@ -14279,9 +14278,8 @@ function cancelarItemOrfaoConta(contaId, idx){
       motivoCancelamento: 'Cancelado via "Ver pedidos" (item órfão)'
     });
     // Recalcula totais
-    var subtotal = itens.filter(function(i){
-      return i.status !== 'cancelado' && !i.transferidoPara;
-    }).reduce(function(a, i){
+    var itensAtivos = itens.filter(function(i){ return i.status !== 'cancelado' && !i.transferidoPara; });
+    var subtotal = itensAtivos.reduce(function(a, i){
       if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
       return a + (i.preco||0) * (i.qtd||1);
     }, 0);
@@ -14289,14 +14287,46 @@ function cancelarItemOrfaoConta(contaId, idx){
     var total = subtotal + taxa10;
     var pagoTotal = c.pagoTotal || 0;
     var restante = Math.max(0, total - pagoTotal);
+    var temPagamento = (c.pagamentos||[]).length > 0;
+
     fbDb.collection('contas_mesa').doc(contaId).update({
       itens: itens,
       subtotal: subtotal,
       taxa10: taxa10,
       total: total,
-      restante: restante
+      restante: restante,
+      atualizadoEm: Date.now()
     }).then(function(){
+      _invalidarCacheItens(contaId);
       showToast('✓ Item cancelado', '#4ade80');
+
+      // Se ficou sem itens ativos e sem pagamentos → libera mesa/comanda
+      if(!itensAtivos.length && !temPagamento){
+        var mesaStr = String(c.mesa||'');
+        var tipoConta = c.tipoConta||'mesa';
+
+        if(tipoConta === 'avulsa' || tipoConta === 'almoco'){
+          // Remove da lista de comandas/almoços pendentes
+          _comandasAvulsas = _comandasAvulsas.filter(function(x){ return x.id !== contaId; });
+          renderAlmocos();
+          renderComandas();
+          // Fecha o modal de ver pedidos
+          var modal = document.getElementById('modal-ver-pedidos');
+          if(modal) modal.remove();
+          showToast('✓ '+( tipoConta==='almoco'?'Almoço':'Comanda')+' encerrado — sem itens', '#4ade80');
+        } else if(mesaStr && _mesasOcupadas[mesaStr]){
+          // Libera mesa no mapa
+          delete _mesasOcupadas[mesaStr];
+          renderMesas();
+          var modal2 = document.getElementById('modal-ver-pedidos');
+          if(modal2) modal2.remove();
+          showToast('✓ Mesa '+mesaStr+' liberada — sem itens', '#4ade80');
+        }
+      } else {
+        // Ainda tem itens — só fecha o modal
+        var modal3 = document.getElementById('modal-ver-pedidos');
+        if(modal3) modal3.remove();
+      }
     }).catch(function(e){
       showToast('❌ ' + e.message, '#f87171');
     });

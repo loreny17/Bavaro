@@ -14328,25 +14328,43 @@ function renderVerPedidosMesa(pedidos){
         return it.status !== 'pago' && it.status !== 'cancelado' && !it.transferidoPara;
       });
       if(itensOrfaos.length){
-        // Renderiza um "pseudo-pedido" agrupado com esses itens
-        var htmlOrfaos = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.78rem;color:#fbbf24;line-height:1.5;">'+
-          '⚠️ <b>Itens sem pedido correspondente</b><br>'+
-          'Esses itens estão na conta mas o pedido original foi removido ou perdido. Você pode cancelar individualmente abaixo.'+
-        '</div>';
-        var totalOrfaos = itensOrfaos.reduce(function(acc, it){ return acc + (it.preco||0)*(it.qtd||1); }, 0);
-        htmlOrfaos += '<div class="pedido-card" style="border-left:3px solid #fbbf24;">'+
+        // Verifica se são todos itens do buffet/almoço (adicionados direto na conta, sem pedido)
+        var todosBuffet = itensOrfaos.every(function(it){
+          var n = (it.nome||'').toLowerCase();
+          return n.includes('buffet') || n.includes('almoço') || n.includes('almoco') || it.tipoVenda === 'kg';
+        });
+
+        var totalOrfaos = itensOrfaos.reduce(function(acc, it){
+          var v = it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+          return acc + v;
+        }, 0);
+
+        // Sem aviso de erro para itens de buffet — é comportamento normal
+        var htmlOrfaos = todosBuffet ? '' :
+          '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.78rem;color:#fbbf24;line-height:1.5;">'+
+            '⚠️ <b>Itens sem pedido correspondente</b><br>'+
+            'Esses itens estão na conta mas o pedido original foi removido ou perdido. Você pode cancelar individualmente abaixo.'+
+          '</div>';
+
+        var tituloCard = todosBuffet
+          ? '<b>☀️ Buffet Almoço</b>'
+          : '<b>📦 Itens na conta</b> <span style="color:var(--muted);font-size:0.78rem;">(sem pedido)</span>';
+
+        htmlOrfaos += '<div class="pedido-card" style="border-left:3px solid '+(todosBuffet?'var(--accent)':'#fbbf24')+';">'+
           '<div class="pedido-cab" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-            '<div><b>📦 Itens na conta</b> <span style="color:var(--muted);font-size:0.78rem;">(sem pedido)</span></div>'+
+            '<div>'+tituloCard+'</div>'+
             '<div style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(totalOrfaos)+'</div>'+
           '</div>';
         itensOrfaos.forEach(function(it){
           var nm = esc(it.nome||'?');
           var qt = it.qtd || 1;
-          var vl = ((it.preco||0)*qt).toFixed(2).replace('.',',');
+          var ehKg = it.tipoVenda === 'kg' && it.peso;
+          var vl = ehKg ? (it.preco||0) : (it.preco||0)*qt;
+          var pesoFmt = ehKg ? (it.peso < 1000 ? it.peso+'g' : (it.peso/1000).toFixed(3).replace('.',',')+'kg') : '';
           htmlOrfaos += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:6px;">'+
             '<div style="display:flex;justify-content:space-between;">'+
-              '<div><b>'+qt+'x</b> '+nm+'</div>'+
-              '<div>R$ '+vl+'</div>'+
+              '<div><b>'+(ehKg?'⚖️ ':qt+'x ')+nm+(pesoFmt?' · '+pesoFmt:'')+'</b></div>'+
+              '<div>R$ '+fmtPreco(vl)+'</div>'+
             '</div>'+
             (it.obs ? '<div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">'+esc(it.obs)+'</div>' : '')+
             '<button onclick="cancelarItemOrfaoConta(\''+contaOrfa.id+'\','+(contaOrfa.itens||[]).indexOf(it)+')" style="margin-top:6px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:6px 10px;border-radius:6px;font-size:0.72rem;font-family:inherit;cursor:pointer;">✕ Cancelar item</button>'+

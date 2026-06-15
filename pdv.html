@@ -2847,11 +2847,16 @@ function carregarHistoricoPDV(){
     .where('restauranteId','==', restId)
     .where('fechadoEm','>=', filtroInicio);
   if(filtroFim) queryHist = queryHist.where('fechadoEm','<=', filtroFim);
-  if(_tenantId) queryHist = queryHist.where('tenantId','==', _tenantId);
+  // tenantId filtrado manualmente para não precisar de índice extra
 
   queryHist.get().then(function(snap){
       var contas = [];
-      snap.forEach(function(d){ contas.push(Object.assign({id: d.id}, d.data())); });
+      snap.forEach(function(d){
+        var v = d.data();
+        // Filtro manual de tenantId
+        if(_tenantId && v.tenantId && v.tenantId !== _tenantId) return;
+        contas.push(Object.assign({id: d.id}, v));
+      });
       // MODO TESTE: ignora contas de teste no histórico e nas vendas
       contas = contas.filter(function(c){ return c.teste !== true; });
       contas.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });

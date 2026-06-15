@@ -12959,6 +12959,21 @@ function cancelarItemNaConta(itemKey){
     restante: totais.restante,
     atualizadoEm: agora
   }).then(function(){
+    // Invalida cache para forçar releitura
+    _invalidarCacheItens(conta.id);
+    // Se todos os itens foram cancelados e não há pagamentos, libera a mesa visualmente
+    var itensAtivos = itensAtualizados.filter(function(it){
+      return it.status !== 'cancelado' && it.status !== 'pago';
+    });
+    var temPagamento = (conta.pagamentos||[]).length > 0;
+    if(!itensAtivos.length && !temPagamento){
+      var mesaStr = String(conta.mesa||'');
+      if(mesaStr && _mesasOcupadas[mesaStr]){
+        delete _mesasOcupadas[mesaStr];
+        renderMesas();
+        showToast('Mesa '+mesaStr+' liberada — todos os itens cancelados', '#4ade80');
+      }
+    }
     // Tenta marcar o item correspondente no pedido também (se achar)
     if(item.pedidoId){
       fbDb.collection('pedidos').doc(item.pedidoId).get().then(function(doc){

@@ -6314,25 +6314,6 @@ function imprimirPedidoAutomatico(pedido){
     }); // fim preCarregarLogos().then()
   }
 
-  // ── ITENS AVULSOS com impressora forçada ──
-  // Agrupa os itens avulsos por impressora escolhida e imprime cada grupo.
-  var avulsos = (pedido.itens||[]).filter(function(it){
-    return it.avulso && it.impressoraForcada && it.status !== 'cancelado';
-  });
-  if(avulsos.length){
-    var porImpressora = {};
-    avulsos.forEach(function(it){
-      if(!porImpressora[it.impressoraForcada]) porImpressora[it.impressoraForcada] = [];
-      porImpressora[it.impressoraForcada].push(it);
-    });
-    Object.keys(porImpressora).forEach(function(impId){
-      var imp = _impressoras.find(function(i){ return i.id === impId; });
-      if(!imp) return;
-      var cupom = gerarCupomAvulso(pedido, porImpressora[impId]);
-      if(cupom) enviarParaImpressora(imp, cupom);
-    });
-  }
-
   // Marca como impresso no Firestore (evita reimprimir se outro PDV abrir)
   fbDb.collection('pedidos').doc(pedido.id).update({impresso: true, impressoEm: Date.now()})
     .catch(function(){});

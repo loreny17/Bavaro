@@ -11742,14 +11742,36 @@ function authBootstrapTenant(){
     }catch(e){}
 
     if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
-      // Login rápido: usa cache, resolve imediatamente, busca tenant info em background
+      // Valida cache — tenta buscar tenant para confirmar que as regras permitem acesso
+      fbDb.collection('users').doc(uid).get().then(function(doc){
+        if(!doc.exists || !doc.data().tenantId){
+          // Cache inválido — limpa e recarrega
+          console.warn('[Tenant] Cache inválido — limpando e recarregando');
+          try{
+            localStorage.removeItem('bavaro_tenant_id');
+            localStorage.removeItem('bavaro_user_doc');
+          }catch(e){}
+          window.location.reload();
+          return;
+        }
+        // Cache válido — atualiza silenciosamente
+        _userDoc = doc.data();
+        _tenantId = _userDoc.tenantId;
+        try{
+          localStorage.setItem('bavaro_tenant_id', _tenantId);
+          localStorage.setItem('bavaro_user_doc', JSON.stringify(_userDoc));
+        }catch(e){}
+      }).catch(function(){
+        // Erro de rede — usa cache mesmo assim (offline)
+      });
+
+      // Usa cache imediatamente sem bloquear
       _userDoc = cachedUserDoc;
       _tenantId = cachedTenantId;
       clearTimeout(timeout);
       resolved = true;
       if(overlay) overlay.classList.add('hidden');
       if(loadingEl) loadingEl.style.display = 'none';
-      // Atualiza cache em background sem bloquear
       fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
         if(tDoc.exists){ _userDoc.tenantInfo = tDoc.data(); }
       }).catch(function(){});
@@ -11796,7 +11818,19 @@ function authBootstrapTenant(){
       clearTimeout(timeout);
       resolved = true;
       console.error('[Tenant] Erro ao buscar users/'+uid+':', err);
-      // Mostra erro pra usuário
+      // Se for erro de permissão, limpa cache corrompido
+      if(err.code === 'permission-denied'){
+        console.warn('[Tenant] Permission denied — limpando cache');
+        try{
+          localStorage.removeItem('bavaro_tenant_id');
+          localStorage.removeItem('bavaro_user_doc');
+        }catch(e){}
+        // Tenta de novo sem cache
+        setTimeout(function(){ window.location.reload(); }, 1500);
+        var msgEl2 = document.getElementById('auth-status');
+        if(msgEl2) msgEl2.textContent = '🔄 Atualizando...';
+        return;
+      }
       var msgEl = document.getElementById('auth-status');
       if(msgEl) msgEl.textContent = '❌ '+(err.message||err.code||'Erro de conexão');
       reject(err);

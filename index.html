@@ -11553,132 +11553,86 @@ function _iniciarAppAposLogin(){
 }
 
 // ═══ TENANT BOOTSTRAP ═══
-// Carrega ou cria o tenant do usuário logado
 function authBootstrapTenant(){
   return new Promise(function(resolve, reject){
-    if(!fbDb || !_usuarioAtual){ reject(new Error('Firebase ou usuário ausente')); return; }
+    if(!fbDb || !_usuarioAtual){ reject(new Error('sem firebase')); return; }
     var uid = _usuarioAtual.uid;
 
+    // Esconde login, mostra loading
     var overlay = document.getElementById('auth-overlay');
     var loadingEl = document.getElementById('auth-tela-loading');
     var loginEl = document.getElementById('auth-tela-login');
-    var resetEl = document.getElementById('auth-tela-reset');
-    var overlayJaEscondido = overlay && overlay.classList.contains('hidden');
-    if(!overlayJaEscondido){
-      if(overlay) overlay.classList.remove('hidden');
-      if(loadingEl) loadingEl.style.display = 'block';
-      if(loginEl) loginEl.style.display = 'none';
-      if(resetEl) resetEl.style.display = 'none';
+    if(overlay) overlay.classList.remove('hidden');
+    if(loadingEl) loadingEl.style.display = 'block';
+    if(loginEl) loginEl.style.display = 'none';
+
+    // Tenta usar cache primeiro para entrada instantânea
+    var cachedTenantId, cachedUserDoc;
+    try{
+      cachedTenantId = localStorage.getItem('bavaro_tenant_id');
+      var s = localStorage.getItem('bavaro_user_doc');
+      if(s) cachedUserDoc = JSON.parse(s);
+    }catch(e){}
+
+    function entrar(userDoc, tenantId){
+      _userDoc = userDoc;
+      _tenantId = tenantId;
+      if(overlay) overlay.classList.add('hidden');
+      if(loadingEl) loadingEl.style.display = 'none';
+      try{
+        localStorage.setItem('bavaro_tenant_id', tenantId);
+        localStorage.setItem('bavaro_user_doc', JSON.stringify(userDoc));
+      }catch(e){}
+      resolve(true);
     }
 
-    var resolved = false;
-    var timeout = setTimeout(function(){
-      if(resolved) return;
-      resolved = true;
-      // Timeout — tenta limpar cache e recarregar
-      console.warn('[Tenant] Timeout — limpando cache e recarregando');
-      try{
-        localStorage.removeItem('bavaro_tenant_id');
-        localStorage.removeItem('bavaro_user_doc');
-      }catch(e){}
-      window.location.reload();
-    }, 8000);
-
-    // PRIMEIRO: força renovação do token antes de qualquer request
-    // Isso evita o problema de token expirado após horas sem usar
-    var fbUser = fbAuth.currentUser;
-    var tokenPromise = fbUser
-      ? fbUser.getIdToken(true).catch(function(){ return null; }) // true = força renovação
-      : Promise.resolve(null);
-
-    tokenPromise.then(function(){
-      // OTIMIZAÇÃO: usa tenantId em cache pra entrada rápida
-      var cachedTenantId = null;
-      var cachedUserDoc = null;
-      try{
-        cachedTenantId = localStorage.getItem('bavaro_tenant_id');
-        var cachedUserStr = localStorage.getItem('bavaro_user_doc');
-        if(cachedUserStr) cachedUserDoc = JSON.parse(cachedUserStr);
-      }catch(e){}
-
-      if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
-        // Cache válido — entra imediatamente e atualiza em background
-        _userDoc = cachedUserDoc;
-        _tenantId = cachedTenantId;
-        clearTimeout(timeout);
-        resolved = true;
-        if(overlay) overlay.classList.add('hidden');
-        if(loadingEl) loadingEl.style.display = 'none';
-        resolve(true);
-        // Atualiza cache em background
-        fbDb.collection('users').doc(uid).get().then(function(doc){
-          if(doc.exists && doc.data().tenantId){
-            _userDoc = doc.data();
-            _tenantId = _userDoc.tenantId;
-            try{
-              localStorage.setItem('bavaro_tenant_id', _tenantId);
-              localStorage.setItem('bavaro_user_doc', JSON.stringify(_userDoc));
-            }catch(e){}
-          } else if(!doc.exists){
-            // Cache corrompido — limpa para próximo acesso
-            try{
-              localStorage.removeItem('bavaro_tenant_id');
-              localStorage.removeItem('bavaro_user_doc');
-            }catch(e){}
-          }
-        }).catch(function(){});
-        fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
-          if(tDoc.exists){ _userDoc.tenantInfo = tDoc.data(); }
-        }).catch(function(){});
-        return;
-      }
-
-      // Sem cache — busca do Firestore
+    function buscarNoFirestore(){
       fbDb.collection('users').doc(uid).get().then(function(doc){
-        if(doc.exists && doc.data() && doc.data().tenantId){
-          _userDoc = doc.data();
-          _tenantId = _userDoc.tenantId;
-          try{
-            localStorage.setItem('bavaro_tenant_id', _tenantId);
-            localStorage.setItem('bavaro_user_doc', JSON.stringify(_userDoc));
-          }catch(e){}
-          clearTimeout(timeout);
-          resolved = true;
-          if(overlay) overlay.classList.add('hidden');
-          if(loadingEl) loadingEl.style.display = 'none';
-          resolve(true);
-          fbDb.collection('tenants').doc(_tenantId).get().then(function(tDoc){
-            if(tDoc.exists){ _userDoc.tenantInfo = tDoc.data(); }
-          }).catch(function(){});
+        if(doc.exists && doc.data().tenantId){
+          entrar(doc.data(), doc.data().tenantId);
         } else {
           // Primeiro acesso
-          clearTimeout(timeout);
-          resolved = true;
-          if(loadingEl) loadingEl.style.display = 'none';
           if(overlay) overlay.classList.add('hidden');
-          return _mostrarBoasVindas().then(function(nomeNegocio){
-            return _criarTenantParaUsuario(nomeNegocio).then(function(){
-              resolve(true);
-            });
-          }).catch(function(e){ reject(e); });
+          if(loadingEl) loadingEl.style.display = 'none';
+          _mostrarBoasVindas().then(function(nome){
+            return _criarTenantParaUsuario(nome);
+          }).then(function(){ resolve(true); }).catch(reject);
         }
       }).catch(function(err){
-        clearTimeout(timeout);
-        resolved = true;
-        console.error('[Tenant] Erro:', err.code);
-        if(err.code === 'permission-denied' || err.code === 'unauthenticated'){
-          try{
-            localStorage.removeItem('bavaro_tenant_id');
-            localStorage.removeItem('bavaro_user_doc');
-          }catch(e){}
-          setTimeout(function(){ window.location.reload(); }, 1000);
-          var msgEl2 = document.getElementById('auth-status');
-          if(msgEl2) msgEl2.textContent = '🔄 Atualizando sessão...';
+        console.error('[Tenant]', err.code, err.message);
+        // Se falhou com cache disponível, usa o cache mesmo assim
+        if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
+          console.warn('[Tenant] Usando cache após erro de rede');
+          entrar(cachedUserDoc, cachedTenantId);
         } else {
-          reject(err);
+          // Sem cache e sem rede — mostra erro e oferece retry
+          if(loadingEl) loadingEl.innerHTML =
+            '<div style="text-align:center;padding:20px;">' +
+            '<div style="font-size:2rem;margin-bottom:10px;">⚠️</div>' +
+            '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:14px;">Erro ao conectar. Verifique sua internet.</div>' +
+            '<button onclick="window.location.reload()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer;font-family:inherit;">🔄 Tentar novamente</button>' +
+            '</div>';
         }
       });
-    });
+    }
+
+    // Se tem cache válido, entra imediatamente
+    if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
+      entrar(cachedUserDoc, cachedTenantId);
+      // Atualiza cache em background silenciosamente
+      fbDb.collection('users').doc(uid).get().then(function(doc){
+        if(doc.exists && doc.data().tenantId){
+          try{
+            localStorage.setItem('bavaro_tenant_id', doc.data().tenantId);
+            localStorage.setItem('bavaro_user_doc', JSON.stringify(doc.data()));
+          }catch(e){}
+        }
+      }).catch(function(){});
+      return;
+    }
+
+    // Sem cache — busca direto
+    buscarNoFirestore();
   });
 }
 

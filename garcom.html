@@ -11917,50 +11917,9 @@ function enviarPedido(){
     });
   }).then(function(ref){
     _enviandoPedido = false;
-    _invalidarCacheItens(contaId);
+    _invalidarCacheItens(contaId); // força reload dos itens na próxima abertura
     if(pedido.numeroSequencial){
       showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
-    }
-    // Se tem itens avulsos com impressora definida, envia comando direto
-    // O PDV não consegue rotear itens avulsos pelos modelos normais (sem categoria)
-    var itensAvulsos = itensPedido.filter(function(it){ return it.avulso && it.impressoraForcada; });
-    if(itensAvulsos.length && _deveImprimir){
-      // Agrupa por impressora (pode ter avulsos em impressoras diferentes)
-      var porImpressora = {};
-      itensAvulsos.forEach(function(it){
-        var impId = it.impressoraForcada;
-        if(!porImpressora[impId]) porImpressora[impId] = { impId: impId, impNome: it.impressoraForcadaNome||'', itens: [] };
-        porImpressora[impId].itens.push(it);
-      });
-      Object.keys(porImpressora).forEach(function(impId){
-        var grupo = porImpressora[impId];
-        // Busca o modelo desta impressora para pegar as configs (corte, logo, etc)
-        var modelo = (_modelosCozinha||[]).find(function(m){ return m.impressoraId === impId; });
-        _imprimirComRetry({
-          tipo: 'pedido_avulso',
-          restauranteId: _restauranteId,
-          tenantId: _tenantId || null,
-          pedidoId: ref.id,
-          pedidoNumero: pedido.numeroSequencial || ref.id.slice(-4).toUpperCase(),
-          mesa: pedido.mesa,
-          garcom: _nomeGarcom,
-          impressoraId: impId,
-          impressoraNome: grupo.impNome,
-          modeloId: modelo ? modelo.id : '',
-          // Configs do modelo — garante corte de papel e layout correto
-          modeloConfig: modelo ? {
-            nome: modelo.nome,
-            tipo: modelo.tipo || 'pedido',
-            cortarPapel: true, // sempre corta no avulso
-            mostrarLogo: false
-          } : { cortarPapel: true },
-          itens: grupo.itens.map(function(it){
-            return { nome: it.nome, qtd: it.qtd||1, preco: it.preco||0, obs: it.obs||'' };
-          }),
-          criadoEm: Date.now(),
-          solicitadoPor: _nomeGarcom
-        });
-      });
     }
   }).catch(function(e){
     _enviandoPedido = false;
@@ -12350,9 +12309,13 @@ function abrirMenuMesa(num, eOcupada){
   // Reescreve o body do modal dinamicamente
   var body = document.querySelector('#modal-mesa-menu .modal-body');
   if(eOcupada && info){
-    var conta = _contasMesaCache[num] || {};
-    var qtdAbertos = info.count;
-    var totalAbertos = (conta.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); }, 0);
+    var conta = _contasMesaCache[num] || _contasMesaCache[String(num)] || {};
+    var qtdAbertos = info.count || conta._itensAbertosCount || 0;
+    // Usa o total já calculado do Firestore (info.total ou conta.total).
+    // NÃO recalcula por conta.itens porque mesas normais não carregam itens no cache
+    // (são carregados sob demanda). Recalcular resultaria sempre em R$ 0,00.
+    var totalAbertos = info.restante > 0 ? info.restante
+      : (info.total || conta.total || conta.subtotal || 0);
     body.innerHTML =
       '<div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);border-radius:12px;padding:14px;margin-bottom:14px;">'+
         '<div style="color:#4ade80;font-weight:700;font-size:0.92rem;">✓ Conta aberta</div>'+
@@ -14553,67 +14516,6 @@ function renderVerPedidosMesa(pedidos){
       (podeEditar?'':'<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center;">Pedido em '+(statusMap[st]||st)+' — edição bloqueada</div>')+
     '</div>';
   });
-  // ── SEMPRE mostra itens órfãos da conta (buffet/kg do Almoço) junto com pedidos normais ──
-  // Esses itens ficam em contas_mesa.itens mas NÃO geram documento na coleção pedidos.
-  // Coleta todos os itemIds que já aparecem nos pedidos normais (para não duplicar)
-  var idsNaoConta = {};
-  validos.forEach(function(p){
-    (p.itens||[]).forEach(function(it){
-      if(it.itemId) idsNaoConta[it.itemId] = true;
-      if(it.id)     idsNaoConta[it.id]     = true;
-    });
-  });
-
-  var contaOrfaInline = null;
-  if(_verPedidosMesaNum !== null && _verPedidosMesaNum !== undefined){
-    contaOrfaInline = _contasMesaCache[String(_verPedidosMesaNum)] || _contasMesaCache[_verPedidosMesaNum];
-  }
-  if(contaOrfaInline && (contaOrfaInline.itens||[]).length){
-    var itensOrfaosInline = (contaOrfaInline.itens||[]).filter(function(it, idx){
-      // Ignora cancelados, transferidos e itens que já aparecem em algum pedido normal
-      if(it.status === 'pago' || it.status === 'cancelado') return false;
-      if(it.transferidoPara) return false;
-      // Se o item tem pedidoId quer dizer que veio de um pedido normal — já está listado acima
-      if(it.pedidoId) return false;
-      return true;
-    });
-    if(itensOrfaosInline.length){
-      var totalOrfaosInline = itensOrfaosInline.reduce(function(acc, it){
-        return acc + (it.tipoVenda === 'kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1));
-      }, 0);
-      var htmlOrfaosInline = '<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:14px;padding:14px;margin-bottom:14px;">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-          '<div style="font-weight:700;font-size:0.94rem;">☀️ Buffet / Almoço</div>'+
-          '<div style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+fmtPreco(totalOrfaosInline)+'</div>'+
-        '</div>';
-      itensOrfaosInline.forEach(function(it){
-        var idxReal = (contaOrfaInline.itens||[]).indexOf(it);
-        var ehKg = it.tipoVenda === 'kg' && it.peso;
-        var vl = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
-        var pesoFmt = ehKg ? (it.peso < 1000 ? it.peso+'g' : (it.peso/1000).toFixed(3).replace('.',',')+'kg') : '';
-        var nm = esc(it.nome||'?');
-        var selsHtml = '';
-        if(it.selecoes && it.selecoes.length){
-          selsHtml = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">'+
-            it.selecoes.map(function(s){ var q=s.qtd||1; return '• '+(q>1?q+'x ':'')+esc(s.opcao||''); }).join(' ')+'</div>';
-        }
-        htmlOrfaosInline +=
-          '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;margin-bottom:8px;">'+
-            '<div style="display:flex;align-items:center;gap:8px;">'+
-              '<span style="background:var(--accent);color:#000;border-radius:5px;padding:2px 7px;font-size:0.74rem;font-weight:700;">'+(ehKg?'⚖️':'1x')+'</span>'+
-              '<span style="flex:1;font-weight:600;font-size:0.88rem;">'+(ehKg?'⚖️ ':'')+nm+(pesoFmt?' · '+pesoFmt:'')+'</span>'+
-              '<span style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.05rem;">R$ '+fmtPreco(vl)+'</span>'+
-            '</div>'+
-            selsHtml+
-            (it.obs?'<div style="font-size:0.72rem;color:var(--muted);margin-top:3px;">📝 '+esc(it.obs)+'</div>':'')+
-            '<button onclick="cancelarItemOrfaoConta(\''+contaOrfaInline.id+'\','+idxReal+')" style="margin-top:6px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:6px 10px;border-radius:6px;font-size:0.72rem;font-family:inherit;cursor:pointer;">✕ Cancelar item</button>'+
-          '</div>';
-      });
-      htmlOrfaosInline += '</div>';
-      html = htmlOrfaosInline + html; // Exibe buffet/almoço NO TOPO, antes dos pedidos normais
-    }
-  }
-
   body.innerHTML = html;
 }
 

@@ -258,6 +258,9 @@ button{cursor:pointer;border:none;background:none;}
 .mesa-card.livre:hover{border-color:var(--accent);background:rgba(212,168,67,0.06);}
 .mesa-card.ocupada{border-color:rgba(248,113,113,0.5);background:rgba(248,113,113,0.05);}
 .mesa-card.minha{border-color:rgba(74,222,128,0.5);background:rgba(74,222,128,0.05);}
+.mesa-card.fechada{border-color:rgba(59,130,246,0.6);background:rgba(59,130,246,0.08);}
+.mesa-card.fechada .mesa-status{color:#60a5fa;font-weight:700;}
+.mesa-card.fechada .mesa-dot{background:#3b82f6;}
 .mesa-num{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:0.05em;color:var(--text);line-height:1;}
 .mesa-status{font-size:0.64rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;}
 .mesa-card.livre .mesa-status{color:var(--muted);}
@@ -701,8 +704,68 @@ header{
   <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
   <!-- ☀️ Tela do Almoço -->
   <div id="almoco-tela" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;">
-    <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center;">
-      <input type="text" id="almoco-busca" placeholder="🔍 Buscar nome ou mesa..." oninput="renderAlmocos()" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px 14px;font-family:inherit;font-size:0.95rem;box-sizing:border-box;">
+
+    <!-- Formulário de buffet direto na tela -->
+    <div id="almoco-form-card" style="background:var(--surface);border:1px solid rgba(251,191,36,0.25);border-radius:16px;padding:16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <span style="font-size:1.5rem;">⚖️</span>
+        <div>
+          <div style="font-weight:800;font-size:1rem;color:var(--accent);">Buffet por Kg</div>
+          <div style="font-size:0.7rem;color:var(--muted);">Registre e vincule à mesa depois</div>
+        </div>
+      </div>
+
+      <!-- Nome cliente -->
+      <div style="margin-bottom:10px;">
+        <label style="font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">👤 Nome do cliente <span style="font-weight:400;">(opcional)</span></label>
+        <input type="text" id="alm-nome" placeholder="Ex: João, Mesa 5..." maxlength="50"
+          style="width:100%;padding:11px 13px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.95rem;box-sizing:border-box;">
+      </div>
+
+      <!-- Item buffet fixo (auto-detectado do cardápio) -->
+      <div id="alm-buffet-info" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-weight:800;font-size:0.9rem;" id="alm-buffet-nome">🍽️ Buffet Almoço</div>
+          <div style="font-size:0.72rem;color:var(--muted);" id="alm-buffet-preco">R$ 99,90/kg</div>
+        </div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--accent);" id="alm-buffet-precokg">R$99,90</div>
+      </div>
+      <!-- Campo oculto para guardar o id do item -->
+      <input type="hidden" id="alm-item-buf" value="">
+
+      <!-- Peso e Valor -->
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;">
+          <label style="font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">⚖️ Peso (g)</label>
+          <input type="text" id="alm-peso" inputmode="numeric" placeholder="450"
+            style="width:100%;padding:11px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:'Bebas Neue',sans-serif;font-size:1.3rem;text-align:center;box-sizing:border-box;"
+            oninput="almSyncPeso()">
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">💰 Valor (R$)</label>
+          <input type="text" id="alm-valor" inputmode="numeric" placeholder="0,00"
+            style="width:100%;padding:11px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:'Bebas Neue',sans-serif;font-size:1.3rem;text-align:center;box-sizing:border-box;"
+            oninput="almSyncValor()">
+        </div>
+      </div>
+
+      <!-- Bebidas — mini grid estilo cardápio -->
+      <div style="margin-bottom:14px;">
+        <label style="font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">🥤 Bebida <span style="font-weight:400;">(opcional)</span></label>
+        <div id="alm-bebidas-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
+      </div>
+
+      <button onclick="criarComandaAlmoco()"
+        style="width:100%;background:linear-gradient(135deg,#fbbf24,#f59e0b);border:none;color:#000;border-radius:12px;padding:13px;font-family:inherit;font-weight:800;cursor:pointer;font-size:1rem;">
+        ⚖️ Registrar na fila
+      </button>
+    </div>
+
+    <!-- Lista de pendentes -->
+    <div style="font-size:0.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">📋 Fila de espera</div>
+    <div style="margin-bottom:10px;">
+      <input type="text" id="almoco-busca" placeholder="🔍 Buscar nome ou mesa..." oninput="renderAlmocos()"
+        style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 14px;font-family:inherit;font-size:0.88rem;box-sizing:border-box;">
     </div>
     <div id="almoco-lista"></div>
   </div>
@@ -1246,6 +1309,11 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
+    // Login anônimo — necessário para as regras do Firestore funcionarem
+    // O garçom não tem email/senha Firebase, mas precisa de request.auth != null
+    firebase.auth().signInAnonymously().catch(function(e){
+      console.warn('[GARCOM] auth anônimo falhou:', e.code);
+    });
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // Quando o app abre, dados são lidos do cache local INSTANTANEAMENTE,
     // depois sincronizados com servidor em background.
@@ -1772,20 +1840,13 @@ function abrirNovoAlmoco(){
   setTimeout(function(){ var inp = document.getElementById('alm-nome'); if(inp) inp.focus(); }, 50);
 }
 
-function almAtualizarPrecoInfo(){
-  var sel = document.getElementById('alm-item-buf');
-  var info = document.getElementById('alm-preco-info');
-  if(!sel || !info) return;
-  var item = (_itens||[]).find(function(i){ return i.id === sel.value; });
-  info.textContent = item ? 'R$ '+fmtPreco(item.preco||0)+'/kg' : '';
-}
+function almAtualizarPrecoInfo(){} // mantido por compatibilidade
 
 function almSyncPeso(){
   var inpPeso = document.getElementById('alm-peso');
   var inpValor = document.getElementById('alm-valor');
-  var sel = document.getElementById('alm-item-buf');
-  if(!inpPeso || !inpValor || !sel) return;
-  var item = (_itens||[]).find(function(i){ return i.id === sel.value; });
+  if(!inpPeso || !inpValor) return;
+  var item = _almItemBuffetAtivo;
   var precoKg = item ? (item.preco||0) : 0;
   var peso = parseInt(inpPeso.value.replace(/\D/g,''), 10) || 0;
   if(peso > 0 && precoKg > 0){
@@ -1799,11 +1860,9 @@ function almSyncPeso(){
 function almSyncValor(){
   var inpPeso = document.getElementById('alm-peso');
   var inpValor = document.getElementById('alm-valor');
-  var sel = document.getElementById('alm-item-buf');
-  if(!inpPeso || !inpValor || !sel) return;
-  var item = (_itens||[]).find(function(i){ return i.id === sel.value; });
+  if(!inpPeso || !inpValor) return;
+  var item = _almItemBuffetAtivo;
   var precoKg = item ? (item.preco||0) : 0;
-  // Máscara automática: 2582 → 25,82
   var apenasDigitos = inpValor.value.replace(/\D/g,'');
   if(!apenasDigitos){ inpPeso.value = ''; return; }
   var centavos = parseInt(apenasDigitos, 10);
@@ -1825,11 +1884,10 @@ function criarComandaAlmoco(){
   var inpPeso = document.getElementById('alm-peso');
   var inpValor = document.getElementById('alm-valor');
 
-  // Item de buffet
-  var itemBufId = selBuf ? selBuf.value : '';
-  var itemBuf = (_itens||[]).find(function(i){ return i.id === itemBufId; });
+  // Item de buffet — usa item detectado automaticamente
+  var itemBuf = _almItemBuffetAtivo;
   if(!itemBuf){
-    showToast('Selecione o item do buffet','#f7a34f');
+    showToast('Nenhum item de buffet encontrado no cardápio','#f7a34f');
     return;
   }
   // Peso e valor
@@ -1872,8 +1930,8 @@ function criarComandaAlmoco(){
     adicionadoPor: _nomeGarcom
   });
 
-  // Bebida opcional
-  var itemBebId = selBeb ? selBeb.value : '';
+  // Bebida opcional — usa chip selecionado em vez de select
+  var itemBebId = _almBebidaSelecionada || '';
   var itemBeb = itemBebId ? (_itens||[]).find(function(i){ return i.id === itemBebId; }) : null;
   if(itemBeb){
     itensConta.push({
@@ -1915,10 +1973,18 @@ function criarComandaAlmoco(){
     pesagemRapida: true,   // flag: veio da pesagem rápida, aguardando mesa
     teste: _modoTeste ? true : false
   }).then(function(ref){
-    document.getElementById('modal-novo-almoco').remove();
+    // Limpa o formulário para próximo cliente
+    var nomeInp = document.getElementById('alm-nome');
+    var pesoInp = document.getElementById('alm-peso');
+    var valInp  = document.getElementById('alm-valor');
+    if(nomeInp) nomeInp.value = '';
+    if(pesoInp) pesoInp.value = '';
+    if(valInp)  valInp.value  = '';
+    _almSelecionarBebida(''); // volta pra "Nenhuma"
     var msg = '⚖️ '+nome+' na fila';
-    if(itemBeb) msg += ' + 🥤';
+    if(itemBeb) msg += ' + 🥤 '+itemBeb.nome;
     showToast(msg, '#fbbf24');
+    renderAlmocos();
     // Se a bebida precisar imprimir, cria pedido pra ela
     if(itemBeb){
       fbDb.collection('pedidos').add({
@@ -1947,11 +2013,9 @@ function renderAlmocos(){
   var lista = document.getElementById('almoco-lista');
   if(!lista) return;
   var busca = (document.getElementById('almoco-busca').value || '').toLowerCase().trim();
-  // Filtra _comandasAvulsas que são do tipo 'almoco'
   var almocos = (_comandasAvulsas || []).filter(function(c){
     return c.tipoConta === 'almoco';
   });
-  // Aplica busca por nome ou mesa
   if(busca){
     almocos = almocos.filter(function(c){
       var nome = (c.cliente||'').toLowerCase();
@@ -1959,78 +2023,84 @@ function renderAlmocos(){
       return nome.indexOf(busca) >= 0 || mesa.indexOf(busca) >= 0;
     });
   }
-  // Ordena: mais novos primeiro
   almocos.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
+
+  // Separa pendentes (sem mesa) de vinculados (com mesa)
+  var pendentes = almocos.filter(function(c){ return !c.mesa; });
+  var vinculados = almocos.filter(function(c){ return !!c.mesa; });
+
   if(!almocos.length){
     lista.innerHTML =
       '<div style="text-align:center;padding:50px 20px;color:var(--muted);">' +
         '<div style="font-size:3rem;margin-bottom:10px;">☀️</div>' +
         '<div style="font-size:0.92rem;font-weight:600;margin-bottom:6px;">Nenhum almoço em aberto</div>' +
-        '<div style="font-size:0.8rem;line-height:1.5;">Toque em "☀️ Novo Almoço" pra começar.<br>Cada pessoa que pesar o buffet pode ter sua própria comanda.</div>' +
+        '<div style="font-size:0.8rem;line-height:1.5;">Use o formulário acima para registrar o buffet.</div>' +
       '</div>';
     return;
   }
-  // Agrupa por mesa (se tem) | "Sem mesa"
-  var grupos = {};
-  almocos.forEach(function(c){
-    var ch = c.mesa ? ('M' + c.mesa) : 'SEM';
-    if(!grupos[ch]) grupos[ch] = { mesa: c.mesa, lista: [] };
-    grupos[ch].lista.push(c);
-  });
-  var ordemMesas = Object.keys(grupos).sort(function(a,b){
-    if(a === 'SEM') return 1;
-    if(b === 'SEM') return -1;
-    return parseInt(a.substr(1)) - parseInt(b.substr(1));
-  });
   var html = '';
-  ordemMesas.forEach(function(ch){
-    var g = grupos[ch];
-    var titGrupo = g.mesa ? ('🪑 MESA ' + g.mesa) : '👤 SEM MESA';
-    var totalGrupo = 0;
-    g.lista.forEach(function(c){
-      var t = (c.itens||[]).filter(function(i){
-        return i.status !== 'cancelado';
-      }).reduce(function(a, i){
-        if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
-        return a + (i.preco||0) * (i.qtd||1);
-      }, 0);
-      totalGrupo += t;
-    });
-    html += '<div style="font-size:0.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:6px 0 8px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">' +
-      '<span>' + titGrupo + ' · ' + g.lista.length + ' pessoa' + (g.lista.length>1?'s':'') + '</span>' +
-      '<span style="color:var(--accent);font-size:0.78rem;">R$ ' + fmtPreco(totalGrupo) + '</span>' +
-    '</div>';
-    g.lista.forEach(function(c){
-      var qtdItens = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length;
-      var total = (c.itens||[]).filter(function(i){
-        return i.status !== 'cancelado';
-      }).reduce(function(a, i){
-        if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
-        return a + (i.preco||0) * (i.qtd||1);
-      }, 0);
-      var minAtras = Math.floor((Date.now() - (c.abertaEm||Date.now())) / 60000);
-      var tempoTxt = minAtras < 1 ? 'agora' : minAtras < 60 ? minAtras + ' min' : Math.floor(minAtras/60) + 'h ' + (minAtras%60) + 'm';
-      var semMesa = !c.mesa;
-      // Destaque visual pra itens sem mesa (laranja pulsante se pendente há mais de 5 min)
-      var bordaColor = semMesa ? (minAtras >= 5 ? '#f87171' : '#fbbf24') : '#fbbf24';
-      var btnVincular = semMesa
-        ? '<button onclick="event.stopPropagation();abrirVincularMesa(\''+c.id+'\')" style="margin-top:10px;width:100%;background:rgba(212,168,67,0.15);border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:9px;font-family:inherit;font-weight:700;font-size:0.88rem;cursor:pointer;">🪑 Vincular mesa</button>'
-        : '';
-      html += '<div class="almoco-card" onclick="abrirMenuComanda(\''+c.id+'\')" style="background:var(--surface);border:1px solid var(--border);border-left:4px solid '+bordaColor+';border-radius:11px;padding:13px 14px;margin-bottom:9px;cursor:pointer;transition:transform 0.1s;">'+
-        '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px;">'+
-          '<div style="font-weight:700;font-size:0.98rem;color:var(--text);">'+esc(c.cliente||'?')+'</div>'+
-          '<div style="font-weight:700;color:var(--accent);font-size:1rem;font-family:\'Bebas Neue\',sans-serif;letter-spacing:0.04em;">R$ '+fmtPreco(total)+'</div>'+
+
+  // Pendentes (sem mesa)
+  if(pendentes.length){
+    html += '<div style="font-size:0.65rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">⏳ Aguardando mesa ('+pendentes.length+')</div>';
+    pendentes.forEach(function(c){
+      var total = (c.itens||[]).filter(function(i){ return i.status!=='cancelado'; }).reduce(function(a,i){
+        return a + (i.tipoVenda==='kg'&&i.peso?(i.preco||0):(i.preco||0)*(i.qtd||1));
+      },0);
+      var minAtras = Math.floor((Date.now()-(c.abertaEm||Date.now()))/60000);
+      var tempoTxt = minAtras<1?'agora':minAtras<60?minAtras+'min':Math.floor(minAtras/60)+'h '+(minAtras%60)+'m';
+      var bordaColor = minAtras>=5?'#f87171':'#fbbf24';
+      html += '<div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid '+bordaColor+';border-radius:11px;padding:13px 14px;margin-bottom:9px;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+          '<div style="font-weight:700;font-size:0.95rem;">'+esc(c.cliente||'?')+'</div>'+
+          '<div style="font-weight:700;color:var(--accent);font-family:\'Bebas Neue\',sans-serif;font-size:1rem;">R$ '+fmtPreco(total)+'</div>'+
         '</div>'+
-        '<div style="font-size:0.76rem;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;">'+
-          '<span>📦 '+qtdItens+' item'+(qtdItens!==1?'s':'')+'</span>'+
-          '<span>⏱ '+tempoTxt+'</span>'+
-          (c.garcomPrincipal ? '<span>👨‍🍳 '+esc(c.garcomPrincipal)+'</span>' : '')+
-          (semMesa ? '<span style="color:#fbbf24;font-weight:700;">⏳ aguardando mesa</span>' : '')+
+        '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:10px;">⏱ '+tempoTxt+
+          (c.itens&&c.itens.length?' · '+c.itens.filter(function(i){return i.status!=='cancelado';}).map(function(i){return esc(i.nome);}).join(', '):'')+
         '</div>'+
-        btnVincular+
+        '<button onclick="abrirVincularMesa(\''+c.id+'\')" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid rgba(212,168,67,0.35);color:var(--accent);border-radius:8px;padding:9px;font-family:inherit;font-weight:700;font-size:0.85rem;cursor:pointer;">🪑 Vincular mesa</button>'+
       '</div>';
     });
-  });
+  }
+
+  // Vinculados (com mesa) — agrupados por mesa
+  if(vinculados.length){
+    if(pendentes.length) html += '<div style="height:6px;"></div>';
+    var gruposMesa = {};
+    vinculados.forEach(function(c){
+      var k = String(c.mesa);
+      if(!gruposMesa[k]) gruposMesa[k]=[];
+      gruposMesa[k].push(c);
+    });
+    Object.keys(gruposMesa).sort(function(a,b){return parseInt(a)-parseInt(b);}).forEach(function(mesa){
+      var gs = gruposMesa[mesa];
+      var totalMesa = gs.reduce(function(acc,c){
+        return acc+(c.itens||[]).filter(function(i){return i.status!=='cancelado';}).reduce(function(a,i){
+          return a+(i.tipoVenda==='kg'&&i.peso?(i.preco||0):(i.preco||0)*(i.qtd||1));
+        },0);
+      },0);
+      html += '<div style="font-size:0.65rem;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;display:flex;justify-content:space-between;">'+
+        '<span>🪑 Mesa '+mesa+' · '+gs.length+' pessoa'+(gs.length>1?'s':'')+'</span>'+
+        '<span style="color:var(--accent);">R$ '+fmtPreco(totalMesa)+'</span>'+
+      '</div>';
+      gs.forEach(function(c){
+        var total=(c.itens||[]).filter(function(i){return i.status!=='cancelado';}).reduce(function(a,i){
+          return a+(i.tipoVenda==='kg'&&i.peso?(i.preco||0):(i.preco||0)*(i.qtd||1));
+        },0);
+        html += '<div onclick="abrirMenuComanda(\''+c.id+'\')" style="background:var(--surface);border:1px solid rgba(74,222,128,0.15);border-radius:10px;padding:11px 13px;margin-bottom:7px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">'+
+          '<div>'+
+            '<div style="font-weight:600;font-size:0.88rem;">'+esc(c.cliente||'?')+'</div>'+
+            '<div style="font-size:0.68rem;color:var(--muted);">'+
+              (c.itens||[]).filter(function(i){return i.status!=='cancelado';}).map(function(i){return esc(i.nome);}).join(', ')+
+            '</div>'+
+          '</div>'+
+          '<div style="font-weight:700;color:var(--accent);font-family:\'Bebas Neue\',sans-serif;">R$ '+fmtPreco(total)+'</div>'+
+        '</div>';
+      });
+      html += '<div style="height:4px;"></div>';
+    });
+  }
+
   lista.innerHTML = html;
 }
 
@@ -2073,11 +2143,7 @@ function abrirVincularMesa(contaId){
 function executarVincularMesa(contaId, numMesa){
   var m = document.getElementById('modal-vincular-mesa');
   if(m) m.remove();
-  // Verifica se a mesa já tem conta aberta
-  var contaExistente = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
-  if(contaExistente && contaExistente.tipoConta !== 'almoco'){
-    // Mesa tem conta não-almoço — vincula mesmo assim (pode ser outra pessoa da mesa)
-  }
+
   fbDb.collection('contas_mesa').doc(contaId).update({
     mesa: parseInt(numMesa) || numMesa,
     pesagemRapida: false,
@@ -2085,6 +2151,42 @@ function executarVincularMesa(contaId, numMesa){
     vinculadoPor: _nomeGarcom
   }).then(function(){
     showToast('✓ Vinculado à Mesa '+numMesa,'#4ade80');
+
+    // Remove da lista de pendentes da aba almoço (já foi vinculado)
+    _comandasAvulsas = _comandasAvulsas.map(function(c){
+      if(c.id !== contaId) return c;
+      return Object.assign({}, c, { mesa: parseInt(numMesa)||numMesa });
+    });
+
+    // Atualiza mapa de mesas — garante que a mesa apareça
+    var mesaStr = String(numMesa);
+    var comanda = _comandasAvulsas.find(function(c){ return c.id === contaId; });
+    if(comanda && !_mesasOcupadas[mesaStr]){
+      _mesasOcupadas[mesaStr] = {
+        contaId: contaId,
+        garcom: comanda.garcomPrincipal || comanda.vinculadoPor || _nomeGarcom || '',
+        abertaEm: comanda.abertaEm || Date.now(),
+        count: (comanda.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length,
+        total: comanda.total || 0,
+        tipoConta: 'almoco'
+      };
+    }
+
+    // Atualiza cache de itens com os itens completos da comanda
+    if(comanda){
+      _contasMesaCache[mesaStr] = Object.assign({}, comanda, {
+        // Mescla itens de TODAS as comandas almoço desta mesa
+        _todosItensAlmoco: (_comandasAvulsas||[]).filter(function(c){
+          return c.tipoConta === 'almoco' && String(c.mesa) === mesaStr;
+        })
+      });
+      _invalidarCacheItens(contaId);
+    }
+
+    // Atualiza badge e lista
+    atualizarBadgeAlmoco();
+    renderAlmocos();
+    renderMesas();
   }).catch(function(e){
     showToast('❌ '+e.message,'#f87171');
   });
@@ -2255,20 +2357,244 @@ function trocarAba(aba){
   document.getElementById('comanda-search-bar').style.display = aba==='comandas' ? '' : 'none';
   document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
   document.getElementById('comandas-lista').style.display = aba==='comandas' ? '' : 'none';
-  // Tela do almoço
   var almTela = document.getElementById('almoco-tela');
   if(almTela) almTela.style.display = aba==='almoco' ? '' : 'none';
   if(aba === 'almoco'){
     renderAlmocos();
     atualizarBadgeAlmoco();
     limparPesagensPendentes();
+    _almPopularFormulario();
   }
-  // FAB nova comanda (mostra só na aba comandas) | FAB almoço (na aba almoço)
   document.getElementById('btn-nova-comanda').style.display = aba==='comandas' ? 'flex' : 'none';
   var fabAlm = document.getElementById('btn-novo-almoco');
-  if(fabAlm) fabAlm.style.display = aba==='almoco' ? 'flex' : 'none';
+  if(fabAlm) fabAlm.style.display = 'none'; // FAB não precisa mais
   if(aba==='comandas') renderComandas();
   if(aba==='almoco') renderAlmocos();
+}
+
+// Popula o formulário de buffet com os itens do cardápio
+function _almPopularFormulario(){
+  // Busca item de buffet por nome (prioridade: "buffet almoço", senão qualquer kg)
+  var itensBuf = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda === 'kg'; });
+  var itemBuf = itensBuf.find(function(i){
+    var n = (i.nome||'').toLowerCase();
+    return n.includes('buffet') || n.includes('almoço') || n.includes('almoco');
+  }) || itensBuf[0];
+
+  var inpBuf = document.getElementById('alm-item-buf');
+  if(inpBuf && itemBuf){
+    inpBuf.value = itemBuf.id;
+    // Atualiza card visual
+    var nomeEl = document.getElementById('alm-buffet-nome');
+    var precoEl = document.getElementById('alm-buffet-preco');
+    var precoKgEl = document.getElementById('alm-buffet-precokg');
+    if(nomeEl) nomeEl.textContent = '🍽️ '+itemBuf.nome;
+    if(precoEl) precoEl.textContent = 'R$ '+fmtPreco(itemBuf.preco||0)+'/kg';
+    if(precoKgEl) precoKgEl.textContent = 'R$'+fmtPreco(itemBuf.preco||0);
+    // Guarda referência global
+    _almItemBuffetAtivo = itemBuf;
+  } else if(!itemBuf){
+    var nomeEl2 = document.getElementById('alm-buffet-nome');
+    if(nomeEl2) nomeEl2.textContent = '⚠️ Nenhum item por kg cadastrado';
+  }
+
+  // Bebidas — mini categorias clicáveis que expandem
+  var bebGrid = document.getElementById('alm-bebidas-grid');
+  if(bebGrid){
+    // Categorias selecionadas pelo admin (salvas no Firestore)
+    var _catsSelecionadas = _almCatsSelecionadas || [];
+
+    // Se não tem seleção salva, mostra vazio
+    var todasCats = _categorias||[];
+    var catsBebidas;
+    if(_catsSelecionadas.length){
+      catsBebidas = todasCats.filter(function(c){ return _catsSelecionadas.indexOf(c.id) !== -1; });
+    } else {
+      catsBebidas = [];
+    }
+
+    if(catsBebidas.length){
+      bebGrid.innerHTML = '';
+      bebGrid.style.display = 'flex';
+      bebGrid.style.flexDirection = 'column';
+      bebGrid.style.gap = '6px';
+
+      // Card "Nenhuma" no topo
+      var noneCard = document.createElement('div');
+      noneCard.id = 'alm-beb-none';
+      noneCard.className = 'alm-beb-chip';
+      noneCard.style.cssText = 'background:var(--accent);border:2px solid var(--accent);border-radius:10px;padding:8px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;';
+      noneCard.innerHTML = '<span style="font-size:1rem;">✕</span><span style="font-size:0.78rem;font-weight:700;color:#000;">Sem bebida</span>';
+      noneCard.onclick = function(){
+        _almSelecionarBebida('');
+        // Fecha todas as categorias
+        document.querySelectorAll('.alm-cat-items').forEach(function(el){ el.style.display='none'; });
+      };
+      bebGrid.appendChild(noneCard);
+
+      // Mini cards de categoria
+      catsBebidas.forEach(function(cat){
+        var itenscat = (_itens||[]).filter(function(i){ return i.disponivel && i.categoriaId===cat.id && i.tipoVenda!=='kg'; });
+        if(!itenscat.length) return;
+
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'border-radius:10px;overflow:hidden;border:1.5px solid var(--border2);';
+
+        // Cabeçalho da categoria
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--surface2);cursor:pointer;';
+        header.innerHTML =
+          '<div style="display:flex;align-items:center;gap:8px;">'+
+            '<span style="font-size:1.1rem;">'+(cat.emoji||'🥤')+'</span>'+
+            '<span style="font-size:0.8rem;font-weight:700;color:var(--text);">'+esc(cat.nome)+'</span>'+
+            '<span style="font-size:0.66rem;color:var(--muted);">('+itenscat.length+')</span>'+
+          '</div>'+
+          '<span class="alm-cat-seta" style="color:var(--muted);font-size:0.8rem;transition:transform 0.2s;">▾</span>';
+
+        // Grid de itens (oculto inicialmente)
+        var itemsDiv = document.createElement('div');
+        itemsDiv.className = 'alm-cat-items';
+        itemsDiv.style.cssText = 'display:none;padding:8px;background:var(--surface);display:none;grid-template-columns:repeat(4,1fr);gap:6px;';
+
+        itenscat.forEach(function(it){
+          var card = document.createElement('div');
+          card.id = 'alm-beb-'+it.id;
+          card.className = 'alm-beb-chip';
+          card.style.cssText = 'background:var(--surface2);border:2px solid var(--border2);border-radius:8px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;transition:border-color 0.15s;';
+          var fotoHtml = it.foto
+            ? '<img src="'+it.foto+'" style="width:100%;height:50px;object-fit:cover;" loading="lazy" onerror="this.parentNode.innerHTML=\'🥤\'">'
+            : '<div style="width:100%;height:50px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">'+(it.emoji||'🥤')+'</div>';
+          card.innerHTML = fotoHtml+
+            '<div style="padding:3px 4px 5px;text-align:center;width:100%;">'+
+              '<div style="font-size:0.58rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+'</div>'+
+              '<div style="font-size:0.56rem;color:var(--accent);font-weight:700;">R$'+fmtPreco(it.preco||0)+'</div>'+
+            '</div>';
+          card.onclick = (function(id){ return function(){ _almSelecionarBebida(id); }; })(it.id);
+          itemsDiv.appendChild(card);
+        });
+
+        // Toggle expand/collapse
+        header.onclick = function(){
+          var aberto = itemsDiv.style.display === 'grid';
+          // Fecha todos
+          document.querySelectorAll('.alm-cat-items').forEach(function(el){ el.style.display='none'; });
+          document.querySelectorAll('.alm-cat-seta').forEach(function(el){ el.style.transform=''; });
+          if(!aberto){
+            itemsDiv.style.display = 'grid';
+            header.querySelector('.alm-cat-seta').style.transform = 'rotate(180deg)';
+          }
+        };
+
+        wrap.appendChild(header);
+        wrap.appendChild(itemsDiv);
+        bebGrid.appendChild(wrap);
+      });
+    } else {
+      // Sem categorias selecionadas — mostra botão para configurar
+      bebGrid.innerHTML =
+        '<div style="text-align:center;padding:10px 0;">'+
+          '<div style="color:var(--muted);font-size:0.78rem;margin-bottom:10px;">Nenhuma categoria configurada</div>'+
+          '<button onclick="abrirSelecionarCatsAlmoco()" style="background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:9px 18px;font-family:inherit;font-weight:700;font-size:0.8rem;cursor:pointer;">⚙️ Selecionar categorias</button>'+
+        '</div>';
+    }
+    // Botão de configurar removido daqui — está no menu lateral ⚙️
+  }
+}
+
+function abrirSelecionarCatsAlmoco(){
+  var ex = document.getElementById('modal-cats-almoco');
+  if(ex) ex.remove();
+
+  var salvas = _almCatsSelecionadas || [];
+
+  var todasCats = (_categorias||[]).filter(function(c){
+    return (_itens||[]).some(function(i){ return i.disponivel && i.categoriaId===c.id && i.tipoVenda!=='kg'; });
+  });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-cats-almoco';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:flex-end;';
+
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;';
+
+  var catsHtml = todasCats.map(function(cat){
+    var sel = salvas.indexOf(cat.id) !== -1;
+    return '<label style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;">'+
+      '<input type="checkbox" value="'+cat.id+'" '+(sel?'checked':'')+' style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">'+
+      '<span style="font-size:0.9rem;">'+(cat.emoji||'🍽️')+' '+esc(cat.nome)+'</span>'+
+    '</label>';
+  }).join('');
+
+  if(!catsHtml) catsHtml = '<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhuma categoria com itens disponíveis</div>';
+
+  inner.innerHTML =
+    '<div style="padding:16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">'+
+      '<div>'+
+        '<div style="font-weight:800;font-size:1rem;">🥤 Categorias de Bebida</div>'+
+        '<div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">Configuração para todos os garçons</div>'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-cats-almoco\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.1rem;">×</button>'+
+    '</div>'+
+    '<div style="overflow-y:auto;flex:1;">'+catsHtml+'</div>'+
+    '<div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);">'+
+      '<button onclick="_salvarCatsAlmoco()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:0.9rem;cursor:pointer;font-family:inherit;">✓ Salvar para todos</button>'+
+    '</div>';
+
+  mod.appendChild(inner);
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+  document.body.appendChild(mod);
+}
+
+function _salvarCatsAlmoco(){
+  var checks = document.querySelectorAll('#modal-cats-almoco input[type=checkbox]:checked');
+  var ids = [];
+  checks.forEach(function(c){ ids.push(c.value); });
+
+  // Salva no Firestore — todos os garçons vão carregar
+  var docPath = 'alm_config_'+_restauranteId;
+  fbDb.collection('garcom_config').doc(docPath).set({
+    catsBebidas: ids,
+    atualizadoEm: Date.now(),
+    atualizadoPor: _nomeGarcom||'admin'
+  }).then(function(){
+    _almCatsSelecionadas = ids;
+    document.getElementById('modal-cats-almoco').remove();
+    showToast('✓ Salvo para todos os garçons', '#4ade80');
+    _almPopularFormulario();
+  }).catch(function(e){
+    showToast('❌ Erro ao salvar: '+e.message, '#f87171');
+  });
+}
+
+var _almItemBuffetAtivo = null;
+var _almCatsSelecionadas = []; // carregado do Firestore pelo admin
+
+// Carrega configuração de categorias do almoço (compartilhada entre garçons)
+function _almCarregarConfig(){
+  if(!fbDb || !_restauranteId) return;
+  fbDb.collection('garcom_config').doc('alm_config_'+_restauranteId).get().then(function(doc){
+    if(doc.exists && doc.data().catsBebidas){
+      _almCatsSelecionadas = doc.data().catsBebidas;
+    }
+  }).catch(function(){});
+}
+
+var _almBebidaSelecionada = '';
+function _almSelecionarBebida(id){
+  _almBebidaSelecionada = id;
+  document.querySelectorAll('.alm-beb-chip').forEach(function(card){
+    var ehNone = id === '' && card.id === 'alm-beb-none';
+    var ehSel  = card.id === 'alm-beb-'+id;
+    var ativo  = ehNone || ehSel;
+    card.style.borderColor  = ativo ? 'var(--accent)' : 'var(--border2)';
+    card.style.background   = (ativo && card.id === 'alm-beb-none') ? 'var(--accent)' : ativo ? 'rgba(212,168,67,0.1)' : 'var(--surface2)';
+    // Texto do card "Nenhuma"
+    if(card.id === 'alm-beb-none'){
+      var txt = card.querySelector('div > div');
+      if(txt) txt.style.color = ativo ? '#000' : 'var(--text)';
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -2907,19 +3233,10 @@ function atualizarResumoMesasAbertas(){
     var info = _mesasOcupadas[numMesa];
     if(!info) return;
     var conta = _contasMesaCache[numMesa];
-    if(!conta) return;
     totalMesas++;
-    // Soma só os itens NÃO cancelados e NÃO pagos (o que ainda falta receber)
-    (conta.itens||[]).forEach(function(it){
-      if(it.status === 'cancelado' || it.status === 'pago') return;
-      // Considera divisão parcial: se algumas partes pagas, subtrai
-      if(it.divisao && it.divisao.total > 1 && (it.divisao.pagas||0) > 0){
-        var falta = it.divisao.total - it.divisao.pagas;
-        subtotalGeral += (it.divisao.valorPorParte || 0) * falta;
-      } else {
-        subtotalGeral += (it.preco || 0) * (it.qtd || 1);
-      }
-    });
+    // Usa restante salvo — evita recalcular dos itens (lazy loading)
+    var restante = (conta && conta.restante != null) ? conta.restante : (info.restante || info.total || 0);
+    subtotalGeral += restante;
   });
   // Inclui comandas avulsas também (que estão em _comandasAvulsas, não em _mesasOcupadas)
   var totalComandas = 0;
@@ -3870,7 +4187,7 @@ function carregarTenantParaMesas(){
     escutarConfigMesas();
     escutarAvisosGarcom();
     renderMesas();
-    // Pré-carrega o cardápio em paralelo pra não ter delay quando entrar na mesa
+    _almCarregarConfig(); // carrega categorias do almoço
     iniciarListeners();
     return;
   }
@@ -3905,56 +4222,99 @@ function carregarTenantParaMesas(){
 }
 
 function escutarMesasOcupadas(){
-  // Cancela escuta anterior se existe (pra reconexão)
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
-  // Escuta as contas abertas das mesas E das comandas avulsas
   var ref = fbDb.collection('contas_mesa')
     .where('restauranteId','==',_restauranteId)
     .where('status','==','aberta');
   _unsubMesas = ref.onSnapshot(function(snap){
-    registrarUpdateListener('mesas'); // ✓ listener vivo
+    registrarUpdateListener('mesas');
     _mesasOcupadas = {};
     _contasMesaCache = {};
     _comandasAvulsas = [];
     snap.forEach(function(doc){
       var d = doc.data();
-      var itensAbertos = (d.itens||[]).filter(function(i){ return i.status !== 'pago' && i.status !== 'cancelado'; });
-      // Comanda avulsa OU almoço (ambas ficam no array _comandasAvulsas)
+
+      // ⚡ OTIMIZAÇÃO: no listener principal guardamos só metadados leves
+      // Os itens completos só são lidos quando o garçom abre a mesa (_carregarItensMesa)
+      // Isso reduz drasticamente o processamento no pico com muitas mesas cheias
+      var meta = {
+        id: doc.id,
+        mesa: d.mesa,
+        tipoConta: d.tipoConta,
+        garcomPrincipal: d.garcomPrincipal||'',
+        vinculadoPor: d.vinculadoPor||'',
+        abertaEm: d.abertaEm||0,
+        total: d.total||0,
+        restante: d.restante||0,
+        subtotal: d.subtotal||0,
+        taxa10: d.taxa10||0,
+        pagoTotal: d.pagoTotal||0,
+        status: d.status,
+        cliente: d.cliente||'',
+        contaImpressaSolicitada: d.contaImpressaSolicitada||false,
+        // Guarda contagem de itens mas não os itens em si
+        _totalItens: (d.itens||[]).length,
+        _itensAbertosCount: (d.itens||[]).filter(function(i){ return i.status!=='pago'&&i.status!=='cancelado'; }).length,
+        _temPagamento: (d.pagamentos||[]).length > 0,
+        pagamentos: d.pagamentos||[], // pagamentos são pequenos, ok guardar
+        taxaServico: d.taxaServico,
+        taxaServicoAtiva: d.taxaServicoAtiva,
+        // NÃO guarda d.itens aqui — carregado sob demanda
+      };
+
+      // Comanda avulsa OU almoço
       if(d.tipoConta === 'avulsa' || d.tipoConta === 'almoco'){
-        _comandasAvulsas.push(Object.assign({id: doc.id, _itensAbertosCount: itensAbertos.length}, d));
+        // Para comandas avulsas precisamos dos itens (lista de comandas é pequena)
+        var contaCompleta = Object.assign({}, meta, {itens: d.itens||[]});
+        _comandasAvulsas.push(contaCompleta);
+        if(d.tipoConta === 'almoco' && d.mesa){
+          var mesaAlm = String(d.mesa);
+          if(!_mesasOcupadas[mesaAlm]){
+            _mesasOcupadas[mesaAlm] = {
+              contaId: doc.id,
+              garcom: d.garcomPrincipal||d.vinculadoPor||_nomeGarcom||'',
+              abertaEm: d.abertaEm||0,
+              count: meta._itensAbertosCount,
+              total: d.total||0,
+              restante: d.restante||0,
+              tipoConta: 'almoco'
+            };
+          }
+          _contasMesaCache[mesaAlm] = contaCompleta;
+        }
         return;
       }
-      // Senão é mesa
+
+      // Mesa normal
       var mesa = String(d.mesa||'');
-      if(mesa){
-        // Mesa só "ocupada" se tem itens em aberto OU pagamentos
-        var temPagamento = (d.pagamentos||[]).length > 0;
-        var temItem = itensAbertos.length > 0;
-        if(!temItem && !temPagamento){
-          // Conta aberta sem itens nem pagamentos = mesa ainda livre na visualização
-          // mas mantém no cache pra continuar usando a conta
-          _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
-          return;
-        }
-        _mesasOcupadas[mesa] = {
-          contaId: doc.id,
-          garcom: d.garcomPrincipal||'',
-          abertaEm: d.abertaEm||0,
-          count: itensAbertos.length,
-          total: d.total||0,
-          restante: d.restante||0
-        };
-        _contasMesaCache[mesa] = Object.assign({id: doc.id}, d);
+      if(!mesa) return;
+
+      var temPagamento = meta._temPagamento;
+      var temItem = meta._itensAbertosCount > 0;
+
+      if(!temItem && !temPagamento){
+        // Mesa sem itens — guarda meta mas não marca ocupada
+        _contasMesaCache[mesa] = meta;
+        return;
       }
+
+      _mesasOcupadas[mesa] = {
+        contaId: doc.id,
+        garcom: d.garcomPrincipal||'',
+        abertaEm: d.abertaEm||0,
+        count: meta._itensAbertosCount,
+        total: d.total||0,
+        restante: d.restante||0
+      };
+      _contasMesaCache[mesa] = meta;
     });
-    // Ordena comandas por mais recente
+
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
     renderMesas();
-    atualizarBadgeAlmoco(); // badge de pesagens pendentes
+    atualizarBadgeAlmoco();
     if(_abaAtual === 'comandas') renderComandas();
     if(_abaAtual === 'almoco') renderAlmocos();
-    // Se o garçom está dentro de uma mesa e o contaId mudou (ex: cache atualizou após abrir mesa),
-    // refaz o listener de pedidos pra apontar pra conta correta.
+
     if(_mesaAtiva !== null && _mesaAtiva !== undefined){
       var contaAt = _contasMesaCache[String(_mesaAtiva)] || _contasMesaCache[_mesaAtiva];
       var idNovo = contaAt ? contaAt.id : null;
@@ -3971,10 +4331,64 @@ function escutarMesasOcupadas(){
   });
 }
 
+// ⚡ Carrega itens completos de uma mesa sob demanda (lazy loading)
+var _itensMesaCache = {}; // {contaId: {itens, carregadoEm}}
+function _carregarItensMesa(contaId, callback){
+  var CACHE_TTL = 30000; // 30s — reusa cache se recente
+  var cached = _itensMesaCache[contaId];
+  if(cached && Date.now() - cached.carregadoEm < CACHE_TTL){
+    callback(cached.itens, cached.pagamentos);
+    return;
+  }
+  fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+    if(!doc.exists){ callback([], []); return; }
+    var d = doc.data();
+    _itensMesaCache[contaId] = {
+      itens: d.itens||[],
+      pagamentos: d.pagamentos||[],
+      carregadoEm: Date.now()
+    };
+    // Atualiza o cache principal com itens completos
+    var mesa = String(d.mesa||'');
+    if(mesa && _contasMesaCache[mesa]){
+      _contasMesaCache[mesa].itens = d.itens||[];
+      _contasMesaCache[mesa].pagamentos = d.pagamentos||[];
+    }
+    callback(d.itens||[], d.pagamentos||[]);
+  }).catch(function(e){
+    console.warn('[LAZY] Erro ao carregar itens da mesa:', e.message);
+    callback([], []);
+  });
+}
+
+// Invalida cache de itens quando novo pedido é enviado
+function _invalidarCacheItens(contaId){
+  if(_itensMesaCache[contaId]) delete _itensMesaCache[contaId];
+}
+
+var _filtroMesas = 'todas';
+
+function setFiltroMesas(filtro){
+  _filtroMesas = filtro;
+  ['todas','minhas','livres','ocupadas'].forEach(function(f){
+    var btn = document.getElementById('filtro-'+f);
+    if(!btn) return;
+    if(f === filtro){
+      btn.style.background = 'var(--accent)';
+      btn.style.color = '#000';
+      btn.style.border = 'none';
+    } else {
+      btn.style.background = 'var(--surface2)';
+      btn.style.color = 'var(--muted)';
+      btn.style.border = '1px solid var(--border2)';
+    }
+  });
+  renderMesas();
+}
+
 function renderMesas(){
   var busca = (document.getElementById('mesa-search-input').value||'').trim();
   var grid = document.getElementById('mesas-grid');
-  // Aplica colunas conforme preferência
   grid.className = 'mesas-grid cols-' + _colsMesas;
   grid.innerHTML = '';
   for(var i = 1; i <= _TOTAL_MESAS; i++){
@@ -3982,8 +4396,20 @@ function renderMesas(){
     if(busca && !num.includes(busca)) continue;
     var info = _mesasOcupadas[num];
     var eOcupada = !!info;
-    var cls = 'mesa-card ' + (eOcupada ? 'ocupada' : 'livre');
-    var status = eOcupada ? 'Ocupada' : 'Livre';
+    var eMinha = eOcupada && info.garcom === _nomeGarcom; // mantido só pro filtro "Minhas"
+    var conta = _contasMesaCache && _contasMesaCache[num];
+    var eFechada = conta && conta.contaImpressaSolicitada === true;
+
+    // Filtro rápido
+    if(_filtroMesas === 'minhas' && !eMinha) continue;
+    if(_filtroMesas === 'livres' && eOcupada) continue;
+    if(_filtroMesas === 'ocupadas' && !eOcupada) continue;
+
+    var cls = 'mesa-card ';
+    if(eFechada) cls += 'fechada';
+    else if(eOcupada) cls += 'ocupada'; // todas vermelhas, sem distinção de "minha"
+    else cls += 'livre';
+    var status = eFechada ? 'Conta impressa' : eOcupada ? 'Ocupada' : 'Livre';
     var dot = eOcupada ? '<div class="mesa-dot"></div>' : '';
     var el = document.createElement('div');
     el.className = cls;
@@ -3991,26 +4417,20 @@ function renderMesas(){
     el.innerHTML = dot + '<div class="mesa-num">' + num + '</div>' +
       '<div class="mesa-status">' + status + '</div>';
     el.onclick = (function(n, ocupada){ return function(){
-      // Se acabou de disparar long press, ignora click subsequente
       if(_longPressDisparou){ _longPressDisparou = false; return; }
-      // Mesa LIVRE → cria conta e vai direto pro cardápio (não precisa confirmar)
       if(!ocupada){
         abrirContaMesa(n);
         pushHistory('cardapio:null');
         return;
       }
-      // Mesa OCUPADA → abre menu de opções (Pedir / Ver / Transferir / Pagar)
       abrirMenuMesa(n, ocupada);
     }; })(num, eOcupada);
-    // Long press apenas pra mesas ocupadas (mesas livres não tem o que reaproveitar)
     if(eOcupada){
       anexarLongPress(el, num);
-      // Swipe pra esquerda → fechar mesa (só admin)
       anexarSwipe(el, num);
     }
     grid.appendChild(el);
   }
-  // Atualiza badges de cozinha (sininho) após renderizar
   setTimeout(function(){
     try{ atualizarBadgesCozinha(); }catch(e){}
   }, 50);
@@ -9996,35 +10416,29 @@ function perguntarReimpressao(pedidoId, motivo){
 }
 
 function executarReimpressaoAposCancelamento(pedidoId, motivo){
-  fbDb.collection('comandos_impressao').add({
+  _imprimirComRetry({
     tipo: 'reimpressao',
     restauranteId: _restauranteId,
     pedidoId: pedidoId,
     motivo: motivo || 'Reimpressão após cancelamento',
     solicitadoPor: _nomeGarcom,
     solicitadoEm: Date.now()
-  }).then(function(){
-    showToast('🖨️ Reimpressão enviada','#4ade80');
-    var m = document.getElementById('modal-pergunta-reimp'); if(m) m.remove();
-  }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
   });
+  showToast('🖨️ Reimpressão enviada','#4ade80');
+  var m = document.getElementById('modal-pergunta-reimp'); if(m) m.remove();
 }
 
 // ── REIMPRIMIR PEDIDO ──
 function reimprimirPedidoGarcom(pedidoId){
   if(!confirm('Reimprimir este pedido?')) return;
-  fbDb.collection('comandos_impressao').add({
+  _imprimirComRetry({
     tipo: 'reimprimir',
     restauranteId: _restauranteId,
     pedidoId: pedidoId,
     solicitadoPor: _nomeGarcom,
     solicitadoEm: Date.now()
-  }).then(function(){
-    showToast('🖨️ Solicitação enviada ao PDV','#4ade80');
-  }).catch(function(e){
-    showToast('❌ '+e.message,'#f87171');
   });
+  showToast('🖨️ Solicitação enviada ao PDV','#4ade80');
 }
 
 // ── Editar item de pedido (garçom) ──
@@ -11313,6 +11727,16 @@ function devolverEstoque(itemId, qtd){
 
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
+
+  // Proteção duplo envio
+  var agora = Date.now();
+  if(_enviandoPedido && agora - _ultimoPedidoEnviadoTs < 5000){
+    showToast('⏳ Aguarde...', '#f59e0b');
+    return;
+  }
+  _enviandoPedido = true;
+  _ultimoPedidoEnviadoTs = agora;
+
   var btn = document.getElementById('btn-enviar-pedido');
   btn.disabled = true;
   btn.textContent = 'Enviando...';
@@ -11483,12 +11907,54 @@ function enviarPedido(){
       return ref;
     });
   }).then(function(ref){
-    // Sucesso confirmado pelo Firebase. UI já mostrou tudo.
-    // Atualiza o toast com o número correto se disponível
+    _enviandoPedido = false;
+    _invalidarCacheItens(contaId);
     if(pedido.numeroSequencial){
       showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
     }
+    // Se tem itens avulsos com impressora definida, envia comando direto
+    // O PDV não consegue rotear itens avulsos pelos modelos normais (sem categoria)
+    var itensAvulsos = itensPedido.filter(function(it){ return it.avulso && it.impressoraForcada; });
+    if(itensAvulsos.length && _deveImprimir){
+      // Agrupa por impressora (pode ter avulsos em impressoras diferentes)
+      var porImpressora = {};
+      itensAvulsos.forEach(function(it){
+        var impId = it.impressoraForcada;
+        if(!porImpressora[impId]) porImpressora[impId] = { impId: impId, impNome: it.impressoraForcadaNome||'', itens: [] };
+        porImpressora[impId].itens.push(it);
+      });
+      Object.keys(porImpressora).forEach(function(impId){
+        var grupo = porImpressora[impId];
+        // Busca o modelo desta impressora para pegar as configs (corte, logo, etc)
+        var modelo = (_modelosCozinha||[]).find(function(m){ return m.impressoraId === impId; });
+        _imprimirComRetry({
+          tipo: 'pedido_avulso',
+          restauranteId: _restauranteId,
+          tenantId: _tenantId || null,
+          pedidoId: ref.id,
+          pedidoNumero: pedido.numeroSequencial || ref.id.slice(-4).toUpperCase(),
+          mesa: pedido.mesa,
+          garcom: _nomeGarcom,
+          impressoraId: impId,
+          impressoraNome: grupo.impNome,
+          modeloId: modelo ? modelo.id : '',
+          // Configs do modelo — garante corte de papel e layout correto
+          modeloConfig: modelo ? {
+            nome: modelo.nome,
+            tipo: modelo.tipo || 'pedido',
+            cortarPapel: true, // sempre corta no avulso
+            mostrarLogo: false
+          } : { cortarPapel: true },
+          itens: grupo.itens.map(function(it){
+            return { nome: it.nome, qtd: it.qtd||1, preco: it.preco||0, obs: it.obs||'' };
+          }),
+          criadoEm: Date.now(),
+          solicitadoPor: _nomeGarcom
+        });
+      });
+    }
   }).catch(function(e){
+    _enviandoPedido = false;
     console.error('[ENVIAR-PEDIDO] ❌ FALHOU:', e);
     // Falhou no envio. Verifica se é problema de conexão.
     var ehProblemaConexao = !_estaOnline || navigator.onLine === false ||
@@ -11531,7 +11997,77 @@ function enviarPedido(){
   });
 }
 
-// ─── Cálculo de totais da conta ───
+// ═══════════════════════════════════════════════════════
+// 🛡️ PROTEÇÕES PARA PICO DE MOVIMENTO
+// ═══════════════════════════════════════════════════════
+
+// 1. Proteção contra duplo envio
+var _enviandoPedido = false;
+var _ultimoPedidoEnviadoTs = 0;
+
+// 2. Debounce para renderMesas (evita re-render a cada update do Firestore)
+var _renderMesasTimer = null;
+var _renderMesasOriginal = renderMesas;
+renderMesas = function(){
+  if(_renderMesasTimer) clearTimeout(_renderMesasTimer);
+  _renderMesasTimer = setTimeout(function(){
+    _renderMesasOriginal();
+  }, 80); // agrupa updates em janela de 80ms
+};
+
+// 3. Retry automático de impressão com backoff
+function _imprimirComRetry(comando, tentativas, delay){
+  tentativas = tentativas || 0;
+  delay = delay || 1000;
+  if(tentativas >= 4){
+    console.warn('[IMPRESSAO] Falhou após 4 tentativas:', comando);
+    showToast('⚠️ Impressão pode ter falhado — verifique a impressora', '#f59e0b', 5000);
+    return;
+  }
+  fbDb.collection('comandos_impressao').add(comando).then(function(){
+    console.log('[IMPRESSAO] ✓ enviado na tentativa', tentativas+1);
+  }).catch(function(e){
+    console.warn('[IMPRESSAO] tentativa', tentativas+1, 'falhou:', e.message);
+    setTimeout(function(){
+      _imprimirComRetry(comando, tentativas+1, delay*2);
+    }, delay);
+  });
+}
+
+// 4. Proteção contra comandas duplicadas (mesmo garçom, mesmo valor, < 3s)
+var _ultimasComandas = {};
+function _ehComandaDuplicada(contaId, total){
+  var chave = contaId + '_' + Math.round(total);
+  var agora = Date.now();
+  if(_ultimasComandas[chave] && agora - _ultimasComandas[chave] < 3000){
+    return true;
+  }
+  _ultimasComandas[chave] = agora;
+  return false;
+}
+
+// 5. Watchdog — reconecta listeners se ficarem sem update por muito tempo
+var _watchdogTimer = null;
+var _ultimoUpdateListener = Date.now();
+function registrarUpdateListener(nome){
+  _ultimoUpdateListener = Date.now();
+}
+function _iniciarWatchdog(){
+  if(_watchdogTimer) clearInterval(_watchdogTimer);
+  _watchdogTimer = setInterval(function(){
+    var agora = Date.now();
+    var semUpdate = agora - _ultimoUpdateListener;
+    // Se ficou mais de 3 minutos sem update e está online
+    if(semUpdate > 180000 && navigator.onLine !== false && _restauranteId){
+      console.warn('[WATCHDOG] Sem updates há', Math.round(semUpdate/1000)+'s — reconectando listeners...');
+      try{ escutarMesasOcupadas(); }catch(e){}
+      showToast('🔄 Reconectando...', '#f59e0b', 2000);
+    }
+  }, 30000); // verifica a cada 30s
+}
+
+// Inicia watchdog quando app carregar
+setTimeout(_iniciarWatchdog, 10000);
 function calcularTotaisConta(c){
   // Helper: calcula valor de um item (item por kg = preço total da pesagem; senão = preço * qtd)
   function valorItem(i){
@@ -11806,8 +12342,9 @@ function abrirMenuMesa(num, eOcupada){
   var body = document.querySelector('#modal-mesa-menu .modal-body');
   if(eOcupada && info){
     var conta = _contasMesaCache[num] || {};
-    var qtdAbertos = info.count;
-    var totalAbertos = (conta.itens||[]).filter(function(i){ return i.status!=='pago' && i.status!=='cancelado'; }).reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); }, 0);
+    var qtdAbertos = info.count || conta._itensAbertosCount || 0;
+    // Usa o total salvo no documento — não recalcula dos itens (lazy loading)
+    var totalAbertos = conta.restante || conta.total || info.total || info.restante || 0;
     body.innerHTML =
       '<div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);border-radius:12px;padding:14px;margin-bottom:14px;">'+
         '<div style="color:#4ade80;font-weight:700;font-size:0.92rem;">✓ Conta aberta</div>'+
@@ -11970,11 +12507,22 @@ function abrirContaMesa(num){
   // PRIMEIRO: verifica cache
   var cached = _contasMesaCache[String(num)];
   if(cached && cached.id){
+    // Carrega itens completos se não estiverem no cache (lazy loading)
+    if(!cached.itens){
+      _carregarItensMesa(cached.id, function(itens, pagamentos){
+        cached.itens = itens;
+        cached.pagamentos = pagamentos;
+        if(contaEhVazia(cached)){
+          entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
+        } else {
+          entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
+        }
+      });
+      return;
+    }
     if(contaEhVazia(cached)){
-      // Conta vazia — reusa silenciosamente, sem mensagem confusa
       entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
     } else {
-      // Conta com itens reais — informa o garçom
       entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
     }
     return;
@@ -12556,6 +13104,21 @@ function cancelarItemNaConta(itemKey){
     restante: totais.restante,
     atualizadoEm: agora
   }).then(function(){
+    // Invalida cache para forçar releitura
+    _invalidarCacheItens(conta.id);
+    // Se todos os itens foram cancelados e não há pagamentos, libera a mesa visualmente
+    var itensAtivos = itensAtualizados.filter(function(it){
+      return it.status !== 'cancelado' && it.status !== 'pago';
+    });
+    var temPagamento = (conta.pagamentos||[]).length > 0;
+    if(!itensAtivos.length && !temPagamento){
+      var mesaStr = String(conta.mesa||'');
+      if(mesaStr && _mesasOcupadas[mesaStr]){
+        delete _mesasOcupadas[mesaStr];
+        renderMesas();
+        showToast('Mesa '+mesaStr+' liberada — todos os itens cancelados', '#4ade80');
+      }
+    }
     // Tenta marcar o item correspondente no pedido também (se achar)
     if(item.pedidoId){
       fbDb.collection('pedidos').doc(item.pedidoId).get().then(function(doc){
@@ -13570,17 +14133,24 @@ function abrirMenuImpressaoConta(){
 }
 
 function imprimirContaMesa(tipo){
-  fbDb.collection('comandos_impressao').add({
+  var comando = {
     tipo:'conta_mesa', subtipo:tipo,
     restauranteId:_restauranteId,
     contaId:_fecharContaId,
     mesa:_fecharConta?_fecharConta.mesa:null,
     solicitadoPor:_nomeGarcom,
     solicitadoEm:Date.now()
-  }).then(function(){
-    showToast('🖨️ Solicitação enviada','#4ade80');
-    var m = document.getElementById('modal-imp-conta'); if(m) m.remove();
-  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+  };
+  _imprimirComRetry(comando);
+  showToast('🖨️ Solicitação enviada','#4ade80');
+  // Marca mesa como azul (conta impressa)
+  if(_fecharContaId){
+    fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+      contaImpressaSolicitada: true,
+      contaImpressaEm: Date.now()
+    }).catch(function(){});
+  }
+  var m = document.getElementById('modal-imp-conta'); if(m) m.remove();
 }
 
 // ════════════════════════════════════════
@@ -13770,7 +14340,6 @@ function cancelarItemOrfaoConta(contaId, idx){
     var itens = c.itens || [];
     if(idx < 0 || idx >= itens.length){ showToast('Item não encontrado', '#f87171'); return; }
     var item = itens[idx];
-    // Marca como cancelado
     itens[idx] = Object.assign({}, item, {
       status: 'cancelado',
       canceladoEm: Date.now(),
@@ -13778,9 +14347,8 @@ function cancelarItemOrfaoConta(contaId, idx){
       motivoCancelamento: 'Cancelado via "Ver pedidos" (item órfão)'
     });
     // Recalcula totais
-    var subtotal = itens.filter(function(i){
-      return i.status !== 'cancelado' && !i.transferidoPara;
-    }).reduce(function(a, i){
+    var itensAtivos = itens.filter(function(i){ return i.status !== 'cancelado' && !i.transferidoPara; });
+    var subtotal = itensAtivos.reduce(function(a, i){
       if(i.tipoVenda === 'kg' && i.peso) return a + (i.preco||0);
       return a + (i.preco||0) * (i.qtd||1);
     }, 0);
@@ -13788,14 +14356,46 @@ function cancelarItemOrfaoConta(contaId, idx){
     var total = subtotal + taxa10;
     var pagoTotal = c.pagoTotal || 0;
     var restante = Math.max(0, total - pagoTotal);
+    var temPagamento = (c.pagamentos||[]).length > 0;
+
     fbDb.collection('contas_mesa').doc(contaId).update({
       itens: itens,
       subtotal: subtotal,
       taxa10: taxa10,
       total: total,
-      restante: restante
+      restante: restante,
+      atualizadoEm: Date.now()
     }).then(function(){
+      _invalidarCacheItens(contaId);
       showToast('✓ Item cancelado', '#4ade80');
+
+      // Se ficou sem itens ativos e sem pagamentos → libera mesa/comanda
+      if(!itensAtivos.length && !temPagamento){
+        var mesaStr = String(c.mesa||'');
+        var tipoConta = c.tipoConta||'mesa';
+
+        if(tipoConta === 'avulsa' || tipoConta === 'almoco'){
+          // Remove da lista de comandas/almoços pendentes
+          _comandasAvulsas = _comandasAvulsas.filter(function(x){ return x.id !== contaId; });
+          renderAlmocos();
+          renderComandas();
+          // Fecha o modal de ver pedidos
+          var modal = document.getElementById('modal-ver-pedidos');
+          if(modal) modal.remove();
+          showToast('✓ '+( tipoConta==='almoco'?'Almoço':'Comanda')+' encerrado — sem itens', '#4ade80');
+        } else if(mesaStr && _mesasOcupadas[mesaStr]){
+          // Libera mesa no mapa
+          delete _mesasOcupadas[mesaStr];
+          renderMesas();
+          var modal2 = document.getElementById('modal-ver-pedidos');
+          if(modal2) modal2.remove();
+          showToast('✓ Mesa '+mesaStr+' liberada — sem itens', '#4ade80');
+        }
+      } else {
+        // Ainda tem itens — só fecha o modal
+        var modal3 = document.getElementById('modal-ver-pedidos');
+        if(modal3) modal3.remove();
+      }
     }).catch(function(e){
       showToast('❌ ' + e.message, '#f87171');
     });
@@ -13827,25 +14427,43 @@ function renderVerPedidosMesa(pedidos){
         return it.status !== 'pago' && it.status !== 'cancelado' && !it.transferidoPara;
       });
       if(itensOrfaos.length){
-        // Renderiza um "pseudo-pedido" agrupado com esses itens
-        var htmlOrfaos = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.78rem;color:#fbbf24;line-height:1.5;">'+
-          '⚠️ <b>Itens sem pedido correspondente</b><br>'+
-          'Esses itens estão na conta mas o pedido original foi removido ou perdido. Você pode cancelar individualmente abaixo.'+
-        '</div>';
-        var totalOrfaos = itensOrfaos.reduce(function(acc, it){ return acc + (it.preco||0)*(it.qtd||1); }, 0);
-        htmlOrfaos += '<div class="pedido-card" style="border-left:3px solid #fbbf24;">'+
+        // Verifica se são todos itens do buffet/almoço (adicionados direto na conta, sem pedido)
+        var todosBuffet = itensOrfaos.every(function(it){
+          var n = (it.nome||'').toLowerCase();
+          return n.includes('buffet') || n.includes('almoço') || n.includes('almoco') || it.tipoVenda === 'kg';
+        });
+
+        var totalOrfaos = itensOrfaos.reduce(function(acc, it){
+          var v = it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+          return acc + v;
+        }, 0);
+
+        // Sem aviso de erro para itens de buffet — é comportamento normal
+        var htmlOrfaos = todosBuffet ? '' :
+          '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.78rem;color:#fbbf24;line-height:1.5;">'+
+            '⚠️ <b>Itens sem pedido correspondente</b><br>'+
+            'Esses itens estão na conta mas o pedido original foi removido ou perdido. Você pode cancelar individualmente abaixo.'+
+          '</div>';
+
+        var tituloCard = todosBuffet
+          ? '<b>☀️ Buffet Almoço</b>'
+          : '<b>📦 Itens na conta</b> <span style="color:var(--muted);font-size:0.78rem;">(sem pedido)</span>';
+
+        htmlOrfaos += '<div class="pedido-card" style="border-left:3px solid '+(todosBuffet?'var(--accent)':'#fbbf24')+';">'+
           '<div class="pedido-cab" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-            '<div><b>📦 Itens na conta</b> <span style="color:var(--muted);font-size:0.78rem;">(sem pedido)</span></div>'+
+            '<div>'+tituloCard+'</div>'+
             '<div style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(totalOrfaos)+'</div>'+
           '</div>';
         itensOrfaos.forEach(function(it){
           var nm = esc(it.nome||'?');
           var qt = it.qtd || 1;
-          var vl = ((it.preco||0)*qt).toFixed(2).replace('.',',');
+          var ehKg = it.tipoVenda === 'kg' && it.peso;
+          var vl = ehKg ? (it.preco||0) : (it.preco||0)*qt;
+          var pesoFmt = ehKg ? (it.peso < 1000 ? it.peso+'g' : (it.peso/1000).toFixed(3).replace('.',',')+'kg') : '';
           htmlOrfaos += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:6px;">'+
             '<div style="display:flex;justify-content:space-between;">'+
-              '<div><b>'+qt+'x</b> '+nm+'</div>'+
-              '<div>R$ '+vl+'</div>'+
+              '<div><b>'+(ehKg?'⚖️ ':qt+'x ')+nm+(pesoFmt?' · '+pesoFmt:'')+'</b></div>'+
+              '<div>R$ '+fmtPreco(vl)+'</div>'+
             '</div>'+
             (it.obs ? '<div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">'+esc(it.obs)+'</div>' : '')+
             '<button onclick="cancelarItemOrfaoConta(\''+contaOrfa.id+'\','+(contaOrfa.itens||[]).indexOf(it)+')" style="margin-top:6px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:6px 10px;border-radius:6px;font-size:0.72rem;font-family:inherit;cursor:pointer;">✕ Cancelar item</button>'+
@@ -13927,6 +14545,67 @@ function renderVerPedidosMesa(pedidos){
       (podeEditar?'':'<div style="font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center;">Pedido em '+(statusMap[st]||st)+' — edição bloqueada</div>')+
     '</div>';
   });
+  // ── SEMPRE mostra itens órfãos da conta (buffet/kg do Almoço) junto com pedidos normais ──
+  // Esses itens ficam em contas_mesa.itens mas NÃO geram documento na coleção pedidos.
+  // Coleta todos os itemIds que já aparecem nos pedidos normais (para não duplicar)
+  var idsNaoConta = {};
+  validos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.itemId) idsNaoConta[it.itemId] = true;
+      if(it.id)     idsNaoConta[it.id]     = true;
+    });
+  });
+
+  var contaOrfaInline = null;
+  if(_verPedidosMesaNum !== null && _verPedidosMesaNum !== undefined){
+    contaOrfaInline = _contasMesaCache[String(_verPedidosMesaNum)] || _contasMesaCache[_verPedidosMesaNum];
+  }
+  if(contaOrfaInline && (contaOrfaInline.itens||[]).length){
+    var itensOrfaosInline = (contaOrfaInline.itens||[]).filter(function(it, idx){
+      // Ignora cancelados, transferidos e itens que já aparecem em algum pedido normal
+      if(it.status === 'pago' || it.status === 'cancelado') return false;
+      if(it.transferidoPara) return false;
+      // Se o item tem pedidoId quer dizer que veio de um pedido normal — já está listado acima
+      if(it.pedidoId) return false;
+      return true;
+    });
+    if(itensOrfaosInline.length){
+      var totalOrfaosInline = itensOrfaosInline.reduce(function(acc, it){
+        return acc + (it.tipoVenda === 'kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1));
+      }, 0);
+      var htmlOrfaosInline = '<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:14px;padding:14px;margin-bottom:14px;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+          '<div style="font-weight:700;font-size:0.94rem;">☀️ Buffet / Almoço</div>'+
+          '<div style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ '+fmtPreco(totalOrfaosInline)+'</div>'+
+        '</div>';
+      itensOrfaosInline.forEach(function(it){
+        var idxReal = (contaOrfaInline.itens||[]).indexOf(it);
+        var ehKg = it.tipoVenda === 'kg' && it.peso;
+        var vl = ehKg ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
+        var pesoFmt = ehKg ? (it.peso < 1000 ? it.peso+'g' : (it.peso/1000).toFixed(3).replace('.',',')+'kg') : '';
+        var nm = esc(it.nome||'?');
+        var selsHtml = '';
+        if(it.selecoes && it.selecoes.length){
+          selsHtml = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">'+
+            it.selecoes.map(function(s){ var q=s.qtd||1; return '• '+(q>1?q+'x ':'')+esc(s.opcao||''); }).join(' ')+'</div>';
+        }
+        htmlOrfaosInline +=
+          '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;margin-bottom:8px;">'+
+            '<div style="display:flex;align-items:center;gap:8px;">'+
+              '<span style="background:var(--accent);color:#000;border-radius:5px;padding:2px 7px;font-size:0.74rem;font-weight:700;">'+(ehKg?'⚖️':'1x')+'</span>'+
+              '<span style="flex:1;font-weight:600;font-size:0.88rem;">'+(ehKg?'⚖️ ':'')+nm+(pesoFmt?' · '+pesoFmt:'')+'</span>'+
+              '<span style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.05rem;">R$ '+fmtPreco(vl)+'</span>'+
+            '</div>'+
+            selsHtml+
+            (it.obs?'<div style="font-size:0.72rem;color:var(--muted);margin-top:3px;">📝 '+esc(it.obs)+'</div>':'')+
+            '<button onclick="cancelarItemOrfaoConta(\''+contaOrfaInline.id+'\','+idxReal+')" style="margin-top:6px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:6px 10px;border-radius:6px;font-size:0.72rem;font-family:inherit;cursor:pointer;">✕ Cancelar item</button>'+
+          '</div>';
+      });
+      htmlOrfaosInline += '</div>';
+      html = htmlOrfaosInline + html; // Exibe buffet/almoço NO TOPO, antes dos pedidos normais
+    }
+  }
+
   body.innerHTML = html;
 }
 
@@ -14489,6 +15168,12 @@ try{
       <!-- Configurações -->
       <div class="md-bloco">
         <div class="md-bloco-titulo">⚙️ Configurações</div>
+        <!-- Categorias de bebida do almoço -->
+        <div style="font-size:0.82rem;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border2);">
+          <div style="font-weight:600;margin-bottom:4px;">☀️ Almoço — Bebidas</div>
+          <div style="color:var(--muted);font-size:0.74rem;margin-bottom:10px;">Selecione quais categorias aparecem na aba Almoço</div>
+          <button onclick="abrirSelecionarCatsAlmoco()" style="width:100%;background:rgba(212,168,67,0.08);border:1.5px solid rgba(212,168,67,0.25);color:var(--accent);border-radius:10px;padding:11px;font-family:inherit;font-weight:700;font-size:0.82rem;cursor:pointer;">⚙️ Configurar categorias</button>
+        </div>
         <!-- Tema (claro/escuro) -->
         <div style="font-size:0.82rem;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border2);">
           <div style="font-weight:600;margin-bottom:4px;">Aparência</div>

@@ -2365,23 +2365,16 @@ function _almPopularFormulario(){
   // Bebidas — mini categorias clicáveis que expandem
   var bebGrid = document.getElementById('alm-bebidas-grid');
   if(bebGrid){
-    // Categorias permitidas para bebidas no almoço
-    var nomesCatsBebidas = ['suco','sucos','chope','chopes','vinho','vinhos','refrigerante','refrigerantes','refri','dose','doses'];
-    var catsBebidas = (_categorias||[]).filter(function(cat){
-      var n = (cat.nome||'').toLowerCase();
-      return nomesCatsBebidas.some(function(k){ return n.includes(k); });
-    });
+    // Categorias selecionadas pelo admin (salvas no Firestore)
+    var _catsSelecionadas = _almCatsSelecionadas || [];
 
-    // Fallback: usa categorias da impressora caixa
-    if(!catsBebidas.length){
-      var catsCaixa = [];
-      (_modelosCozinha||[]).forEach(function(m){
-        var imp = (_impressorasCozinha||[]).find(function(i){ return i.id === m.impressoraId; });
-        if(imp && (imp.tipo==='caixa' || (imp.nome||'').toLowerCase().includes('caixa'))){
-          catsCaixa = catsCaixa.concat(m.categorias||[]);
-        }
-      });
-      catsBebidas = (_categorias||[]).filter(function(c){ return catsCaixa.includes(c.id); });
+    // Se não tem seleção salva, mostra vazio
+    var todasCats = _categorias||[];
+    var catsBebidas;
+    if(_catsSelecionadas.length){
+      catsBebidas = todasCats.filter(function(c){ return _catsSelecionadas.indexOf(c.id) !== -1; });
+    } else {
+      catsBebidas = [];
     }
 
     if(catsBebidas.length){
@@ -2461,12 +2454,103 @@ function _almPopularFormulario(){
         bebGrid.appendChild(wrap);
       });
     } else {
-      bebGrid.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;">Nenhuma categoria de bebida encontrada</div>';
+      // Sem categorias selecionadas — mostra botão para configurar
+      bebGrid.innerHTML =
+        '<div style="text-align:center;padding:10px 0;">'+
+          '<div style="color:var(--muted);font-size:0.78rem;margin-bottom:10px;">Nenhuma categoria configurada</div>'+
+          '<button onclick="abrirSelecionarCatsAlmoco()" style="background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:9px 18px;font-family:inherit;font-weight:700;font-size:0.8rem;cursor:pointer;">⚙️ Selecionar categorias</button>'+
+        '</div>';
+    }
+    // Botão de configurar — só para admin
+    if(_isAdmin){
+      var btnConfig = document.createElement('button');
+      btnConfig.onclick = abrirSelecionarCatsAlmoco;
+      btnConfig.style.cssText = 'width:100%;background:transparent;border:none;color:var(--muted);font-size:0.65rem;font-family:inherit;cursor:pointer;padding:4px 0 8px;text-align:right;';
+      btnConfig.textContent = '⚙️ Configurar categorias';
+      if(bebGrid.parentNode) bebGrid.parentNode.insertBefore(btnConfig, bebGrid);
     }
   }
 }
 
+function abrirSelecionarCatsAlmoco(){
+  if(!_isAdmin){ showToast('Apenas admins podem configurar','#f7a34f'); return; }
+  var ex = document.getElementById('modal-cats-almoco');
+  if(ex) ex.remove();
+
+  var salvas = _almCatsSelecionadas || [];
+
+  var todasCats = (_categorias||[]).filter(function(c){
+    return (_itens||[]).some(function(i){ return i.disponivel && i.categoriaId===c.id && i.tipoVenda!=='kg'; });
+  });
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-cats-almoco';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:flex-end;';
+
+  var inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;';
+
+  var catsHtml = todasCats.map(function(cat){
+    var sel = salvas.indexOf(cat.id) !== -1;
+    return '<label style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;">'+
+      '<input type="checkbox" value="'+cat.id+'" '+(sel?'checked':'')+' style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">'+
+      '<span style="font-size:0.9rem;">'+(cat.emoji||'🍽️')+' '+esc(cat.nome)+'</span>'+
+    '</label>';
+  }).join('');
+
+  if(!catsHtml) catsHtml = '<div style="color:var(--muted);text-align:center;padding:20px;font-size:0.84rem;">Nenhuma categoria com itens disponíveis</div>';
+
+  inner.innerHTML =
+    '<div style="padding:16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">'+
+      '<div>'+
+        '<div style="font-weight:800;font-size:1rem;">🥤 Categorias de Bebida</div>'+
+        '<div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">Configuração para todos os garçons</div>'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-cats-almoco\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1.1rem;">×</button>'+
+    '</div>'+
+    '<div style="overflow-y:auto;flex:1;">'+catsHtml+'</div>'+
+    '<div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);">'+
+      '<button onclick="_salvarCatsAlmoco()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:0.9rem;cursor:pointer;font-family:inherit;">✓ Salvar para todos</button>'+
+    '</div>';
+
+  mod.appendChild(inner);
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+  document.body.appendChild(mod);
+}
+
+function _salvarCatsAlmoco(){
+  var checks = document.querySelectorAll('#modal-cats-almoco input[type=checkbox]:checked');
+  var ids = [];
+  checks.forEach(function(c){ ids.push(c.value); });
+
+  // Salva no Firestore — todos os garçons vão carregar
+  var docPath = 'alm_config_'+_restauranteId;
+  fbDb.collection('garcom_config').doc(docPath).set({
+    catsBebidas: ids,
+    atualizadoEm: Date.now(),
+    atualizadoPor: _nomeGarcom||'admin'
+  }).then(function(){
+    _almCatsSelecionadas = ids;
+    document.getElementById('modal-cats-almoco').remove();
+    showToast('✓ Salvo para todos os garçons', '#4ade80');
+    _almPopularFormulario();
+  }).catch(function(e){
+    showToast('❌ Erro ao salvar: '+e.message, '#f87171');
+  });
+}
+
 var _almItemBuffetAtivo = null;
+var _almCatsSelecionadas = []; // carregado do Firestore pelo admin
+
+// Carrega configuração de categorias do almoço (compartilhada entre garçons)
+function _almCarregarConfig(){
+  if(!fbDb || !_restauranteId) return;
+  fbDb.collection('garcom_config').doc('alm_config_'+_restauranteId).get().then(function(doc){
+    if(doc.exists && doc.data().catsBebidas){
+      _almCatsSelecionadas = doc.data().catsBebidas;
+    }
+  }).catch(function(){});
+}
 
 var _almBebidaSelecionada = '';
 function _almSelecionarBebida(id){
@@ -4084,7 +4168,7 @@ function carregarTenantParaMesas(){
     escutarConfigMesas();
     escutarAvisosGarcom();
     renderMesas();
-    // Pré-carrega o cardápio em paralelo pra não ter delay quando entrar na mesa
+    _almCarregarConfig(); // carrega categorias do almoço
     iniciarListeners();
     return;
   }

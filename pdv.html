@@ -6519,6 +6519,50 @@ function processarComandoImpressao(cmdId, cmd){
     }
     return;
   }
+  if(cmd.tipo === 'pedido_avulso'){
+    // Item avulso com impressora específica — imprime direto na impressora escolhida
+    var impAvulso = _impressoras.find(function(i){ return i.id === cmd.impressoraId; });
+    if(!impAvulso){
+      console.warn('[AVULSO] Impressora não encontrada:', cmd.impressoraId);
+      showToast('⚠️ Impressora "' + (cmd.impressoraNome||cmd.impressoraId) + '" não encontrada','#f7a34f', 5000);
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      return;
+    }
+    if(!_qzPronto){
+      showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
+      return;
+    }
+    // Gera cupom com largura da impressora e corte de papel
+    var L = Math.max(20, (impAvulso.largura||48) - 2);
+    var s = escposInit();
+    s += linha('=', L) + '\n';
+    s += escposCenter();
+    s += escposBold(true);
+    s += 'ITEM AVULSO\n';
+    s += escposBold(false);
+    s += escposLeft();
+    s += linha('-', L) + '\n';
+    if(cmd.mesa) s += 'Mesa: ' + cmd.mesa + '\n';
+    if(cmd.garcom) s += 'Garcom: ' + cmd.garcom + '\n';
+    if(cmd.pedidoNumero) s += 'Pedido #' + cmd.pedidoNumero + '\n';
+    var dAv = new Date(cmd.criadoEm || Date.now());
+    s += dAv.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+    s += linha('-', L) + '\n';
+    (cmd.itens||[]).forEach(function(it){
+      s += escposBold(true);
+      s += (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase() + '\n';
+      s += escposBold(false);
+      if(it.obs) s += '   Obs: ' + it.obs + '\n';
+    });
+    s += linha('-', L) + '\n';
+    s += '\n\n\n';
+    s += escposCut(); // corte de papel
+    enviarParaImpressora(impAvulso, s).then(function(){
+      showToast('🖨️ Item avulso impresso em ' + impAvulso.nome, '#4ade80');
+    });
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    return;
+  }
   if(cmd.tipo === 'reimprimir'){
     fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
       if(doc.exists){

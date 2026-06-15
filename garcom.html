@@ -11917,9 +11917,50 @@ function enviarPedido(){
     });
   }).then(function(ref){
     _enviandoPedido = false;
-    _invalidarCacheItens(contaId); // força reload dos itens na próxima abertura
+    _invalidarCacheItens(contaId);
     if(pedido.numeroSequencial){
       showToast('✓ Pedido #'+pedido.numeroSequencial+' enviado!', '#4ade80');
+    }
+    // Se tem itens avulsos com impressora definida, envia comando direto
+    // O PDV não consegue rotear itens avulsos pelos modelos normais (sem categoria)
+    var itensAvulsos = itensPedido.filter(function(it){ return it.avulso && it.impressoraForcada; });
+    if(itensAvulsos.length && _deveImprimir){
+      // Agrupa por impressora (pode ter avulsos em impressoras diferentes)
+      var porImpressora = {};
+      itensAvulsos.forEach(function(it){
+        var impId = it.impressoraForcada;
+        if(!porImpressora[impId]) porImpressora[impId] = { impId: impId, impNome: it.impressoraForcadaNome||'', itens: [] };
+        porImpressora[impId].itens.push(it);
+      });
+      Object.keys(porImpressora).forEach(function(impId){
+        var grupo = porImpressora[impId];
+        // Busca o modelo desta impressora para pegar as configs (corte, logo, etc)
+        var modelo = (_modelosCozinha||[]).find(function(m){ return m.impressoraId === impId; });
+        _imprimirComRetry({
+          tipo: 'pedido_avulso',
+          restauranteId: _restauranteId,
+          tenantId: _tenantId || null,
+          pedidoId: ref.id,
+          pedidoNumero: pedido.numeroSequencial || ref.id.slice(-4).toUpperCase(),
+          mesa: pedido.mesa,
+          garcom: _nomeGarcom,
+          impressoraId: impId,
+          impressoraNome: grupo.impNome,
+          modeloId: modelo ? modelo.id : '',
+          // Configs do modelo — garante corte de papel e layout correto
+          modeloConfig: modelo ? {
+            nome: modelo.nome,
+            tipo: modelo.tipo || 'pedido',
+            cortarPapel: true, // sempre corta no avulso
+            mostrarLogo: false
+          } : { cortarPapel: true },
+          itens: grupo.itens.map(function(it){
+            return { nome: it.nome, qtd: it.qtd||1, preco: it.preco||0, obs: it.obs||'' };
+          }),
+          criadoEm: Date.now(),
+          solicitadoPor: _nomeGarcom
+        });
+      });
     }
   }).catch(function(e){
     _enviandoPedido = false;

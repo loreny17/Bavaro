@@ -859,6 +859,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
           <div class="f-toggle-switch"></div>
         </div>
         <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Quando ativo, este item aparece como sugestão na tela de adicionais do totem (após o cliente adicionar qualquer item ao carrinho). Ideal para bebidas, extras e adicionais.</div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
+          <label style="font-size:0.78rem;color:var(--muted);white-space:nowrap;">Posição na tela:</label>
+          <input type="number" id="item-ordem-sugerido" min="1" max="99" value="99" style="width:70px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.9rem;text-align:center;">
+          <span style="font-size:0.7rem;color:var(--muted);">1 = aparece primeiro</span>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1412,6 +1417,7 @@ function iniciarListeners(){
         tipoVenda: d.tipoVenda || 'unidade',
         palavrasVoz: d.palavrasVoz || '',
         sugerido: d.sugerido === true,
+        ordemSugerido: d.ordemSugerido || 99,
         pausado: d.pausado === true,
         controlarEstoque: d.controlarEstoque === true,
         estoque: d.estoque || 0
@@ -1632,6 +1638,8 @@ function abrirModalItem(){
   _atualizarLabelPrecoPorKg(false);
   var stToggle = document.getElementById('item-sugerir-totem-toggle');
   if(stToggle) stToggle.classList.remove('active');
+  var ordemSugReset = document.getElementById('item-ordem-sugerido');
+  if(ordemSugReset) ordemSugReset.value = 99;
   resetFotoUp();
   preencherSelectCategorias(_catAtiva !== 'todas' ? _catAtiva : null);
   renderItemGruposCheckboxes([]);
@@ -1661,6 +1669,8 @@ function editarItem(id){
   _atualizarLabelPrecoPorKg(ehKg);
   var stToggleEd = document.getElementById('item-sugerir-totem-toggle');
   if(stToggleEd) stToggleEd.classList.toggle('active', i.sugerido === true);
+  var ordemSugEl = document.getElementById('item-ordem-sugerido');
+  if(ordemSugEl) ordemSugEl.value = i.ordemSugerido || 99;
   preencherSelectCategorias(i.categoria);
   renderItemGruposCheckboxes(i.gruposIds || []);
   if(i.foto){
@@ -2183,6 +2193,8 @@ function salvarItem(){
   var ehKg = document.getElementById('item-por-kg-toggle').classList.contains('active');
   var stToggleSv = document.getElementById('item-sugerir-totem-toggle');
   var sugerido = stToggleSv ? stToggleSv.classList.contains('active') : false;
+  var ordemSugeridoEl = document.getElementById('item-ordem-sugerido');
+  var ordemSugerido = ordemSugeridoEl ? (parseInt(ordemSugeridoEl.value)||99) : 99;
   var dados = {
     nome:nome, preco:preco, categoria:categoria, descricao:descricao,
     codigo:codigo, foto:foto, disponivel:disponivel,
@@ -2192,6 +2204,7 @@ function salvarItem(){
     gruposIds: gruposIds,
     tipoVenda: ehKg ? 'kg' : 'unidade',
     sugerido: sugerido,
+    ordemSugerido: sugerido ? ordemSugerido : 99,
     palavrasVoz: (function(){ var p = document.getElementById('item-palavras-voz'); return p ? p.value.trim() : ''; })(),
     atualizadoEm:Date.now()
   };

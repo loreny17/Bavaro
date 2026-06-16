@@ -1376,9 +1376,11 @@ function _confirmarAdicionarPendente(){
 
 // ─── TELA DE ADICIONAIS SUGERIDOS (estilo McDonald's) ───
 function _abrirTelaAdicionais(itemAdicionado){
-  // Só mostra itens marcados como sugerido:true
+  // Só mostra itens marcados como sugerido:true, ordenados por posição
   var todosItens = (window._cardapioItens || []).filter(function(i){
     return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itemAdicionado.id;
+  }).sort(function(a,b){
+    return (a.ordemSugerido||99) - (b.ordemSugerido||99);
   });
 
   if(!todosItens.length) return; // sem sugestões configuradas
@@ -2068,25 +2070,33 @@ function finalizarPedido(){
     });
   }
 
-  // UMA ÚNICA transação: incrementa contador + cria pedido (+ pedido pra impressão se modo sem caixa)
+  // Gera senha otimista ANTES da transação pra mostrar tela imediatamente
+  // A transação vai confirmar/corrigir o número depois se necessário
+  var senhaOtimista = Math.floor(Math.random() * 900) + 100; // número temporário
+
+  // Mostra tela de sucesso IMEDIATAMENTE (não espera transação)
+  _carrinho = [];
+  _selecoesTemp = {};
+  _qtdTemp = 1;
+  atualizarBarra();
+  mostrarTelaSenha('...', total); // mostra com reticências enquanto confirma
+
+  // Transação roda em background
   fbDb.runTransaction(function(tx){
     return tx.get(refSenha).then(function(doc){
       var nova = doc.exists ? ((doc.data().ultima || 0) + 1) : 1;
       tx.set(refSenha, { ultima: nova, atualizadoEm: Date.now() });
-      // pedidos_totem: sempre cria
       tx.set(refPedido, {
         senha: nova,
         data: hoje,
         itens: itensSalvar,
         total: total,
-        // Em modo sem caixa, marca como pago direto (não passa pelo caixa)
         status: _semCaixa ? 'pago' : 'aguardando_pagamento',
         criadoEm: Date.now(),
         pagoEm: _semCaixa ? Date.now() : null,
         restauranteId: _restauranteId,
         tenantId: _tenantId
       });
-      // pedidos (pra PDV escutar e imprimir): só em modo sem caixa
       if(refPedidoImpressao){
         tx.set(refPedidoImpressao, {
           garcom: 'Totem',
@@ -2109,16 +2119,21 @@ function finalizarPedido(){
       return nova;
     });
   }).then(function(senha){
-    // Sucesso — limpa carrinho, mostra tela da senha
-    _carrinho = [];
-    _selecoesTemp = {};
-    _qtdTemp = 1;
-    atualizarBarra();
-    mostrarTelaSenha(senha, total);
+    // Atualiza a senha na tela assim que confirmada
+    var senhaEl = document.getElementById('numero-senha-totem');
+    if(senhaEl) senhaEl.textContent = '#' + senha;
+    var instrucaoEl = document.getElementById('instrucao-senha-totem');
+    if(instrucaoEl){
+      var titulo = _semCaixa ? 'Pedido recebido!' : 'Vá ao caixa pagar';
+      var sub = _semCaixa
+        ? 'Quando chamarmos sua senha <b style="color:var(--accent);">#' + senha + '</b>, retire no balcão'
+        : 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
+      instrucaoEl.innerHTML = '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + titulo + '</div><div style="font-size:0.96rem;color:var(--muted);">' + sub + '</div>';
+    }
   }).catch(function(e){
     console.error('[FINALIZAR]', e);
-    mostrarAvisoTotem('Erro ao enviar: ' + (e.message||e.code||'tente de novo'));
-    if(btn){ btn.disabled = false; btn.textContent = 'Finalizar Pedido'; }
+    // Mostra erro mas não desfaz a tela — só avisa
+    mostrarAvisoTotem('Erro ao confirmar: ' + (e.message||e.code||'tente de novo'));
   });
 }
 
@@ -2167,9 +2182,9 @@ function mostrarTelaSenha(senha, total){
   tela.innerHTML =
     '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
     '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
-    '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
+    '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
     '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
-    '<div style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
+    '<div id="instrucao-senha-totem" style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
       '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + instrucaoTitulo + '</div>' +
       '<div style="font-size:0.96rem;color:var(--muted);">' + instrucaoSub + '</div>' +
     '</div>' +

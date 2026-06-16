@@ -31,6 +31,7 @@
     --colunas:2;
     --foto-ratio:16/10;
     --item-radius:11px;
+    --sug-colunas:3;
   }
   html,body{height:100%;overflow:hidden;}
   body{
@@ -667,6 +668,14 @@
         <div class="cfg-titulo">Cantos arredondados (cards)</div>
         <input type="range" id="cfg-radius" min="0" max="24" step="1" oninput="aplicarCfgPreview()">
         <div class="cfg-val"><span id="cfg-radius-val">11</span> px</div>
+      </div>
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">Itens por linha (tela "Quer adicionar algo mais?")</div>
+        <div class="cfg-opcoes" id="cfg-sug-colunas-grupo">
+          <button class="cfg-op" data-val="2">2</button>
+          <button class="cfg-op" data-val="3">3</button>
+          <button class="cfg-op" data-val="4">4</button>
+        </div>
       </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
@@ -1406,11 +1415,11 @@ function _abrirTelaAdicionais(itemAdicionado){
         : '<div style="width:100%;height:80px;background:rgba(255,255,255,0.04);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:center;font-size:2rem;">'+(it.emoji||'🍽️')+'</div>';
       var btnHtml = sel
         ? '<div style="display:flex;align-items:center;justify-content:space-between;background:#d4a843;border-radius:7px;overflow:hidden;">'+
-            '<button onclick=\'_sugQtd(\''+it.id+'\',--1)\' style=\'background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;\'>−</button>'+
-            '<span style=\'color:#000;font-weight:900;font-size:0.85rem;\'>'+qtd+'</span>'+
-            '<button onclick=\'_sugQtd(\''+it.id+'\',1)\' style=\'background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;\'>+</button>'+
+            '<button onclick="_sugQtd(\''+it.id+'\',-1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">−</button>'+
+            '<span style="color:#000;font-weight:900;font-size:0.85rem;">'+qtd+'</span>'+
+            '<button onclick="_sugQtd(\''+it.id+'\',1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">+</button>'+
           '</div>'
-        : '<button onclick=\'_sugQtd(\''+it.id+'\',1)\' style=\'width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:6px;font-weight:800;font-size:0.75rem;cursor:pointer;\'>+ Adicionar</button>';
+        : '<button onclick="_sugQtd(\''+it.id+'\',1)" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:6px;font-weight:800;font-size:0.75rem;cursor:pointer;">+ Adicionar</button>';
       return '<div style="background:'+(sel?'rgba(212,168,67,0.07)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;transition:all 0.15s;">'+
         foto+
         '<div style="padding:8px;">'+
@@ -1462,7 +1471,7 @@ function _abrirTelaAdicionais(itemAdicionado){
       '</div>'+
       '<div style="font-size:1.3rem;font-weight:900;color:#fff;">Quer adicionar algo mais?</div>'+
     '</div>'+
-    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:600px;"></div>'+
+    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(var(--sug-colunas, 3),1fr);gap:10px;width:100%;max-width:600px;"></div>'+
     '<div style="display:flex;gap:10px;width:100%;max-width:480px;flex-shrink:0;">'+
       '<button onclick="_fecharTelaAdicionais()" style="flex:1;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:12px;padding:14px;font-size:0.9rem;font-weight:700;cursor:pointer;">Não, obrigado</button>'+
       '<button id="sug-btn-confirmar" onclick="_confirmarAdicionaisSugeridos()" style="flex:2;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:12px;padding:14px;font-size:0.9rem;font-weight:900;cursor:pointer;opacity:0.75;">🛒 Ver meu pedido</button>'+
@@ -2349,7 +2358,8 @@ var _CFG_PADRAO = {
   lateral: 100,
   colunas: 2,
   fotoRatio: '16/10',
-  radius: 11
+  radius: 11,
+  sugColunas: 3
 };
 
 // Carrega config do localStorage (chamado quando totem inicia)
@@ -2407,6 +2417,7 @@ function aplicarCfg(cfg){
   r.setProperty('--colunas', cfg.colunas);
   r.setProperty('--foto-ratio', cfg.fotoRatio);
   r.setProperty('--item-radius', cfg.radius + 'px');
+  r.setProperty('--sug-colunas', cfg.sugColunas || 3);
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
@@ -2452,6 +2463,15 @@ function abrirConfig(){
       aplicarCfgPreview();
     };
   });
+  // Botões de colunas da tela de sugestão
+  document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(b){
+    b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === (cfg.sugColunas || 3));
+    b.onclick = function(){
+      document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(x){ x.classList.remove('ativo'); });
+      b.classList.add('ativo');
+      aplicarCfgPreview();
+    };
+  });
 
   document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
   document.getElementById('cfg-url').textContent = window.location.pathname;
@@ -2471,11 +2491,13 @@ function _lerCfgDoModal(){
   var rad = parseInt(document.getElementById('cfg-radius').value) || 11;
   var colBtn = document.querySelector('#cfg-colunas-grupo .cfg-op.ativo');
   var fotoBtn = document.querySelector('#cfg-foto-grupo .cfg-op.ativo');
+  var sugColBtn = document.querySelector('#cfg-sug-colunas-grupo .cfg-op.ativo');
   return {
     lateral: lat,
     colunas: colBtn ? parseInt(colBtn.getAttribute('data-val')) : 2,
     fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
-    radius: rad
+    radius: rad,
+    sugColunas: sugColBtn ? parseInt(sugColBtn.getAttribute('data-val')) : 3
   };
 }
 

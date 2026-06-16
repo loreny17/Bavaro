@@ -11229,15 +11229,35 @@ function iniciarFirebase(){
     try{ firebase.app(); }catch(e){ firebase.initializeApp(firebaseConfig); }
     fbDb = firebase.firestore();
     fbAuth = firebase.auth();
-    // Atualiza status imediatamente (Firebase JÁ está pronto neste ponto)
     var statusEl = document.getElementById('auth-status');
     if(statusEl) statusEl.textContent = '✓ Conectado ao servidor';
-    // Manter sessão local (não desloga ao fechar o navegador)
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(e){
       console.warn('Persistence erro:', e.message);
     });
     console.log('Firebase conectado!');
-    // Observer principal: detecta login/logout e libera o app
+
+    // ── ENTRADA RÁPIDA POR CACHE ──────────────────────────────────────────────
+    // Se já tem cache válido, entra imediatamente sem esperar o onAuthStateChanged
+    // (o Firebase pode demorar 2-5s para confirmar a sessão)
+    var _cacheEntradaFeita = false;
+    try{
+      var cTenantId = localStorage.getItem('bavaro_tenant_id');
+      var cUserDoc  = JSON.parse(localStorage.getItem('bavaro_user_doc') || 'null');
+      if(cTenantId && cUserDoc && cUserDoc.uid){
+        console.log('[Auth] Cache encontrado — entrando imediatamente');
+        _usuarioAtual = { uid: cUserDoc.uid, email: cUserDoc.email, nome: cUserDoc.nome || cUserDoc.email };
+        _userDoc      = cUserDoc;
+        _tenantId     = cTenantId;
+        _cacheEntradaFeita = true;
+        authEsconderTela();
+        if(!_appJaIniciado){
+          _appJaIniciado = true;
+          _iniciarAppAposLogin();
+        }
+      }
+    }catch(e){ console.warn('[Auth] Erro lendo cache:', e); }
+    // ─────────────────────────────────────────────────────────────────────────
+
     fbAuth.onAuthStateChanged(function(user){
       if(user){
         _usuarioAtual = {
@@ -11252,24 +11272,26 @@ function iniciarFirebase(){
           _appJaIniciado = true;
           _iniciarAppAposLogin();
         }
-        // Safety net: se após 10s ainda estiver na tela de loading, força esconder
-        setTimeout(function(){
-          var ov = document.getElementById('auth-overlay');
-          if(ov && !ov.classList.contains('hidden')){
-            console.warn('[Auth] Safety timeout — forçando esconder overlay');
-            ov.classList.add('hidden');
-          }
-          var ls = document.getElementById('loading-screen');
-          if(ls && !ls.classList.contains('hidden')){
-            ls.classList.add('hidden');
-          }
-        }, 10000);
       } else {
-        // Usuário não logado — mostra tela de login
-        _usuarioAtual = null;
-        authMostrarTela('login');
-        document.getElementById('auth-overlay').classList.remove('hidden');
-        if(statusEl) statusEl.textContent = '✓ Conectado ao servidor';
+        // Firebase confirmou que NÃO há sessão
+        // Só mostra login se a entrada por cache não tiver acontecido
+        if(!_cacheEntradaFeita){
+          _usuarioAtual = null;
+          authMostrarTela('login');
+          document.getElementById('auth-overlay').classList.remove('hidden');
+          if(statusEl) statusEl.textContent = '✓ Conectado ao servidor';
+        } else {
+          // Cache estava errado/expirado — força logout limpo
+          console.warn('[Auth] Cache inválido, sessão expirada — fazendo logout');
+          try{
+            localStorage.removeItem('bavaro_tenant_id');
+            localStorage.removeItem('bavaro_user_doc');
+          }catch(e){}
+          _usuarioAtual = null;
+          _appJaIniciado = false;
+          authMostrarTela('login');
+          document.getElementById('auth-overlay').classList.remove('hidden');
+        }
       }
     });
   }catch(e){

@@ -1331,7 +1331,8 @@ function confirmarAdicionarAoCarrinho(){
 
   var precoUnit = _precoComExtras(it, _selecoesTemp);
 
-  _carrinho.push({
+  // Guarda o item pronto para adicionar depois da tela de adicionais
+  _itemPendente = {
     itemId: it.id,
     fonte: it.fonte,
     nome: it.nome,
@@ -1343,16 +1344,34 @@ function confirmarAdicionarAoCarrinho(){
     selecoesLabel: labelSelecoes.join(' · '),
     observacao: (_obsTemp || '').trim(),
     gruposIds: it.gruposIds || []
-  });
+  };
+  var itRef = it;
 
   fecharModalItem();
+  resetTimerInatividade();
+
+  // Verifica se tem sugestões — se sim, mostra ANTES de adicionar ao carrinho
+  var todosItensAdic = (window._cardapioItens||[]).filter(function(i){
+    return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itRef.id;
+  });
+
+  if(todosItensAdic.length){
+    // Mostra tela de adicionais — o item só vai pro carrinho quando o cliente dispensar ou escolher
+    _abrirTelaAdicionais(itRef);
+  } else {
+    // Sem sugestões — adiciona direto
+    _confirmarAdicionarPendente();
+  }
+}
+
+// Efetivamente adiciona o item pendente ao carrinho (chamado após tela de adicionais)
+function _confirmarAdicionarPendente(){
+  if(!_itemPendente) return;
+  _carrinho.push(_itemPendente);
+  _itemPendente = null;
   atualizarBarra();
   renderItens();
   try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
-  resetTimerInatividade();
-
-  // Mostra tela de adicionais sugeridos (estilo McDonald's)
-  _abrirTelaAdicionais(it);
 }
 
 // ─── TELA DE ADICIONAIS SUGERIDOS (estilo McDonald's) ───
@@ -1369,7 +1388,7 @@ function _abrirTelaAdicionais(itemAdicionado){
 
   var el = document.createElement('div');
   el.id = 'tela-adicionais';
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:8000;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:40px 32px;animation:fadeIn 0.25s ease;';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:8000;display:flex;flex-direction:column;align-items:center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:32px 20px 40px;gap:28px;animation:fadeIn 0.25s ease;';
 
   var autoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 20000);
   el._autoClose = autoClose;
@@ -1437,6 +1456,8 @@ function _fecharTelaAdicionais(){
     clearTimeout(el._autoClose);
     el.remove();
   }
+  // Confirma o item pendente no carrinho ao fechar (sem escolher adicional)
+  _confirmarAdicionarPendente();
   resetTimerInatividade();
 }
 
@@ -1480,8 +1501,14 @@ function _adicionarSugerido(itemId){
 }
 
 function _irParaCarrinho(){
-  _fecharTelaAdicionais();
-  // Abre o carrinho
+  var el = document.getElementById('tela-adicionais');
+  if(el){
+    clearTimeout(el._autoClose);
+    el.remove();
+  }
+  // Confirma item pendente e abre carrinho
+  _confirmarAdicionarPendente();
+  resetTimerInatividade();
   var btnCart = document.getElementById('barra-carrinho');
   if(btnCart) btnCart.click();
 }
@@ -1529,6 +1556,7 @@ var _wizPassoAtual = 0;
 var _wizGrupos = [];
 var _wizDirecao = 'forward'; // 'forward' ou 'back' — pra animação
 var _obsTemp = ''; // observação livre do cliente (digitada no wizard)
+var _itemPendente = null; // item aguardando confirmação (após tela de adicionais)
 
 function abrirWizardItem(){
   _wizGrupos = _gruposDoItem(_itemAberto);

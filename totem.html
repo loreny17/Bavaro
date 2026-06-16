@@ -1357,81 +1357,70 @@ function confirmarAdicionarAoCarrinho(){
 
 // ─── TELA DE ADICIONAIS SUGERIDOS (estilo McDonald's) ───
 function _abrirTelaAdicionais(itemAdicionado){
-  // Busca itens sugeridos — marcados como sugerido:true OU de categorias de bebida/adicional
+  // Só mostra itens marcados como sugerido:true
   var todosItens = (window._cardapioItens || []).filter(function(i){
-    if(!i.disponivel) return false;
-    if(i.id === itemAdicionado.id) return false; // não sugere o mesmo item
-    // Prioridade 1: marcado explicitamente como sugerido
-    if(i.sugerido) return true;
-    // Prioridade 2: categoria com nome de bebida ou adicional
-    var cat = (window._cardapioCats||[]).find(function(c){ return c.id === i.categoriaId; });
-    if(!cat) return false;
-    var n = (cat.nome||'').toLowerCase();
-    return n.includes('bebida') || n.includes('suco') || n.includes('refri') ||
-           n.includes('água') || n.includes('agua') || n.includes('adicional') ||
-           n.includes('extra') || n.includes('sobremesa') || n.includes('dose');
-  }).slice(0, 6); // máx 6 sugestões
+    return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itemAdicionado.id;
+  });
 
-  if(!todosItens.length) return; // sem sugestões, não mostra nada
+  if(!todosItens.length) return; // sem sugestões configuradas
 
   var ex = document.getElementById('tela-adicionais');
   if(ex) ex.remove();
 
   var el = document.createElement('div');
   el.id = 'tela-adicionais';
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:8000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;animation:fadeIn 0.2s ease;';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:8000;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:40px 32px;animation:fadeIn 0.25s ease;';
 
-  // Timer auto-fechar em 12s
-  var timerEl = null;
-  var autoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 12000);
+  var autoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 20000);
+  el._autoClose = autoClose;
 
+  // Divide em linhas de até 4
+  var cols = Math.min(todosItens.length, 4);
   var itensHtml = todosItens.map(function(it){
     var preco = 'R$ ' + (it.preco||0).toFixed(2).replace('.',',');
     var foto = it.foto
-      ? '<img src="'+it.foto+'" style="width:100%;height:110px;object-fit:cover;border-radius:12px 12px 0 0;" loading="lazy">'
-      : '<div style="width:100%;height:110px;background:rgba(255,255,255,0.05);border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:center;font-size:2.5rem;">'+(it.emoji||'🍽️')+'</div>';
-    return '<div onclick="_adicionarSugerido(\''+it.id+'\')" style="background:#1a1a1a;border:2px solid rgba(255,255,255,0.08);border-radius:14px;overflow:hidden;cursor:pointer;transition:all 0.15s;flex:1;min-width:130px;max-width:160px;" onmouseover="this.style.borderColor=\'#d4a843\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.08)\'">'+
+      ? '<img src="'+it.foto+'" style="width:100%;height:140px;object-fit:cover;border-radius:16px 16px 0 0;" loading="lazy">'
+      : '<div style="width:100%;height:140px;background:rgba(255,255,255,0.05);border-radius:16px 16px 0 0;display:flex;align-items:center;justify-content:center;font-size:3rem;">'+(it.emoji||'🍽️')+'</div>';
+    return '<div onclick="_adicionarSugerido(\''+it.id+'\')" id="sug-card-'+it.id+'" style="background:#1c1c1c;border:2.5px solid rgba(255,255,255,0.1);border-radius:18px;overflow:hidden;cursor:pointer;flex:1;min-width:160px;max-width:220px;transition:all 0.2s;" onmouseover="this.style.borderColor=\'#d4a843\';this.style.transform=\'scale(1.03)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.1)\';this.style.transform=\'scale(1)\'">'+
       foto+
-      '<div style="padding:10px;">'+
-        '<div style="font-size:0.82rem;font-weight:700;color:#fff;line-height:1.2;margin-bottom:4px;">'+it.nome+'</div>'+
-        '<div style="font-size:0.78rem;color:#d4a843;font-weight:700;">'+preco+'</div>'+
-        '<button style="width:100%;margin-top:8px;background:#d4a843;color:#000;border:none;border-radius:8px;padding:7px;font-weight:800;font-size:0.8rem;cursor:pointer;">+ Adicionar</button>'+
+      '<div style="padding:14px;">'+
+        '<div style="font-size:0.95rem;font-weight:800;color:#fff;line-height:1.3;margin-bottom:6px;">'+it.nome+'</div>'+
+        (it.descricao?'<div style="font-size:0.72rem;color:rgba(255,255,255,0.5);margin-bottom:8px;line-height:1.3;">'+it.descricao+'</div>':'')+
+        '<div style="font-size:1.1rem;color:#d4a843;font-weight:900;margin-bottom:10px;">'+preco+'</div>'+
+        '<button style="width:100%;background:#d4a843;color:#000;border:none;border-radius:10px;padding:10px;font-weight:900;font-size:0.9rem;cursor:pointer;">+ Adicionar</button>'+
       '</div>'+
     '</div>';
   }).join('');
 
   el.innerHTML =
-    '<div style="width:100%;max-width:600px;">'+
-      // Header
-      '<div style="text-align:center;margin-bottom:20px;">'+
-        '<div style="font-size:1.4rem;font-weight:900;color:#fff;letter-spacing:-0.02em;">'+
-          '✅ '+itemAdicionado.nome+' adicionado!'+
-        '</div>'+
-        '<div style="font-size:1rem;color:rgba(255,255,255,0.6);margin-top:6px;">'+
-          'Que tal adicionar algo mais?'+
-        '</div>'+
+    // Header
+    '<div style="text-align:center;width:100%;">'+
+      '<div style="display:inline-flex;align-items:center;gap:10px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:50px;padding:10px 22px;margin-bottom:16px;">'+
+        '<span style="font-size:1.4rem;">✅</span>'+
+        '<span style="font-size:1rem;font-weight:700;color:#4ade80;">'+itemAdicionado.nome+' adicionado ao pedido!</span>'+
       '</div>'+
-      // Grid de sugestões
-      '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:24px;">'+
-        itensHtml+
-      '</div>'+
-      // Botões
-      '<div style="display:flex;gap:12px;justify-content:center;">'+
-        '<button onclick="_fecharTelaAdicionais()" style="flex:1;max-width:200px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.15);color:#fff;border-radius:14px;padding:16px;font-size:1rem;font-weight:700;cursor:pointer;">'+
-          'Não, obrigado'+
-        '</button>'+
-        '<button onclick="_irParaCarrinho()" style="flex:1;max-width:200px;background:#d4a843;border:none;color:#000;border-radius:14px;padding:16px;font-size:1rem;font-weight:800;cursor:pointer;">'+
-          '🛒 Ver carrinho'+
-        '</button>'+
-      '</div>'+
-      // Timer visual
-      '<div id="adicionais-timer-bar" style="margin-top:16px;height:3px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">'+
-        '<div style="height:100%;background:#d4a843;width:100%;transition:width 12s linear;border-radius:2px;" id="adicionais-timer-fill"></div>'+
-      '</div>'+
+      '<div style="font-size:1.6rem;font-weight:900;color:#fff;margin-bottom:4px;">Quer adicionar algo mais?</div>'+
+      '<div style="font-size:1rem;color:rgba(255,255,255,0.5);">Confira nossas sugestões exclusivas</div>'+
+    '</div>'+
+    // Grid
+    '<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;width:100%;max-width:960px;">'+
+      itensHtml+
+    '</div>'+
+    // Botões
+    '<div style="display:flex;gap:16px;width:100%;max-width:500px;">'+
+      '<button onclick="_fecharTelaAdicionais()" style="flex:1;background:rgba(255,255,255,0.06);border:2px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:16px;padding:18px;font-size:1.1rem;font-weight:700;cursor:pointer;letter-spacing:0.02em;">'+
+        'Não, obrigado'+
+      '</button>'+
+      '<button onclick="_irParaCarrinho()" style="flex:1;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:16px;padding:18px;font-size:1.1rem;font-weight:900;cursor:pointer;letter-spacing:0.02em;">'+
+        '🛒 Ver meu pedido'+
+      '</button>'+
+    '</div>'+
+    // Timer bar
+    '<div style="width:100%;max-width:500px;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden;">'+
+      '<div id="adicionais-timer-fill" style="height:100%;background:#d4a843;width:100%;transition:width 20s linear;border-radius:2px;"></div>'+
     '</div>';
 
   document.body.appendChild(el);
-  el._autoClose = autoClose;
 
   // Inicia animação do timer
   requestAnimationFrame(function(){

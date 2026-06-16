@@ -11569,15 +11569,18 @@ function authBootstrapTenant(){
     if(!fbDb || !_usuarioAtual){ reject(new Error('sem firebase')); return; }
     var uid = _usuarioAtual.uid;
 
-    // Esconde login, mostra loading
-    var overlay = document.getElementById('auth-overlay');
+    var overlay   = document.getElementById('auth-overlay');
     var loadingEl = document.getElementById('auth-tela-loading');
-    var loginEl = document.getElementById('auth-tela-login');
-    if(overlay) overlay.classList.remove('hidden');
-    if(loadingEl) loadingEl.style.display = 'block';
-    if(loginEl) loginEl.style.display = 'none';
+    var loginEl   = document.getElementById('auth-tela-login');
 
-    // Tenta usar cache primeiro para entrada instantânea
+    // Safety net absoluto: se em 5s ainda não entrou, esconde o overlay
+    var safetyTimer = setTimeout(function(){
+      console.warn('[Bootstrap] safety timer — forçando esconder overlay');
+      if(overlay)   overlay.classList.add('hidden');
+      if(loadingEl) loadingEl.style.display = 'none';
+    }, 5000);
+
+    // Lê cache ANTES de qualquer outra coisa
     var cachedTenantId, cachedUserDoc;
     try{
       cachedTenantId = localStorage.getItem('bavaro_tenant_id');
@@ -11585,10 +11588,20 @@ function authBootstrapTenant(){
       if(s) cachedUserDoc = JSON.parse(s);
     }catch(e){}
 
+    var temCache = !!(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid);
+
+    // Só mostra tela de loading se não tiver cache
+    if(!temCache){
+      if(overlay)   overlay.classList.remove('hidden');
+      if(loadingEl) loadingEl.style.display = 'block';
+      if(loginEl)   loginEl.style.display = 'none';
+    }
+
     function entrar(userDoc, tenantId){
-      _userDoc = userDoc;
-      _tenantId = tenantId;
-      if(overlay) overlay.classList.add('hidden');
+      clearTimeout(safetyTimer);
+      _userDoc    = userDoc;
+      _tenantId   = tenantId;
+      if(overlay)   overlay.classList.add('hidden');
       if(loadingEl) loadingEl.style.display = 'none';
       try{
         localStorage.setItem('bavaro_tenant_id', tenantId);
@@ -11602,8 +11615,9 @@ function authBootstrapTenant(){
         if(doc.exists && doc.data().tenantId){
           entrar(doc.data(), doc.data().tenantId);
         } else {
-          // Primeiro acesso
-          if(overlay) overlay.classList.add('hidden');
+          // Primeiro acesso — cria tenant
+          clearTimeout(safetyTimer);
+          if(overlay)   overlay.classList.add('hidden');
           if(loadingEl) loadingEl.style.display = 'none';
           _mostrarBoasVindas().then(function(nome){
             return _criarTenantParaUsuario(nome);
@@ -11611,12 +11625,14 @@ function authBootstrapTenant(){
         }
       }).catch(function(err){
         console.error('[Tenant]', err.code, err.message);
-        // Se falhou com cache disponível, usa o cache mesmo assim
-        if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
-          console.warn('[Tenant] Usando cache após erro de rede');
+        // Falhou no Firestore — usa cache se tiver
+        if(temCache){
+          console.warn('[Tenant] Usando cache após erro');
           entrar(cachedUserDoc, cachedTenantId);
         } else {
-          // Sem cache e sem rede — mostra erro e oferece retry
+          // Sem cache e sem acesso — mostra botão retry
+          clearTimeout(safetyTimer);
+          if(overlay)   overlay.classList.remove('hidden');
           if(loadingEl) loadingEl.innerHTML =
             '<div style="text-align:center;padding:20px;">' +
             '<div style="font-size:2rem;margin-bottom:10px;">⚠️</div>' +
@@ -11627,10 +11643,9 @@ function authBootstrapTenant(){
       });
     }
 
-    // Se tem cache válido, entra imediatamente
-    if(cachedTenantId && cachedUserDoc && cachedUserDoc.uid === uid){
+    // Com cache: entra imediatamente e atualiza em background
+    if(temCache){
       entrar(cachedUserDoc, cachedTenantId);
-      // Atualiza cache em background silenciosamente
       fbDb.collection('users').doc(uid).get().then(function(doc){
         if(doc.exists && doc.data().tenantId){
           try{
@@ -11642,7 +11657,7 @@ function authBootstrapTenant(){
       return;
     }
 
-    // Sem cache — busca direto
+    // Sem cache: busca no Firestore
     buscarNoFirestore();
   });
 }

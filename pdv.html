@@ -5858,38 +5858,58 @@ function iniciarListenerImpressao(){
   if(_impListenerAtivo) return;
   if(!_qzPronto || !_restauranteAtivo) return;
   _impListenerAtivo = true;
-  // Marca pedidos já existentes para não imprimir o que já estava lá quando QZ conectou
-  var queryImp = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
+  // Marca pedidos de hoje como já impressos (não reimprimir o que já estava lá)
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var queryImp = fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteAtivo.id)
+    .where('criadoEm','>=', hoje.getTime());
   if(_tenantId) queryImp = queryImp.where('tenantId','==', _tenantId);
   queryImp.get().then(function(snap){
     snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
-  });
-  // Listener: imprime novos pedidos automaticamente
-  console.log('[PDV] Iniciando listener de pedidos para restaurante:', _restauranteAtivo.id);
-  var queryImpListen = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
-  if(_tenantId) queryImpListen = queryImpListen.where('tenantId','==', _tenantId);
-  queryImpListen.onSnapshot(function(snap){
+    // Só inicia o listener APÓS marcar os existentes — evita reimprimir pedidos antigos
+    console.log('[PDV] Iniciando listener de pedidos para restaurante:', _restauranteAtivo.id);
+    var queryImpListen = fbDb.collection('pedidos')
+      .where('restauranteId','==', _restauranteAtivo.id)
+      .where('criadoEm','>=', hoje.getTime());
+    if(_tenantId) queryImpListen = queryImpListen.where('tenantId','==', _tenantId);
+    queryImpListen.onSnapshot(function(snap){
+        snap.docChanges().forEach(function(ch){
+          if(ch.type === 'added'){
+            var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
+            console.log('[PDV] Pedido recebido:', pedido.id, 'origemTotem:', !!pedido.origemTotem, 'cliente:', pedido.cliente);
+            if(_ultimosPedidosImpressos[pedido.id]) {
+              console.log('[PDV] já processado, ignorando');
+              return;
+            }
+            if(pedido.impresso) {
+              console.log('[PDV] já marcado como impresso, ignorando');
+              _ultimosPedidosImpressos[pedido.id] = true;
+              return;
+            }
+            _ultimosPedidosImpressos[pedido.id] = true;
+            console.log('[PDV] disparando imprimirPedidoAutomatico...');
+            imprimirPedidoAutomatico(pedido);
+          }
+        });
+      }, function(err){
+        console.error('[PDV] erro no listener:', err);
+      });
+  }).catch(function(e){
+    console.warn('[PDV] erro ao buscar pedidos iniciais:', e.code);
+    // Mesmo com erro, inicia o listener
+    var queryImpListen2 = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
+    if(_tenantId) queryImpListen2 = queryImpListen2.where('tenantId','==', _tenantId);
+    queryImpListen2.onSnapshot(function(snap){
       snap.docChanges().forEach(function(ch){
         if(ch.type === 'added'){
           var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
-          console.log('[PDV] Pedido recebido:', pedido.id, 'origemTotem:', !!pedido.origemTotem, 'cliente:', pedido.cliente);
-          if(_ultimosPedidosImpressos[pedido.id]) {
-            console.log('[PDV] já processado, ignorando');
-            return;
-          }
-          if(pedido.impresso) {
-            console.log('[PDV] já marcado como impresso, ignorando');
-            _ultimosPedidosImpressos[pedido.id] = true;
-            return;
-          }
+          if(_ultimosPedidosImpressos[pedido.id] || pedido.impresso) return;
           _ultimosPedidosImpressos[pedido.id] = true;
-          console.log('[PDV] disparando imprimirPedidoAutomatico...');
           imprimirPedidoAutomatico(pedido);
         }
       });
-    }, function(err){
-      console.error('[PDV] erro no listener:', err);
     });
+  });
 }
 
 // ─── CUPOM CLIENTE DO TOTEM (sai no caixa quando libera o pedido) ───

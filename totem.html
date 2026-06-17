@@ -77,6 +77,86 @@
     50%{transform:scale(1.04);box-shadow:0 0 0 20px rgba(212,168,67,0);}
   }
 
+  /* ═══ LOADING DE MACARRÃO (enquanto confirma a senha) ═══ */
+  .massa-loading{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;
+  }
+  .massa-loading .garfo-wrap{
+    position:relative;width:140px;height:140px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .massa-loading .prato{
+    position:absolute;width:130px;height:130px;border-radius:50%;
+    background:radial-gradient(circle at 50% 45%, #1d1d24 0%, #16161c 70%, #0e0e12 100%);
+    border:3px solid rgba(212,168,67,0.25);
+  }
+  .massa-loading .macarrao{
+    position:absolute;width:88px;height:88px;
+    animation:girarMacarrao 1.1s linear infinite;
+  }
+  .massa-loading .fio{
+    position:absolute;top:50%;left:50%;
+    width:78px;height:8px;
+    margin-top:-4px;margin-left:-39px;
+    border-radius:8px;
+    background:linear-gradient(90deg, #f0c060, #d4a843);
+    transform-origin:50% 50%;
+    opacity:0.92;
+  }
+  .massa-loading .fio:nth-child(1){transform:rotate(0deg);}
+  .massa-loading .fio:nth-child(2){transform:rotate(60deg);}
+  .massa-loading .fio:nth-child(3){transform:rotate(120deg);}
+  .massa-loading .garfo{
+    position:absolute;width:14px;height:64px;
+    transform:rotate(-25deg) translate(10px,-8px);
+    animation:girarGarfo 1.1s ease-in-out infinite;
+    filter:drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+  }
+  .massa-loading .garfo .cabo{
+    position:absolute;bottom:0;left:50%;
+    width:5px;height:38px;margin-left:-2.5px;
+    background:linear-gradient(180deg,#e8e8ec,#bdbdc4);
+    border-radius:3px;
+  }
+  .massa-loading .garfo .dente{
+    position:absolute;top:0;width:3px;height:26px;
+    background:linear-gradient(180deg,#f5f5f7,#cfcfd6);
+    border-radius:2px 2px 1px 1px;
+  }
+  .massa-loading .garfo .dente:nth-child(1){left:1px;}
+  .massa-loading .garfo .dente:nth-child(2){left:6px;}
+  .massa-loading .garfo .dente:nth-child(3){left:11px;}
+  @keyframes girarMacarrao{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
+  @keyframes girarGarfo{
+    0%,100%{transform:rotate(-25deg) translate(10px,-8px);}
+    50%{transform:rotate(8deg) translate(2px,4px);}
+  }
+  .massa-loading .texto{
+    font-size:1.15rem;font-weight:700;color:var(--text);
+  }
+  .massa-loading .pontinhos span{
+    animation:pontinhoPulsa 1.2s infinite;
+    opacity:0.2;
+  }
+  .massa-loading .pontinhos span:nth-child(1){animation-delay:0s;}
+  .massa-loading .pontinhos span:nth-child(2){animation-delay:0.2s;}
+  .massa-loading .pontinhos span:nth-child(3){animation-delay:0.4s;}
+  @keyframes pontinhoPulsa{
+    0%,100%{opacity:0.2;}
+    50%{opacity:1;}
+  }
+  @keyframes fadeOutLoading{
+    to{opacity:0;transform:scale(0.85);}
+  }
+  @keyframes fadeInSenha{
+    from{opacity:0;transform:scale(0.85);}
+    to{opacity:1;transform:scale(1);}
+  }
+
   /* ═══ APP PRINCIPAL — LAYOUT COM MENU LATERAL ═══ */
   #app{height:100%;display:flex;flex-direction:row;}
 
@@ -2161,9 +2241,16 @@ function finalizarPedido(){
       return nova;
     });
   }).then(function(senha){
-    // Atualiza a senha na tela assim que confirmada
+    // Atualiza a senha na tela assim que confirmada — troca o loading de macarrão pelo número
     var senhaEl = document.getElementById('numero-senha-totem');
-    if(senhaEl) senhaEl.textContent = '#' + senha;
+    if(senhaEl){
+      senhaEl.style.animation = 'fadeOutLoading 0.25s ease forwards';
+      setTimeout(function(){
+        senhaEl.className = '';
+        senhaEl.style.cssText = 'font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);animation:fadeInSenha 0.3s ease;';
+        senhaEl.textContent = '#' + senha;
+      }, 250);
+    }
     var instrucaoEl = document.getElementById('instrucao-senha-totem');
     if(instrucaoEl){
       var titulo = _semCaixa ? 'Pedido recebido!' : 'Vá ao caixa pagar';
@@ -2221,10 +2308,22 @@ function mostrarTelaSenha(senha, total){
     instrucaoSub = 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
   }
 
+  var aguardando = (senha === '...');
+  var numeroSenhaHtml = aguardando
+    ? '<div id="numero-senha-totem" class="massa-loading" style="margin:6px 0 2px;">' +
+        '<div class="garfo-wrap">' +
+          '<div class="prato"></div>' +
+          '<div class="macarrao"><div class="fio"></div><div class="fio"></div><div class="fio"></div></div>' +
+          '<div class="garfo"><div class="dente"></div><div class="dente"></div><div class="dente"></div><div class="cabo"></div></div>' +
+        '</div>' +
+        '<div class="texto">Preparando sua senha<span class="pontinhos"><span>.</span><span>.</span><span>.</span></span></div>' +
+      '</div>'
+    : '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>';
+
   tela.innerHTML =
     '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
     '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
-    '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
+    numeroSenhaHtml +
     '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
     '<div id="instrucao-senha-totem" style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
       '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + instrucaoTitulo + '</div>' +

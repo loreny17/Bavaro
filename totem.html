@@ -535,7 +535,7 @@
 <!-- Tela inicial — cliente toca pra começar -->
 <div class="tela-inicial" id="tela-inicial" onclick="comecarPedido()">
   <div class="ti-logo">&#8203;</div>
-  <div class="ti-sub">&#8203;</div>
+  <div class="ti-sub">Carregando...</div>
   <div class="ti-bater">TOQUE PARA INICIAR</div>
   <div class="ti-instrucao">Faça seu pedido por aqui 👆</div>
   <!-- QR Code pra cliente pedir pelo celular dele -->
@@ -827,9 +827,28 @@ window.addEventListener('load', function(){
       }
     }, 12000);
     window._loadTimeout = _loadTimeout;
-    // Auth anônimo em background (não bloqueia o carregamento)
-    // cardapio_totem já é público (allow read: if true)
-    firebase.auth().signInAnonymously().catch(function(){});
+    // Auth anônimo — quando completar, tenta carregar cardápio principal (requer auth)
+    firebase.auth().signInAnonymously().then(function(){
+      // Se já tem itens do principal no cache, não precisa recarregar
+      if(_itensPrincipal && _itensPrincipal.length) return;
+      var base2 = fbDb.collection('tenants').doc(_tenantId)
+        .collection('restaurantes').doc(_restauranteId);
+      var pp4 = base2.collection('cardapio').doc('data').collection('categorias').get()
+        .then(function(snap){ _catsPrincipal=[]; snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id,fonte:'principal'},d.data())); }); })
+        .catch(function(){});
+      var pp5 = base2.collection('cardapio').doc('data').collection('itens').get()
+        .then(function(snap){ _itensPrincipal=[]; snap.forEach(function(d){ var v=d.data(); if(v.disponivel===false)return; _itensPrincipal.push(Object.assign({id:d.id,fonte:'principal'},v)); }); })
+        .catch(function(){});
+      var pp7 = base2.collection('cardapio').doc('data').collection('grupos_opcoes').get()
+        .then(function(snap){ snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id,fonte:'principal'},d.data())); }); })
+        .catch(function(){});
+      Promise.all([pp4,pp5,pp7]).then(function(){
+        if(_itensPrincipal.length || _catsPrincipal.length){
+          montarCardapio(); // re-renderiza com itens do principal
+          _salvarCacheCardapio();
+        }
+      });
+    }).catch(function(){});
     carregarTudo();
     if(!_modoQR){ gerarQRTelaInicial(); }
   }catch(e){
@@ -925,6 +944,11 @@ function carregarTudo(){
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
+  // Mostra tenant/rest na tela de loading para debug
+  var txt = document.getElementById('carregando-txt');
+  if(txt) txt.innerHTML = 'Carregando cardápio...<br><span style="font-size:0.7rem;color:#666;font-family:monospace;">'+
+    _tenantId.substring(0,20)+'...<br>rest: '+_restauranteId+'</span>';
+
   // Tenta usar cache local para entrada instantânea
   var temCache = _carregarCacheCardapio();
   if(temCache){
@@ -1004,35 +1028,35 @@ function _buscarCardapioFirestore(base){
       });
     }).catch(function(e){ console.warn('itens totem:', e); _totemItens = []; });
 
-  // 4. Categorias do cardápio PRINCIPAL (todas, depois filtra pelas escolhidas)
+  // 4. Categorias do cardápio PRINCIPAL (requer auth — opcional)
   var p4 = base.collection('cardapio').doc('data').collection('categorias').get()
     .then(function(snap){
       _catsPrincipal = [];
       snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('cats principal:', e); _catsPrincipal = []; });
+    }).catch(function(e){ console.warn('cats principal (ignorado):', e.code); _catsPrincipal = []; });
 
-  // 5. Itens do cardápio principal (todos, depois filtra pelas categorias)
+  // 5. Itens do cardápio principal (requer auth — opcional)
   var p5 = base.collection('cardapio').doc('data').collection('itens').get()
     .then(function(snap){
       _itensPrincipal = [];
       snap.forEach(function(d){
         var v = d.data();
-        if(v.disponivel === false) return; // só disponíveis
+        if(v.disponivel === false) return;
         _itensPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, v));
       });
-    }).catch(function(e){ console.warn('itens principal:', e); _itensPrincipal = []; });
+    }).catch(function(e){ console.warn('itens principal (ignorado):', e.code); _itensPrincipal = []; });
 
   // 6. Grupos do TOTEM
   var p6 = base.collection('cardapio_totem').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos totem:', e); });
+    }).catch(function(e){ console.warn('grupos totem:', e.code); });
 
-  // 7. Grupos do PRINCIPAL (pras bebidas e categorias importadas)
+  // 7. Grupos do PRINCIPAL (opcional)
   var p7 = base.collection('cardapio').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos principal:', e); });
+    }).catch(function(e){ console.warn('grupos principal (ignorado):', e.code); });
 
   return Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
     montarCardapio();

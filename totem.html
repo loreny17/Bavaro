@@ -827,30 +827,17 @@ window.addEventListener('load', function(){
       }
     }, 12000);
     window._loadTimeout = _loadTimeout;
-    // Auth anônimo — quando completar, tenta carregar cardápio principal (requer auth)
+    // Auth anônimo PRIMEIRO — o cardápio principal (p4/p5) exige auth nas regras do Firestore.
+    // Só depois de autenticado é que disparamos carregarTudo(), garantindo que todas as
+    // collections sejam acessíveis tanto no totem físico quanto no modo QR (celular do cliente).
     firebase.auth().signInAnonymously().then(function(){
-      // Se já tem itens do principal no cache, não precisa recarregar
-      if(_itensPrincipal && _itensPrincipal.length) return;
-      var base2 = fbDb.collection('tenants').doc(_tenantId)
-        .collection('restaurantes').doc(_restauranteId);
-      var pp4 = base2.collection('cardapio').doc('data').collection('categorias').get()
-        .then(function(snap){ _catsPrincipal=[]; snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id,fonte:'principal'},d.data())); }); })
-        .catch(function(){});
-      var pp5 = base2.collection('cardapio').doc('data').collection('itens').get()
-        .then(function(snap){ _itensPrincipal=[]; snap.forEach(function(d){ var v=d.data(); if(v.disponivel===false)return; _itensPrincipal.push(Object.assign({id:d.id,fonte:'principal'},v)); }); })
-        .catch(function(){});
-      var pp7 = base2.collection('cardapio').doc('data').collection('grupos_opcoes').get()
-        .then(function(snap){ snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id,fonte:'principal'},d.data())); }); })
-        .catch(function(){});
-      Promise.all([pp4,pp5,pp7]).then(function(){
-        if(_itensPrincipal.length || _catsPrincipal.length){
-          montarCardapio(); // re-renderiza com itens do principal
-          _salvarCacheCardapio();
-        }
-      });
-    }).catch(function(){});
-    carregarTudo();
-    if(!_modoQR){ gerarQRTelaInicial(); }
+      carregarTudo();
+      if(!_modoQR){ gerarQRTelaInicial(); }
+    }).catch(function(e){
+      console.warn('[AUTH] signInAnonymously falhou, tentando sem auth:', e);
+      carregarTudo();
+      if(!_modoQR){ gerarQRTelaInicial(); }
+    });
   }catch(e){
     mostrarErro('Erro ao iniciar: ' + e.message);
   }
@@ -956,7 +943,7 @@ function carregarTudo(){
   // Mostra tenant/rest na tela de loading para debug
   var txt = document.getElementById('carregando-txt');
   if(txt) txt.innerHTML = 'Carregando cardápio...<br><span style="font-size:0.7rem;color:#666;font-family:monospace;">'+
-    _tenantId.substring(0,20)+'...<br>rest: '+_restauranteId+'</span>';
+    'tenant: '+_tenantId+'<br>rest: '+_restauranteId+'<br>modoQR: '+_modoQR+'</span>';
 
   // Tenta usar cache local para entrada instantânea
   var temCache = _carregarCacheCardapio();
@@ -967,7 +954,7 @@ function carregarTudo(){
     _buscarCardapioFirestore(base).then(function(){
       _salvarCacheCardapio();
       // Re-renderiza se algo mudou
-      renderCardapio();
+      montarCardapio();
     }).catch(function(e){ console.warn('[TOTEM] Erro ao atualizar cache:', e); });
     return;
   }
@@ -1037,14 +1024,21 @@ function _buscarCardapioFirestore(base){
       });
     }).catch(function(e){ console.warn('itens totem:', e); _totemItens = []; });
 
-  // 4. Categorias do cardápio PRINCIPAL (requer auth — opcional)
+  // 4. Categorias do cardápio PRINCIPAL
   var p4 = base.collection('cardapio').doc('data').collection('categorias').get()
     .then(function(snap){
       _catsPrincipal = [];
       snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('cats principal (ignorado):', e.code); _catsPrincipal = []; });
+    }).catch(function(e){
+      console.warn('cats principal erro:', e.code, e.message);
+      if(_modoQR && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
+        var txt = document.getElementById('carregando-txt');
+        if(txt) txt.innerHTML = '⚠️ Sem permissão no Firestore<br><span style="font-size:0.7rem;font-family:monospace;color:#f87171;">'+e.code+'<br>Verifique as regras do Firestore<br>cardapio/data deve permitir<br>auth anônimo (isAnonymous)</span>';
+      }
+      _catsPrincipal = [];
+    });
 
-  // 5. Itens do cardápio principal (requer auth — opcional)
+  // 5. Itens do cardápio principal
   var p5 = base.collection('cardapio').doc('data').collection('itens').get()
     .then(function(snap){
       _itensPrincipal = [];
@@ -1053,7 +1047,10 @@ function _buscarCardapioFirestore(base){
         if(v.disponivel === false) return;
         _itensPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, v));
       });
-    }).catch(function(e){ console.warn('itens principal (ignorado):', e.code); _itensPrincipal = []; });
+    }).catch(function(e){
+      console.warn('itens principal erro:', e.code, e.message);
+      _itensPrincipal = [];
+    });
 
   // 6. Grupos do TOTEM
   var p6 = base.collection('cardapio_totem').doc('data').collection('grupos_opcoes').get()
@@ -1121,14 +1118,38 @@ function montarCardapio(){
   if(!window._cardapioCats.length){
     if(window._loadTimeout) clearTimeout(window._loadTimeout);
     document.getElementById('carregando').classList.add('escondido');
-    // Mostra erro na tela inicial
-    var tiLogo = document.querySelector('.ti-logo');
-    var tiSub = document.querySelector('.ti-sub');
-    if(tiLogo) tiLogo.textContent = '⚠️';
-    if(tiSub) tiSub.innerHTML =
-      'Nenhum item no cardápio<br>'+
-      '<span style="font-size:0.65rem;color:rgba(255,255,255,0.4);font-family:monospace;">'+
-      _tenantId.substring(0,20)+'...<br>rest: '+_restauranteId+'</span>';
+    var diagMsg =
+      'tenant: '+_tenantId+'\n'+
+      'rest: '+_restauranteId+'\n'+
+      'totemCats: '+_totemCats.length+'\n'+
+      'totemItens: '+_totemItens.length+'\n'+
+      'catsPrincipaisIds: '+JSON.stringify(_catsPrincipaisIds)+'\n'+
+      'catsPrincipal: '+_catsPrincipal.length+'\n'+
+      'itensPrincipal: '+_itensPrincipal.length;
+    console.warn('[TOTEM] Cardápio vazio:\n'+diagMsg);
+    if(_modoQR){
+      // No modo QR, mostra diagnóstico direto na tela de loading (não tem tela inicial)
+      var txt2 = document.getElementById('carregando-txt');
+      if(txt2) txt2.innerHTML =
+        '⚠️ Cardápio vazio<br>'+
+        '<span style="font-size:0.65rem;font-family:monospace;color:#f87171;line-height:1.7;">'+
+        'tenant: '+_tenantId+'<br>'+
+        'rest: <b>'+_restauranteId+'</b><br>'+
+        'cats totem: '+_totemCats.length+' | itens: '+_totemItens.length+'<br>'+
+        'catsPrincipaisIds: '+((_catsPrincipaisIds.length)?_catsPrincipaisIds.join(', '):'(nenhum)')+'<br>'+
+        'cats principal: '+_catsPrincipal.length+' | itens: '+_itensPrincipal.length+
+        '</span><br><br>'+
+        '<button onclick="location.reload()" style="background:#d4a843;color:#000;border:none;border-radius:8px;padding:10px 20px;font-size:0.9rem;font-weight:700;cursor:pointer;">🔄 Tentar novamente</button>';
+      document.getElementById('carregando').classList.remove('escondido');
+    } else {
+      var tiLogo = document.querySelector('.ti-logo');
+      var tiSub = document.querySelector('.ti-sub');
+      if(tiLogo) tiLogo.textContent = '⚠️';
+      if(tiSub) tiSub.innerHTML =
+        'Nenhum item no cardápio<br>'+
+        '<span style="font-size:0.65rem;color:rgba(255,255,255,0.4);font-family:monospace;">'+
+        _tenantId.substring(0,20)+'...<br>rest: '+_restauranteId+'</span>';
+    }
     return;
   }
 

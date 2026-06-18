@@ -553,6 +553,27 @@
   <div class="txt" id="carregando-txt">Carregando cardápio...</div>
 </div>
 
+<!-- DEBUG PANEL — aparece no canto inferior, copia e cola pro desenvolvedor -->
+<div id="debug-panel" style="
+  position:fixed;bottom:0;left:0;right:0;z-index:9999;
+  background:rgba(0,0,0,0.92);border-top:2px solid #d4a843;
+  font-family:monospace;font-size:11px;color:#a3e635;
+  padding:10px 12px;max-height:45vh;overflow-y:auto;
+  display:none;
+">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <span style="color:#d4a843;font-weight:bold;font-size:13px;">🐛 DEBUG TOTEM</span>
+    <button onclick="document.getElementById('debug-panel').style.display='none'"
+      style="background:#333;border:1px solid #555;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ fechar</button>
+  </div>
+  <div id="debug-log" style="white-space:pre-wrap;line-height:1.6;"></div>
+  <button onclick="
+    var t=document.getElementById('debug-log').textContent;
+    if(navigator.clipboard){navigator.clipboard.writeText(t);}
+    this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar tudo',2000);
+  " style="margin-top:8px;background:#d4a843;color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;width:100%;">📋 Copiar tudo</button>
+</div>
+
 <!-- App principal (escondido até cliente tocar) -->
 <div id="app" style="display:none;">
 
@@ -786,6 +807,23 @@ var _cfg = _resolverTenantRest();
 var _tenantId = _cfg.tenant;
 var _restauranteId = _cfg.rest;
 
+// ════════ DEBUG ════════
+// Ativa automaticamente no modo QR ou com ?debug=1
+var _debugAtivo = _modoQR || _params.get('debug') === '1';
+function dbg(msg, cor){
+  if(!_debugAtivo) return;
+  var panel = document.getElementById('debug-panel');
+  var log = document.getElementById('debug-log');
+  if(!panel || !log) return;
+  panel.style.display = 'block';
+  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var line = '['+ts+'] ' + msg;
+  log.textContent += line + '\n';
+  log.scrollTop = log.scrollHeight;
+  console.log('[DBG]', msg);
+}
+// ════════════════════════
+
 // Estado
 var _totemItens = [];        // itens do cardapio_totem
 var _totemCats = [];         // categorias do cardapio_totem
@@ -830,11 +868,14 @@ window.addEventListener('load', function(){
     // Auth anônimo PRIMEIRO — o cardápio principal (p4/p5) exige auth nas regras do Firestore.
     // Só depois de autenticado é que disparamos carregarTudo(), garantindo que todas as
     // collections sejam acessíveis tanto no totem físico quanto no modo QR (celular do cliente).
-    firebase.auth().signInAnonymously().then(function(){
+    dbg('Firebase iniciado. modoQR='+_modoQR+' tenant='+_tenantId+' rest='+_restauranteId);
+    dbg('Aguardando signInAnonymously...');
+    firebase.auth().signInAnonymously().then(function(uc){
+      dbg('AUTH OK — uid='+(uc&&uc.user?uc.user.uid:'?')+' anon='+(uc&&uc.user?uc.user.isAnonymous:'?'));
       carregarTudo();
       if(!_modoQR){ gerarQRTelaInicial(); }
     }).catch(function(e){
-      console.warn('[AUTH] signInAnonymously falhou, tentando sem auth:', e);
+      dbg('AUTH ERRO: '+e.code+' — '+e.message);
       carregarTudo();
       if(!_modoQR){ gerarQRTelaInicial(); }
     });
@@ -937,6 +978,7 @@ function _carregarCacheCardapio(){
 }
 
 function carregarTudo(){
+  dbg('carregarTudo() iniciado');
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
@@ -947,6 +989,7 @@ function carregarTudo(){
 
   // Tenta usar cache local para entrada instantânea
   var temCache = _carregarCacheCardapio();
+  dbg('Cache local: '+(temCache?'SIM':'NÃO'));
   if(temCache){
     console.log('[TOTEM] Cache local válido — exibindo cardápio instantaneamente');
     _finalizarCarregamento();
@@ -971,8 +1014,10 @@ function carregarTudo(){
 
 function _buscarCardapioFirestore(base){
 
+  dbg('Iniciando busca Firestore (p1..p7)...');
   // 1. Config do totem (categorias do principal escolhidas + itens excluídos + modo sem caixa)
   var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
+    dbg('p1 config: exists='+doc.exists+' catsPrincipaisIds='+(doc.exists?(doc.data().categoriasPrincipais||[]).length:'—'));
     if(doc.exists){
       var d = doc.data();
       _catsPrincipaisIds = d.categoriasPrincipais || [];
@@ -1011,7 +1056,8 @@ function _buscarCardapioFirestore(base){
       _totemCats = [];
       snap.forEach(function(d){ _totemCats.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
       _totemCats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
-    }).catch(function(e){ console.warn('cats totem:', e); _totemCats = []; });
+      dbg('p2 cats_totem: '+_totemCats.length+' docs');
+    }).catch(function(e){ dbg('p2 ERRO: '+e.code+' '+e.message); _totemCats = []; });
 
   // 3. Itens do totem (próprios)
   var p3 = base.collection('cardapio_totem').doc('data').collection('itens').get()
@@ -1019,16 +1065,18 @@ function _buscarCardapioFirestore(base){
       _totemItens = [];
       snap.forEach(function(d){
         var v = d.data();
-        if(v.ativo === false) return; // só ativos
+        if(v.ativo === false) return;
         _totemItens.push(Object.assign({id:d.id, fonte:'totem'}, v));
       });
-    }).catch(function(e){ console.warn('itens totem:', e); _totemItens = []; });
+      dbg('p3 itens_totem: '+_totemItens.length+' docs');
+    }).catch(function(e){ dbg('p3 ERRO: '+e.code+' '+e.message); _totemItens = []; });
 
   // 4. Categorias do cardápio PRINCIPAL
   var p4 = base.collection('cardapio').doc('data').collection('categorias').get()
     .then(function(snap){
       _catsPrincipal = [];
       snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
+      dbg('p4 cats_principal: '+_catsPrincipal.length+' docs');
     }).catch(function(e){
       console.warn('cats principal erro:', e.code, e.message);
       if(_modoQR && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
@@ -1047,8 +1095,9 @@ function _buscarCardapioFirestore(base){
         if(v.disponivel === false) return;
         _itensPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, v));
       });
+      dbg('p5 itens_principal: '+_itensPrincipal.length+' docs');
     }).catch(function(e){
-      console.warn('itens principal erro:', e.code, e.message);
+      dbg('p5 ERRO itens_principal: '+e.code+' '+e.message);
       _itensPrincipal = [];
     });
 
@@ -1056,15 +1105,21 @@ function _buscarCardapioFirestore(base){
   var p6 = base.collection('cardapio_totem').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos totem:', e.code); });
+      dbg('p6 grupos_totem: '+snap.size+' docs');
+    }).catch(function(e){ dbg('p6 ERRO: '+e.code); });
 
   // 7. Grupos do PRINCIPAL (opcional)
   var p7 = base.collection('cardapio').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos principal (ignorado):', e.code); });
+      dbg('p7 grupos_principal: '+snap.size+' docs');
+    }).catch(function(e){ dbg('p7 ERRO: '+e.code); });
 
   return Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
+    dbg('Promise.all resolvido! Resumo:');
+    dbg('  totemCats='+_totemCats.length+' totemItens='+_totemItens.length);
+    dbg('  catsPrincipaisIds='+_catsPrincipaisIds.length+' ('+_catsPrincipaisIds.join(',')+')');
+    dbg('  catsPrincipal='+_catsPrincipal.length+' itensPrincipal='+_itensPrincipal.length);
     var txt = document.getElementById('carregando-txt');
     if(txt) txt.innerHTML = 'Processando...<br><span style="font-size:0.65rem;font-family:monospace;color:#888;">'+
       'cats: '+_totemCats.length+' | itens: '+_totemItens.length+'<br>'+
@@ -1097,6 +1152,8 @@ function montarCardapio(){
   // Junta as categorias (próprias do totem primeiro, depois do principal)
   // _totemCats já está ordenado por "ordem", e catsPrincSelecionadas pela ordem escolhida
   window._cardapioCats = _totemCats.concat(catsPrincSelecionadas);
+  dbg('_cardapioCats final: '+window._cardapioCats.length+' cats');
+  dbg('_cardapioItens final: '+(window._cardapioItens||[]).length+' itens (calculado abaixo)');
 
   // Junta os itens — normaliza e ordena pelo campo "ordem" dentro de cada fonte
   var itensTotem = _totemItens.slice().sort(function(a,b){
@@ -1114,6 +1171,7 @@ function montarCardapio(){
     return (a.criadoEm||0) - (b.criadoEm||0);
   });
   window._cardapioItens = itensTotem.concat(itensPrinc);
+  dbg('_cardapioItens: '+window._cardapioItens.length+' total (totem='+itensTotem.length+' princ='+itensPrinc.length+')');
 
   if(!window._cardapioCats.length){
     if(window._loadTimeout) clearTimeout(window._loadTimeout);
@@ -1164,6 +1222,7 @@ function montarCardapio(){
 
   // Em modo QR: pula a tela "TOQUE PARA INICIAR" e abre direto o cardápio
   // (cliente já abriu o link pelo QR, não precisa tocar de novo)
+  dbg('Renderização OK! Abrindo app... modoQR='+_modoQR);
   if(_modoQR){
     var tela = document.getElementById('tela-inicial');
     if(tela){

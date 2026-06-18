@@ -1,5 +1,5 @@
 // Service Worker — Bávaro Totem (Autoatendimento)
-const CACHE = 'bavaro-totem-v1';
+const CACHE = 'bavaro-totem-v20260618';
 const ARQUIVOS = ['/totem.html', '/manifest-totem.json'];
 
 self.addEventListener('install', function(e){

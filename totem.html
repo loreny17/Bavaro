@@ -817,8 +817,16 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
+    // Timeout de segurança — se demorar mais de 15s mostra erro com retry
+    var _loadTimeout = setTimeout(function(){
+      var txt = document.getElementById('carregando-txt');
+      if(txt && txt.textContent.indexOf('Erro') === -1){
+        txt.innerHTML = 'Demorando mais que o esperado...<br><br>'+
+          '<button onclick="location.reload()" style="background:#d4a843;color:#000;border:none;border-radius:8px;padding:12px 24px;font-size:1rem;font-weight:700;cursor:pointer;">🔄 Tentar novamente</button>';
+      }
+    }, 15000);
+    window._loadTimeout = _loadTimeout;
     carregarTudo();
-    // Gera o QR Code da tela inicial (só no modo totem; no modo QR não mostra)
     if(!_modoQR){ gerarQRTelaInicial(); }
   }catch(e){
     mostrarErro('Erro ao iniciar: ' + e.message);
@@ -868,7 +876,7 @@ function mostrarErro(msg){
 
 // Carrega o cardápio (totem próprio + categorias selecionadas do principal)
 // Usa cache local para carregamento instantâneo e atualiza em background
-var _CACHE_KEY = 'totem_cardapio_v2';
+var _CACHE_KEY = 'totem_cardapio_v2_' + _tenantId + '_' + _restauranteId;
 var _CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
 function _salvarCacheCardapio(){
@@ -1082,7 +1090,8 @@ function montarCardapio(){
     return;
   }
 
-  // Esconde o carregando
+  // Esconde o carregando e limpa timeout de segurança
+  if(window._loadTimeout) clearTimeout(window._loadTimeout);
   document.getElementById('carregando').classList.add('escondido');
 
   renderCategorias();

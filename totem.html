@@ -31,7 +31,6 @@
     --colunas:2;
     --foto-ratio:16/10;
     --item-radius:11px;
-    --sug-colunas:3;
   }
   html,body{height:100%;overflow:hidden;}
   body{
@@ -75,64 +74,6 @@
   @keyframes pulse{
     0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(212,168,67,0.4);}
     50%{transform:scale(1.04);box-shadow:0 0 0 20px rgba(212,168,67,0);}
-  }
-
-  /* ═══ TELA "CONFIRMANDO PEDIDO" (itens aparecem um a um, disfarça o loading) ═══ */
-  .tela-confirmando{
-    position:fixed;inset:0;z-index:500;
-    background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    padding:20px;animation:fadeInTela 0.4s ease;
-  }
-  .tc-titulo{
-    font-size:1.3rem;color:var(--muted);margin-bottom:26px;
-    text-align:center;
-  }
-  .tc-lista{
-    display:flex;flex-direction:column;gap:12px;
-    width:100%;max-width:420px;
-  }
-  .tc-item{
-    display:flex;align-items:center;gap:14px;
-    background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:12px 16px;
-    opacity:0;transform:translateY(14px);
-    animation:tcItemEntra 0.45s ease forwards;
-  }
-  .tc-item .tc-check{
-    flex-shrink:0;width:26px;height:26px;border-radius:50%;
-    background:var(--accent);color:#000;
-    display:flex;align-items:center;justify-content:center;
-    font-size:0.85rem;font-weight:900;
-  }
-  .tc-item .tc-qtd{
-    flex-shrink:0;font-family:'Bebas Neue',sans-serif;
-    font-size:1.15rem;color:var(--accent);min-width:26px;text-align:center;
-  }
-  .tc-item .tc-nome{
-    flex:1;font-size:0.98rem;font-weight:700;color:var(--text);
-    line-height:1.25;
-  }
-  @keyframes tcItemEntra{
-    to{opacity:1;transform:translateY(0);}
-  }
-  .tc-rodape{
-    margin-top:30px;font-size:0.86rem;color:var(--muted);
-    display:flex;align-items:center;gap:8px;
-    opacity:0;animation:tcItemEntra 0.45s ease forwards;
-  }
-  .tc-rodape .tc-bolinha{
-    width:7px;height:7px;border-radius:50%;background:var(--accent);
-    animation:tcBolinhaPulsa 1s infinite;
-  }
-  .tc-rodape .tc-bolinha:nth-child(2){animation-delay:0.15s;}
-  .tc-rodape .tc-bolinha:nth-child(3){animation-delay:0.3s;}
-  @keyframes tcBolinhaPulsa{
-    0%,100%{opacity:0.25;transform:scale(0.8);}
-    50%{opacity:1;transform:scale(1.15);}
-  }
-  @keyframes fadeOutTela{
-    to{opacity:0;}
   }
 
   /* ═══ APP PRINCIPAL — LAYOUT COM MENU LATERAL ═══ */
@@ -727,14 +668,6 @@
         <input type="range" id="cfg-radius" min="0" max="24" step="1" oninput="aplicarCfgPreview()">
         <div class="cfg-val"><span id="cfg-radius-val">11</span> px</div>
       </div>
-      <div class="cfg-grupo">
-        <div class="cfg-titulo">Itens por linha (tela "Quer adicionar algo mais?")</div>
-        <div class="cfg-opcoes" id="cfg-sug-colunas-grupo">
-          <button class="cfg-op" data-val="2">2</button>
-          <button class="cfg-op" data-val="3">3</button>
-          <button class="cfg-op" data-val="4">4</button>
-        </div>
-      </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
@@ -934,9 +867,77 @@ function mostrarErro(msg){
 }
 
 // Carrega o cardápio (totem próprio + categorias selecionadas do principal)
+// Usa cache local para carregamento instantâneo e atualiza em background
+var _CACHE_KEY = 'totem_cardapio_v2';
+var _CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
+function _salvarCacheCardapio(){
+  try{
+    var dados = {
+      ts: Date.now(),
+      totemCats: _totemCats,
+      totemItens: _totemItens,
+      catsPrincipaisIds: _catsPrincipaisIds,
+      itensExcluidos: _itensExcluidos,
+      semCaixa: _semCaixa,
+      mostrarQR: _mostrarQR,
+      cardapioItens: window._cardapioItens || [],
+      cardapioCats: window._cardapioCats || [],
+      grupos: window._grupos || []
+    };
+    localStorage.setItem(_CACHE_KEY, JSON.stringify(dados));
+  }catch(e){}
+}
+
+function _carregarCacheCardapio(){
+  try{
+    var raw = localStorage.getItem(_CACHE_KEY);
+    if(!raw) return false;
+    var dados = JSON.parse(raw);
+    if(Date.now() - dados.ts > _CACHE_TTL) return false;
+    // Restaura tudo do cache
+    _totemCats = dados.totemCats || [];
+    _totemItens = dados.totemItens || [];
+    _catsPrincipaisIds = dados.catsPrincipaisIds || [];
+    _itensExcluidos = dados.itensExcluidos || [];
+    _semCaixa = dados.semCaixa === true;
+    _mostrarQR = dados.mostrarQR !== false;
+    window._cardapioItens = dados.cardapioItens || [];
+    window._cardapioCats = dados.cardapioCats || [];
+    window._grupos = dados.grupos || [];
+    return true;
+  }catch(e){ return false; }
+}
+
 function carregarTudo(){
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
+
+  // Tenta usar cache local para entrada instantânea
+  var temCache = _carregarCacheCardapio();
+  if(temCache){
+    console.log('[TOTEM] Cache local válido — exibindo cardápio instantaneamente');
+    _finalizarCarregamento();
+    // Atualiza em background sem bloquear
+    _buscarCardapioFirestore(base).then(function(){
+      _salvarCacheCardapio();
+      // Re-renderiza se algo mudou
+      renderCardapio();
+    }).catch(function(e){ console.warn('[TOTEM] Erro ao atualizar cache:', e); });
+    return;
+  }
+
+  // Sem cache — busca do Firestore normalmente
+  _buscarCardapioFirestore(base).then(function(){
+    _salvarCacheCardapio();
+    _finalizarCarregamento();
+  }).catch(function(e){
+    mostrarErro('Erro ao carregar cardápio. Recarregue a página.');
+    console.error('[TOTEM] Erro fatal:', e);
+  });
+}
+
+function _buscarCardapioFirestore(base){
 
   // 1. Config do totem (categorias do principal escolhidas + itens excluídos + modo sem caixa)
   var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
@@ -1021,9 +1022,13 @@ function carregarTudo(){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
     }).catch(function(e){ console.warn('grupos principal:', e); });
 
-  Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
+  return Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
     montarCardapio();
   });
+}
+
+function _finalizarCarregamento(){
+  montarCardapio();
 }
 
 // Junta tudo e renderiza
@@ -1473,11 +1478,11 @@ function _abrirTelaAdicionais(itemAdicionado){
         : '<div style="width:100%;height:80px;background:rgba(255,255,255,0.04);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:center;font-size:2rem;">'+(it.emoji||'🍽️')+'</div>';
       var btnHtml = sel
         ? '<div style="display:flex;align-items:center;justify-content:space-between;background:#d4a843;border-radius:7px;overflow:hidden;">'+
-            '<button onclick="_sugQtd(\''+it.id+'\',-1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">−</button>'+
-            '<span style="color:#000;font-weight:900;font-size:0.85rem;">'+qtd+'</span>'+
-            '<button onclick="_sugQtd(\''+it.id+'\',1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">+</button>'+
+            '<button onclick=\'_sugQtd(\''+it.id+'\',--1)\' style=\'background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;\'>−</button>'+
+            '<span style=\'color:#000;font-weight:900;font-size:0.85rem;\'>'+qtd+'</span>'+
+            '<button onclick=\'_sugQtd(\''+it.id+'\',1)\' style=\'background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;\'>+</button>'+
           '</div>'
-        : '<button onclick="_sugQtd(\''+it.id+'\',1)" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:6px;font-weight:800;font-size:0.75rem;cursor:pointer;">+ Adicionar</button>';
+        : '<button onclick=\'_sugQtd(\''+it.id+'\',1)\' style=\'width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:6px;font-weight:800;font-size:0.75rem;cursor:pointer;\'>+ Adicionar</button>';
       return '<div style="background:'+(sel?'rgba(212,168,67,0.07)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;transition:all 0.15s;">'+
         foto+
         '<div style="padding:8px;">'+
@@ -1517,10 +1522,7 @@ function _abrirTelaAdicionais(itemAdicionado){
       _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
     });
     tela.remove();
-    // Adiciona o item original (ex: a massa escolhida antes da tela de sugestão)
-    _confirmarAdicionarPendente();
-    atualizarBarra(); renderItens();
-    if(Object.keys(_selecoes).length){ try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
+    if(Object.keys(_selecoes).length){ atualizarBarra(); renderItens(); try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
   };
@@ -1532,7 +1534,7 @@ function _abrirTelaAdicionais(itemAdicionado){
       '</div>'+
       '<div style="font-size:1.3rem;font-weight:900;color:#fff;">Quer adicionar algo mais?</div>'+
     '</div>'+
-    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(var(--sug-colunas, 3),1fr);gap:10px;width:100%;max-width:600px;"></div>'+
+    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:600px;"></div>'+
     '<div style="display:flex;gap:10px;width:100%;max-width:480px;flex-shrink:0;">'+
       '<button onclick="_fecharTelaAdicionais()" style="flex:1;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:12px;padding:14px;font-size:0.9rem;font-weight:700;cursor:pointer;">Não, obrigado</button>'+
       '<button id="sug-btn-confirmar" onclick="_confirmarAdicionaisSugeridos()" style="flex:2;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:12px;padding:14px;font-size:0.9rem;font-weight:900;cursor:pointer;opacity:0.75;">🛒 Ver meu pedido</button>'+
@@ -2174,18 +2176,12 @@ function finalizarPedido(){
   // A transação vai confirmar/corrigir o número depois se necessário
   var senhaOtimista = Math.floor(Math.random() * 900) + 100; // número temporário
 
-  // Guarda os itens do carrinho pra mostrar na tela de confirmação (antes de limpar)
-  var itensParaAnimar = _carrinho.map(function(c){ return { nome: c.nome, qtd: c.qtd }; });
-
-  // Mostra a tela "confirmando pedido" (itens aparecendo um a um) — disfarça o tempo de espera
+  // Mostra tela de sucesso IMEDIATAMENTE (não espera transação)
   _carrinho = [];
   _selecoesTemp = {};
   _qtdTemp = 1;
   atualizarBarra();
-  mostrarTelaConfirmando(itensParaAnimar);
-
-  var _inicioConfirmacao = Date.now();
-  var _TEMPO_MIN_CONFIRMACAO = 1900; // ms — garante que a animação dos itens não pisque rápido demais
+  mostrarTelaSenha('...', total); // mostra com reticências enquanto confirma
 
   // Transação roda em background
   fbDb.runTransaction(function(tx){
@@ -2225,21 +2221,21 @@ function finalizarPedido(){
       return nova;
     });
   }).then(function(senha){
-    // Espera o tempo mínimo de animação terminar antes de trocar pra tela de senha
-    var passou = Date.now() - _inicioConfirmacao;
-    var faltam = Math.max(0, _TEMPO_MIN_CONFIRMACAO - passou);
-    setTimeout(function(){
-      _fecharTelaConfirmando(function(){
-        mostrarTelaSenha(senha, total);
-      });
-    }, faltam);
+    // Atualiza a senha na tela assim que confirmada
+    var senhaEl = document.getElementById('numero-senha-totem');
+    if(senhaEl) senhaEl.textContent = '#' + senha;
+    var instrucaoEl = document.getElementById('instrucao-senha-totem');
+    if(instrucaoEl){
+      var titulo = _semCaixa ? 'Pedido recebido!' : 'Vá ao caixa pagar';
+      var sub = _semCaixa
+        ? 'Quando chamarmos sua senha <b style="color:var(--accent);">#' + senha + '</b>, retire no balcão'
+        : 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
+      instrucaoEl.innerHTML = '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + titulo + '</div><div style="font-size:0.96rem;color:var(--muted);">' + sub + '</div>';
+    }
   }).catch(function(e){
     console.error('[FINALIZAR]', e);
-    _fecharTelaConfirmando(function(){
-      mostrarAvisoTotem('Erro ao confirmar: ' + (e.message||e.code||'tente de novo'));
-      var btnFin = document.querySelector('.btn-finalizar');
-      if(btnFin){ btnFin.disabled = false; btnFin.textContent = 'Finalizar Pedido'; }
-    });
+    // Mostra erro mas não desfaz a tela — só avisa
+    mostrarAvisoTotem('Erro ao confirmar: ' + (e.message||e.code||'tente de novo'));
   });
 }
 
@@ -2247,50 +2243,6 @@ function _dataHoje(){
   var d = new Date();
   var p = function(n){ return n < 10 ? '0' + n : '' + n; };
   return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
-}
-
-// Mostra a tela "confirmando pedido": cada item do carrinho aparece um a um, suavemente,
-// disfarçando o tempo de espera até a senha ficar pronta.
-function mostrarTelaConfirmando(itens){
-  var ex = document.getElementById('tela-confirmando');
-  if(ex) ex.remove();
-
-  var tela = document.createElement('div');
-  tela.id = 'tela-confirmando';
-  tela.className = 'tela-confirmando';
-
-  var ATRASO_ENTRE_ITENS = 380; // ms entre cada item aparecendo
-  var listaHtml = itens.map(function(it, i){
-    var delay = (0.15 + i * (ATRASO_ENTRE_ITENS/1000)).toFixed(2);
-    var qtdHtml = it.qtd > 1 ? '<span class="tc-qtd">' + it.qtd + 'x</span>' : '<span class="tc-check">✓</span>';
-    return '<div class="tc-item" style="animation-delay:' + delay + 's;">' +
-      qtdHtml +
-      '<span class="tc-nome">' + escapar(it.nome) + '</span>' +
-    '</div>';
-  }).join('');
-
-  var delayRodape = (0.15 + itens.length * (ATRASO_ENTRE_ITENS/1000) + 0.2).toFixed(2);
-
-  tela.innerHTML =
-    '<div class="tc-titulo">Confirmando seu pedido</div>' +
-    '<div class="tc-lista">' + listaHtml + '</div>' +
-    '<div class="tc-rodape" style="animation-delay:' + delayRodape + 's;">' +
-      '<span class="tc-bolinha"></span><span class="tc-bolinha"></span><span class="tc-bolinha"></span>' +
-      '<span style="margin-left:4px;">gerando sua senha</span>' +
-    '</div>';
-
-  document.body.appendChild(tela);
-}
-
-// Fecha a tela de confirmação com um fade suave e então executa o callback (ex: mostrar a senha)
-function _fecharTelaConfirmando(callback){
-  var tela = document.getElementById('tela-confirmando');
-  if(!tela){ if(callback) callback(); return; }
-  tela.style.animation = 'fadeOutTela 0.25s ease forwards';
-  setTimeout(function(){
-    tela.remove();
-    if(callback) callback();
-  }, 250);
 }
 
 // Mostra tela cheia com a senha e instruções
@@ -2329,12 +2281,10 @@ function mostrarTelaSenha(senha, total){
     instrucaoSub = 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
   }
 
-  var numeroSenhaHtml = '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>';
-
   tela.innerHTML =
     '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
     '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
-    numeroSenhaHtml +
+    '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
     '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
     '<div id="instrucao-senha-totem" style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
       '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + instrucaoTitulo + '</div>' +
@@ -2430,9 +2380,6 @@ function voltarTelaInicial(){
   // Remove tela de senha se ainda estiver visível
   var ts = document.getElementById('tela-senha');
   if(ts) ts.remove();
-  // Remove tela de confirmação animada se ainda estiver visível
-  var tc = document.getElementById('tela-confirmando');
-  if(tc) tc.remove();
   document.getElementById('tela-inicial').style.display = 'flex';
   setTimeout(function(){
     document.getElementById('tela-inicial').classList.remove('escondida');
@@ -2474,8 +2421,7 @@ var _CFG_PADRAO = {
   lateral: 100,
   colunas: 2,
   fotoRatio: '16/10',
-  radius: 11,
-  sugColunas: 3
+  radius: 11
 };
 
 // Carrega config do localStorage (chamado quando totem inicia)
@@ -2533,7 +2479,6 @@ function aplicarCfg(cfg){
   r.setProperty('--colunas', cfg.colunas);
   r.setProperty('--foto-ratio', cfg.fotoRatio);
   r.setProperty('--item-radius', cfg.radius + 'px');
-  r.setProperty('--sug-colunas', cfg.sugColunas || 3);
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
@@ -2579,15 +2524,6 @@ function abrirConfig(){
       aplicarCfgPreview();
     };
   });
-  // Botões de colunas da tela de sugestão
-  document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(b){
-    b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === (cfg.sugColunas || 3));
-    b.onclick = function(){
-      document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(x){ x.classList.remove('ativo'); });
-      b.classList.add('ativo');
-      aplicarCfgPreview();
-    };
-  });
 
   document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
   document.getElementById('cfg-url').textContent = window.location.pathname;
@@ -2607,13 +2543,11 @@ function _lerCfgDoModal(){
   var rad = parseInt(document.getElementById('cfg-radius').value) || 11;
   var colBtn = document.querySelector('#cfg-colunas-grupo .cfg-op.ativo');
   var fotoBtn = document.querySelector('#cfg-foto-grupo .cfg-op.ativo');
-  var sugColBtn = document.querySelector('#cfg-sug-colunas-grupo .cfg-op.ativo');
   return {
     lateral: lat,
     colunas: colBtn ? parseInt(colBtn.getAttribute('data-val')) : 2,
     fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
-    radius: rad,
-    sugColunas: sugColBtn ? parseInt(sugColBtn.getAttribute('data-val')) : 3
+    radius: rad
   };
 }
 

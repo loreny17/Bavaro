@@ -902,6 +902,15 @@ function mostrarErro(msg){
 var _CACHE_KEY = 'totem_cardapio_v2_' + _tenantId + '_' + _restauranteId;
 var _CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
+// Limpa caches antigos de outros restaurantes
+try{
+  for(var _k in localStorage){
+    if(_k.indexOf('totem_cardapio_v2_') === 0 && _k !== _CACHE_KEY){
+      localStorage.removeItem(_k);
+    }
+  }
+}catch(e){}
+
 function _salvarCacheCardapio(){
   try{
     var dados = {
@@ -1059,6 +1068,11 @@ function _buscarCardapioFirestore(base){
     }).catch(function(e){ console.warn('grupos principal (ignorado):', e.code); });
 
   return Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
+    // Debug — mostra o que foi carregado
+    var txt = document.getElementById('carregando-txt');
+    if(txt) txt.innerHTML = 'Processando...<br><span style="font-size:0.65rem;font-family:monospace;color:#888;">'+
+      'cats: '+_totemCats.length+' | itens: '+_totemItens.length+'<br>'+
+      'rest: '+_restauranteId+'</span>';
     montarCardapio();
   });
 }

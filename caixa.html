@@ -381,6 +381,7 @@ var _somDesbloqueado = false;
 var _cardapioCarregado = false;
 var _cardapioTotem = { itens:[], cats:[], grupos:[] };
 var _cardapioPrincipal = { itens:[], cats:[], grupos:[] };
+var _catsPrincipaisSelecionadas = []; // categorias do principal selecionadas no PDV
 var _editandoPedidoId = null;
 var _editandoItens = []; // cópia local pra editar
 var _pagtoSelecionado = ''; // 'dinheiro'|'pix'|'debito'|'credito'
@@ -808,6 +809,12 @@ function carregarCardapioParaEdicao(){
   promessas.push(base.collection('cardapio').doc('data').collection('grupos_opcoes').get()
     .then(function(s){ var arr = []; s.forEach(function(d){ arr.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); }); _cardapioPrincipal.grupos = arr; }));
 
+  // Config do totem — lê quais categorias do principal foram selecionadas
+  promessas.push(base.collection('cardapio_totem').doc('config').get()
+    .then(function(doc){
+      _catsPrincipaisSelecionadas = doc.exists ? (doc.data().categoriasPrincipais || []) : [];
+    }).catch(function(){ _catsPrincipaisSelecionadas = []; }));
+
   return Promise.all(promessas).then(function(){ _cardapioCarregado = true; });
 }
 
@@ -951,14 +958,31 @@ function abrirSeletorAdicionarItem(){
   var ex = document.getElementById('modal-seletor');
   if(ex) ex.remove();
 
-  var todos = _cardapioTotem.itens;
+  // Itens do totem
+  var itensTotem = _cardapioTotem.itens || [];
+
+  // Itens do principal — filtrados pelas categorias selecionadas no PDV
+  var itensPrincipal = [];
+  if(_catsPrincipaisSelecionadas.length){
+    itensPrincipal = (_cardapioPrincipal.itens || []).filter(function(it){
+      return _catsPrincipaisSelecionadas.indexOf(it.categoriaId || it.categoria) >= 0;
+    });
+  }
+
+  // Mescla os dois
+  var todos = itensTotem.concat(itensPrincipal);
+
   if(!todos.length){
-    mostrarToast('Nenhum item disponível no cardápio do totem', '#f87171');
+    mostrarToast('Nenhum item disponível no cardápio', '#f87171');
     return;
   }
 
+  // Mapa de categorias — totem + principal
   var catsMap = {};
   _cardapioTotem.cats.forEach(function(c){ catsMap[c.id] = c; });
+  _cardapioPrincipal.cats.forEach(function(c){
+    if(_catsPrincipaisSelecionadas.indexOf(c.id) >= 0) catsMap[c.id] = c;
+  });
 
   var porCat = {};
   todos.forEach(function(it){

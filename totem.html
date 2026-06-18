@@ -717,6 +717,7 @@
 
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <!-- QR Code (leve, sem dependências) -->
 <!-- QR Code: tenta cdnjs (já liberado nas regras), com fallback jsdelivr -->
@@ -817,7 +818,7 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    // Timeout de segurança — se demorar mais de 15s mostra erro com retry
+    // Timeout de segurança
     var _loadTimeout = setTimeout(function(){
       var txt = document.getElementById('carregando-txt');
       if(txt && txt.textContent.indexOf('Erro') === -1){
@@ -826,7 +827,13 @@ window.addEventListener('load', function(){
       }
     }, 15000);
     window._loadTimeout = _loadTimeout;
-    carregarTudo();
+    // Login anônimo — necessário para as regras do Firestore permitirem leitura
+    firebase.auth().signInAnonymously().then(function(){
+      carregarTudo();
+    }).catch(function(e){
+      console.warn('[TOTEM] Auth anônimo falhou, tentando sem auth:', e.code);
+      carregarTudo(); // tenta mesmo assim (regras públicas)
+    });
     if(!_modoQR){ gerarQRTelaInicial(); }
   }catch(e){
     mostrarErro('Erro ao iniciar: ' + e.message);

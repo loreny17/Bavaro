@@ -31,7 +31,6 @@
     --colunas:2;
     --foto-ratio:16/10;
     --item-radius:11px;
-    --sug-colunas:3;
   }
   html,body{height:100%;overflow:hidden;}
   body{
@@ -75,64 +74,6 @@
   @keyframes pulse{
     0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(212,168,67,0.4);}
     50%{transform:scale(1.04);box-shadow:0 0 0 20px rgba(212,168,67,0);}
-  }
-
-  /* ═══ TELA "CONFIRMANDO PEDIDO" (itens aparecem um a um, disfarça o loading) ═══ */
-  .tela-confirmando{
-    position:fixed;inset:0;z-index:500;
-    background:linear-gradient(135deg,#0a0a0c 0%,#1a1410 100%);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    padding:20px;animation:fadeInTela 0.4s ease;
-  }
-  .tc-titulo{
-    font-size:1.3rem;color:var(--muted);margin-bottom:26px;
-    text-align:center;
-  }
-  .tc-lista{
-    display:flex;flex-direction:column;gap:12px;
-    width:100%;max-width:420px;
-  }
-  .tc-item{
-    display:flex;align-items:center;gap:14px;
-    background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:12px 16px;
-    opacity:0;transform:translateY(14px);
-    animation:tcItemEntra 0.45s ease forwards;
-  }
-  .tc-item .tc-check{
-    flex-shrink:0;width:26px;height:26px;border-radius:50%;
-    background:var(--accent);color:#000;
-    display:flex;align-items:center;justify-content:center;
-    font-size:0.85rem;font-weight:900;
-  }
-  .tc-item .tc-qtd{
-    flex-shrink:0;font-family:'Bebas Neue',sans-serif;
-    font-size:1.15rem;color:var(--accent);min-width:26px;text-align:center;
-  }
-  .tc-item .tc-nome{
-    flex:1;font-size:0.98rem;font-weight:700;color:var(--text);
-    line-height:1.25;
-  }
-  @keyframes tcItemEntra{
-    to{opacity:1;transform:translateY(0);}
-  }
-  .tc-rodape{
-    margin-top:30px;font-size:0.86rem;color:var(--muted);
-    display:flex;align-items:center;gap:8px;
-    opacity:0;animation:tcItemEntra 0.45s ease forwards;
-  }
-  .tc-rodape .tc-bolinha{
-    width:7px;height:7px;border-radius:50%;background:var(--accent);
-    animation:tcBolinhaPulsa 1s infinite;
-  }
-  .tc-rodape .tc-bolinha:nth-child(2){animation-delay:0.15s;}
-  .tc-rodape .tc-bolinha:nth-child(3){animation-delay:0.3s;}
-  @keyframes tcBolinhaPulsa{
-    0%,100%{opacity:0.25;transform:scale(0.8);}
-    50%{opacity:1;transform:scale(1.15);}
-  }
-  @keyframes fadeOutTela{
-    to{opacity:0;}
   }
 
   /* ═══ APP PRINCIPAL — LAYOUT COM MENU LATERAL ═══ */
@@ -591,10 +532,16 @@
 </head>
 <body>
 
+<!-- MARCA DE TESTE DE DEPLOY — se isso NÃO aparecer, o arquivo no servidor é o antigo -->
+<!-- Toque 3x nesta faixa pra abrir o painel de debug manualmente -->
+<div id="faixa-deploy-debug" onclick="_toqueFaixaDebug()" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff0000;color:#fff;text-align:center;font-weight:900;font-size:16px;padding:8px;font-family:sans-serif;cursor:pointer;">
+  🔴 ARQUIVO NOVO CARREGOU — TESTE-DEBUG-V2 🔴
+</div>
+
 <!-- Tela inicial — cliente toca pra começar -->
 <div class="tela-inicial" id="tela-inicial" onclick="comecarPedido()">
-  <div class="ti-logo">BÁVARO</div>
-  <div class="ti-sub">Restaurante</div>
+  <div class="ti-logo">&#8203;</div>
+  <div class="ti-sub">Carregando...</div>
   <div class="ti-bater">TOQUE PARA INICIAR</div>
   <div class="ti-instrucao">Faça seu pedido por aqui 👆</div>
   <!-- QR Code pra cliente pedir pelo celular dele -->
@@ -612,13 +559,34 @@
   <div class="txt" id="carregando-txt">Carregando cardápio...</div>
 </div>
 
+<!-- DEBUG PANEL — aparece no canto inferior, copia e cola pro desenvolvedor -->
+<div id="debug-panel" style="
+  position:fixed;bottom:0;left:0;right:0;z-index:9999;
+  background:rgba(0,0,0,0.92);border-top:2px solid #d4a843;
+  font-family:monospace;font-size:11px;color:#a3e635;
+  padding:10px 12px;max-height:45vh;overflow-y:auto;
+  display:none;
+">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <span style="color:#d4a843;font-weight:bold;font-size:13px;">🐛 DEBUG TOTEM</span>
+    <button onclick="document.getElementById('debug-panel').style.display='none'"
+      style="background:#333;border:1px solid #555;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ fechar</button>
+  </div>
+  <div id="debug-log" style="white-space:pre-wrap;line-height:1.6;"></div>
+  <button onclick="
+    var t=document.getElementById('debug-log').textContent;
+    if(navigator.clipboard){navigator.clipboard.writeText(t);}
+    this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar tudo',2000);
+  " style="margin-top:8px;background:#d4a843;color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;width:100%;">📋 Copiar tudo</button>
+</div>
+
 <!-- App principal (escondido até cliente tocar) -->
 <div id="app" style="display:none;">
 
   <!-- ── Menu lateral esquerdo ── -->
   <div class="lateral">
     <div class="lateral-topo">
-      <div class="logo" onclick="contarToqueLogo()">BÁVARO</div>
+      <div class="logo" onclick="contarToqueLogo()">&#8203;</div>
       <div class="sub">Faça seu pedido</div>
     </div>
     <div class="lateral-cats" id="cats"></div>
@@ -727,14 +695,6 @@
         <input type="range" id="cfg-radius" min="0" max="24" step="1" oninput="aplicarCfgPreview()">
         <div class="cfg-val"><span id="cfg-radius-val">11</span> px</div>
       </div>
-      <div class="cfg-grupo">
-        <div class="cfg-titulo">Itens por linha (tela "Quer adicionar algo mais?")</div>
-        <div class="cfg-opcoes" id="cfg-sug-colunas-grupo">
-          <button class="cfg-op" data-val="2">2</button>
-          <button class="cfg-op" data-val="3">3</button>
-          <button class="cfg-op" data-val="4">4</button>
-        </div>
-      </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
@@ -784,6 +744,7 @@
 
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <!-- QR Code (leve, sem dependências) -->
 <!-- QR Code: tenta cdnjs (já liberado nas regras), com fallback jsdelivr -->
@@ -852,6 +813,41 @@ var _cfg = _resolverTenantRest();
 var _tenantId = _cfg.tenant;
 var _restauranteId = _cfg.rest;
 
+// ════════ DEBUG ════════
+// Ativa automaticamente no modo QR ou com ?debug=1
+var _debugAtivo = _modoQR || _params.get('debug') === '1';
+function dbg(msg, cor){
+  if(!_debugAtivo) return;
+  var panel = document.getElementById('debug-panel');
+  var log = document.getElementById('debug-log');
+  if(!panel || !log) return;
+  panel.style.display = 'block';
+  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var line = '['+ts+'] ' + msg;
+  log.textContent += line + '\n';
+  log.scrollTop = log.scrollHeight;
+  console.log('[DBG]', msg);
+}
+
+// Toque na faixa vermelha de deploy: 3 toques abre o painel de debug manualmente
+// (útil pra copiar o log sem precisar de ?debug=1 na URL ou estar no modo QR)
+var _toquesFaixaDebug = 0;
+var _ultimoToqueFaixaDebug = 0;
+function _toqueFaixaDebug(){
+  var agora = Date.now();
+  if(agora - _ultimoToqueFaixaDebug > 1500) _toquesFaixaDebug = 0;
+  _ultimoToqueFaixaDebug = agora;
+  _toquesFaixaDebug++;
+  if(_toquesFaixaDebug >= 3){
+    _toquesFaixaDebug = 0;
+    _debugAtivo = true;
+    var panel = document.getElementById('debug-panel');
+    if(panel) panel.style.display = 'block';
+    dbg('🐛 Debug ativado manualmente (3 toques na faixa vermelha)');
+  }
+}
+// ════════════════════════
+
 // Estado
 var _totemItens = [];        // itens do cardapio_totem
 var _totemCats = [];         // categorias do cardapio_totem
@@ -884,9 +880,29 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    carregarTudo();
-    // Gera o QR Code da tela inicial (só no modo totem; no modo QR não mostra)
-    if(!_modoQR){ gerarQRTelaInicial(); }
+    // Timeout de segurança
+    var _loadTimeout = setTimeout(function(){
+      var txt = document.getElementById('carregando-txt');
+      if(txt && txt.textContent.indexOf('Erro') === -1){
+        txt.innerHTML = 'Demorando mais que o esperado...<br><br>'+
+          '<button onclick="location.reload()" style="background:#d4a843;color:#000;border:none;border-radius:8px;padding:12px 24px;font-size:1rem;font-weight:700;cursor:pointer;">🔄 Tentar novamente</button>';
+      }
+    }, 12000);
+    window._loadTimeout = _loadTimeout;
+    // Auth anônimo PRIMEIRO — o cardápio principal (p4/p5) exige auth nas regras do Firestore.
+    // Só depois de autenticado é que disparamos carregarTudo(), garantindo que todas as
+    // collections sejam acessíveis tanto no totem físico quanto no modo QR (celular do cliente).
+    dbg('Firebase iniciado. modoQR='+_modoQR+' tenant='+_tenantId+' rest='+_restauranteId);
+    dbg('Aguardando signInAnonymously...');
+    firebase.auth().signInAnonymously().then(function(uc){
+      dbg('AUTH OK — uid='+(uc&&uc.user?uc.user.uid:'?')+' anon='+(uc&&uc.user?uc.user.isAnonymous:'?'));
+      carregarTudo();
+      if(!_modoQR){ gerarQRTelaInicial(); }
+    }).catch(function(e){
+      dbg('AUTH ERRO: '+e.code+' — '+e.message);
+      carregarTudo();
+      if(!_modoQR){ gerarQRTelaInicial(); }
+    });
   }catch(e){
     mostrarErro('Erro ao iniciar: ' + e.message);
   }
@@ -934,12 +950,98 @@ function mostrarErro(msg){
 }
 
 // Carrega o cardápio (totem próprio + categorias selecionadas do principal)
+// Usa cache local para carregamento instantâneo e atualiza em background
+var _CACHE_KEY = 'totem_cardapio_v2_' + _tenantId + '_' + _restauranteId;
+var _CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
+// Limpa caches antigos de outros restaurantes
+try{
+  for(var _k in localStorage){
+    if(_k.indexOf('totem_cardapio_v2_') === 0 && _k !== _CACHE_KEY){
+      localStorage.removeItem(_k);
+    }
+  }
+}catch(e){}
+
+function _salvarCacheCardapio(){
+  try{
+    var dados = {
+      ts: Date.now(),
+      totemCats: _totemCats,
+      totemItens: _totemItens,
+      catsPrincipaisIds: _catsPrincipaisIds,
+      itensExcluidos: _itensExcluidos,
+      semCaixa: _semCaixa,
+      mostrarQR: _mostrarQR,
+      cardapioItens: window._cardapioItens || [],
+      cardapioCats: window._cardapioCats || [],
+      grupos: window._grupos || []
+    };
+    localStorage.setItem(_CACHE_KEY, JSON.stringify(dados));
+  }catch(e){}
+}
+
+function _carregarCacheCardapio(){
+  try{
+    var raw = localStorage.getItem(_CACHE_KEY);
+    if(!raw) return false;
+    var dados = JSON.parse(raw);
+    if(Date.now() - dados.ts > _CACHE_TTL) return false;
+    // Restaura tudo do cache
+    _totemCats = dados.totemCats || [];
+    _totemItens = dados.totemItens || [];
+    _catsPrincipaisIds = dados.catsPrincipaisIds || [];
+    _itensExcluidos = dados.itensExcluidos || [];
+    _semCaixa = dados.semCaixa === true;
+    _mostrarQR = dados.mostrarQR !== false;
+    window._cardapioItens = dados.cardapioItens || [];
+    window._cardapioCats = dados.cardapioCats || [];
+    window._grupos = dados.grupos || [];
+    return true;
+  }catch(e){ return false; }
+}
+
 function carregarTudo(){
+  dbg('carregarTudo() iniciado');
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
+  // Mostra tenant/rest na tela de loading para debug
+  var txt = document.getElementById('carregando-txt');
+  if(txt) txt.innerHTML = 'Carregando cardápio...<br><span style="font-size:0.7rem;color:#666;font-family:monospace;">'+
+    'tenant: '+_tenantId+'<br>rest: '+_restauranteId+'<br>modoQR: '+_modoQR+'</span>';
+
+  // Tenta usar cache local para entrada instantânea
+  var temCache = _carregarCacheCardapio();
+  dbg('Cache local: '+(temCache?'SIM':'NÃO'));
+  if(temCache){
+    console.log('[TOTEM] Cache local válido — exibindo cardápio instantaneamente');
+    _finalizarCarregamento();
+    // Atualiza em background sem bloquear
+    _buscarCardapioFirestore(base).then(function(){
+      _salvarCacheCardapio();
+      // Re-renderiza se algo mudou
+      montarCardapio();
+    }).catch(function(e){ console.warn('[TOTEM] Erro ao atualizar cache:', e); });
+    return;
+  }
+
+  // Sem cache — busca do Firestore normalmente
+  _buscarCardapioFirestore(base).then(function(){
+    _salvarCacheCardapio();
+    _finalizarCarregamento();
+  }).catch(function(e){
+    mostrarErro('Erro ao carregar cardápio. Recarregue a página.');
+    console.error('[TOTEM] Erro fatal:', e);
+  });
+}
+
+function _buscarCardapioFirestore(base){
+
+  dbg('Iniciando busca Firestore (p1..p7)...');
   // 1. Config do totem (categorias do principal escolhidas + itens excluídos + modo sem caixa)
   var p1 = base.collection('cardapio_totem').doc('config').get().then(function(doc){
+    dbg('p1 config: exists='+doc.exists+' catsPrincipaisIds='+(doc.exists?(doc.data().categoriasPrincipais||[]).length:'—'));
     if(doc.exists){
       var d = doc.data();
       _catsPrincipaisIds = d.categoriasPrincipais || [];
@@ -978,7 +1080,8 @@ function carregarTudo(){
       _totemCats = [];
       snap.forEach(function(d){ _totemCats.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
       _totemCats.sort(function(a,b){ return (a.ordem||0) - (b.ordem||0); });
-    }).catch(function(e){ console.warn('cats totem:', e); _totemCats = []; });
+      dbg('p2 cats_totem: '+_totemCats.length+' docs');
+    }).catch(function(e){ dbg('p2 ERRO: '+e.code+' '+e.message); _totemCats = []; });
 
   // 3. Itens do totem (próprios)
   var p3 = base.collection('cardapio_totem').doc('data').collection('itens').get()
@@ -986,44 +1089,71 @@ function carregarTudo(){
       _totemItens = [];
       snap.forEach(function(d){
         var v = d.data();
-        if(v.ativo === false) return; // só ativos
+        if(v.ativo === false) return;
         _totemItens.push(Object.assign({id:d.id, fonte:'totem'}, v));
       });
-    }).catch(function(e){ console.warn('itens totem:', e); _totemItens = []; });
+      dbg('p3 itens_totem: '+_totemItens.length+' docs');
+    }).catch(function(e){ dbg('p3 ERRO: '+e.code+' '+e.message); _totemItens = []; });
 
-  // 4. Categorias do cardápio PRINCIPAL (todas, depois filtra pelas escolhidas)
+  // 4. Categorias do cardápio PRINCIPAL
   var p4 = base.collection('cardapio').doc('data').collection('categorias').get()
     .then(function(snap){
       _catsPrincipal = [];
       snap.forEach(function(d){ _catsPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('cats principal:', e); _catsPrincipal = []; });
+      dbg('p4 cats_principal: '+_catsPrincipal.length+' docs');
+    }).catch(function(e){
+      console.warn('cats principal erro:', e.code, e.message);
+      if(_modoQR && (e.code === 'permission-denied' || e.code === 'unauthenticated')){
+        var txt = document.getElementById('carregando-txt');
+        if(txt) txt.innerHTML = '⚠️ Sem permissão no Firestore<br><span style="font-size:0.7rem;font-family:monospace;color:#f87171;">'+e.code+'<br>Verifique as regras do Firestore<br>cardapio/data deve permitir<br>auth anônimo (isAnonymous)</span>';
+      }
+      _catsPrincipal = [];
+    });
 
-  // 5. Itens do cardápio principal (todos, depois filtra pelas categorias)
+  // 5. Itens do cardápio principal
   var p5 = base.collection('cardapio').doc('data').collection('itens').get()
     .then(function(snap){
       _itensPrincipal = [];
       snap.forEach(function(d){
         var v = d.data();
-        if(v.disponivel === false) return; // só disponíveis
+        if(v.disponivel === false) return;
         _itensPrincipal.push(Object.assign({id:d.id, fonte:'principal'}, v));
       });
-    }).catch(function(e){ console.warn('itens principal:', e); _itensPrincipal = []; });
+      dbg('p5 itens_principal: '+_itensPrincipal.length+' docs');
+    }).catch(function(e){
+      dbg('p5 ERRO itens_principal: '+e.code+' '+e.message);
+      _itensPrincipal = [];
+    });
 
   // 6. Grupos do TOTEM
   var p6 = base.collection('cardapio_totem').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'totem'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos totem:', e); });
+      dbg('p6 grupos_totem: '+snap.size+' docs');
+    }).catch(function(e){ dbg('p6 ERRO: '+e.code); });
 
-  // 7. Grupos do PRINCIPAL (pras bebidas e categorias importadas)
+  // 7. Grupos do PRINCIPAL (opcional)
   var p7 = base.collection('cardapio').doc('data').collection('grupos_opcoes').get()
     .then(function(snap){
       snap.forEach(function(d){ _grupos.push(Object.assign({id:d.id, fonte:'principal'}, d.data())); });
-    }).catch(function(e){ console.warn('grupos principal:', e); });
+      dbg('p7 grupos_principal: '+snap.size+' docs');
+    }).catch(function(e){ dbg('p7 ERRO: '+e.code); });
 
-  Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
+  return Promise.all([p1, p2, p3, p4, p5, p6, p7]).then(function(){
+    dbg('Promise.all resolvido! Resumo:');
+    dbg('  totemCats='+_totemCats.length+' totemItens='+_totemItens.length);
+    dbg('  catsPrincipaisIds='+_catsPrincipaisIds.length+' ('+_catsPrincipaisIds.join(',')+')');
+    dbg('  catsPrincipal='+_catsPrincipal.length+' itensPrincipal='+_itensPrincipal.length);
+    var txt = document.getElementById('carregando-txt');
+    if(txt) txt.innerHTML = 'Processando...<br><span style="font-size:0.65rem;font-family:monospace;color:#888;">'+
+      'cats: '+_totemCats.length+' | itens: '+_totemItens.length+'<br>'+
+      'rest: '+_restauranteId+'</span>';
     montarCardapio();
   });
+}
+
+function _finalizarCarregamento(){
+  montarCardapio();
 }
 
 // Junta tudo e renderiza
@@ -1046,6 +1176,8 @@ function montarCardapio(){
   // Junta as categorias (próprias do totem primeiro, depois do principal)
   // _totemCats já está ordenado por "ordem", e catsPrincSelecionadas pela ordem escolhida
   window._cardapioCats = _totemCats.concat(catsPrincSelecionadas);
+  dbg('_cardapioCats final: '+window._cardapioCats.length+' cats');
+  dbg('_cardapioItens final: '+(window._cardapioItens||[]).length+' itens (calculado abaixo)');
 
   // Junta os itens — normaliza e ordena pelo campo "ordem" dentro de cada fonte
   var itensTotem = _totemItens.slice().sort(function(a,b){
@@ -1063,21 +1195,48 @@ function montarCardapio(){
     return (a.criadoEm||0) - (b.criadoEm||0);
   });
   window._cardapioItens = itensTotem.concat(itensPrinc);
+  dbg('_cardapioItens: '+window._cardapioItens.length+' total (totem='+itensTotem.length+' princ='+itensPrinc.length+')');
 
   if(!window._cardapioCats.length){
-    // Diagnóstico: mostra tenant + restaurante atuais pra facilitar identificar erro de link
-    document.getElementById('carregando-txt').innerHTML =
-      'Nenhum item no cardápio deste restaurante.<br><br>' +
-      '<div style="font-size:0.8rem;color:var(--muted);margin-top:14px;padding:12px;background:var(--surface);border-radius:8px;text-align:left;font-family:monospace;">' +
-        '<b>Diagnóstico:</b><br>' +
-        'Tenant: ' + _tenantId.substring(0, 24) + '...<br>' +
-        'Restaurante: ' + _restauranteId + '<br><br>' +
-        '<span style="color:#f7a34f;">Se você acabou de cadastrar itens em outro lugar, confirme se o link está correto. Pegue o link novo no PDV → Cardápio do Totem.</span>' +
-      '</div>';
+    if(window._loadTimeout) clearTimeout(window._loadTimeout);
+    document.getElementById('carregando').classList.add('escondido');
+    var diagMsg =
+      'tenant: '+_tenantId+'\n'+
+      'rest: '+_restauranteId+'\n'+
+      'totemCats: '+_totemCats.length+'\n'+
+      'totemItens: '+_totemItens.length+'\n'+
+      'catsPrincipaisIds: '+JSON.stringify(_catsPrincipaisIds)+'\n'+
+      'catsPrincipal: '+_catsPrincipal.length+'\n'+
+      'itensPrincipal: '+_itensPrincipal.length;
+    console.warn('[TOTEM] Cardápio vazio:\n'+diagMsg);
+    if(_modoQR){
+      // No modo QR, mostra diagnóstico direto na tela de loading (não tem tela inicial)
+      var txt2 = document.getElementById('carregando-txt');
+      if(txt2) txt2.innerHTML =
+        '⚠️ Cardápio vazio<br>'+
+        '<span style="font-size:0.65rem;font-family:monospace;color:#f87171;line-height:1.7;">'+
+        'tenant: '+_tenantId+'<br>'+
+        'rest: <b>'+_restauranteId+'</b><br>'+
+        'cats totem: '+_totemCats.length+' | itens: '+_totemItens.length+'<br>'+
+        'catsPrincipaisIds: '+((_catsPrincipaisIds.length)?_catsPrincipaisIds.join(', '):'(nenhum)')+'<br>'+
+        'cats principal: '+_catsPrincipal.length+' | itens: '+_itensPrincipal.length+
+        '</span><br><br>'+
+        '<button onclick="location.reload()" style="background:#d4a843;color:#000;border:none;border-radius:8px;padding:10px 20px;font-size:0.9rem;font-weight:700;cursor:pointer;">🔄 Tentar novamente</button>';
+      document.getElementById('carregando').classList.remove('escondido');
+    } else {
+      var tiLogo = document.querySelector('.ti-logo');
+      var tiSub = document.querySelector('.ti-sub');
+      if(tiLogo) tiLogo.textContent = '⚠️';
+      if(tiSub) tiSub.innerHTML =
+        'Nenhum item no cardápio<br>'+
+        '<span style="font-size:0.65rem;color:rgba(255,255,255,0.4);font-family:monospace;">'+
+        _tenantId.substring(0,20)+'...<br>rest: '+_restauranteId+'</span>';
+    }
     return;
   }
 
-  // Esconde o carregando
+  // Esconde o carregando e limpa timeout de segurança
+  if(window._loadTimeout) clearTimeout(window._loadTimeout);
   document.getElementById('carregando').classList.add('escondido');
 
   renderCategorias();
@@ -1087,6 +1246,7 @@ function montarCardapio(){
 
   // Em modo QR: pula a tela "TOQUE PARA INICIAR" e abre direto o cardápio
   // (cliente já abriu o link pelo QR, não precisa tocar de novo)
+  dbg('Renderização OK! Abrindo app... modoQR='+_modoQR);
   if(_modoQR){
     var tela = document.getElementById('tela-inicial');
     if(tela){
@@ -1442,89 +1602,94 @@ function _confirmarAdicionarPendente(){
 }
 
 // ─── TELA DE ADICIONAIS SUGERIDOS (estilo McDonald's) ───
+// Seleções globais da tela de adicionais
+var _sugSelecoes = {};
+var _sugItens = [];
+var _sugAutoClose = null;
+
+function _sugQtd(itemId, delta){
+  _sugSelecoes[itemId] = Math.max(0, (_sugSelecoes[itemId]||0) + parseInt(delta));
+  if(!_sugSelecoes[itemId]) delete _sugSelecoes[itemId];
+  try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
+  _sugRenderGrid();
+}
+
+function _sugRenderGrid(){
+  var grid = document.getElementById('sug-grid');
+  if(!grid) return;
+  grid.innerHTML = _sugItens.map(function(it){
+    var qtd = _sugSelecoes[it.id] || 0;
+    var sel = qtd > 0;
+    var preco = 'R$ '+(it.preco||0).toFixed(2).replace('.',',');
+    var foto = it.foto
+      ? '<img src="'+it.foto+'" style="width:100%;height:80px;object-fit:cover;border-radius:10px 10px 0 0;" loading="lazy">'
+      : '<div style="width:100%;height:80px;background:rgba(255,255,255,0.04);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:center;font-size:2rem;">'+(it.emoji||'🍽️')+'</div>';
+    var btnHtml = sel
+      ? '<div style="display:flex;align-items:center;justify-content:space-between;background:#d4a843;border-radius:7px;overflow:hidden;">'+
+          '<button data-id="'+it.id+'" data-d="-1" style="background:none;border:none;color:#000;font-size:1.2rem;font-weight:900;padding:6px 12px;cursor:pointer;line-height:1;">−</button>'+
+          '<span style="color:#000;font-weight:900;font-size:0.88rem;pointer-events:none;">'+qtd+'</span>'+
+          '<button data-id="'+it.id+'" data-d="1" style="background:none;border:none;color:#000;font-size:1.2rem;font-weight:900;padding:6px 12px;cursor:pointer;line-height:1;">+</button>'+
+        '</div>'
+      : '<button data-id="'+it.id+'" data-d="1" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:8px;font-weight:800;font-size:0.8rem;cursor:pointer;">+ Adicionar</button>';
+    return '<div style="background:'+(sel?'rgba(212,168,67,0.07)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;transition:all 0.15s;">'+
+      foto+
+      '<div style="padding:8px;">'+
+        '<div style="font-size:0.78rem;font-weight:800;color:#fff;line-height:1.2;margin-bottom:2px;">'+it.nome+'</div>'+
+        '<div style="font-size:0.78rem;color:#d4a843;font-weight:700;margin-bottom:6px;">'+preco+'</div>'+
+        btnHtml+
+      '</div>'+
+    '</div>';
+  }).join('');
+  grid.onclick = function(e){
+    var btn = e.target.closest('[data-id]');
+    if(!btn) return;
+    _sugQtd(btn.getAttribute('data-id'), btn.getAttribute('data-d'));
+  };
+  var qtdTotal = Object.keys(_sugSelecoes).reduce(function(a,k){ return a+(_sugSelecoes[k]||0); },0);
+  var totalVal = Object.keys(_sugSelecoes).reduce(function(acc,id){
+    var it = _sugItens.find(function(x){ return x.id===id; });
+    return acc+(it?(it.preco||0)*(_sugSelecoes[id]||0):0);
+  },0);
+  var btnConf = document.getElementById('sug-btn-confirmar');
+  if(btnConf){
+    btnConf.textContent = qtdTotal>0 ? '✓ Adicionar ('+qtdTotal+') · R$ '+totalVal.toFixed(2).replace('.',',') : '🛒 Ver meu pedido';
+    btnConf.style.opacity = qtdTotal>0 ? '1' : '0.75';
+  }
+}
+
+function _confirmarAdicionaisSugeridos(){
+  clearTimeout(_sugAutoClose);
+  var tela = document.getElementById('tela-adicionais');
+  if(tela) tela.remove();
+  // Confirma o item principal (massa, prato, etc) que estava pendente
+  _confirmarAdicionarPendente();
+  // Adiciona os adicionais selecionados
+  Object.keys(_sugSelecoes).forEach(function(itemId){
+    var qtd = _sugSelecoes[itemId]; if(!qtd) return;
+    var it = _sugItens.find(function(x){ return x.id===itemId; });
+    if(!it) return;
+    _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
+  });
+  if(Object.keys(_sugSelecoes).length){ atualizarBarra(); renderItens(); try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
+  _sugSelecoes = {};
+  _sugItens = [];
+  resetTimerInatividade();
+  if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
+}
+
 function _abrirTelaAdicionais(itemAdicionado){
-  var todosItens = (window._cardapioItens || []).filter(function(i){
+  _sugItens = (window._cardapioItens || []).filter(function(i){
     return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itemAdicionado.id;
   }).sort(function(a,b){ return (a.ordemSugerido||99)-(b.ordemSugerido||99); });
-
-  if(!todosItens.length) return;
-
+  if(!_sugItens.length) return;
+  _sugSelecoes = {};
+  clearTimeout(_sugAutoClose);
   var ex = document.getElementById('tela-adicionais');
   if(ex) ex.remove();
-
-  var _selecoes = {};
-
   var el = document.createElement('div');
   el.id = 'tela-adicionais';
   el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.97);z-index:8000;display:flex;flex-direction:column;align-items:center;padding:24px 16px 20px;gap:16px;animation:fadeIn 0.2s ease;overflow-y:auto;';
-
-  var autoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 25000);
-  el._autoClose = autoClose;
-
-  function renderGrid(){
-    var grid = document.getElementById('sug-grid');
-    if(!grid) return;
-    grid.innerHTML = todosItens.map(function(it){
-      var qtd = _selecoes[it.id] || 0;
-      var sel = qtd > 0;
-      var preco = 'R$ '+(it.preco||0).toFixed(2).replace('.',',');
-      var foto = it.foto
-        ? '<img src="'+it.foto+'" style="width:100%;height:80px;object-fit:cover;border-radius:10px 10px 0 0;" loading="lazy">'
-        : '<div style="width:100%;height:80px;background:rgba(255,255,255,0.04);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:center;font-size:2rem;">'+(it.emoji||'🍽️')+'</div>';
-      var btnHtml = sel
-        ? '<div style="display:flex;align-items:center;justify-content:space-between;background:#d4a843;border-radius:7px;overflow:hidden;">'+
-            '<button onclick="_sugQtd(\''+it.id+'\',-1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">−</button>'+
-            '<span style="color:#000;font-weight:900;font-size:0.85rem;">'+qtd+'</span>'+
-            '<button onclick="_sugQtd(\''+it.id+'\',1)" style="background:none;border:none;color:#000;font-size:1.1rem;font-weight:900;padding:5px 9px;cursor:pointer;">+</button>'+
-          '</div>'
-        : '<button onclick="_sugQtd(\''+it.id+'\',1)" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:6px;font-weight:800;font-size:0.75rem;cursor:pointer;">+ Adicionar</button>';
-      return '<div style="background:'+(sel?'rgba(212,168,67,0.07)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;transition:all 0.15s;">'+
-        foto+
-        '<div style="padding:8px;">'+
-          '<div style="font-size:0.75rem;font-weight:800;color:#fff;line-height:1.2;margin-bottom:2px;">'+it.nome+'</div>'+
-          '<div style="font-size:0.75rem;color:#d4a843;font-weight:700;margin-bottom:6px;">'+preco+'</div>'+
-          btnHtml+
-        '</div>'+
-      '</div>';
-    }).join('');
-    var qtdTotal = Object.keys(_selecoes).reduce(function(a,k){ return a+(_selecoes[k]||0); },0);
-    var totalVal = Object.keys(_selecoes).reduce(function(acc,id){
-      var it = todosItens.find(function(x){ return x.id===id; });
-      return acc+(it?(it.preco||0)*(_selecoes[id]||0):0);
-    },0);
-    var btnConf = document.getElementById('sug-btn-confirmar');
-    if(btnConf){
-      btnConf.textContent = qtdTotal>0 ? '✓ Adicionar ('+qtdTotal+') · R$ '+totalVal.toFixed(2).replace('.',',') : '🛒 Ver meu pedido';
-      btnConf.style.opacity = qtdTotal>0 ? '1' : '0.75';
-    }
-  }
-
-  window._sugQtd = function(itemId, delta){
-    _selecoes[itemId] = Math.max(0, (_selecoes[itemId]||0)+delta);
-    if(!_selecoes[itemId]) delete _selecoes[itemId];
-    try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
-    renderGrid();
-  };
-
-  window._confirmarAdicionaisSugeridos = function(){
-    var tela = document.getElementById('tela-adicionais');
-    if(!tela) return;
-    clearTimeout(tela._autoClose);
-    Object.keys(_selecoes).forEach(function(itemId){
-      var qtd = _selecoes[itemId]; if(!qtd) return;
-      var it = todosItens.find(function(x){ return x.id===itemId; });
-      if(!it) return;
-      _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
-    });
-    tela.remove();
-    // Adiciona o item original (ex: a massa escolhida antes da tela de sugestão)
-    _confirmarAdicionarPendente();
-    atualizarBarra(); renderItens();
-    if(Object.keys(_selecoes).length){ try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
-    resetTimerInatividade();
-    if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
-  };
-
+  _sugAutoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 25000);
   el.innerHTML =
     '<div style="text-align:center;flex-shrink:0;">'+
       '<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:50px;padding:7px 16px;margin-bottom:10px;">'+
@@ -1532,7 +1697,7 @@ function _abrirTelaAdicionais(itemAdicionado){
       '</div>'+
       '<div style="font-size:1.3rem;font-weight:900;color:#fff;">Quer adicionar algo mais?</div>'+
     '</div>'+
-    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(var(--sug-colunas, 3),1fr);gap:10px;width:100%;max-width:600px;"></div>'+
+    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:600px;"></div>'+
     '<div style="display:flex;gap:10px;width:100%;max-width:480px;flex-shrink:0;">'+
       '<button onclick="_fecharTelaAdicionais()" style="flex:1;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:12px;padding:14px;font-size:0.9rem;font-weight:700;cursor:pointer;">Não, obrigado</button>'+
       '<button id="sug-btn-confirmar" onclick="_confirmarAdicionaisSugeridos()" style="flex:2;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:12px;padding:14px;font-size:0.9rem;font-weight:900;cursor:pointer;opacity:0.75;">🛒 Ver meu pedido</button>'+
@@ -1540,17 +1705,12 @@ function _abrirTelaAdicionais(itemAdicionado){
     '<div style="width:100%;max-width:480px;height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;flex-shrink:0;">'+
       '<div id="adicionais-timer-fill" style="height:100%;background:#d4a843;width:100%;transition:width 25s linear;border-radius:2px;"></div>'+
     '</div>';
-
-  el._selecoes = _selecoes;
-  el._todosItens = todosItens;
   document.body.appendChild(el);
-  renderGrid();
-
+  _sugRenderGrid();
   requestAnimationFrame(function(){ requestAnimationFrame(function(){
     var f=document.getElementById('adicionais-timer-fill'); if(f) f.style.width='0%';
   }); });
 }
-
 
 function _fecharTelaAdicionais(){
   var el = document.getElementById('tela-adicionais');
@@ -2174,18 +2334,12 @@ function finalizarPedido(){
   // A transação vai confirmar/corrigir o número depois se necessário
   var senhaOtimista = Math.floor(Math.random() * 900) + 100; // número temporário
 
-  // Guarda os itens do carrinho pra mostrar na tela de confirmação (antes de limpar)
-  var itensParaAnimar = _carrinho.map(function(c){ return { nome: c.nome, qtd: c.qtd }; });
-
-  // Mostra a tela "confirmando pedido" (itens aparecendo um a um) — disfarça o tempo de espera
+  // Mostra tela de sucesso IMEDIATAMENTE (não espera transação)
   _carrinho = [];
   _selecoesTemp = {};
   _qtdTemp = 1;
   atualizarBarra();
-  mostrarTelaConfirmando(itensParaAnimar);
-
-  var _inicioConfirmacao = Date.now();
-  var _TEMPO_MIN_CONFIRMACAO = 1900; // ms — garante que a animação dos itens não pisque rápido demais
+  mostrarTelaSenha('...', total); // mostra com reticências enquanto confirma
 
   // Transação roda em background
   fbDb.runTransaction(function(tx){
@@ -2225,21 +2379,21 @@ function finalizarPedido(){
       return nova;
     });
   }).then(function(senha){
-    // Espera o tempo mínimo de animação terminar antes de trocar pra tela de senha
-    var passou = Date.now() - _inicioConfirmacao;
-    var faltam = Math.max(0, _TEMPO_MIN_CONFIRMACAO - passou);
-    setTimeout(function(){
-      _fecharTelaConfirmando(function(){
-        mostrarTelaSenha(senha, total);
-      });
-    }, faltam);
+    // Atualiza a senha na tela assim que confirmada
+    var senhaEl = document.getElementById('numero-senha-totem');
+    if(senhaEl) senhaEl.textContent = '#' + senha;
+    var instrucaoEl = document.getElementById('instrucao-senha-totem');
+    if(instrucaoEl){
+      var titulo = _semCaixa ? 'Pedido recebido!' : 'Vá ao caixa pagar';
+      var sub = _semCaixa
+        ? 'Quando chamarmos sua senha <b style="color:var(--accent);">#' + senha + '</b>, retire no balcão'
+        : 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
+      instrucaoEl.innerHTML = '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + titulo + '</div><div style="font-size:0.96rem;color:var(--muted);">' + sub + '</div>';
+    }
   }).catch(function(e){
     console.error('[FINALIZAR]', e);
-    _fecharTelaConfirmando(function(){
-      mostrarAvisoTotem('Erro ao confirmar: ' + (e.message||e.code||'tente de novo'));
-      var btnFin = document.querySelector('.btn-finalizar');
-      if(btnFin){ btnFin.disabled = false; btnFin.textContent = 'Finalizar Pedido'; }
-    });
+    // Mostra erro mas não desfaz a tela — só avisa
+    mostrarAvisoTotem('Erro ao confirmar: ' + (e.message||e.code||'tente de novo'));
   });
 }
 
@@ -2247,50 +2401,6 @@ function _dataHoje(){
   var d = new Date();
   var p = function(n){ return n < 10 ? '0' + n : '' + n; };
   return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
-}
-
-// Mostra a tela "confirmando pedido": cada item do carrinho aparece um a um, suavemente,
-// disfarçando o tempo de espera até a senha ficar pronta.
-function mostrarTelaConfirmando(itens){
-  var ex = document.getElementById('tela-confirmando');
-  if(ex) ex.remove();
-
-  var tela = document.createElement('div');
-  tela.id = 'tela-confirmando';
-  tela.className = 'tela-confirmando';
-
-  var ATRASO_ENTRE_ITENS = 380; // ms entre cada item aparecendo
-  var listaHtml = itens.map(function(it, i){
-    var delay = (0.15 + i * (ATRASO_ENTRE_ITENS/1000)).toFixed(2);
-    var qtdHtml = it.qtd > 1 ? '<span class="tc-qtd">' + it.qtd + 'x</span>' : '<span class="tc-check">✓</span>';
-    return '<div class="tc-item" style="animation-delay:' + delay + 's;">' +
-      qtdHtml +
-      '<span class="tc-nome">' + escapar(it.nome) + '</span>' +
-    '</div>';
-  }).join('');
-
-  var delayRodape = (0.15 + itens.length * (ATRASO_ENTRE_ITENS/1000) + 0.2).toFixed(2);
-
-  tela.innerHTML =
-    '<div class="tc-titulo">Confirmando seu pedido</div>' +
-    '<div class="tc-lista">' + listaHtml + '</div>' +
-    '<div class="tc-rodape" style="animation-delay:' + delayRodape + 's;">' +
-      '<span class="tc-bolinha"></span><span class="tc-bolinha"></span><span class="tc-bolinha"></span>' +
-      '<span style="margin-left:4px;">gerando sua senha</span>' +
-    '</div>';
-
-  document.body.appendChild(tela);
-}
-
-// Fecha a tela de confirmação com um fade suave e então executa o callback (ex: mostrar a senha)
-function _fecharTelaConfirmando(callback){
-  var tela = document.getElementById('tela-confirmando');
-  if(!tela){ if(callback) callback(); return; }
-  tela.style.animation = 'fadeOutTela 0.25s ease forwards';
-  setTimeout(function(){
-    tela.remove();
-    if(callback) callback();
-  }, 250);
 }
 
 // Mostra tela cheia com a senha e instruções
@@ -2329,12 +2439,10 @@ function mostrarTelaSenha(senha, total){
     instrucaoSub = 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
   }
 
-  var numeroSenhaHtml = '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>';
-
   tela.innerHTML =
     '<div style="font-size:1.4rem;color:var(--muted);margin-bottom:18px;">Pedido enviado!</div>' +
     '<div style="font-size:1.05rem;color:var(--text);margin-bottom:12px;">Sua senha é</div>' +
-    numeroSenhaHtml +
+    '<div id="numero-senha-totem" style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (_modoQR ? '8rem' : '11rem') + ';color:var(--accent);line-height:1;letter-spacing:0.04em;text-shadow:0 4px 40px rgba(212,168,67,0.4);">#' + senha + '</div>' +
     '<div style="font-size:1.3rem;color:var(--accent);font-weight:700;margin-top:24px;margin-bottom:32px;">Total: R$ ' + totalTxt + '</div>' +
     '<div id="instrucao-senha-totem" style="background:var(--surface);border:2px solid var(--accent);border-radius:18px;padding:22px 28px;text-align:center;max-width:520px;">' +
       '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + instrucaoTitulo + '</div>' +
@@ -2430,9 +2538,6 @@ function voltarTelaInicial(){
   // Remove tela de senha se ainda estiver visível
   var ts = document.getElementById('tela-senha');
   if(ts) ts.remove();
-  // Remove tela de confirmação animada se ainda estiver visível
-  var tc = document.getElementById('tela-confirmando');
-  if(tc) tc.remove();
   document.getElementById('tela-inicial').style.display = 'flex';
   setTimeout(function(){
     document.getElementById('tela-inicial').classList.remove('escondida');
@@ -2466,7 +2571,7 @@ document.addEventListener('click', resetTimerInatividade);
 // ════════════════════════════════════════════════════════════════
 //  ⚙️ PAINEL DE CONFIGURAÇÃO DE LAYOUT (5 toques no BÁVARO)
 // ════════════════════════════════════════════════════════════════
-var _VERSAO_TOTEM = '2026-05-29-01:30 (config-layout)';
+var _VERSAO_TOTEM = 'TESTE-DEBUG-V2 (verifique se isso aparece)';
 var _toquesLogo = 0;
 var _ultimoToqueLogo = 0;
 var _CFG_KEY = 'totem_layout_cfg';
@@ -2474,8 +2579,7 @@ var _CFG_PADRAO = {
   lateral: 100,
   colunas: 2,
   fotoRatio: '16/10',
-  radius: 11,
-  sugColunas: 3
+  radius: 11
 };
 
 // Carrega config do localStorage (chamado quando totem inicia)
@@ -2533,7 +2637,6 @@ function aplicarCfg(cfg){
   r.setProperty('--colunas', cfg.colunas);
   r.setProperty('--foto-ratio', cfg.fotoRatio);
   r.setProperty('--item-radius', cfg.radius + 'px');
-  r.setProperty('--sug-colunas', cfg.sugColunas || 3);
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
@@ -2579,15 +2682,6 @@ function abrirConfig(){
       aplicarCfgPreview();
     };
   });
-  // Botões de colunas da tela de sugestão
-  document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(b){
-    b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === (cfg.sugColunas || 3));
-    b.onclick = function(){
-      document.querySelectorAll('#cfg-sug-colunas-grupo .cfg-op').forEach(function(x){ x.classList.remove('ativo'); });
-      b.classList.add('ativo');
-      aplicarCfgPreview();
-    };
-  });
 
   document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
   document.getElementById('cfg-url').textContent = window.location.pathname;
@@ -2607,13 +2701,11 @@ function _lerCfgDoModal(){
   var rad = parseInt(document.getElementById('cfg-radius').value) || 11;
   var colBtn = document.querySelector('#cfg-colunas-grupo .cfg-op.ativo');
   var fotoBtn = document.querySelector('#cfg-foto-grupo .cfg-op.ativo');
-  var sugColBtn = document.querySelector('#cfg-sug-colunas-grupo .cfg-op.ativo');
   return {
     lateral: lat,
     colunas: colBtn ? parseInt(colBtn.getAttribute('data-val')) : 2,
     fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
-    radius: rad,
-    sugColunas: sugColBtn ? parseInt(sugColBtn.getAttribute('data-val')) : 3
+    radius: rad
   };
 }
 

@@ -908,6 +908,18 @@ var _qtdTemp = 1;
 // ─── Inicialização ───
 window.addEventListener('load', function(){
   dbg('Evento "load" disparado. typeof firebase=' + typeof firebase + ' typeof QRCode=' + typeof QRCode);
+  // Inicializa o Firebase ANTES de qualquer outra coisa — carregarCfgLayout() pode
+  // precisar do fbDb imediatamente no modo QR (bug antigo: ela rodava antes do fbDb
+  // existir e travava o resto da inicialização com "Cannot read properties of null").
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.firestore();
+    dbg('Firebase.initializeApp + firestore() OK.');
+  }catch(e){
+    dbg('💥 ERRO FATAL ao iniciar Firebase: ' + e.message);
+    mostrarErro('Erro ao iniciar: ' + e.message);
+    return;
+  }
   carregarCfgLayout();
   // Registra o service worker (PWA)
   if('serviceWorker' in navigator){
@@ -916,8 +928,6 @@ window.addEventListener('load', function(){
     });
   }
   try{
-    firebase.initializeApp(firebaseConfig);
-    fbDb = firebase.firestore();
     // Timeout de segurança
     var _loadTimeout = setTimeout(function(){
       dbg('⏱️ TIMEOUT 12s — carregamento demorou demais (provável travamento no auth/Firestore)');
@@ -2637,9 +2647,9 @@ function carregarCfgLayout(){
   // (assim a tela já aparece com algo enquanto carrega; se o Firestore tiver, atualiza)
   if(_modoQR){
     aplicarCfg(_CFG_PADRAO);
-    // Busca layout publicado pelo dono — assim que tiver _tenantId e _restauranteId
+    // Busca layout publicado pelo dono — assim que tiver _tenantId, _restauranteId E fbDb
     var tentarBuscar = function(){
-      if(!_tenantId || !_restauranteId){
+      if(!_tenantId || !_restauranteId || !fbDb){
         setTimeout(tentarBuscar, 300);
         return;
       }
@@ -2650,12 +2660,12 @@ function carregarCfgLayout(){
           if(doc.exists){
             var d = doc.data();
             if(d.layoutQR){
-              console.log('[TOTEM-QR] Aplicando layout publicado:', d.layoutQR);
+              dbg('[TOTEM-QR] Aplicando layout publicado: ' + JSON.stringify(d.layoutQR));
               aplicarCfg(d.layoutQR);
             }
           }
         })
-        .catch(function(e){ console.warn('[TOTEM-QR] erro buscar layout:', e); });
+        .catch(function(e){ dbg('[TOTEM-QR] erro buscar layout: ' + e.message); });
     };
     tentarBuscar();
     return;

@@ -816,21 +816,29 @@ var _restauranteId = _cfg.rest;
 // ════════ DEBUG ════════
 // Ativa automaticamente no modo QR ou com ?debug=1
 var _debugAtivo = _modoQR || _params.get('debug') === '1';
+// Buffer SEMPRE grava tudo, mesmo com o painel desativado/escondido —
+// assim, quando o painel for aberto depois (ex: 3 toques na faixa vermelha),
+// dá pra ver o histórico completo desde o carregamento da página, não só o que
+// aconteceu depois de abrir o painel.
+var _debugBuffer = [];
 function dbg(msg, cor){
+  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var line = '['+ts+'] ' + msg;
+  _debugBuffer.push(line);
+  console.log('[DBG]', msg);
   if(!_debugAtivo) return;
   var panel = document.getElementById('debug-panel');
   var log = document.getElementById('debug-log');
   if(!panel || !log) return;
   panel.style.display = 'block';
-  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  var line = '['+ts+'] ' + msg;
   log.textContent += line + '\n';
   log.scrollTop = log.scrollHeight;
-  console.log('[DBG]', msg);
 }
 
 // Toque na faixa vermelha de deploy: 3 toques abre o painel de debug manualmente
-// (útil pra copiar o log sem precisar de ?debug=1 na URL ou estar no modo QR)
+// (útil pra copiar o log sem precisar de ?debug=1 na URL ou estar no modo QR).
+// Ao abrir, despeja todo o _debugBuffer acumulado desde o carregamento da página,
+// não só as mensagens futuras.
 var _toquesFaixaDebug = 0;
 var _ultimoToqueFaixaDebug = 0;
 function _toqueFaixaDebug(){
@@ -842,8 +850,11 @@ function _toqueFaixaDebug(){
     _toquesFaixaDebug = 0;
     _debugAtivo = true;
     var panel = document.getElementById('debug-panel');
+    var log = document.getElementById('debug-log');
+    if(log) log.textContent = _debugBuffer.join('\n') + '\n';
     if(panel) panel.style.display = 'block';
-    dbg('🐛 Debug ativado manualmente (3 toques na faixa vermelha)');
+    if(log) log.scrollTop = log.scrollHeight;
+    dbg('🐛 Debug ativado manualmente (3 toques na faixa vermelha) — log completo desde o carregamento acima ☝️');
   }
 }
 // ════════════════════════

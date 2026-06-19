@@ -763,6 +763,44 @@
 //   - cardapio/data/ (categorias selecionadas no PDV — bebidas, etc)
 // ════════════════════════════════════════════════════════════════
 
+// ════════ DEBUG (definido AGORA, antes de qualquer outra coisa, pra não perder nada) ════════
+// Buffer SEMPRE grava tudo, mesmo com o painel escondido — assim, quando o painel
+// for aberto depois (3 toques na faixa vermelha), dá pra ver o histórico completo
+// desde a primeira linha do script, não só o que aconteceu depois de abrir o painel.
+var _debugBuffer = [];
+var _debugAtivo = false; // ajustado mais abaixo, assim que soubermos se é modo QR
+function dbg(msg, cor){
+  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  var line = '['+ts+'] ' + msg;
+  _debugBuffer.push(line);
+  console.log('[DBG]', msg);
+  if(!_debugAtivo) return;
+  var panel = document.getElementById('debug-panel');
+  var log = document.getElementById('debug-log');
+  if(!panel || !log) return;
+  panel.style.display = 'block';
+  log.textContent += line + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+// Captura QUALQUER erro não tratado (ex: script de CDN bloqueado, exceção
+// inesperada em qualquer lugar) — funciona mesmo com o painel desativado,
+// porque dbg() sempre grava no buffer primeiro.
+window.onerror = function(msg, url, linha, col, err){
+  try{ dbg('💥 ERRO GLOBAL: ' + msg + ' @ ' + (url||'?').split('/').pop() + ':' + (linha||'?') + ':' + (col||'?')); }catch(e){}
+  return false;
+};
+window.addEventListener('unhandledrejection', function(ev){
+  try{
+    var r = ev && ev.reason;
+    dbg('💥 PROMISE REJEITADA (sem .catch): ' + (r && r.message ? r.message : r));
+  }catch(e){}
+});
+document.addEventListener('DOMContentLoaded', function(){
+  dbg('DOMContentLoaded disparado. readyState=' + document.readyState);
+});
+dbg('Script começou a executar. readyState=' + document.readyState + ' UA=' + navigator.userAgent.slice(0,80));
+// ════════════════════════════════════════════════════════════════
+
 var firebaseConfig = {
   apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
   authDomain: "gestao-reataurante.firebaseapp.com",
@@ -778,6 +816,7 @@ var _params = new URLSearchParams(window.location.search);
 // MODO QR: cliente está usando o próprio celular (não totem físico).
 // Comportamento diferente: sem timer de inatividade, senha sem contador, botão "Fazer outro pedido".
 var _modoQR = _params.get('qr') === '1';
+dbg('modoQR=' + _modoQR + ' url=' + location.href);
 // Resolução de tenant/restaurante:
 // 1. Se veio na URL (?tenant=X&rest=Y), USA e salva no localStorage (pro PWA lembrar)
 // 2. Senão, lê do localStorage (PWA instalado abre sem query string)
@@ -791,7 +830,9 @@ function _resolverTenantRest(){
     // Veio na URL — usa e salva
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify({tenant: urlTenant, rest: urlRest}));
-    }catch(e){}
+    }catch(e){
+      dbg('⚠️ localStorage.setItem falhou (modo privado/sem storage?): ' + e.message);
+    }
     return {tenant: urlTenant, rest: urlRest};
   }
 
@@ -804,7 +845,9 @@ function _resolverTenantRest(){
         return {tenant: obj.tenant, rest: obj.rest};
       }
     }
-  }catch(e){}
+  }catch(e){
+    dbg('⚠️ localStorage.getItem falhou (modo privado/sem storage?): ' + e.message);
+  }
 
   // Fallback final
   return {tenant: 'tnt_molrfz1k_rznlgl', rest: 'default'};
@@ -812,28 +855,11 @@ function _resolverTenantRest(){
 var _cfg = _resolverTenantRest();
 var _tenantId = _cfg.tenant;
 var _restauranteId = _cfg.rest;
+dbg('tenant=' + _tenantId + ' rest=' + _restauranteId);
 
-// ════════ DEBUG ════════
-// Ativa automaticamente no modo QR ou com ?debug=1
-var _debugAtivo = _modoQR || _params.get('debug') === '1';
-// Buffer SEMPRE grava tudo, mesmo com o painel desativado/escondido —
-// assim, quando o painel for aberto depois (ex: 3 toques na faixa vermelha),
-// dá pra ver o histórico completo desde o carregamento da página, não só o que
-// aconteceu depois de abrir o painel.
-var _debugBuffer = [];
-function dbg(msg, cor){
-  var ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  var line = '['+ts+'] ' + msg;
-  _debugBuffer.push(line);
-  console.log('[DBG]', msg);
-  if(!_debugAtivo) return;
-  var panel = document.getElementById('debug-panel');
-  var log = document.getElementById('debug-log');
-  if(!panel || !log) return;
-  panel.style.display = 'block';
-  log.textContent += line + '\n';
-  log.scrollTop = log.scrollHeight;
-}
+// Ativa o painel automaticamente no modo QR ou com ?debug=1
+// (em qualquer outro caso, o histórico fica só no buffer até os 3 toques na faixa vermelha)
+_debugAtivo = _modoQR || _params.get('debug') === '1';
 
 // Toque na faixa vermelha de deploy: 3 toques abre o painel de debug manualmente
 // (útil pra copiar o log sem precisar de ?debug=1 na URL ou estar no modo QR).
@@ -881,6 +907,7 @@ var _qtdTemp = 1;
 
 // ─── Inicialização ───
 window.addEventListener('load', function(){
+  dbg('Evento "load" disparado. typeof firebase=' + typeof firebase + ' typeof QRCode=' + typeof QRCode);
   carregarCfgLayout();
   // Registra o service worker (PWA)
   if('serviceWorker' in navigator){
@@ -893,6 +920,7 @@ window.addEventListener('load', function(){
     fbDb = firebase.firestore();
     // Timeout de segurança
     var _loadTimeout = setTimeout(function(){
+      dbg('⏱️ TIMEOUT 12s — carregamento demorou demais (provável travamento no auth/Firestore)');
       var txt = document.getElementById('carregando-txt');
       if(txt && txt.textContent.indexOf('Erro') === -1){
         txt.innerHTML = 'Demorando mais que o esperado...<br><br>'+
@@ -915,6 +943,7 @@ window.addEventListener('load', function(){
       if(!_modoQR){ gerarQRTelaInicial(); }
     });
   }catch(e){
+    dbg('💥 ERRO FATAL ao iniciar Firebase: ' + e.message);
     mostrarErro('Erro ao iniciar: ' + e.message);
   }
 });
@@ -956,6 +985,7 @@ function gerarQRTelaInicial(){
 }
 
 function mostrarErro(msg){
+  dbg('❌ TELA DE ERRO: ' + msg);
   document.getElementById('carregando-txt').textContent = msg;
   document.getElementById('carregando').style.background = '#2a1010';
 }

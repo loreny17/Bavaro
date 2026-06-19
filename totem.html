@@ -532,12 +532,6 @@
 </head>
 <body>
 
-<!-- MARCA DE TESTE DE DEPLOY — se isso NÃO aparecer, o arquivo no servidor é o antigo -->
-<!-- Toque 3x nesta faixa pra abrir o painel de debug manualmente -->
-<div id="faixa-deploy-debug" onclick="_toqueFaixaDebug()" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff0000;color:#fff;text-align:center;font-weight:900;font-size:16px;padding:8px;font-family:sans-serif;cursor:pointer;">
-  🔴 ARQUIVO NOVO CARREGOU — TESTE-DEBUG-V2 🔴
-</div>
-
 <!-- Tela inicial — cliente toca pra começar -->
 <div class="tela-inicial" id="tela-inicial" onclick="comecarPedido()">
   <div class="ti-logo">&#8203;</div>
@@ -857,32 +851,10 @@ var _tenantId = _cfg.tenant;
 var _restauranteId = _cfg.rest;
 dbg('tenant=' + _tenantId + ' rest=' + _restauranteId);
 
-// Ativa o painel automaticamente no modo QR ou com ?debug=1
-// (em qualquer outro caso, o histórico fica só no buffer até os 3 toques na faixa vermelha)
-_debugAtivo = _modoQR || _params.get('debug') === '1';
-
-// Toque na faixa vermelha de deploy: 3 toques abre o painel de debug manualmente
-// (útil pra copiar o log sem precisar de ?debug=1 na URL ou estar no modo QR).
-// Ao abrir, despeja todo o _debugBuffer acumulado desde o carregamento da página,
-// não só as mensagens futuras.
-var _toquesFaixaDebug = 0;
-var _ultimoToqueFaixaDebug = 0;
-function _toqueFaixaDebug(){
-  var agora = Date.now();
-  if(agora - _ultimoToqueFaixaDebug > 1500) _toquesFaixaDebug = 0;
-  _ultimoToqueFaixaDebug = agora;
-  _toquesFaixaDebug++;
-  if(_toquesFaixaDebug >= 3){
-    _toquesFaixaDebug = 0;
-    _debugAtivo = true;
-    var panel = document.getElementById('debug-panel');
-    var log = document.getElementById('debug-log');
-    if(log) log.textContent = _debugBuffer.join('\n') + '\n';
-    if(panel) panel.style.display = 'block';
-    if(log) log.scrollTop = log.scrollHeight;
-    dbg('🐛 Debug ativado manualmente (3 toques na faixa vermelha) — log completo desde o carregamento acima ☝️');
-  }
-}
+// Painel de debug: nunca abre sozinho pra cliente nenhum — só com ?debug=1 na URL,
+// manualmente, se precisar investigar algo no futuro. O buffer continua gravando
+// tudo em segundo plano (silencioso), então dá pra reativar o painel a qualquer momento.
+_debugAtivo = _params.get('debug') === '1';
 // ════════════════════════
 
 // Estado

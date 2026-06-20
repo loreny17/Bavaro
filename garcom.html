@@ -13577,6 +13577,44 @@ function renderFecharConta(){
 
   var itensVisiveis = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado' && (!_fecharOcultarPagos || i.status!=='pago'); });
   var qtdPagos = (c.itens||[]).filter(function(i){ return i.status==='pago'; }).length;
+
+  // Resumo por pessoa (se houver pessoas vinculadas)
+  var itensPessoas = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado' && (i.pessoa || i.nomeCliente); });
+  if(itensPessoas.length){
+    var porPessoa = {};
+    itensPessoas.forEach(function(it){
+      var p = it.pessoa || it.nomeCliente || 'Mesa toda';
+      if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
+      var v = (it.preco||0)*(it.qtd||1);
+      porPessoa[p].itens.push(it);
+      porPessoa[p].total += v;
+    });
+    var itensSemPessoa = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado' && !i.pessoa && !i.nomeCliente; });
+    var totalSemPessoa = itensSemPessoa.reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); },0);
+
+    html += '<div class="fechar-bloco" style="border:1px solid rgba(212,168,67,0.3);">'+
+      '<div style="font-size:0.78rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:10px;">👥 Por pessoa</div>';
+    Object.keys(porPessoa).forEach(function(p){
+      var dados = porPessoa[p];
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px;">'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:0.88rem;">👤 '+esc(p)+'</div>'+
+          '<div style="font-size:0.7rem;color:var(--muted);">'+dados.itens.length+' item'+(dados.itens.length!==1?'s':'')+'</div>'+
+        '</div>'+
+        '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.1rem;">R$ '+fmtPreco(dados.total)+'</div>'+
+      '</div>';
+    });
+    if(itensSemPessoa.length){
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px;opacity:0.7;">'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:0.88rem;color:var(--muted);">🍽️ Mesa toda</div>'+
+          '<div style="font-size:0.7rem;color:var(--muted);">'+itensSemPessoa.length+' item'+(itensSemPessoa.length!==1?'s':'')+'</div>'+
+        '</div>'+
+        '<div style="font-family:Bebas Neue,sans-serif;color:var(--muted);font-size:1.1rem;">R$ '+fmtPreco(totalSemPessoa)+'</div>'+
+      '</div>';
+    }
+    html += '</div>';
+  }
   if(itensVisiveis.length){
     html += '<div class="fechar-bloco">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
@@ -13650,10 +13688,12 @@ function renderFecharConta(){
         checkboxHtml+
         '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
           esc((it.qtd||1)+'x '+it.nome)+
-          // Nome do cliente (buffet por kg) — substitui as gramas
-          (it.nomeCliente
-            ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>'
-            : (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : '')
+          // Nome do cliente (buffet por kg) ou pessoa vinculada
+          (it.pessoa
+            ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.pessoa)+'</div>'
+            : it.nomeCliente
+              ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>'
+              : (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : '')
           )+
           (it.obs?'<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>':'')+
           linhaAbatido+

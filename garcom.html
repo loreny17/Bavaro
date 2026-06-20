@@ -4322,14 +4322,14 @@ function escutarMesasOcupadas(){
         status: d.status,
         cliente: d.cliente||'',
         contaImpressaSolicitada: d.contaImpressaSolicitada||false,
-        // Guarda contagem de itens mas não os itens em si
         _totalItens: (d.itens||[]).length,
         _itensAbertosCount: (d.itens||[]).filter(function(i){ return i.status!=='pago'&&i.status!=='cancelado'; }).length,
         _temPagamento: (d.pagamentos||[]).length > 0,
-        pagamentos: d.pagamentos||[], // pagamentos são pequenos, ok guardar
+        pagamentos: d.pagamentos||[],
         taxaServico: d.taxaServico,
         taxaServicoAtiva: d.taxaServicoAtiva,
-        // NÃO guarda d.itens aqui — carregado sob demanda
+        // Inclui itens — Firestore já leu o documento inteiro de qualquer forma
+        itens: d.itens||[],
       };
 
       // Comanda avulsa OU almoço
@@ -7585,23 +7585,8 @@ function abrirPedidoRapido(numMesa){
     renderPedidoRapidoGrid();
   }
 
-  // Se já tem itens no cache, abre direto
-  if(conta.itens && conta.itens.length){
-    _abrirComItens();
-    return;
-  }
-  // Senão busca do Firestore
-  var contaId = conta.id || conta._id;
-  if(!contaId){ _abrirComItens(); return; }
-  showToast('⏳ Carregando itens...','#888',1500);
-  fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
-    if(doc.exists){
-      var dados = doc.data();
-      conta.itens = dados.itens || [];
-      _contasMesaCache[String(numMesa)] = Object.assign(conta, dados);
-    }
-    _abrirComItens();
-  }).catch(function(){ _abrirComItens(); });
+  // Itens sempre no cache agora — abre direto
+  _abrirComItens();
 }
 
 // Renderiza os cards do popup (com controles de qtd)
@@ -12906,30 +12891,7 @@ function abrirTransferirMesa(num){
     '</div>';
   document.body.appendChild(mod);
   pushHistory('transferir:'+num);
-
-  // Se já tem itens no cache usa direto, senão busca do Firestore
-  if(conta.itens && conta.itens.length){
-    renderTransferir();
-  } else {
-    // Busca itens do Firestore
-    var contaId = conta.id || conta._id;
-    if(!contaId){
-      renderTransferir();
-      return;
-    }
-    fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
-      if(doc.exists){
-        var dados = doc.data();
-        conta.itens = dados.itens || [];
-        conta.total = dados.total || dados.restante || 0;
-        conta.restante = dados.restante || dados.total || 0;
-        _contasMesaCache[String(num)] = Object.assign(conta, dados);
-      }
-      renderTransferir();
-    }).catch(function(){
-      renderTransferir();
-    });
-  }
+  renderTransferir();
 }
 
 function fecharModalTransferir(){

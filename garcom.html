@@ -7534,62 +7534,74 @@ function abrirAvaliacao(){
 
 function abrirPedidoRapido(numMesa){
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
-  if(!conta){
-    // Mesa sem conta — silencioso, não faz nada (decisão do usuário)
-    return;
-  }
-  // Agrupa itens distintos, ignorando obs/seleções (decisão B do usuário)
-  // Filtra: kg de fora, cancelados de fora
-  // Chave: prefere id, mas usa "nome|preco" como fallback se id estiver vazio
-  var distintos = {};
-  (conta.itens||[]).forEach(function(it){
-    if(it.status === 'cancelado') return;
-    if(it.tipoVenda === 'kg') return;
-    if(!it.nome) return; // sem nome não dá pra mostrar nada
-    // Chave: id se tiver, senão nome+preço (pra ainda repetir item sem id)
-    var chave = it.id || ('nome:'+it.nome+'|p:'+(it.precoBase || it.preco || 0));
-    if(!distintos[chave]){
-      distintos[chave] = {
-        id: it.id || null,
-        chave: chave,
-        nome: it.nome,
-        preco: it.precoBase || it.preco // preço sem extras
-      };
+  if(!conta) return;
+
+  function _abrirComItens(){
+    var distintos = {};
+    (conta.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado') return;
+      if(it.tipoVenda === 'kg') return;
+      if(!it.nome) return;
+      var chave = it.id || ('nome:'+it.nome+'|p:'+(it.precoBase || it.preco || 0));
+      if(!distintos[chave]){
+        distintos[chave] = {
+          id: it.id || null,
+          chave: chave,
+          nome: it.nome,
+          preco: it.precoBase || it.preco
+        };
+      }
+    });
+    var lista = Object.keys(distintos).map(function(k){ return distintos[k]; });
+    if(!lista.length){
+      showToast('Mesa sem itens para repetir','#f7a34f');
+      return;
     }
-  });
-  var lista = Object.keys(distintos).map(function(k){ return distintos[k]; });
-  if(!lista.length){
-    // Mesa aberta mas sem itens consumíveis — silencioso
+    _qtdsRapidas = {};
+    _mesaRapidaAtual = numMesa;
+    lista.forEach(function(it){ _qtdsRapidas[it.chave] = 0; });
+    var ex = document.getElementById('modal-pedido-rapido');
+    if(ex) ex.remove();
+    var mod = document.createElement('div');
+    mod.className = 'modal modal-centro show';
+    mod.id = 'modal-pedido-rapido';
+    mod.dataset.lista = JSON.stringify(lista);
+    mod.innerHTML =
+      '<div class="modal-box" style="max-width:440px;border-radius:18px;">'+
+        '<div class="modal-header">'+
+          '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
+          '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
+        '</div>'+
+        '<div class="modal-body">'+
+          '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque no card pra mandar +1. Use os botões pra escolher mais quantidades e "Enviar tudo".</div>'+
+          '<div id="pedido-rapido-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;"></div>'+
+        '</div>'+
+        '<div class="modal-footer">'+
+          '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">Fechar</button>'+
+          '<button class="f-btn" id="btn-enviar-tudo-rapido" style="flex:1.6;background:var(--accent);color:#000;font-weight:700;opacity:0.4;pointer-events:none;" onclick="enviarTodosRapidos()">📨 Enviar tudo</button>'+
+        '</div>'+
+      '</div>';
+    document.body.appendChild(mod);
+    renderPedidoRapidoGrid();
+  }
+
+  // Se já tem itens no cache, abre direto
+  if(conta.itens && conta.itens.length){
+    _abrirComItens();
     return;
   }
-  // Estado inicial: cada item começa com qtd 0 (apagado).
-  _qtdsRapidas = {};
-  _mesaRapidaAtual = numMesa;
-  lista.forEach(function(it){ _qtdsRapidas[it.chave] = 0; });
-  // Renderiza
-  var ex = document.getElementById('modal-pedido-rapido');
-  if(ex) ex.remove();
-  var mod = document.createElement('div');
-  mod.className = 'modal modal-centro show';
-  mod.id = 'modal-pedido-rapido';
-  mod.dataset.lista = JSON.stringify(lista); // guarda lista pra render
-  mod.innerHTML =
-    '<div class="modal-box" style="max-width:440px;border-radius:18px;">'+
-      '<div class="modal-header">'+
-        '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
-        '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
-      '</div>'+
-      '<div class="modal-body">'+
-        '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque no card pra mandar +1. Use os botões pra escolher mais quantidades e "Enviar tudo".</div>'+
-        '<div id="pedido-rapido-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;"></div>'+
-      '</div>'+
-      '<div class="modal-footer">'+
-        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">Fechar</button>'+
-        '<button class="f-btn" id="btn-enviar-tudo-rapido" style="flex:1.6;background:var(--accent);color:#000;font-weight:700;opacity:0.4;pointer-events:none;" onclick="enviarTodosRapidos()">📨 Enviar tudo</button>'+
-      '</div>'+
-    '</div>';
-  document.body.appendChild(mod);
-  renderPedidoRapidoGrid();
+  // Senão busca do Firestore
+  var contaId = conta.id || conta._id;
+  if(!contaId){ _abrirComItens(); return; }
+  showToast('⏳ Carregando itens...','#888',1500);
+  fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+    if(doc.exists){
+      var dados = doc.data();
+      conta.itens = dados.itens || [];
+      _contasMesaCache[String(numMesa)] = Object.assign(conta, dados);
+    }
+    _abrirComItens();
+  }).catch(function(){ _abrirComItens(); });
 }
 
 // Renderiza os cards do popup (com controles de qtd)

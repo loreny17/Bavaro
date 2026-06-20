@@ -6663,6 +6663,54 @@ function processarComandoImpressao(cmdId, cmd){
       .finally(function(){
         fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
       });
+  } else if(cmd.tipo === 'conta_pessoa'){
+    // Imprime conta de uma pessoa específica
+    var L = 42;
+    var nomePessoa = cmd.pessoa || 'Mesa toda';
+    var itens = cmd.itens || [];
+    var total = cmd.total || 0;
+    var mesa = cmd.mesa || '';
+
+    var s = escposInit();
+    s += escposCenter();
+    s += escposBold(true);
+    s += 'CONTA — ' + nomePessoa.toUpperCase() + '\n';
+    s += escposBold(false);
+    s += 'Mesa: ' + mesa + '\n';
+    s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+    s += escposLeft();
+    s += linha('-', L) + '\n';
+    itens.forEach(function(it){
+      var qtd = it.qtd || 1;
+      var val = (it.preco||0) * qtd;
+      var nome = (it.nome||'').substring(0,28);
+      var valStr = 'R$' + fmtPreco(val);
+      var espaco = L - (qtd+'x '+nome).length - valStr.length;
+      if(espaco < 1) espaco = 1;
+      s += qtd + 'x ' + nome + ' '.repeat(espaco) + valStr + '\n';
+      if(it.obs) s += '  Obs: ' + it.obs + '\n';
+    });
+    s += linha('-', L) + '\n';
+    s += escposBold(true);
+    var totStr = 'R$ ' + fmtPreco(total);
+    var totLabel = 'TOTAL:';
+    s += totLabel + ' '.repeat(L - totLabel.length - totStr.length) + totStr + '\n';
+    s += escposBold(false);
+    s += '\n\n\n';
+    s += escposCut();
+
+    // Imprime nas impressoras de fechamento
+    var modelosFech = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
+    var impsP = [];
+    if(modelosFech.length){
+      modelosFech.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsP.indexOf(imp)<0) impsP.push(imp); });
+    } else {
+      impsP = _impressoras.slice();
+    }
+    impsP.forEach(function(imp){ enviarParaImpressora(imp, s); });
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    showToast('🖨️ Conta de ' + nomePessoa + ' impressa', '#4ade80');
+
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado
     fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
@@ -7550,10 +7598,10 @@ function abrirMenuLateral(){
   try{
     if(typeof _restauranteAtivo !== 'undefined' && _restauranteAtivo){
       document.getElementById('menu-rest-nome').textContent = (_restauranteAtivo.emoji||'🍽️') + ' ' + _restauranteAtivo.nome;
-      // Botão "Pedir Insumos ao Central" — sempre visível
+      // Botão "Pedir Insumos ao Central" — só aparece se NÃO for o Central (default)
       var btnInsumos = document.getElementById('menu-item-insumos');
       if(btnInsumos){
-        btnInsumos.style.display = '';
+        btnInsumos.style.display = (_restauranteAtivo.id !== 'default') ? '' : 'none';
       }
     }
   }catch(e){}
@@ -12845,51 +12893,62 @@ function toggleAdminUsuario(garcomId, novoValor){
   </div>
   <div class="menu-lateral-body">
 
-    <!-- 🔄 SEMPRE VISÍVEL — Trocar Restaurante + Pedir Insumos -->
+    <!-- 🏠 PRINCIPAL — sempre aberto -->
     <div class="menu-grupo">
-      <button class="menu-item destaque" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
-      <button class="menu-item destaque" id="menu-item-insumos" onclick="abrirPedidoInsumos();fecharMenuLateral();"><span class="ico">🚚</span><span class="lbl">Pedir Insumos ao Central</span></button>
+      <button class="menu-item destaque" onclick="menuIrPara('pedidos')"><span class="ico">🧾</span><span class="lbl">Pedidos</span></button>
+      <button class="menu-item destaque" onclick="menuIrPara('historico')"><span class="ico">📜</span><span class="lbl">Histórico</span></button>
+      <button class="menu-item destaque" onclick="abrirTelaCozinha();fecharMenuLateral();"><span class="ico">🍳</span><span class="lbl">Tela da Cozinha</span></button>
     </div>
 
-    <!-- 🍽️ CARDÁPIO (recolhível) -->
+    <!-- 🍽️ CARDÁPIO -->
     <div class="menu-grupo">
-      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
+      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
         <span>🍽️ Cardápio</span>
         <span class="seta">▾</span>
       </button>
-      <div class="menu-grupo-conteudo fechado">
+      <div class="menu-grupo-conteudo">
+        <button class="menu-item" onclick="menuIrPara('cardapio')"><span class="ico">📋</span><span class="lbl">Cardápio Principal</span></button>
         <button class="menu-item" onclick="menuIrPara('totem')"><span class="ico">📱</span><span class="lbl">Cardápio do Totem</span></button>
+        <button class="menu-item" onclick="menuIrPara('grupos')"><span class="ico">🎛️</span><span class="lbl">Grupos (acompanhamentos)</span></button>
         <button class="menu-item" onclick="abrirEstoque();fecharMenuLateral();"><span class="ico">📦</span><span class="lbl">Pausar e Estoque</span></button>
         <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">🔁</span><span class="lbl">Copiar de outro restaurante</span></button>
       </div>
     </div>
 
-    <!-- 🍳 OPERAÇÃO (recolhível) -->
+    <!-- ⚙️ CONFIGURAÇÕES -->
     <div class="menu-grupo">
-      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
-        <span>🍳 Operação</span>
-        <span class="seta">▾</span>
-      </button>
-      <div class="menu-grupo-conteudo fechado">
-        <button class="menu-item" onclick="abrirTelaCozinha();fecharMenuLateral();"><span class="ico">🍳</span><span class="lbl">Tela da Cozinha</span></button>
-        <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
-        <button class="menu-item" onclick="abrirEncerrarDia();fecharMenuLateral();"><span class="ico">🌙</span><span class="lbl">Encerrar o Dia</span></button>
-      </div>
-    </div>
-
-    <!-- ⚙️ CONFIGURAÇÕES (recolhível) -->
-    <div class="menu-grupo">
-      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
+      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
         <span>⚙️ Configurações</span>
         <span class="seta">▾</span>
       </button>
-      <div class="menu-grupo-conteudo fechado">
+      <div class="menu-grupo-conteudo">
+        <button class="menu-item" onclick="menuIrPara('garcons')"><span class="ico">👥</span><span class="lbl">Garçons</span></button>
+        <button class="menu-item" onclick="menuIrPara('impressao')"><span class="ico">🖨️</span><span class="lbl">Impressão</span></button>
         <button class="menu-item" onclick="abrirConfigTaxa();fecharMenuLateral();"><span class="ico">💵</span><span class="lbl">Taxa de Serviço</span></button>
-        <!-- 🛡️ ADMIN (só admin) -->
-        <div id="menu-grupo-admin" style="display:none;">
-          <button class="menu-item" onclick="menuIrPara('admin')"><span class="ico">🛡️</span><span class="lbl">Painel Admin</span></button>
-          <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>
-        </div>
+        <button class="menu-item" id="menu-item-insumos" onclick="abrirPedidoInsumos();fecharMenuLateral();" style="display:none;"><span class="ico">🚚</span><span class="lbl">Pedir Insumos ao Central</span></button>
+      </div>
+    </div>
+
+    <!-- 📊 RELATÓRIOS -->
+    <div class="menu-grupo">
+      <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
+    </div>
+
+    <!-- 🌙 FIM DO DIA -->
+    <div class="menu-grupo">
+      <button class="menu-item" onclick="abrirEncerrarDia();fecharMenuLateral();"><span class="ico">🌙</span><span class="lbl">Encerrar o Dia</span></button>
+    </div>
+
+    <!-- 🛡️ ADMIN (só admin) -->
+    <div class="menu-grupo" id="menu-grupo-admin" style="display:none;">
+      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
+        <span>🛡️ Admin</span>
+        <span class="seta">▾</span>
+      </button>
+      <div class="menu-grupo-conteudo">
+        <button class="menu-item" onclick="menuIrPara('admin')"><span class="ico">🛡️</span><span class="lbl">Painel Admin</span></button>
+        <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
+        <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>
       </div>
     </div>
 

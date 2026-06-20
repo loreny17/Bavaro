@@ -13450,9 +13450,21 @@ function abrirFecharConta(num){
   _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
     .onSnapshot(function(doc){
       if(doc.exists){
-        _fecharConta = Object.assign({id:doc.id}, doc.data());
-        // Enriquece com pessoas dos pedidos (já em cache)
-        _enriquecerItensConta(_fecharConta);
+        var novasConta = Object.assign({id:doc.id}, doc.data());
+        // Preserva campo "pessoa" que foi enriquecido manualmente via pedidos
+        if(_fecharConta && _fecharConta.itens){
+          var mapaPessoa = {};
+          (_fecharConta.itens||[]).forEach(function(it){
+            if(it.pessoa) mapaPessoa[it.itemKey || it.nome] = it.pessoa;
+          });
+          (novasConta.itens||[]).forEach(function(it){
+            if(!it.pessoa){
+              var p = mapaPessoa[it.itemKey || it.nome];
+              if(p) it.pessoa = p;
+            }
+          });
+        }
+        _fecharConta = novasConta;
         renderFecharConta();
       }
     });

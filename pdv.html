@@ -6663,7 +6663,12 @@ function processarComandoImpressao(cmdId, cmd){
       .finally(function(){
         fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
       });
-  } else if(cmd.tipo === 'conta_pessoa'){
+  } else if(cmd.tipo === 'conta_pessoa' || cmd.tipo === 'conta_pessoa_junto'){
+    if(!_qzPronto){
+      showToast('⚠️ Impressora não conectada — verifique o QZ Tray','#f7a34f', 5000);
+      return; // Mantém o comando no Firestore para tentar de novo
+    }
+    if(cmd.tipo === 'conta_pessoa'){
     var L = 42;
     var nomePessoa = cmd.pessoa || 'Mesa toda';
     var itens = cmd.itens || [];
@@ -6719,8 +6724,7 @@ function processarComandoImpressao(cmdId, cmd){
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     showToast('🖨️ Conta de ' + nomePessoa + ' impressa', '#4ade80');
 
-  } else if(cmd.tipo === 'conta_pessoa_junto'){
-    // Todos juntos num cupom só, separados por pessoa
+    } else {
     var L = 42;
     var grupos = cmd.grupos || [];
     var mesa = cmd.mesa || '';
@@ -6786,6 +6790,7 @@ function processarComandoImpressao(cmdId, cmd){
     impsFJ.forEach(function(imp){ enviarParaImpressora(imp, s); });
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     showToast('🖨️ Conta completa impressa', '#4ade80');
+    } // fim else conta_pessoa_junto
 
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado

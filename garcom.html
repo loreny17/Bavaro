@@ -4896,7 +4896,10 @@ function anexarLongPress(el, numMesa){
   }
   el.addEventListener('touchstart', iniciar, {passive:true});
   el.addEventListener('touchmove', mover, {passive:true});
-  el.addEventListener('touchend', cancelar);
+  el.addEventListener('touchend', function(){
+    // Só cancela se ainda não disparou
+    if(!_longPressDisparou) cancelar();
+  });
   el.addEventListener('touchcancel', cancelar);
   // Suporte também pra desktop (mouse)
   el.addEventListener('mousedown', iniciar);
@@ -5033,37 +5036,30 @@ function anexarSwipe(el, numMesa){
     }
     swiping = false;
 
-    var children = el.children;
+    // Snapshot dos children ANTES do setTimeout (HTMLCollection é live)
+    var childrenSnap = Array.from(el.children).filter(function(c){ return c !== bgEl; });
+
     // Anima o reset
-    for(var i = 0; i < children.length; i++){
-      var c = children[i];
-      if(c === bgEl) continue;
+    childrenSnap.forEach(function(c){
       c.style.transition = 'transform 0.18s ease';
       c.style.transform = 'translateX(0)';
-    }
+    });
 
     var ativar = Math.abs(currentX) >= THRESHOLD;
     var dirFinal = direcao;
 
     setTimeout(function(){
       removerBg();
-      // Limpa styles
-      for(var i = 0; i < children.length; i++){
-        var c = children[i];
+      childrenSnap.forEach(function(c){
         c.style.transition = '';
         c.style.transform = '';
-      }
-      // Se passou do threshold, dispara ação conforme direção
+      });
       if(ativar){
-        // Impede o click subsequente de disparar
         _longPressDisparou = true;
         setTimeout(function(){ _longPressDisparou = false; }, 300);
-
         if(dirFinal < 0){
-          // ESQUERDA: executa ação configurada
           executarAcaoGesto(_gestosAcoes.swipeEsq, numMesa);
         } else {
-          // DIREITA: executa ação configurada
           executarAcaoGesto(_gestosAcoes.swipeDir, numMesa);
         }
       }
@@ -12893,12 +12889,35 @@ function abrirTransferirMesa(num){
         '<div class="modal-titulo">TRANSFERIR — MESA '+num+'</div>'+
         '<button class="modal-fechar" onclick="fecharModalTransferir()">×</button>'+
       '</div>'+
-      '<div class="modal-body" id="transferir-body"></div>'+
+      '<div class="modal-body" id="transferir-body"><div style="text-align:center;padding:24px;color:var(--muted);">Carregando itens...</div></div>'+
       '<div class="modal-footer" id="transferir-footer"></div>'+
     '</div>';
   document.body.appendChild(mod);
   pushHistory('transferir:'+num);
-  renderTransferir();
+
+  // Se já tem itens no cache usa direto, senão busca do Firestore
+  if(conta.itens && conta.itens.length){
+    renderTransferir();
+  } else {
+    // Busca itens do Firestore
+    var contaId = conta.id || conta._id;
+    if(!contaId){
+      renderTransferir();
+      return;
+    }
+    fbDb.collection('contas_mesa').doc(contaId).get().then(function(doc){
+      if(doc.exists){
+        var dados = doc.data();
+        conta.itens = dados.itens || [];
+        conta.total = dados.total || dados.restante || 0;
+        conta.restante = dados.restante || dados.total || 0;
+        _contasMesaCache[String(num)] = Object.assign(conta, dados);
+      }
+      renderTransferir();
+    }).catch(function(){
+      renderTransferir();
+    });
+  }
 }
 
 function fecharModalTransferir(){

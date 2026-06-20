@@ -6664,11 +6664,13 @@ function processarComandoImpressao(cmdId, cmd){
         fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
       });
   } else if(cmd.tipo === 'conta_pessoa'){
-    // Imprime conta de uma pessoa específica
     var L = 42;
     var nomePessoa = cmd.pessoa || 'Mesa toda';
     var itens = cmd.itens || [];
-    var total = cmd.total || 0;
+    var subtotal = cmd.subtotal || cmd.total || 0;
+    var taxa = cmd.taxa || 0;
+    var taxaPct = cmd.taxaPct || 0;
+    var total = cmd.total || (subtotal + taxa);
     var mesa = cmd.mesa || '';
 
     var s = escposInit();
@@ -6682,34 +6684,108 @@ function processarComandoImpressao(cmdId, cmd){
     s += linha('-', L) + '\n';
     itens.forEach(function(it){
       var qtd = it.qtd || 1;
-      var val = (it.preco||0) * qtd;
-      var nome = (it.nome||'').substring(0,28);
-      var valStr = 'R$' + fmtPreco(val);
-      var espaco = L - (qtd+'x '+nome).length - valStr.length;
-      if(espaco < 1) espaco = 1;
-      s += qtd + 'x ' + nome + ' '.repeat(espaco) + valStr + '\n';
-      if(it.obs) s += '  Obs: ' + it.obs + '\n';
+      var val = it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*qtd;
+      var nome = (it.nome||'').substring(0,26);
+      var valStr = 'R$ '+fmtPreco(val);
+      var prefix = qtd+'x ';
+      var espaco = Math.max(1, L - prefix.length - nome.length - valStr.length);
+      s += prefix + nome + ' '.repeat(espaco) + valStr + '\n';
+      if(it.obs) s += '   Obs: ' + it.obs + '\n';
     });
     s += linha('-', L) + '\n';
+    if(taxa > 0){
+      var subStr = 'R$ '+fmtPreco(subtotal);
+      var subLabel = 'Subtotal:';
+      s += subLabel + ' '.repeat(Math.max(1,L-subLabel.length-subStr.length)) + subStr + '\n';
+      var taxStr = 'R$ '+fmtPreco(taxa);
+      var taxLabel = '+ '+taxaPct+'% serviço:';
+      s += taxLabel + ' '.repeat(Math.max(1,L-taxLabel.length-taxStr.length)) + taxStr + '\n';
+    }
     s += escposBold(true);
-    var totStr = 'R$ ' + fmtPreco(total);
-    var totLabel = 'TOTAL:';
-    s += totLabel + ' '.repeat(L - totLabel.length - totStr.length) + totStr + '\n';
+    var totStr = 'R$ '+fmtPreco(total);
+    var totLabel = 'TOTAL '+nomePessoa.toUpperCase()+':';
+    if(totLabel.length + totStr.length + 1 > L) totLabel = 'TOTAL:';
+    s += totLabel + ' '.repeat(Math.max(1,L-totLabel.length-totStr.length)) + totStr + '\n';
     s += escposBold(false);
     s += '\n\n\n';
     s += escposCut();
 
-    // Imprime nas impressoras de fechamento
     var modelosFech = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
     var impsP = [];
     if(modelosFech.length){
       modelosFech.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsP.indexOf(imp)<0) impsP.push(imp); });
-    } else {
-      impsP = _impressoras.slice();
-    }
+    } else { impsP = _impressoras.slice(); }
     impsP.forEach(function(imp){ enviarParaImpressora(imp, s); });
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     showToast('🖨️ Conta de ' + nomePessoa + ' impressa', '#4ade80');
+
+  } else if(cmd.tipo === 'conta_pessoa_junto'){
+    // Todos juntos num cupom só, separados por pessoa
+    var L = 42;
+    var grupos = cmd.grupos || [];
+    var mesa = cmd.mesa || '';
+
+    var s = escposInit();
+    s += escposCenter();
+    s += escposBold(true);
+    s += 'CONTA DA MESA ' + mesa + '\n';
+    s += escposBold(false);
+    s += new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+    s += linha('=', L) + '\n';
+
+    var totalGeral = 0;
+    grupos.forEach(function(g){
+      s += escposLeft();
+      s += escposBold(true);
+      s += '>>> ' + (g.pessoa||'Mesa toda').toUpperCase() + ' <<<\n';
+      s += escposBold(false);
+      s += linha('-', L) + '\n';
+      (g.itens||[]).forEach(function(it){
+        var qtd = it.qtd || 1;
+        var val = it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*qtd;
+        var nome = (it.nome||'').substring(0,26);
+        var valStr = 'R$ '+fmtPreco(val);
+        var prefix = qtd+'x ';
+        var espaco = Math.max(1, L-prefix.length-nome.length-valStr.length);
+        s += prefix + nome + ' '.repeat(espaco) + valStr + '\n';
+        if(it.obs) s += '   Obs: '+it.obs+'\n';
+      });
+      s += linha('-', L) + '\n';
+      if((g.taxa||0) > 0){
+        var subStr = 'R$ '+fmtPreco(g.subtotal||0);
+        var subLbl = 'Subtotal:';
+        s += subLbl + ' '.repeat(Math.max(1,L-subLbl.length-subStr.length)) + subStr + '\n';
+        var txStr = 'R$ '+fmtPreco(g.taxa||0);
+        var txLbl = '+ '+(g.taxaPct||10)+'% serviço:';
+        s += txLbl + ' '.repeat(Math.max(1,L-txLbl.length-txStr.length)) + txStr + '\n';
+      }
+      s += escposBold(true);
+      var totPStr = 'R$ '+fmtPreco(g.total||0);
+      var totPLbl = 'TOTAL '+(g.pessoa||'Mesa toda').toUpperCase()+':';
+      if(totPLbl.length+totPStr.length+1 > L) totPLbl = 'TOTAL:';
+      s += totPLbl + ' '.repeat(Math.max(1,L-totPLbl.length-totPStr.length)) + totPStr + '\n';
+      s += escposBold(false);
+      s += '\n';
+      totalGeral += g.total || 0;
+    });
+
+    s += linha('=', L) + '\n';
+    s += escposBold(true);
+    var totGStr = 'R$ '+fmtPreco(totalGeral);
+    var totGLbl = 'TOTAL GERAL:';
+    s += totGLbl + ' '.repeat(Math.max(1,L-totGLbl.length-totGStr.length)) + totGStr + '\n';
+    s += escposBold(false);
+    s += '\n\n\n';
+    s += escposCut();
+
+    var modelosFJ = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
+    var impsFJ = [];
+    if(modelosFJ.length){
+      modelosFJ.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsFJ.indexOf(imp)<0) impsFJ.push(imp); });
+    } else { impsFJ = _impressoras.slice(); }
+    impsFJ.forEach(function(imp){ enviarParaImpressora(imp, s); });
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    showToast('🖨️ Conta completa impressa', '#4ade80');
 
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado

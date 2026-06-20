@@ -13627,32 +13627,53 @@ function renderFecharConta(){
     itensPessoas.forEach(function(it){
       var p = it.pessoa || it.nomeCliente || 'Mesa toda';
       if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
-      var v = (it.preco||0)*(it.qtd||1);
+      var v = it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
       porPessoa[p].itens.push(it);
       porPessoa[p].total += v;
     });
     var itensSemPessoa = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado' && !i.pessoa && !i.nomeCliente; });
     var totalSemPessoa = itensSemPessoa.reduce(function(a,i){ return a+(i.preco||0)*(i.qtd||1); },0);
+    var taxaPct = _taxaServicoPct || 10;
 
-    html += '<div class="fechar-bloco" style="border:1px solid rgba(212,168,67,0.3);">'+
-      '<div style="font-size:0.78rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:10px;">👥 Por pessoa</div>';
+    html += '<div class="fechar-bloco" style="border:1px solid rgba(212,168,67,0.35);padding:12px;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'+
+        '<div style="font-size:0.78rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">👥 Por pessoa</div>'+
+        '<button onclick="abrirImprimirPorPessoaFechar()" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.35);color:var(--accent);padding:5px 12px;border-radius:7px;font-size:0.74rem;font-weight:700;font-family:inherit;cursor:pointer;">🖨️ Imprimir</button>'+
+      '</div>';
     Object.keys(porPessoa).forEach(function(p){
       var dados = porPessoa[p];
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px;">'+
-        '<div>'+
-          '<div style="font-weight:700;font-size:0.88rem;">👤 '+esc(p)+'</div>'+
-          '<div style="font-size:0.7rem;color:var(--muted);">'+dados.itens.length+' item'+(dados.itens.length!==1?'s':'')+'</div>'+
+      var taxa = _taxaServicoAtiva ? dados.total * (taxaPct/100) : 0;
+      var totalComTaxa = dados.total + taxa;
+      var pessoaId = 'pp-'+p.replace(/[^a-zA-Z0-9]/g,'_');
+      html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:10px;margin-bottom:8px;overflow:hidden;">'+
+        '<div onclick="togglePessoaBloco(\'+pessoaId+\'\')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;">'+
+          '<div><div style="font-weight:700;font-size:0.9rem;">👤 '+esc(p)+'</div>'+
+          '<div style="font-size:0.7rem;color:var(--muted);">'+dados.itens.length+' item'+(dados.itens.length!==1?'s':'')+(taxa>0?' · c/ '+taxaPct+'% serv.':'')+'</div></div>'+
+          '<div style="text-align:right;">'+
+            '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.15rem;">R$ '+fmtPreco(totalComTaxa)+'</div>'+
+            (taxa>0?'<div style="font-size:0.68rem;color:var(--muted);">sub R$ '+fmtPreco(dados.total)+'</div>':'')+
+          '</div>'+
         '</div>'+
-        '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.1rem;">R$ '+fmtPreco(dados.total)+'</div>'+
-      '</div>';
+        '<div id="'+pessoaId+'" style="display:none;border-top:1px solid var(--border2);padding:8px 12px;">';
+      dados.itens.forEach(function(it){
+        var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
+        html += '<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'+
+          '<span>'+(it.qtd||1)+'x '+esc(it.nome||'')+'</span>'+
+          '<span style="color:var(--accent);">R$ '+fmtPreco(v)+'</span>'+
+        '</div>';
+        if(it.obs) html += '<div style="font-size:0.7rem;color:var(--muted);padding:2px 0;">📝 '+esc(it.obs)+'</div>';
+      });
+      if(taxa>0) html += '<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:5px 0 2px;color:var(--muted);"><span>+ '+taxaPct+'% serviço</span><span>R$ '+fmtPreco(taxa)+'</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:0.88rem;padding:5px 0 2px;border-top:1px solid rgba(255,255,255,0.07);margin-top:3px;">'+
+        '<span>Total '+esc(p)+'</span><span style="color:var(--accent);">R$ '+fmtPreco(totalComTaxa)+'</span></div>';
+      html += '</div></div>';
     });
     if(itensSemPessoa.length){
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px;opacity:0.7;">'+
-        '<div>'+
-          '<div style="font-weight:700;font-size:0.88rem;color:var(--muted);">🍽️ Mesa toda</div>'+
-          '<div style="font-size:0.7rem;color:var(--muted);">'+itensSemPessoa.length+' item'+(itensSemPessoa.length!==1?'s':'')+'</div>'+
-        '</div>'+
-        '<div style="font-family:Bebas Neue,sans-serif;color:var(--muted);font-size:1.1rem;">R$ '+fmtPreco(totalSemPessoa)+'</div>'+
+      var taxaSem = _taxaServicoAtiva ? totalSemPessoa*(taxaPct/100) : 0;
+      html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:10px;margin-bottom:8px;padding:10px 12px;opacity:0.75;display:flex;justify-content:space-between;align-items:center;">'+
+        '<div><div style="font-weight:700;font-size:0.9rem;color:var(--muted);">🍽️ Mesa toda</div>'+
+        '<div style="font-size:0.7rem;color:var(--muted);">'+itensSemPessoa.length+' item'+(itensSemPessoa.length!==1?'s':'')+'</div></div>'+
+        '<div style="font-family:Bebas Neue,sans-serif;color:var(--muted);font-size:1.15rem;">R$ '+fmtPreco(totalSemPessoa+taxaSem)+'</div>'+
       '</div>';
     }
     html += '</div>';
@@ -14611,6 +14632,144 @@ function executarEncerramento(){
 }
 
 // Fechamento único: imprime direto sem abrir menu de opções
+function togglePessoaBloco(id){
+  var e = document.getElementById(id);
+  if(e) e.style.display = e.style.display === 'none' ? 'block' : 'none';
+}
+
+function abrirImprimirPorPessoaFechar(){
+  var c = _fecharConta;
+  if(!c) return;
+  var taxaPct = _taxaServicoPct || 10;
+
+  // Monta grupos por pessoa
+  var porPessoa = {};
+  (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
+    var p = it.pessoa || it.nomeCliente || '__sem__';
+    if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
+    var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
+    porPessoa[p].itens.push(it);
+    porPessoa[p].total += v;
+  });
+
+  var pessoas = Object.keys(porPessoa).filter(function(p){ return p !== '__sem__'; });
+  if(!pessoas.length){ showToast('Nenhuma pessoa vinculada','#f7a34f'); return; }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-imp-pessoa-fechar';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var pessoasHtml = pessoas.map(function(p){
+    var dados = porPessoa[p];
+    var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
+    var tot = dados.total + taxa;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:6px;">'+
+      '<input type="checkbox" class="chk-pessoa-fechar" value="'+esc(p)+'" checked style="width:18px;height:18px;accent-color:var(--accent);">'+
+      '<span style="flex:1;font-weight:600;">👤 '+esc(p)+'</span>'+
+      '<span style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(tot)+'</span>'+
+    '</label>';
+  }).join('');
+
+  var temSemPessoa = !!porPessoa['__sem__'];
+  if(temSemPessoa){
+    var dadosSem = porPessoa['__sem__'];
+    var taxaSem = _taxaServicoAtiva ? dadosSem.total*(taxaPct/100) : 0;
+    pessoasHtml += '<label style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:6px;opacity:0.75;">'+
+      '<input type="checkbox" class="chk-pessoa-fechar" value="__sem__" style="width:18px;height:18px;accent-color:var(--accent);">'+
+      '<span style="flex:1;font-weight:600;color:var(--muted);">🍽️ Mesa toda (sem nome)</span>'+
+      '<span style="color:var(--muted);font-weight:700;">R$ '+fmtPreco(dadosSem.total+taxaSem)+'</span>'+
+    '</label>';
+  }
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto;">'+
+      '<div style="font-weight:700;font-size:1rem;margin-bottom:4px;">🖨️ Imprimir por pessoa</div>'+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">Mesa '+c.mesa+' — selecione quem imprimir</div>'+
+      pessoasHtml+
+      '<div style="display:flex;gap:8px;margin-top:8px;">'+
+        '<button onclick="_executarImpPessoaFechar(\'separado\')" style="flex:1;padding:13px;background:var(--accent);color:#000;border:none;border-radius:10px;font-weight:700;font-size:0.88rem;font-family:inherit;cursor:pointer;">🖨️ Separado</button>'+
+        '<button onclick="_executarImpPessoaFechar(\'junto\')" style="flex:1;padding:13px;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:700;font-size:0.88rem;font-family:inherit;cursor:pointer;">📋 Tudo junto</button>'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-imp-pessoa-fechar\').remove()" style="width:100%;margin-top:8px;padding:11px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-family:inherit;cursor:pointer;">Cancelar</button>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function _executarImpPessoaFechar(modo){
+  var c = _fecharConta;
+  if(!c) return;
+  var taxaPct = _taxaServicoPct || 10;
+
+  var chks = document.querySelectorAll('.chk-pessoa-fechar:checked');
+  var selecionadas = Array.from(chks).map(function(x){ return x.value; });
+  if(!selecionadas.length){ showToast('Selecione pelo menos uma pessoa','#f7a34f'); return; }
+
+  var m = document.getElementById('modal-imp-pessoa-fechar');
+  if(m) m.remove();
+
+  // Monta grupos
+  var porPessoa = {};
+  (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
+    var p = it.pessoa || it.nomeCliente || '__sem__';
+    if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
+    var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
+    porPessoa[p].itens.push(it);
+    porPessoa[p].total += v;
+  });
+
+  if(modo === 'separado'){
+    // Um comando por pessoa
+    selecionadas.forEach(function(p){
+      var dados = porPessoa[p];
+      if(!dados) return;
+      var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
+      var total = dados.total + taxa;
+      var nomePessoa = p === '__sem__' ? 'Mesa toda' : p;
+      var cmd = {
+        tipo: 'conta_pessoa',
+        restauranteId: _restauranteId,
+        contaId: _fecharContaId,
+        mesa: c.mesa,
+        pessoa: nomePessoa,
+        itens: dados.itens,
+        subtotal: dados.total,
+        taxa: taxa,
+        taxaPct: _taxaServicoAtiva ? taxaPct : 0,
+        total: total,
+        solicitadoPor: _nomeGarcom,
+        solicitadoEm: Date.now()
+      };
+      _imprimirComRetry(cmd);
+    });
+    showToast('🖨️ Enviado para impressão','#4ade80');
+  } else {
+    // Tudo junto em um único comando
+    var cmd = {
+      tipo: 'conta_pessoa_junto',
+      restauranteId: _restauranteId,
+      contaId: _fecharContaId,
+      mesa: c.mesa,
+      grupos: selecionadas.map(function(p){
+        var dados = porPessoa[p] || {itens:[],total:0};
+        var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
+        return {
+          pessoa: p === '__sem__' ? 'Mesa toda' : p,
+          itens: dados.itens,
+          subtotal: dados.total,
+          taxa: taxa,
+          taxaPct: _taxaServicoAtiva ? taxaPct : 0,
+          total: dados.total + taxa
+        };
+      }),
+      solicitadoPor: _nomeGarcom,
+      solicitadoEm: Date.now()
+    };
+    _imprimirComRetry(cmd);
+    showToast('🖨️ Enviado para impressão','#4ade80');
+  }
+}
+
 function abrirMenuImpressaoConta(){
   imprimirContaMesa('final');
 }

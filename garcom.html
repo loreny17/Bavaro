@@ -11332,7 +11332,8 @@ function adicionarAoCarrinho(){
       qtd: _qtdTemp,
       obs: obs,
       foto: _itemAberto.foto||'',
-      selecoes: selecoes
+      selecoes: selecoes,
+      pessoa: '' // vinculado depois pelo garçom
     };
   }
   // Modo edição: substitui o item no carrinho. Modo normal: adiciona novo.
@@ -11441,6 +11442,11 @@ function renderCarrinho(){
         pesoHtml+
         selecoesHtml+
         (it.obs?'<div class="cart-item-obs">📝 '+esc(it.obs)+'</div>':'')+
+        '<div style="margin-top:4px;">'+
+          '<button onclick="cartVincularPessoa('+idx+')" style="background:'+(it.pessoa?'rgba(212,168,67,0.15)':'rgba(255,255,255,0.05)')+';border:1px solid '+(it.pessoa?'var(--accent)':'var(--border)')+';color:'+(it.pessoa?'var(--accent)':'var(--muted)')+';border-radius:6px;padding:3px 9px;font-size:0.72rem;font-family:inherit;cursor:pointer;">'+
+            (it.pessoa ? '👤 '+esc(it.pessoa) : '👤 Para quem?')+
+          '</button>'+
+        '</div>'+
         '<div class="cart-item-sub">'+
           '<span class="cart-preco">R$ '+fmtPreco(subtotalItem)+'</span>'+
           controleQtdHtml+
@@ -11455,6 +11461,273 @@ function renderCarrinho(){
   var impRow = document.getElementById('cart-imprimir-row');
   if(impRow) impRow.style.display = 'flex';
 }
+// ════════════════════════════════════════
+//  SISTEMA DE PESSOAS POR MESA
+// ════════════════════════════════════════
+var _pessoasMesa = []; // nomes das pessoas da mesa atual
+
+function _getPessoasMesa(){
+  // Busca da conta atual no cache
+  var num = _mesaAtiva;
+  if(!num) return _pessoasMesa;
+  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  if(conta && conta.pessoas && conta.pessoas.length) _pessoasMesa = conta.pessoas;
+  return _pessoasMesa;
+}
+
+function cartVincularPessoa(idx){
+  var pessoas = _getPessoasMesa();
+  var atual = _carrinho[idx] ? (_carrinho[idx].pessoa || '') : '';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-pessoa-vincular';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var pessoasHtml = pessoas.map(function(p){
+    var ativa = p === atual;
+    return '<button onclick="_selecionarPessoaCarrinho('+idx+',\''+p.replace(/'/g,"\\'")+'\')" style="width:100%;text-align:left;padding:12px 14px;background:'+(ativa?'rgba(212,168,67,0.15)':'var(--surface2)')+';border:1px solid '+(ativa?'var(--accent)':'var(--border)')+';border-radius:10px;color:'+(ativa?'var(--accent)':'var(--text)')+';font-size:0.95rem;font-family:inherit;cursor:pointer;margin-bottom:6px;">'+
+      '👤 '+esc(p)+(ativa?' ✓':'')+
+    '</button>';
+  }).join('');
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:100%;max-width:360px;">'+
+      '<div style="font-weight:700;font-size:1rem;margin-bottom:14px;">Para quem é este item?</div>'+
+      (pessoasHtml || '')+
+      '<div style="display:flex;gap:8px;margin-top:10px;">'+
+        '<input id="inp-nova-pessoa" type="text" placeholder="Nome da pessoa..." maxlength="30" style="flex:1;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.9rem;" onkeydown="if(event.key===\'Enter\')_adicionarNovaPessoaCarrinho('+idx+')">'+
+        '<button onclick="_adicionarNovaPessoaCarrinho('+idx+')" style="padding:10px 14px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;">+</button>'+
+      '</div>'+
+      (atual?'<button onclick="_selecionarPessoaCarrinho('+idx+',\'\')" style="width:100%;margin-top:8px;padding:10px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;font-family:inherit;cursor:pointer;">✕ Remover pessoa</button>':'')+
+      '<button onclick="document.getElementById(\'modal-pessoa-vincular\').remove()" style="width:100%;margin-top:8px;padding:10px;background:var(--surface3);border:1px solid var(--border);color:var(--muted);border-radius:8px;font-family:inherit;cursor:pointer;">Fechar</button>'+
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var inp=document.getElementById('inp-nova-pessoa'); if(inp) inp.focus(); },100);
+}
+
+function _adicionarNovaPessoaCarrinho(idx){
+  var inp = document.getElementById('inp-nova-pessoa');
+  if(!inp) return;
+  var nome = inp.value.trim();
+  if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
+  // Adiciona à lista de pessoas da mesa
+  if(_pessoasMesa.indexOf(nome) < 0) _pessoasMesa.push(nome);
+  // Salva na conta no Firestore
+  _salvarPessoasMesa();
+  // Vincula ao item
+  _selecionarPessoaCarrinho(idx, nome);
+}
+
+function _selecionarPessoaCarrinho(idx, nome){
+  if(_carrinho[idx]) _carrinho[idx].pessoa = nome;
+  var m = document.getElementById('modal-pessoa-vincular');
+  if(m) m.remove();
+  renderCarrinho();
+  salvarCarrinho();
+}
+
+function _salvarPessoasMesa(){
+  var num = _mesaAtiva;
+  if(!num) return;
+  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  if(!conta || !conta.id) return;
+  fbDb.collection('contas_mesa').doc(conta.id).update({
+    pessoas: _pessoasMesa
+  }).catch(function(){});
+}
+
+// Vincula pessoa a item já enviado (em "Ver pedidos da mesa")
+function vincularPessoaItem(pedidoId, itemIdx){
+  var pedido = (_meusPedidos||[]).find(function(p){ return p.id===pedidoId; });
+  if(!pedido) return;
+  var it = (pedido.itens||[])[itemIdx];
+  if(!it) return;
+
+  var pessoas = _pessoasMesa.slice();
+  // Tenta pegar da conta da mesa
+  var num = _verPedidosMesaNum;
+  if(num){
+    var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
+    if(conta && conta.pessoas) pessoas = conta.pessoas;
+  }
+  var atual = it.pessoa || '';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-pessoa-item';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var pessoasHtml = pessoas.map(function(p){
+    var ativa = p === atual;
+    return '<button onclick="_vincularPessoaItemSalvar(\''+pedidoId+'\','+itemIdx+',\''+p.replace(/'/g,"\\'")+'\')" style="width:100%;text-align:left;padding:12px 14px;background:'+(ativa?'rgba(212,168,67,0.15)':'var(--surface2)')+';border:1px solid '+(ativa?'var(--accent)':'var(--border)')+';border-radius:10px;color:'+(ativa?'var(--accent)':'var(--text)')+';font-size:0.95rem;font-family:inherit;cursor:pointer;margin-bottom:6px;">'+
+      '👤 '+esc(p)+(ativa?' ✓':'')+
+    '</button>';
+  }).join('');
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:100%;max-width:360px;">'+
+      '<div style="font-weight:700;font-size:1rem;margin-bottom:6px;">Vincular a:</div>'+
+      '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">'+esc(it.nome)+'</div>'+
+      (pessoasHtml||'<div style="color:var(--muted);font-size:0.82rem;margin-bottom:10px;">Nenhuma pessoa cadastrada ainda.</div>')+
+      '<div style="display:flex;gap:8px;margin-top:10px;">'+
+        '<input id="inp-nova-pessoa-item" type="text" placeholder="Nome da pessoa..." maxlength="30" style="flex:1;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.9rem;" onkeydown="if(event.key===\'Enter\')_novaEVincularPessoa(\''+pedidoId+'\','+itemIdx+')">'+
+        '<button onclick="_novaEVincularPessoa(\''+pedidoId+'\','+itemIdx+')" style="padding:10px 14px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;">+</button>'+
+      '</div>'+
+      (atual?'<button onclick="_vincularPessoaItemSalvar(\''+pedidoId+'\','+itemIdx+',\'\')" style="width:100%;margin-top:8px;padding:10px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;font-family:inherit;cursor:pointer;">✕ Remover pessoa</button>':'')+
+      '<button onclick="document.getElementById(\'modal-pessoa-item\').remove()" style="width:100%;margin-top:8px;padding:10px;background:var(--surface3);border:1px solid var(--border);color:var(--muted);border-radius:8px;font-family:inherit;cursor:pointer;">Fechar</button>'+
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var inp=document.getElementById('inp-nova-pessoa-item'); if(inp) inp.focus(); },100);
+}
+
+function _novaEVincularPessoa(pedidoId, itemIdx){
+  var inp = document.getElementById('inp-nova-pessoa-item');
+  if(!inp) return;
+  var nome = inp.value.trim();
+  if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
+  if(_pessoasMesa.indexOf(nome) < 0) _pessoasMesa.push(nome);
+  _salvarPessoasMesa();
+  _vincularPessoaItemSalvar(pedidoId, itemIdx, nome);
+}
+
+function _vincularPessoaItemSalvar(pedidoId, itemIdx, nome){
+  var m = document.getElementById('modal-pessoa-item');
+  if(m) m.remove();
+  var pedido = (_meusPedidos||[]).find(function(p){ return p.id===pedidoId; });
+  if(!pedido || !pedido.itens || pedido.itens[itemIdx] === undefined) return;
+  pedido.itens[itemIdx].pessoa = nome;
+  // Salva no Firestore
+  fbDb.collection('pedidos').doc(pedidoId).update({
+    itens: pedido.itens
+  }).then(function(){
+    showToast('👤 '+(nome?nome+' vinculado':'Pessoa removida'),'#4ade80');
+  }).catch(function(){
+    showToast('⚠️ Erro ao salvar','#f7a34f');
+  });
+}
+
+// ════════════════════════════════════════
+//  IMPRESSÃO POR PESSOA
+// ════════════════════════════════════════
+function abrirImprimirPorPessoa(num){
+  var num = num || _verPedidosMesaNum || _mesaAtiva;
+  if(!num) return;
+
+  // Coleta todos os itens de todos os pedidos da mesa
+  var todosPedidos = _meusPedidos || [];
+  var itensPorPessoa = {}; // {nome: [itens]}
+  var itensSemPessoa = [];
+
+  todosPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado' || it.transferidoPara) return;
+      var pessoa = it.pessoa || it.nomeCliente || '';
+      if(pessoa){
+        if(!itensPorPessoa[pessoa]) itensPorPessoa[pessoa] = [];
+        itensPorPessoa[pessoa].push(it);
+      } else {
+        itensSemPessoa.push(it);
+      }
+    });
+  });
+
+  var pessoas = Object.keys(itensPorPessoa);
+  if(!pessoas.length && !itensSemPessoa.length){
+    showToast('Mesa sem itens','#f7a34f');
+    return;
+  }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-imprimir-pessoa';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var calcTotal = function(itens){ return itens.reduce(function(a,it){ return a+(it.preco||0)*(it.qtd||1); },0); };
+
+  var pessoasHtml = pessoas.map(function(p){
+    var tot = calcTotal(itensPorPessoa[p]);
+    return '<label style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:6px;">'+
+      '<input type="checkbox" class="chk-pessoa-imp" value="'+esc(p)+'" checked style="width:18px;height:18px;accent-color:var(--accent);">'+
+      '<span style="flex:1;font-weight:600;">👤 '+esc(p)+'</span>'+
+      '<span style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(tot)+'</span>'+
+    '</label>';
+  }).join('');
+
+  if(itensSemPessoa.length){
+    pessoasHtml += '<label style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:6px;">'+
+      '<input type="checkbox" class="chk-pessoa-imp" value="__sem_pessoa__" checked style="width:18px;height:18px;accent-color:var(--accent);">'+
+      '<span style="flex:1;font-weight:600;color:var(--muted);">🍽️ Mesa toda (sem nome)</span>'+
+      '<span style="color:var(--accent);font-weight:700;">R$ '+fmtPreco(calcTotal(itensSemPessoa))+'</span>'+
+    '</label>';
+  }
+
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto;">'+
+      '<div style="font-weight:700;font-size:1rem;margin-bottom:4px;">🖨️ Imprimir por pessoa</div>'+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">Mesa '+num+' — selecione quem imprimir</div>'+
+      '<div style="margin-bottom:14px;">'+pessoasHtml+'</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button onclick="_executarImprimirPorPessoa(\''+num+'\')" style="flex:1;padding:13px;background:var(--accent);color:#000;border:none;border-radius:10px;font-weight:700;font-size:0.95rem;font-family:inherit;cursor:pointer;">🖨️ Imprimir selecionados</button>'+
+        '<button onclick="_imprimirTudoJunto(\''+num+'\')" style="flex:1;padding:13px;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:700;font-size:0.95rem;font-family:inherit;cursor:pointer;">📋 Tudo junto</button>'+
+      '</div>'+
+      '<button onclick="document.getElementById(\'modal-imprimir-pessoa\').remove()" style="width:100%;margin-top:8px;padding:11px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-family:inherit;cursor:pointer;">Cancelar</button>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function _executarImprimirPorPessoa(num){
+  var chks = document.querySelectorAll('.chk-pessoa-imp:checked');
+  var selecionadas = Array.from(chks).map(function(c){ return c.value; });
+  if(!selecionadas.length){ showToast('⚠️ Selecione pelo menos uma pessoa','#f7a34f'); return; }
+
+  var m = document.getElementById('modal-imprimir-pessoa');
+  if(m) m.remove();
+
+  var todosPedidos = _meusPedidos || [];
+  // Agrupa itens por pessoa selecionada
+  var grupos = {}; // {pessoa: [itens]}
+  todosPedidos.forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.status === 'cancelado' || it.transferidoPara) return;
+      var pessoa = it.pessoa || it.nomeCliente || '__sem_pessoa__';
+      if(selecionadas.indexOf(pessoa) < 0) return;
+      if(!grupos[pessoa]) grupos[pessoa] = [];
+      grupos[pessoa].push(it);
+    });
+  });
+
+  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  var contaId = conta ? conta.id : null;
+
+  Object.keys(grupos).forEach(function(pessoa){
+    var itens = grupos[pessoa];
+    var total = itens.reduce(function(a,it){ return a+(it.preco||0)*(it.qtd||1); },0);
+    var nomePessoa = pessoa === '__sem_pessoa__' ? 'Mesa toda' : pessoa;
+    var comando = {
+      tipo: 'conta_pessoa',
+      restauranteId: _restauranteId,
+      contaId: contaId,
+      mesa: num,
+      pessoa: nomePessoa,
+      itens: itens,
+      total: total,
+      solicitadoPor: _nomeGarcom,
+      solicitadoEm: Date.now()
+    };
+    _imprimirComRetry(comando);
+  });
+
+  showToast('🖨️ Enviado para impressão','#4ade80');
+}
+
+function _imprimirTudoJunto(num){
+  var m = document.getElementById('modal-imprimir-pessoa');
+  if(m) m.remove();
+  // Usa a impressão normal de conta mas com nomes das pessoas nos itens
+  imprimirContaMesa('simplificada');
+}
+
 function cartAlterarQtd(idx, delta){
   // Ignora pra itens kg (eles têm botão "Editar" próprio)
   if(_carrinho[idx].tipoVenda === 'kg') return;
@@ -11681,6 +11954,7 @@ function confirmarEnvioFab(){
         '</div>' +
         '<div style="display:flex;gap:8px;">' +
           '<button onclick="document.getElementById(\'modal-fab-confirma\').remove()" style="flex:1;padding:11px;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:8px;font-weight:600;font-size:0.88rem;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+          '<button onclick="document.getElementById(\'modal-fab-confirma\').remove()" style="flex:1;padding:11px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:8px;font-weight:700;font-size:0.88rem;cursor:pointer;font-family:inherit;">← Mais itens</button>' +
           '<button onclick="enviarPedidoFromFab()" style="flex:2;padding:11px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:0.92rem;cursor:pointer;font-family:inherit;">🚀 Enviar agora</button>' +
         '</div>' +
       '</div>' +
@@ -14344,6 +14618,9 @@ var _verPedidosMesaNum = null;
 var _verPedidosUnsub = null;
 
 function abrirVerPedidosMesa(num){
+  _pessoasMesa = [];
+  var contaAbertura = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  if(contaAbertura && contaAbertura.pessoas) _pessoasMesa = contaAbertura.pessoas.slice();
   _verPedidosMesaNum = num;
   // Cria modal em tela cheia
   var ex = document.getElementById('modal-ver-pedidos');
@@ -14354,11 +14631,12 @@ function abrirVerPedidosMesa(num){
   mod.style.cssText = 'background:var(--bg);';
   mod.innerHTML =
     '<div class="modal-box" style="max-width:none;width:100%;height:100%;border-radius:0;display:flex;flex-direction:column;background:var(--bg);">'+
-      '<div class="modal-header" style="background:var(--surface);border-bottom:1px solid var(--border);">'+
-        '<button onclick="fecharVerPedidosMesa()" style="background:transparent;border:none;color:var(--text);font-size:1.5rem;cursor:pointer;margin-right:8px;font-family:inherit;">‹</button>'+
-        '<div class="modal-titulo">PEDIDOS — MESA '+num+'</div>'+
-        '<button class="modal-fechar" onclick="fecharVerPedidosMesa()">×</button>'+
-      '</div>'+
+    '<div class="modal-header" style="background:var(--surface);border-bottom:1px solid var(--border);">'+
+      '<button onclick="fecharVerPedidosMesa()" style="background:transparent;border:none;color:var(--text);font-size:1.5rem;cursor:pointer;margin-right:8px;font-family:inherit;">‹</button>'+
+      '<div class="modal-titulo" style="flex:1;">PEDIDOS — MESA '+num+'</div>'+
+      '<button onclick="abrirImprimirPorPessoa('+num+')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:7px 12px;border-radius:8px;font-size:0.78rem;font-weight:700;font-family:inherit;cursor:pointer;margin-right:6px;">🖨️ Por pessoa</button>'+
+      '<button class="modal-fechar" onclick="fecharVerPedidosMesa()">×</button>'+
+    '</div>'+
       '<div class="modal-body" style="flex:1;overflow-y:auto;padding:14px;" id="ver-pedidos-body">'+
         '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>'+
       '</div>'+
@@ -14677,9 +14955,10 @@ function renderVerPedidosMesa(pedidos){
       var acoes = podeEditar
         ? '<div style="display:flex;gap:6px;margin-top:6px;">'+
             '<button onclick="abrirEditarItemGarcom(\''+p.id+'\','+idx+')" style="flex:1;background:var(--surface3);border:1px solid var(--border2);color:var(--text);padding:7px;border-radius:8px;font-size:0.74rem;font-family:inherit;cursor:pointer;">✏️ Editar</button>'+
+            '<button onclick="vincularPessoaItem(\''+p.id+'\','+idx+')" style="flex:1;background:'+(it.pessoa?'rgba(212,168,67,0.1)':'var(--surface3)')+';border:1px solid '+(it.pessoa?'rgba(212,168,67,0.4)':'var(--border2)')+';color:'+(it.pessoa?'var(--accent)':'var(--text)')+';padding:7px;border-radius:8px;font-size:0.74rem;font-family:inherit;cursor:pointer;">'+(it.pessoa?'👤 '+esc(it.pessoa):'👤 Pessoa')+'</button>'+
             '<button onclick="cancelarItemGarcom(\''+p.id+'\','+idx+')" style="flex:1;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:7px;border-radius:8px;font-size:0.74rem;font-family:inherit;cursor:pointer;">✕ Cancelar</button>'+
           '</div>'
-        : '';
+        : '<div style="margin-top:4px;">'+(it.pessoa?'<span style="font-size:0.72rem;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:2px 8px;border-radius:5px;">👤 '+esc(it.pessoa)+'</span>':'')+'</div>';
       var selsHtml = '';
       if(it.selecoes && it.selecoes.length){
         selsHtml = '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">'+ 

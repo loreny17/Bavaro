@@ -459,7 +459,7 @@ header{
 .empty-sub{font-size:0.84rem;}
 
 /* ─── Modal genérico ─── */
-.modal{position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:9500;
+.modal{position:fixed;inset:0;background:rgba(0,0,0,0.48);z-index:9500;
   display:flex;align-items:flex-end;justify-content:center;
   opacity:0;pointer-events:none;transition:opacity 0.2s;}
 .modal.show{opacity:1;pointer-events:all;}
@@ -468,12 +468,12 @@ header{
 .modal.modal-centro{align-items:center;padding:20px;}
 .modal.modal-centro .modal-box{border-radius:18px !important;max-height:80vh;}
 .modal-box{
-  background:rgba(22,19,16,0.82);border:1px solid rgba(255,255,255,0.10);
+  background:rgba(22,19,16,0.74);border:1px solid rgba(255,255,255,0.10);
   border-radius:22px 22px 0 0;width:100%;max-width:500px;max-height:92vh;
   overflow-y:auto;display:flex;flex-direction:column;
   transform:translateY(16px);transition:transform 0.18s ease-out;
-  box-shadow:0 -8px 40px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.09);
-  backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);
+  box-shadow:0 -8px 40px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.10);
+  backdrop-filter:blur(28px) saturate(1.6);-webkit-backdrop-filter:blur(28px) saturate(1.6);
 }
 .modal.show .modal-box{transform:translateY(0);}
 @media(min-width:768px){.modal-box{border-radius:18px;}}
@@ -782,9 +782,20 @@ html[data-glass="on"] .bottom-nav{
 html[data-glass="on"] .comanda-card{
   background:rgba(26,26,26,calc(1 - var(--bv-glass,0)*0.85));
 }
+/* Cards de categoria (emojis) — vidro fosco também */
+html[data-glass="on"] .cat-card{
+  background:rgba(255,255,255,0.05)!important;
+  border:1px solid rgba(255,255,255,0.12);
+  backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.10);
+}
+html[data-glass="on"] .cat-card .item-foto{
+  background:rgba(255,255,255,0.04)!important;
+}
 /* modo leve (sem animações) desliga o desfoque pesado, mantendo só a translucidez */
 html[data-anim="off"][data-glass="on"] #app header,
 html[data-anim="off"][data-glass="on"] .cat-bar,
+html[data-anim="off"][data-glass="on"] .cat-card,
 html[data-anim="off"][data-glass="on"] .item-card,
 html[data-anim="off"][data-glass="on"] .bottom-nav,
 html[data-anim="off"][data-glass="on"] .comanda-card,
@@ -3391,7 +3402,8 @@ function reverterDescido(pedidoId, idx){
 }
 
 function mostrarMesas(){
-  document.getElementById('mesa-screen').classList.remove('hidden');
+  var _msEl = document.getElementById('mesa-screen');
+  if(_msEl){ _msEl.style.display = ''; _msEl.classList.remove('hidden'); }
   document.getElementById('app').style.display = 'none';
   iniciarHeartbeat(); // monitora listeners em background
   // Badge no header: nome + crown se admin
@@ -8514,13 +8526,17 @@ function voltarParaMesas(){
   _carrinho = []; // limpa em memória (mas continua salvo no localStorage)
   _ultimoContaIdEscutado = null;
   var _appEl = document.getElementById('app');
+  var _msEl = document.getElementById('mesa-screen');
   var _animOff = document.documentElement.getAttribute('data-anim') === 'off';
+  function _mostrarMapa(){
+    if(_msEl){ _msEl.style.display = ''; _msEl.classList.remove('hidden'); }
+  }
   if(_animOff){
     _appEl.style.display = 'none';
-    document.getElementById('mesa-screen').classList.remove('hidden');
+    _mostrarMapa();
   } else {
-    // revela o mapa atrás e desliza o cardápio (overlay sólido) de volta para a lateral
-    document.getElementById('mesa-screen').classList.remove('hidden');
+    // desliza o cardápio (sólido) de volta para a lateral SOBRE FUNDO ESCURO;
+    // o mapa só reaparece quando o slide termina (sem faixa dourada cruzando)
     _appEl.style.position = 'fixed';
     _appEl.style.inset = '0';
     _appEl.style.zIndex = '800';
@@ -8534,7 +8550,8 @@ function voltarParaMesas(){
       _appEl.style.position = '';
       _appEl.style.inset = '';
       _appEl.style.background = '';
-    }, 290);
+      _mostrarMapa();
+    }, 300);
   }
   if(_unsubPedidos){ _unsubPedidos(); _unsubPedidos = null; }
   atualizarCarrinhoBadge();
@@ -8545,6 +8562,8 @@ function voltarParaMesas(){
 // ════════════════════════════════════════
 function iniciarApp(){
   var _appEl = document.getElementById('app');
+  var _msEl = document.getElementById('mesa-screen');
+  if(_msEl) _msEl.style.display = 'none'; // esconde o mapa na hora → o slide revela fundo escuro, sem faixa dourada
   _appEl.style.display = 'flex';
   // ▸ animação: cardápio entra deslizando da lateral (overlay sólido, sem faixa)
   if(document.documentElement.getAttribute('data-anim') !== 'off'){
@@ -9881,7 +9900,7 @@ function renderItens(){
       var count = _itens.filter(function(i){ return (i.categoriaId||'')===cat.id && i.disponivel; }).length;
       if(!count) return;
       var card = document.createElement('div');
-      card.className = 'item-card';
+      card.className = 'item-card cat-card';
       card.innerHTML =
         '<div class="item-foto" style="background:linear-gradient(135deg,#2a2a2a,#1a1a1a);">'+(cat.emoji||'📂')+'</div>'+
         '<div class="item-info" style="text-align:center;">'+

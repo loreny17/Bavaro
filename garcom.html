@@ -11701,12 +11701,90 @@ function renderCarrinho(){
         '</div>'+
       '</div>';
     wrap.appendChild(div);
+    // Swipe no carrinho: direita = +1, esquerda = remover
+    _anexarSwipeCarrinho(div, idx);
   });
   document.getElementById('cart-total-val').textContent = 'R$ '+fmtPreco(total);
   totalRow.style.display = 'flex';
   var impRow = document.getElementById('cart-imprimir-row');
   if(impRow) impRow.style.display = 'flex';
 }
+function _anexarSwipeCarrinho(el, idx){
+  var startX = 0, currentX = 0, swiping = false;
+  var THRESHOLD = 70;
+  var bgEl = null;
+
+  function criarBg(dir){
+    bgEl = document.createElement('div');
+    bgEl.style.cssText = 'position:absolute;inset:0;border-radius:inherit;display:flex;align-items:center;'+
+      (dir > 0
+        ? 'justify-content:flex-start;padding-left:18px;background:rgba(74,222,128,0.25);color:#4ade80;'
+        : 'justify-content:flex-end;padding-right:18px;background:rgba(248,113,113,0.25);color:#f87171;')+
+      'font-size:1.3rem;font-weight:700;pointer-events:none;z-index:0;';
+    bgEl.textContent = dir > 0 ? '+1 ✓' : '🗑';
+    el.style.position = 'relative';
+    el.insertBefore(bgEl, el.firstChild);
+  }
+
+  function removerBg(){
+    if(bgEl && bgEl.parentNode === el){ el.removeChild(bgEl); bgEl = null; }
+  }
+
+  el.addEventListener('touchstart', function(e){
+    if(e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    currentX = 0;
+    swiping = false;
+  }, {passive:true});
+
+  el.addEventListener('touchmove', function(e){
+    currentX = e.touches[0].clientX - startX;
+    if(Math.abs(currentX) < 8) return;
+    swiping = true;
+    // Cria bg na direção correta
+    var dir = currentX > 0 ? 1 : -1;
+    if(!bgEl) criarBg(dir);
+    // Move os filhos (exceto bg)
+    Array.from(el.children).forEach(function(c){
+      if(c !== bgEl) c.style.transform = 'translateX('+currentX+'px)';
+    });
+    // Atualiza cor conforme passa do threshold
+    var passou = Math.abs(currentX) >= THRESHOLD;
+    if(bgEl) bgEl.style.opacity = passou ? '1' : (Math.abs(currentX)/THRESHOLD).toFixed(2);
+  }, {passive:true});
+
+  el.addEventListener('touchend', function(){
+    if(!swiping){ removerBg(); return; }
+    swiping = false;
+    var passou = Math.abs(currentX) >= THRESHOLD;
+    var dir = currentX > 0 ? 1 : -1;
+    // Anima de volta
+    Array.from(el.children).forEach(function(c){
+      if(c !== bgEl){ c.style.transition = 'transform 0.15s'; c.style.transform = 'translateX(0)'; }
+    });
+    setTimeout(function(){
+      removerBg();
+      Array.from(el.children).forEach(function(c){ c.style.transition = ''; });
+      if(passou){
+        if(dir > 0){
+          // Direita: +1
+          if(_carrinho[idx] && _carrinho[idx].tipoVenda !== 'kg'){
+            _carrinho[idx].qtd = (_carrinho[idx].qtd||1) + 1;
+            try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
+            atualizarCarrinhoBadge();
+            renderCarrinho();
+            renderItens();
+          }
+        } else {
+          // Esquerda: remove
+          try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){}
+          cartRemover(idx);
+        }
+      }
+    }, 150);
+  });
+}
+
 function cartAlterarQtd(idx, delta){
   // Ignora pra itens kg (eles têm botão "Editar" próprio)
   if(_carrinho[idx].tipoVenda === 'kg') return;

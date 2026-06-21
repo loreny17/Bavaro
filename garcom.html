@@ -832,15 +832,29 @@ html[data-glass="on"] .bottom-nav{
 html[data-glass="on"] .comanda-card{
   background:rgba(26,26,26,calc(1 - var(--bv-glass,0)*0.9));
 }
-/* Cards de categoria (emojis) — vidro fosco também */
-html[data-glass="on"] .cat-card{
+/* ─── Glass fixo — categorias e mesas (sempre ativo, independe de animações) ─── */
+.cat-card{
   background:rgba(255,255,255,0.05)!important;
-  border:1px solid rgba(255,255,255,0.12);
-  backdrop-filter:blur(calc(14px + var(--bv-glass,0)*26px)) saturate(1.8);-webkit-backdrop-filter:blur(calc(14px + var(--bv-glass,0)*26px)) saturate(1.8);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.10);
+  border:1px solid rgba(255,255,255,0.13)!important;
+  backdrop-filter:blur(20px) saturate(1.6)!important;
+  -webkit-backdrop-filter:blur(20px) saturate(1.6)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.12),0 4px 20px rgba(0,0,0,0.3)!important;
 }
-html[data-glass="on"] .cat-card .item-foto{
+.cat-card .item-foto{
   background:rgba(255,255,255,0.04)!important;
+}
+.mesa-card{
+  backdrop-filter:blur(14px) saturate(1.5)!important;
+  -webkit-backdrop-filter:blur(14px) saturate(1.5)!important;
+}
+.mesa-card.livre{
+  background:rgba(255,255,255,0.05)!important;
+  border-color:rgba(255,255,255,0.12)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.10)!important;
+}
+.mesa-card.ocupada{
+  background:rgba(248,113,113,0.08)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 2px 12px rgba(248,113,113,0.15)!important;
 }
 /* Modais com glass */
 html[data-glass="on"] .modal{
@@ -885,13 +899,19 @@ html[data-anim="off"] *::after{
 html[data-anim="off"] header,
 html[data-anim="off"] .bottom-nav,
 html[data-anim="off"] .toast,
-html[data-anim="off"] .modal,
-html[data-anim="off"] .modal.show,
-html[data-anim="off"] .modal-box,
 html[data-anim="off"] #login-screen{
   backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
 }
-html[data-anim="off"] .modal-box{background:var(--surface)!important;}
+/* Com animações desligadas: mantém glass nos modais mas remove transições pesadas */
+html[data-anim="off"] .modal-box{
+  background:rgba(12,10,8,0.55)!important;
+  backdrop-filter:blur(40px) saturate(1.8)!important;
+  -webkit-backdrop-filter:blur(40px) saturate(1.8)!important;
+}
+html[data-anim="off"] .modal{
+  backdrop-filter:blur(8px)!important;
+  -webkit-backdrop-filter:blur(8px)!important;
+}
 /* brilhos decorativos (sheen) e ripple desligados */
 html[data-anim="off"] .item-card::after,
 html[data-anim="off"] .comanda-card::after,
@@ -7688,7 +7708,7 @@ function abrirPedidoRapido(numMesa){
     mod.id = 'modal-pedido-rapido';
     mod.dataset.lista = JSON.stringify(lista);
     mod.innerHTML =
-      '<div class="modal-box" style="max-width:440px;border-radius:18px;">'+
+      '<div class="modal-box" style="max-width:440px;border-radius:18px;background:rgba(12,10,8,calc(0.60 - var(--bv-glass,0)*0.55));backdrop-filter:blur(calc(36px + var(--bv-glass,0)*30px)) saturate(1.8);-webkit-backdrop-filter:blur(calc(36px + var(--bv-glass,0)*30px)) saturate(1.8);border:1px solid rgba(255,255,255,calc(0.14 + var(--bv-glass,0)*0.18));">'+
         '<div class="modal-header">'+
           '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
           '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
@@ -7731,8 +7751,8 @@ function renderPedidoRapidoGrid(){
     }
     // Visual: card "apagado" quando qtd=0, destacado quando qtd>0
     var cardStyle = qtd > 0
-      ? 'background:rgba(212,168,67,0.1);border:1.5px solid var(--accent);'
-      : 'background:var(--surface2);border:1.5px solid var(--border2);';
+      ? 'background:rgba(212,168,67,calc(0.12 - var(--bv-glass,0)*0.08));border:1.5px solid var(--accent);backdrop-filter:blur(calc(16px + var(--bv-glass,0)*20px));-webkit-backdrop-filter:blur(calc(16px + var(--bv-glass,0)*20px));'
+      : 'background:rgba(255,255,255,calc(0.05 - var(--bv-glass,0)*0.04));border:1.5px solid rgba(255,255,255,calc(0.10 + var(--bv-glass,0)*0.10));backdrop-filter:blur(calc(16px + var(--bv-glass,0)*20px));-webkit-backdrop-filter:blur(calc(16px + var(--bv-glass,0)*20px));';
     var qtdColor = qtd > 0 ? 'var(--accent)' : 'var(--muted)';
     var chaveEscaped = chave.replace(/'/g,"\\'").replace(/"/g,'&quot;');
     html += '<div class="ped-rap-card" style="'+cardStyle+'border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:140px;cursor:pointer;transition:all 0.15s;" '+
@@ -9775,10 +9795,9 @@ function renderItens(){
       var card = document.createElement('div');
       card.className = 'item-card cat-card';
       card.innerHTML =
-        '<div class="item-foto" style="background:linear-gradient(135deg,#2a2a2a,#1a1a1a);">'+(cat.emoji||'📂')+'</div>'+
+        '<div class="item-foto" style="background:rgba(255,255,255,0.04);">'+(cat.emoji||'📂')+'</div>'+
         '<div class="item-info" style="text-align:center;">'+
-          '<div class="item-nome">'+esc(cat.nome)+'</div>'+
-          '<div class="item-desc" style="text-align:center;">'+count+' '+(count===1?'item':'itens')+'</div>'+
+          '<div class="item-nome" style="-webkit-line-clamp:2;">'+esc(cat.nome)+'</div>'+
         '</div>';
       card.onclick = (function(id){ return function(){ _catAtiva=id; pushHistory('cardapio:'+id); renderCatBar(); renderItens(); }; })(cat.id);
       grid.appendChild(card);

@@ -12867,10 +12867,26 @@ function _executarImpPessoaFechar(modo){
   var m = document.getElementById('modal-imp-pessoa-fechar');
   if(m) m.remove();
 
-  // Monta grupos
+  // Monta grupos — cruza com pedidos para pegar campo pessoa
   var porPessoa = {};
+  // Mapa de pessoa dos pedidos (mais confiável que a conta)
+  var mapaPessoa = {};
+  (_meusPedidos||[]).forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.pessoa){
+        var chave = it.itemKey || (it.nome+'|'+(it.preco||0));
+        mapaPessoa[chave] = it.pessoa;
+      }
+    });
+  });
   (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
-    var p = it.pessoa || it.nomeCliente || '__sem__';
+    // Tenta pegar pessoa do item ou do mapa de pedidos
+    var pessoa = it.pessoa || it.nomeCliente;
+    if(!pessoa){
+      var chave = it.itemKey || (it.nome+'|'+(it.preco||0));
+      pessoa = mapaPessoa[chave];
+    }
+    var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
     var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
     porPessoa[p].itens.push(it);
@@ -14993,8 +15009,6 @@ function abrirVerPedidosMesa(num){
       '<div class="modal-header" style="background:var(--surface);border-bottom:1px solid var(--border);">'+
         '<button onclick="fecharVerPedidosMesa()" style="background:transparent;border:none;color:var(--text);font-size:1.5rem;cursor:pointer;margin-right:8px;font-family:inherit;">‹</button>'+
         '<div class="modal-titulo" style="flex:1;">PEDIDOS — MESA '+num+'</div>'+
-        '<button onclick="abrirImprimirPorPessoa('+num+')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:7px 12px;border-radius:8px;font-size:0.78rem;font-weight:700;font-family:inherit;cursor:pointer;margin-right:6px;">🖨️ Por pessoa</button>'+
-        '<button onclick="abrirImprimirPorPessoa('+num+')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:7px 12px;border-radius:8px;font-size:0.78rem;font-weight:700;font-family:inherit;cursor:pointer;margin-right:6px;">🖨️ Por pessoa</button>'+
         '<button class="modal-fechar" onclick="fecharVerPedidosMesa()">×</button>'+
       '</div>'+
       '<div class="modal-body" style="flex:1;overflow-y:auto;padding:14px;" id="ver-pedidos-body">'+

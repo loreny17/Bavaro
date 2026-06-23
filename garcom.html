@@ -14376,8 +14376,9 @@ function _renderItemFechar(it, c){
       var jaPaga = f < partesPagas;
       var fragMarcado = fragsMarcados.indexOf(f) >= 0;
       var checkF = jaPaga ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>' : '<div class="item-pgto-check '+(fragMarcado?'checked':'')+'" style="margin-right:8px;">'+(fragMarcado?'✓':'')+'</div>';
+      var nomeFrag = (div.pessoas && div.pessoas[f]) ? '👤 '+esc(div.pessoas[f]) : 'Parte '+(f+1)+' de '+div.total;
       h += '<div class="item-pgto" style="padding:6px 8px;background:var(--surface);border-radius:7px;margin-bottom:4px;'+(jaPaga?'opacity:0.55;text-decoration:line-through;':'cursor:pointer;')+'" '+((!jaPaga)?'onclick="toggleFragmento(\''+it.itemKey+'\','+f+')"':'')+'>'+
-        checkF+'<div style="flex:1;font-size:0.78rem;">Parte '+(f+1)+' de '+div.total+(jaPaga?' (paga)':'')+'</div>'+
+        checkF+'<div style="flex:1;font-size:0.78rem;">'+nomeFrag+(jaPaga?' (paga)':'')+'</div>'+
         '<div style="font-family:Bebas Neue,sans-serif;color:'+(jaPaga?'var(--muted)':'var(--accent)')+';font-size:0.95rem;">R$ '+fmtPreco(div.valorPorParte)+'</div></div>';
     }
     h += '</div>';
@@ -14452,12 +14453,37 @@ function renderFecharConta(){
       var gruposPessoa = {};
       var semPessoa = [];
       itensVisiveis.forEach(function(it){
-        var p = it.pessoa || it.nomeCliente;
-        if(p){ if(!gruposPessoa[p]) gruposPessoa[p]=[]; gruposPessoa[p].push(it); }
-        else semPessoa.push(it);
+        // Item com divisão — distribui cada parte para a pessoa correspondente
+        if(it.divisao && it.divisao.total > 1 && it.divisao.pessoas){
+          var div = it.divisao;
+          for(var f2 = 0; f2 < div.total; f2++){
+            var pFrag = div.pessoas[f2] || it.pessoa || it.nomeCliente || '';
+            if(pFrag){
+              if(!gruposPessoa[pFrag]) gruposPessoa[pFrag] = [];
+              // Adiciona o item mas com valor de 1 parte
+              if(f2 === 0 || !(gruposPessoa[pFrag].some(function(x){ return x.itemKey===it.itemKey; }))){
+                // Representante da parte desta pessoa
+                var itParte = Object.assign({}, it, {
+                  _fragIdx: f2,
+                  _valorParte: div.valorPorParte
+                });
+                gruposPessoa[pFrag].push(itParte);
+              }
+            } else {
+              if(!semPessoa.some(function(x){ return x.itemKey===it.itemKey; }))
+                semPessoa.push(it);
+            }
+          }
+        } else {
+          var p = it.pessoa || it.nomeCliente;
+          if(p){ if(!gruposPessoa[p]) gruposPessoa[p]=[]; gruposPessoa[p].push(it); }
+          else semPessoa.push(it);
+        }
       });
       Object.keys(gruposPessoa).forEach(function(p){
-        var totalP = gruposPessoa[p].reduce(function(a,it){ return a+(it.preco||0)*(it.qtd||1); },0);
+        var totalP = gruposPessoa[p].reduce(function(a,it){
+          return a + (it._valorParte !== undefined ? it._valorParte : (it.preco||0)*(it.qtd||1));
+        },0);
         var taxaP = _taxaServicoAtiva ? totalP*(((_taxaServicoPct||10))/100) : 0;
         var pessoaId = 'grp-'+p.replace(/[^a-zA-Z0-9]/g,'_');
         var pessoaEsc = p.replace(/'/g,"\\'");
@@ -14798,14 +14824,17 @@ function aplicarDivisao(itemKey){
   if(_dividirNumEscolhido < 2) return;
   var it = (_fecharConta.itens||[]).find(function(x){ return x.itemKey === itemKey; });
   if(!it) return;
-  // ⚠️ Divide só o RESTANTE (descontando abatimentos)
   var valorTotal = valorRestanteItem(it);
   if(valorTotal <= 0.01){ showToast('Nada para dividir','#f7a34f'); return; }
   var valorPorParte = valorTotal / _dividirNumEscolhido;
   var divisao = {
     total: _dividirNumEscolhido,
     pagas: 0,
-    valorPorParte: parseFloat(valorPorParte.toFixed(2))
+    valorPorParte: parseFloat(valorPorParte.toFixed(2)),
+    // Salva as pessoas por parte (vazio = herda pessoa do item)
+    pessoas: _dividirPessoas && _dividirPessoas.length === _dividirNumEscolhido
+      ? _dividirPessoas.slice()
+      : new Array(_dividirNumEscolhido).fill('')
   };
   var itensAtualizados = _fecharConta.itens.map(function(x){
     if(x.itemKey === itemKey) return Object.assign({}, x, { divisao: divisao });
@@ -14817,6 +14846,7 @@ function aplicarDivisao(itemKey){
     showToast('✓ Item dividido em ' + _dividirNumEscolhido + ' partes','#4ade80');
     var m = document.getElementById('modal-dividir'); if(m) m.remove();
     _dividirNumEscolhido = 0;
+    _dividirPessoas = [];
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
 

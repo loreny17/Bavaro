@@ -2508,10 +2508,48 @@ function renderAlmocos(){
 }
 
 // ☀️ Abre grade de mesas pra vincular uma pesagem pendente
+// IDs selecionados para vincular juntos
+var _almVincularIds = [];
+
 function abrirVincularMesa(contaId){
+  // Inicia/adiciona à seleção
+  if(_almVincularIds.indexOf(contaId) < 0) _almVincularIds = [contaId];
+  _abrirModalVincularMesa();
+}
+
+function _toggleAlmVincular(contaId){
+  var idx = _almVincularIds.indexOf(contaId);
+  if(idx >= 0) _almVincularIds.splice(idx, 1);
+  else _almVincularIds.push(contaId);
+  _abrirModalVincularMesa();
+}
+
+function _abrirModalVincularMesa(){
   var ex = document.getElementById('modal-vincular-mesa');
   if(ex) ex.remove();
-  // Monta grade de mesas
+
+  // Pessoas pendentes (sem mesa)
+  var pendentes = (_comandasAvulsas||[]).filter(function(c){ return c.tipoConta==='almoco' && !c.mesa && c.status==='aberta'; });
+
+  // Seção de seleção múltipla
+  var selHtml = '';
+  if(pendentes.length > 1){
+    selHtml = '<div style="margin-bottom:14px;border-bottom:1px solid var(--border2);padding-bottom:12px;">'+
+      '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:8px;">Vincular junto (toque para selecionar):</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+    pendentes.forEach(function(c){
+      var sel = _almVincularIds.indexOf(c.id) >= 0;
+      var nome = c.nomeCliente || c.cliente || c.garcomPrincipal || 'Pessoa';
+      selHtml += '<button onclick="_toggleAlmVincular(\''+c.id+'\')" style="padding:7px 12px;border-radius:8px;border:1.5px solid '+(sel?'var(--accent)':'var(--border2)')+';background:'+(sel?'rgba(212,168,67,0.12)':'var(--surface2)')+';color:'+(sel?'var(--accent)':'var(--text)')+';font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;">'+
+        (sel?'✓ ':'')+esc(nome)+
+      '</button>';
+    });
+    selHtml += '</div>'+
+      '<div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">'+_almVincularIds.length+' selecionada(s)</div>'+
+    '</div>';
+  }
+
+  // Grade de mesas
   var html = '';
   for(var i = 1; i <= _TOTAL_MESAS; i++){
     var num = String(i);
@@ -2520,73 +2558,90 @@ function abrirVincularMesa(contaId){
     var bg = ocupada ? 'rgba(74,222,128,0.12)' : 'var(--surface2)';
     var border = ocupada ? '1.5px solid rgba(74,222,128,0.5)' : '1.5px solid var(--border2)';
     var sub = ocupada ? '<div style="font-size:0.6rem;color:#4ade80;">Aberta</div>' : '<div style="font-size:0.6rem;color:var(--muted);">Livre</div>';
-    html += '<button onclick="executarVincularMesa(\''+contaId+'\','+num+')" '+
+    html += '<button onclick="executarVincularMesa(null,'+num+')" '+
       'style="background:'+bg+';border:'+border+';border-radius:10px;padding:10px 6px;font-family:inherit;color:var(--text);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;">'+
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;">'+num+'</div>'+
-      sub+
-    '</button>';
+      sub+'</button>';
   }
+
   var m = document.createElement('div');
   m.id = 'modal-vincular-mesa';
   m.className = 'modal-bg aberto';
   m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:500;display:flex;align-items:flex-end;justify-content:center;';
-  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.onclick = function(e){ if(e.target===m){ m.remove(); _almVincularIds=[]; } };
   m.innerHTML =
     '<div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:20px 16px 32px;max-height:80vh;overflow-y:auto;">'+
       '<div style="display:flex;align-items:center;margin-bottom:16px;">'+
         '<div style="font-weight:800;font-size:1rem;">🪑 Escolha a mesa</div>'+
-        '<button onclick="document.getElementById(\'modal-vincular-mesa\').remove()" style="margin-left:auto;background:transparent;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button>'+
+        '<button onclick="document.getElementById(\'modal-vincular-mesa\').remove();_almVincularIds=[];" style="margin-left:auto;background:transparent;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button>'+
       '</div>'+
+      selHtml+
       '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">'+html+'</div>'+
     '</div>';
   document.body.appendChild(m);
 }
 
-// Vincula a comanda à mesa escolhida
-function executarVincularMesa(contaId, numMesa){
+// Vincula as comandas selecionadas à mesa escolhida
+function executarVincularMesa(contaIdIgnorado, numMesa){
   var m = document.getElementById('modal-vincular-mesa');
   if(m) m.remove();
 
-  fbDb.collection('contas_mesa').doc(contaId).update({
-    mesa: parseInt(numMesa) || numMesa,
-    pesagemRapida: false,
-    vinculadoEm: Date.now(),
-    vinculadoPor: _nomeGarcom
-  }).then(function(){
-    showToast('✓ Vinculado à Mesa '+numMesa,'#4ade80');
+  var ids = _almVincularIds.slice();
+  _almVincularIds = [];
 
-    // Remove da lista de pendentes da aba almoço (já foi vinculado)
+  if(!ids.length){ showToast('Nenhuma pessoa selecionada','#f7a34f'); return; }
+
+  var mesaInt = parseInt(numMesa) || numMesa;
+  var mesaStr = String(numMesa);
+  var promessas = ids.map(function(contaId){
+    return fbDb.collection('contas_mesa').doc(contaId).update({
+      mesa: mesaInt,
+      pesagemRapida: false,
+      vinculadoEm: Date.now(),
+      vinculadoPor: _nomeGarcom
+    });
+  });
+
+  Promise.all(promessas).then(function(){
+    showToast('✓ '+ids.length+' pessoa(s) vinculada(s) à Mesa '+numMesa,'#4ade80');
+
+    // Atualiza comandasAvulsas em memória
     _comandasAvulsas = _comandasAvulsas.map(function(c){
-      if(c.id !== contaId) return c;
-      return Object.assign({}, c, { mesa: parseInt(numMesa)||numMesa });
+      if(ids.indexOf(c.id) < 0) return c;
+      return Object.assign({}, c, { mesa: mesaInt });
     });
 
-    // Atualiza mapa de mesas — garante que a mesa apareça
-    var mesaStr = String(numMesa);
-    var comanda = _comandasAvulsas.find(function(c){ return c.id === contaId; });
-    if(comanda && !_mesasOcupadas[mesaStr]){
+    // Mescla TODOS os itens das comandas desta mesa no cache
+    var todasComandas = _comandasAvulsas.filter(function(c){
+      return c.tipoConta === 'almoco' && String(c.mesa) === mesaStr;
+    });
+    var itensMesclados = [];
+    todasComandas.forEach(function(c){ itensMesclados = itensMesclados.concat(c.itens||[]); });
+    var totalMesclado = itensMesclados.reduce(function(a,it){
+      return a + (it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1));
+    }, 0);
+
+    // Atualiza mapa de mesas
+    if(!_mesasOcupadas[mesaStr]){
       _mesasOcupadas[mesaStr] = {
-        contaId: contaId,
-        garcom: comanda.garcomPrincipal || comanda.vinculadoPor || _nomeGarcom || '',
-        abertaEm: comanda.abertaEm || Date.now(),
-        count: (comanda.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length,
-        total: comanda.total || 0,
+        contaId: todasComandas[0] && todasComandas[0].id,
+        garcom: _nomeGarcom || '',
+        abertaEm: Date.now(),
+        count: itensMesclados.filter(function(i){ return i.status !== 'cancelado'; }).length,
+        total: totalMesclado,
         tipoConta: 'almoco'
       };
     }
 
-    // Atualiza cache de itens com os itens completos da comanda
-    if(comanda){
-      _contasMesaCache[mesaStr] = Object.assign({}, comanda, {
-        // Mescla itens de TODAS as comandas almoço desta mesa
-        _todosItensAlmoco: (_comandasAvulsas||[]).filter(function(c){
-          return c.tipoConta === 'almoco' && String(c.mesa) === mesaStr;
-        })
-      });
-      _invalidarCacheItens(contaId);
-    }
+    // Cache unificado da mesa com todos os itens
+    _contasMesaCache[mesaStr] = Object.assign({}, todasComandas[0] || {}, {
+      mesa: mesaInt,
+      itens: itensMesclados,
+      total: totalMesclado,
+      _todosItensAlmoco: todasComandas
+    });
 
-    // Atualiza badge e lista
+    ids.forEach(function(id){ _invalidarCacheItens(id); });
     atualizarBadgeAlmoco();
     renderAlmocos();
     renderMesas();

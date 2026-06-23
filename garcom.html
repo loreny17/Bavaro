@@ -8465,6 +8465,7 @@ function selecionarMesa(num){
   _comandaSelecionada = null;
   _mesaAtiva = num;
   _carrinho = [];
+  _pessoasMesa = []; // Limpa nomes ao entrar numa mesa
   _catAtiva = null;  // Volta para grade de categorias
   // Limpa a busca do cardápio (não deixa pesquisa antiga presa)
   var buscaEl = document.getElementById('busca-input');
@@ -12890,13 +12891,7 @@ function _selecionarPessoaCarrinho(idx, nome){
 }
 
 function _salvarPessoasMesa(){
-  var num = _mesaAtiva;
-  if(!num) return;
-  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
-  if(!conta || !conta.id) return;
-  fbDb.collection('contas_mesa').doc(conta.id).update({
-    pessoas: _pessoasMesa
-  }).catch(function(){});
+  // Não salva no Firestore — pessoas ficam só em memória durante a sessão da mesa
 }
 
 // Vincula pessoa a item já enviado (em "Ver pedidos da mesa")
@@ -12904,26 +12899,20 @@ function _salvarPessoasMesa(){
 function _getPessoasMesa(){
   var num = _mesaAtiva;
   if(!num) return _pessoasMesa;
-  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
-  if(conta && conta.pessoas && conta.pessoas.length){
-    _pessoasMesa = conta.pessoas;
-  } else {
-    // Tenta extrair pessoas dos itens já vinculados na conta
-    var pessoasItens = [];
-    (conta && conta.itens || []).forEach(function(it){
-      var p = it.pessoa || it.nomeCliente;
-      if(p && pessoasItens.indexOf(p) < 0) pessoasItens.push(p);
+  // Extrai pessoas dos itens já vinculados nos pedidos em memória (desta sessão)
+  var pessoasItens = [];
+  (_meusPedidos||[]).forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.pessoa && pessoasItens.indexOf(it.pessoa) < 0){
+        pessoasItens.push(it.pessoa);
+      }
     });
-    // E dos pedidos em cache
-    (_meusPedidos||[]).forEach(function(p){
-      (p.itens||[]).forEach(function(it){
-        if(it.pessoa && _pessoasMesa.indexOf(it.pessoa) < 0 && pessoasItens.indexOf(it.pessoa) < 0){
-          pessoasItens.push(it.pessoa);
-        }
-      });
-    });
-    if(pessoasItens.length) _pessoasMesa = pessoasItens;
-  }
+  });
+  // Adiciona nomes já em _pessoasMesa que não vieram dos pedidos
+  _pessoasMesa.forEach(function(p){
+    if(pessoasItens.indexOf(p) < 0) pessoasItens.push(p);
+  });
+  if(pessoasItens.length) _pessoasMesa = pessoasItens;
   return _pessoasMesa;
 }
 
@@ -15166,6 +15155,8 @@ function executarEncerramento(){
 
   // Re-renderiza imediatamente pra remover do mapa
   if(typeof renderMesas === 'function') renderMesas();
+  // Limpa nomes da mesa ao fechar a conta
+  _pessoasMesa = [];
 
   // ═══ FIREBASE EM BACKGROUND ═══
   // 1. Cria conta_fechada

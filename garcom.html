@@ -14222,6 +14222,36 @@ function cancelarItemNaConta(itemKey){
   });
 }
 
+function _renderItemFecharDrag(it, c){
+  // Igual ao _renderItemFechar mas com draggable no container
+  var h = _renderItemFechar(it, c);
+  // Adiciona draggable ao div externo
+  if(it.itemKey && it.status !== 'pago'){
+    h = h.replace(
+      '<div class="item-pgto"',
+      '<div class="item-pgto" draggable="true" ondragstart="event.dataTransfer.setData(\'itemKey\',\''+it.itemKey+'\');event.currentTarget.style.opacity=\'0.5\'" ondragend="event.currentTarget.style.opacity=\'1\'"'
+    );
+  }
+  return h;
+}
+
+function _trocarPessoaItem(itemKey, novaPessoa){
+  if(!_fecharConta || !itemKey) return;
+  var itens = (_fecharConta.itens||[]).map(function(it){
+    if(it.itemKey !== itemKey) return it;
+    return Object.assign({}, it, {pessoa: novaPessoa});
+  });
+  _fecharConta.itens = itens;
+  // Salva no Firestore
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({itens: itens})
+    .then(function(){
+      var nomeItem = ((_fecharConta.itens||[]).find(function(i){ return i.itemKey===itemKey; })||{}).nome || '';
+      showToast('👤 '+(novaPessoa||'Mesa toda')+': '+nomeItem,'#4ade80');
+      renderFecharConta();
+    })
+    .catch(function(){ showToast('❌ Erro ao trocar pessoa','#f87171'); });
+}
+
 function _renderItemFechar(it, c){
   var h = '';
   var pago = it.status === 'pago';
@@ -14311,6 +14341,9 @@ function renderFecharConta(){
 
     // Agrupa por pessoa se ativo
     if(_fecharAgruparPessoa && temPessoas){
+      html += '<div style="font-size:0.68rem;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:4px;">'+
+        '↕️ Arraste um item para outra pessoa para transferir'+
+      '</div>';
       var gruposPessoa = {};
       var semPessoa = [];
       itensVisiveis.forEach(function(it){
@@ -14322,7 +14355,12 @@ function renderFecharConta(){
         var totalP = gruposPessoa[p].reduce(function(a,it){ return a+(it.preco||0)*(it.qtd||1); },0);
         var taxaP = _taxaServicoAtiva ? totalP*(((_taxaServicoPct||10))/100) : 0;
         var pessoaId = 'grp-'+p.replace(/[^a-zA-Z0-9]/g,'_');
-        html += '<div style="margin-bottom:10px;">'+
+        var pessoaEsc = p.replace(/'/g,"\\'");
+        html += '<div style="margin-bottom:10px;" '+
+            'ondragover="event.preventDefault();this.style.outline=\'2px solid var(--accent)\'" '+
+            'ondragleave="this.style.outline=\'none\'" '+
+            'ondrop="event.preventDefault();this.style.outline=\'none\';_trocarPessoaItem(event.dataTransfer.getData(\'itemKey\'),\''+pessoaEsc+'\')" '+
+          '>'+
           '<div onclick="var e=document.getElementById(\''+pessoaId+'\');e.style.display=e.style.display===\'none\'?\'block\':\'none\'" style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);border-radius:8px;margin-bottom:4px;cursor:pointer;">'+
             '<span style="font-weight:700;font-size:0.88rem;color:var(--accent);">👤 '+esc(p)+'</span>'+
             '<div style="text-align:right;">'+
@@ -14331,15 +14369,19 @@ function renderFecharConta(){
             '</div>'+
           '</div>'+
           '<div id="'+pessoaId+'">';
-        gruposPessoa[p].forEach(function(it){ html += _renderItemFechar(it, c); });
+        gruposPessoa[p].forEach(function(it){ html += _renderItemFecharDrag(it, c); });
         html += '</div></div>';
       });
       if(semPessoa.length){
-        html += '<div style="margin-bottom:10px;">'+
+        html += '<div style="margin-bottom:10px;" '+
+            'ondragover="event.preventDefault();this.style.outline=\'2px solid var(--muted)\'" '+
+            'ondragleave="this.style.outline=\'none\'" '+
+            'ondrop="event.preventDefault();this.style.outline=\'none\';_trocarPessoaItem(event.dataTransfer.getData(\'itemKey\'),\'\')" '+
+          '>'+
           '<div style="padding:6px 8px;background:var(--surface2);border-radius:8px;margin-bottom:4px;">'+
             '<span style="font-size:0.78rem;color:var(--muted);">🍽️ Mesa toda</span>'+
           '</div>';
-        semPessoa.forEach(function(it){ html += _renderItemFechar(it, c); });
+        semPessoa.forEach(function(it){ html += _renderItemFecharDrag(it, c); });
         html += '</div>';
       }
     } else {
@@ -15450,6 +15492,48 @@ function abrirVerPedidosMesa(num){
     unsub2();
     if(unsub3) unsub3();
   };
+
+  // ─── ALMOÇO: mostra itens das contas_mesa diretamente ───
+  // Mesas de almoço não têm documentos em 'pedidos' — os itens ficam nas contas_mesa
+  var contaCache = _contasMesaCache[mesaStr] || _contasMesaCache[num];
+  var ehAlmoco = contaCache && contaCache.tipoConta === 'almoco';
+  if(ehAlmoco){
+    // Busca todas as contas_mesa de almoço desta mesa
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==',_restauranteId)
+      .where('mesa','==',mesaInt)
+      .where('tipoConta','==','almoco')
+      .get()
+      .then(function(snap){
+        if(snap.empty){
+          var body = document.getElementById('ver-pedidos-body');
+          if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-titulo">Nenhum pedido</div><div class="empty-sub">Ainda não há pedidos nesta mesa.</div></div>';
+          return;
+        }
+        // Converte cada conta_mesa num "pedido" virtual para renderVerPedidosMesa
+        var pedidosVirtuais = [];
+        snap.forEach(function(d){
+          var c = d.data();
+          var nomeCliente = c.nomeCliente || c.cliente || 'Pessoa';
+          pedidosVirtuais.push({
+            id: d.id,
+            mesa: mesaInt,
+            garcom: c.garcomPrincipal || c.vinculadoPor || _nomeGarcom,
+            criadoEm: c.abertaEm || c.criadoEm || 0,
+            contaId: d.id,
+            status: 'entregue',
+            itens: (c.itens||[]).map(function(it){
+              return Object.assign({}, it, {
+                nomeCliente: it.nomeCliente || nomeCliente,
+                status: it.status || 'entregue'
+              });
+            })
+          });
+        });
+        pedidosVirtuais.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
+        renderVerPedidosMesa(pedidosVirtuais);
+      });
+  }
 }
 
 function fecharVerPedidosMesa(){

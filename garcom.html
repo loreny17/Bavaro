@@ -12969,14 +12969,36 @@ function _vincularPessoaItemSalvar(pedidoId, itemIdx, nome){
   var pedido = (_meusPedidos||[]).find(function(p){ return p.id===pedidoId; });
   if(!pedido || !pedido.itens || pedido.itens[itemIdx] === undefined) return;
   pedido.itens[itemIdx].pessoa = nome;
-  // Salva no Firestore
+
+  // Salva no pedido
   fbDb.collection('pedidos').doc(pedidoId).update({
     itens: pedido.itens
   }).then(function(){
     showToast('👤 '+(nome?nome+' vinculado':'Pessoa removida'),'#4ade80');
+    // Também atualiza a conta_mesa para que fechar conta veja a pessoa
+    _sincronizarPessoaNaConta(pedido.itens[itemIdx].nome, pedido.itens[itemIdx].preco||0, nome);
   }).catch(function(){
     showToast('⚠️ Erro ao salvar','#f7a34f');
   });
+}
+
+function _sincronizarPessoaNaConta(nomeItem, precoItem, nomePessoa){
+  // Atualiza o campo pessoa nos itens da conta_mesa correspondente
+  var num = _verPedidosMesaNum || _mesaAtiva;
+  if(!num) return;
+  var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
+  if(!conta || !conta.id) return;
+  var itensAtualizados = false;
+  var itens = (conta.itens||[]).map(function(it){
+    if(it.nome === nomeItem && Math.abs((it.preco||0) - precoItem) < 0.01 && !it.pessoa){
+      itensAtualizados = true;
+      return Object.assign({}, it, {pessoa: nomePessoa});
+    }
+    return it;
+  });
+  if(!itensAtualizados) return;
+  conta.itens = itens;
+  fbDb.collection('contas_mesa').doc(conta.id).update({itens: itens}).catch(function(){});
 }
 
 // ════════════════════════════════════════
@@ -12993,13 +13015,34 @@ function abrirImprimirPorPessoaFechar(){
   if(!c) return;
   var taxaPct = _taxaServicoPct || 10;
 
+  // Monta mapa pessoa por nome+preco cruzando com pedidos
+  var mapaPessoa = {};
+  (_meusPedidos||[]).forEach(function(p){
+    (p.itens||[]).forEach(function(it){
+      if(it.pessoa){
+        var chave = (it.itemKey || it.nome) + '|' + (it.preco||0);
+        mapaPessoa[chave] = it.pessoa;
+        // fallback só por nome
+        if(!mapaPessoa[it.nome]) mapaPessoa[it.nome] = it.pessoa;
+      }
+    });
+  });
+
   // Monta grupos por pessoa
   var porPessoa = {};
   (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
-    var p = it.pessoa || it.nomeCliente || '__sem__';
+    // Tenta pegar pessoa do item, ou do mapa de pedidos
+    var pessoa = it.pessoa || it.nomeCliente;
+    if(!pessoa){
+      var chave = (it.itemKey || it.nome) + '|' + (it.preco||0);
+      pessoa = mapaPessoa[chave] || mapaPessoa[it.nome];
+    }
+    var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
     var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
-    porPessoa[p].itens.push(it);
+    // Guarda pessoa no item para uso posterior
+    var itComPessoa = Object.assign({}, it, {pessoa: pessoa||''});
+    porPessoa[p].itens.push(itComPessoa);
     porPessoa[p].total += v;
   });
 

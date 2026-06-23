@@ -12902,11 +12902,28 @@ function _salvarPessoasMesa(){
 // Vincula pessoa a item já enviado (em "Ver pedidos da mesa")
 
 function _getPessoasMesa(){
-  // Busca da conta atual no cache
   var num = _mesaAtiva;
   if(!num) return _pessoasMesa;
   var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
-  if(conta && conta.pessoas && conta.pessoas.length) _pessoasMesa = conta.pessoas;
+  if(conta && conta.pessoas && conta.pessoas.length){
+    _pessoasMesa = conta.pessoas;
+  } else {
+    // Tenta extrair pessoas dos itens já vinculados na conta
+    var pessoasItens = [];
+    (conta && conta.itens || []).forEach(function(it){
+      var p = it.pessoa || it.nomeCliente;
+      if(p && pessoasItens.indexOf(p) < 0) pessoasItens.push(p);
+    });
+    // E dos pedidos em cache
+    (_meusPedidos||[]).forEach(function(p){
+      (p.itens||[]).forEach(function(it){
+        if(it.pessoa && _pessoasMesa.indexOf(it.pessoa) < 0 && pessoasItens.indexOf(it.pessoa) < 0){
+          pessoasItens.push(it.pessoa);
+        }
+      });
+    });
+    if(pessoasItens.length) _pessoasMesa = pessoasItens;
+  }
   return _pessoasMesa;
 }
 
@@ -13129,52 +13146,53 @@ function _executarImpPessoaFechar(modo){
   });
 
   if(modo === 'separado'){
-    // Um comando por pessoa
     selecionadas.forEach(function(p){
       var dados = porPessoa[p];
-      if(!dados) return;
+      if(!dados || !dados.itens.length) return;
       var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
       var total = dados.total + taxa;
       var nomePessoa = p === '__sem__' ? 'Mesa toda' : p;
       var cmd = {
         tipo: 'conta_pessoa',
-        restauranteId: _restauranteId,
-        contaId: _fecharContaId,
-        mesa: c.mesa,
+        restauranteId: _restauranteId || 'default',
+        contaId: _fecharContaId || '',
+        mesa: c.mesa || _mesaAtiva || '',
         pessoa: nomePessoa,
         itens: dados.itens,
         subtotal: dados.total,
         taxa: taxa,
         taxaPct: _taxaServicoAtiva ? taxaPct : 0,
         total: total,
-        solicitadoPor: _nomeGarcom,
+        solicitadoPor: _nomeGarcom || '',
         solicitadoEm: Date.now()
       };
+      console.log('[IMPRESSAO] Enviando conta_pessoa:', cmd.restauranteId, nomePessoa, dados.itens.length, 'itens');
       _imprimirComRetry(cmd);
     });
     showToast('🖨️ Enviado para impressão','#4ade80');
   } else {
-    // Tudo junto em um único comando
+    var grupos = selecionadas.map(function(p){
+      var dados = porPessoa[p] || {itens:[],total:0};
+      var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
+      return {
+        pessoa: p === '__sem__' ? 'Mesa toda' : p,
+        itens: dados.itens,
+        subtotal: dados.total,
+        taxa: taxa,
+        taxaPct: _taxaServicoAtiva ? taxaPct : 0,
+        total: dados.total + taxa
+      };
+    }).filter(function(g){ return g.itens.length > 0; });
     var cmd = {
       tipo: 'conta_pessoa_junto',
-      restauranteId: _restauranteId,
-      contaId: _fecharContaId,
-      mesa: c.mesa,
-      grupos: selecionadas.map(function(p){
-        var dados = porPessoa[p] || {itens:[],total:0};
-        var taxa = _taxaServicoAtiva ? dados.total*(taxaPct/100) : 0;
-        return {
-          pessoa: p === '__sem__' ? 'Mesa toda' : p,
-          itens: dados.itens,
-          subtotal: dados.total,
-          taxa: taxa,
-          taxaPct: _taxaServicoAtiva ? taxaPct : 0,
-          total: dados.total + taxa
-        };
-      }),
-      solicitadoPor: _nomeGarcom,
+      restauranteId: _restauranteId || 'default',
+      contaId: _fecharContaId || '',
+      mesa: c.mesa || _mesaAtiva || '',
+      grupos: grupos,
+      solicitadoPor: _nomeGarcom || '',
       solicitadoEm: Date.now()
     };
+    console.log('[IMPRESSAO] Enviando conta_pessoa_junto:', cmd.restauranteId, grupos.length, 'grupos');
     _imprimirComRetry(cmd);
     showToast('🖨️ Enviado para impressão','#4ade80');
   }

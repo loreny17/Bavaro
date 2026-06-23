@@ -14474,12 +14474,18 @@ function abrirModalDividirItem(itemKey){
         '</div>'+
         '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">Em quantas partes dividir?</div>'+
         '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;" id="dividir-opcoes-grid"></div>'+
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">'+
           '<span style="font-size:0.78rem;color:var(--muted);">Outro número:</span>'+
           '<input type="number" id="dividir-custom" min="2" max="20" placeholder="Ex: 7" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:8px;padding:8px 12px;font-size:0.95rem;outline:none;">'+
         '</div>'+
+        (_pessoasMesa.length > 0
+          ? '<div id="dividir-pessoas-bloco" style="display:none;margin-bottom:12px;">'+
+              '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">Vincular partes às pessoas (opcional):</div>'+
+              '<div id="dividir-pessoas-lista"></div>'+
+            '</div>'
+          : '')+
         '<div id="dividir-preview" style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.25);border-radius:10px;padding:12px;text-align:center;margin-top:8px;display:none;">'+
-          '<div style="font-size:0.74rem;color:var(--muted);">Cada pessoa paga</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);">Cada parte vale</div>'+
           '<div id="dividir-valor-parte" style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.6rem;margin-top:3px;">R$ —</div>'+
         '</div>'+
       '</div>'+
@@ -14511,24 +14517,64 @@ function abrirModalDividirItem(itemKey){
   });
 }
 var _dividirNumEscolhido = 0;
+var _dividirPessoas = []; // pessoas selecionadas para cada parte
+
 function selecionarDivisao(num, valorTotal){
   _dividirNumEscolhido = num;
-  // Highlight
+  _dividirPessoas = new Array(num).fill('');
+  // Highlight botões
   document.querySelectorAll('.dividir-num-btn').forEach(function(b){
     var ativo = parseInt(b.dataset.num, 10) === num;
     b.style.background = ativo ? 'var(--accent)' : 'var(--surface2)';
     b.style.color = ativo ? '#000' : 'var(--text)';
     b.style.borderColor = ativo ? 'var(--accent)' : 'var(--border2)';
   });
-  // Limpa custom se foi clique em botão padrão
   var custom = document.getElementById('dividir-custom');
   if(custom && parseInt(custom.value,10) !== num) custom.value = '';
-  // Mostra preview
+  // Preview valor
   var preview = document.getElementById('dividir-preview');
   var valorParte = valorTotal / num;
   document.getElementById('dividir-valor-parte').textContent = 'R$ ' + fmtPreco(valorParte);
   preview.style.display = 'block';
+  // Mostra seleção de pessoas se tiver nomes cadastrados
+  var bloco = document.getElementById('dividir-pessoas-bloco');
+  var lista = document.getElementById('dividir-pessoas-lista');
+  if(bloco && lista && _pessoasMesa.length > 0){
+    bloco.style.display = 'block';
+    lista.innerHTML = '';
+    for(var i = 0; i < num; i++){
+      var parteIdx = i;
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+      row.innerHTML = '<span style="font-size:0.78rem;color:var(--muted);min-width:52px;">Parte '+(i+1)+':</span>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;flex:1;">';
+      _pessoasMesa.forEach(function(p){
+        row.innerHTML += '<button onclick="_toggleDividirPessoa('+parteIdx+',\''+p.replace(/'/g,"\\'")+'\')" id="dp-'+parteIdx+'-'+p.replace(/[^a-zA-Z0-9]/g,'_')+'" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--muted);font-size:0.74rem;font-family:inherit;cursor:pointer;">👤 '+esc(p)+'</button>';
+      });
+      row.innerHTML += '</div>';
+      lista.appendChild(row);
+    }
+  }
   atualizarBotaoAplicar();
+}
+
+function _toggleDividirPessoa(idx, nome){
+  // Se já está selecionada deseleciona, senão seleciona
+  if(_dividirPessoas[idx] === nome){
+    _dividirPessoas[idx] = '';
+  } else {
+    _dividirPessoas[idx] = nome;
+  }
+  // Atualiza visual de todos os botões desta parte
+  _pessoasMesa.forEach(function(p){
+    var btn = document.getElementById('dp-'+idx+'-'+p.replace(/[^a-zA-Z0-9]/g,'_'));
+    if(btn){
+      var ativo = _dividirPessoas[idx] === p;
+      btn.style.background = ativo ? 'rgba(212,168,67,0.15)' : 'var(--surface2)';
+      btn.style.color = ativo ? 'var(--accent)' : 'var(--muted)';
+      btn.style.borderColor = ativo ? 'var(--accent)' : 'var(--border2)';
+    }
+  });
 }
 function atualizarBotaoAplicar(){
   var btn = document.getElementById('btn-aplicar-divisao');

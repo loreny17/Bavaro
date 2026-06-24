@@ -12959,65 +12959,72 @@ function abrirMiniCardapio(cat){
         '<div style="font-size:0.82rem;color:var(--accent);font-weight:700;flex-shrink:0;">R$ '+fmtPreco(it.preco)+'</div>'+
       '</div>';
 
-    // Badge
+    // Badge de quantidade selecionada (swipe)
     var badge = document.createElement('div');
     badge.style.cssText = 'font-family:Bebas Neue,sans-serif;font-size:1rem;color:#000;background:var(--accent);border-radius:50%;width:26px;height:26px;display:none;align-items:center;justify-content:center;flex-shrink:0;';
     row.appendChild(badge);
+
+    // Botão + para adicionar e fechar
+    var btnAdd = document.createElement('button');
+    btnAdd.style.cssText = 'width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);color:#000;font-size:1.3rem;font-weight:800;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;';
+    btnAdd.textContent = '+';
+    btnAdd.addEventListener('touchend', function(e){
+      e.stopPropagation();
+      e.preventDefault();
+      _adicionarItemDireto(it);
+      showToast('✓ '+it.nome,'#4ade80');
+      try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+      mod.remove();
+    }, {passive:false});
+    row.appendChild(btnAdd);
 
     function atualizarRow(){
       var q = selecionados[it.id]||0;
       if(q > 0){
         badge.style.display = 'flex';
         badge.textContent = q;
+        btnAdd.style.display = 'none';
         row.style.background = 'rgba(212,168,67,0.1)';
         row.style.borderColor = 'rgba(212,168,67,0.5)';
       } else {
         badge.style.display = 'none';
+        btnAdd.style.display = 'flex';
         row.style.background = 'var(--surface2)';
         row.style.borderColor = 'var(--border2)';
       }
       atualizarFooter();
     }
 
-    var _swX = 0, _swY = 0, _swMoving = false, _swDir = null;
+    // Swipe horizontal apenas — sem tap acidental
+    var _swX = 0, _swY = 0, _swDir = null, _swAtivou = false;
 
     row.addEventListener('touchstart', function(e){
       _swX = e.touches[0].clientX;
       _swY = e.touches[0].clientY;
-      _swMoving = false;
       _swDir = null;
+      _swAtivou = false;
     }, {passive:true});
 
     row.addEventListener('touchmove', function(e){
       var dx = Math.abs(e.touches[0].clientX - _swX);
       var dy = Math.abs(e.touches[0].clientY - _swY);
-      if(!_swDir && (dx > 8 || dy > 8)){
+      if(!_swDir && (dx > 10 || dy > 10)){
         _swDir = dx > dy ? 'h' : 'v';
       }
-      if(_swDir === 'h') _swMoving = true;
+      // Só ativa swipe se claramente horizontal e pelo menos 50px
+      if(_swDir === 'h' && dx > 50) _swAtivou = true;
     }, {passive:true});
 
     row.addEventListener('touchend', function(e){
-      e.stopPropagation();
+      if(!_swAtivou || _swDir !== 'h') return;
       var dx = e.changedTouches[0].clientX - _swX;
-      var dy = Math.abs(e.changedTouches[0].clientY - _swY);
-
-      if(_swDir === 'v' || (!_swMoving && dy < 10)){
-        // TAP vertical ou clique — adiciona e fecha
-        _adicionarItemDireto(it);
-        showToast('✓ '+it.nome,'#4ade80');
-        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
-        mod.remove();
-      } else if(_swMoving && _swDir === 'h'){
-        // SWIPE horizontal — seleciona
-        if(dx > 30){
-          selecionados[it.id] = (selecionados[it.id]||0) + 1;
-        } else if(dx < -30){
-          selecionados[it.id] = Math.max(0,(selecionados[it.id]||0) - 1);
-        }
-        try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
-        atualizarRow();
+      if(dx > 50){
+        selecionados[it.id] = (selecionados[it.id]||0) + 1;
+      } else if(dx < -50){
+        selecionados[it.id] = Math.max(0,(selecionados[it.id]||0) - 1);
       }
+      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+      atualizarRow();
     }, {passive:true});
 
     return row;

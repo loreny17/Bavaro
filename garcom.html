@@ -15525,18 +15525,55 @@ function abrirVerPedidosMesa(num){
   pushHistory('ver-pedidos:'+num);
 
   // Escuta pedidos da mesa em tempo real.
-  // Estratégia robusta: busca TODOS pedidos da mesa (int e string)
-  // E filtra no cliente por janela de tempo OU contaId.
   var contaAtual = _contasMesaCache[String(num)] || _contasMesaCache[num];
   var contaIdAtual = contaAtual ? contaAtual.id : null;
   var abertaEm = (contaAtual && contaAtual.abertaEm) ? contaAtual.abertaEm : 0;
   if(_verPedidosUnsub) _verPedidosUnsub();
 
-  var body0 = document.getElementById('ver-pedidos-body');
-  if(body0) body0.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando pedidos...</div></div>';
-
   var mesaInt = parseInt(num);
   var mesaStr = String(num);
+
+  // ─── ALMOÇO: detecta PRIMEIRO antes de buscar em 'pedidos' ───
+  var ehAlmoco = (contaAtual && contaAtual.tipoConta === 'almoco') ||
+    (_comandasAvulsas||[]).some(function(c){ return c.tipoConta==='almoco' && String(c.mesa)===mesaStr; });
+
+  if(ehAlmoco){
+    _verPedidosUnsub = function(){};
+    // Busca contas_mesa de almoço desta mesa
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==',_restauranteId)
+      .where('tipoConta','==','almoco')
+      .get().then(function(snap){
+        var pedidosVirtuais = [];
+        snap.forEach(function(d){
+          var c = d.data();
+          if(String(c.mesa) !== mesaStr && c.mesa !== mesaInt) return;
+          if((c.itens||[]).length === 0) return;
+          var nomeCliente = c.nomeCliente || c.cliente || c.garcomPrincipal || 'Pessoa';
+          pedidosVirtuais.push({
+            id: d.id, mesa: mesaInt,
+            garcom: c.garcomPrincipal || c.vinculadoPor || _nomeGarcom,
+            criadoEm: c.abertaEm || c.criadoEm || 0,
+            contaId: d.id, status: 'entregue',
+            itens: (c.itens||[]).map(function(it){
+              return Object.assign({}, it, {
+                nomeCliente: it.nomeCliente || nomeCliente,
+                pessoa: it.pessoa || it.nomeCliente || nomeCliente,
+                status: it.status || 'entregue'
+              });
+            })
+          });
+        });
+        if(pedidosVirtuais.length === 0){
+          var body = document.getElementById('ver-pedidos-body');
+          if(body) body.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted);"><div style="font-size:2rem;margin-bottom:12px;">📭</div><div>Nenhum item registrado nesta mesa</div></div>';
+          return;
+        }
+        pedidosVirtuais.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
+        renderVerPedidosMesa(pedidosVirtuais);
+      }).catch(function(e){ showToast('Erro ao carregar almoço','#f87171'); });
+    return; // Não executa o resto (listeners de pedidos)
+  }
 
   // BUSCA DUPLA: pega pedidos com mesa como int E como string
   // Isso resolve problemas de tipo (alguns pedidos antigos podem ter mesa como string)
@@ -15629,48 +15666,6 @@ function abrirVerPedidosMesa(num){
     unsub2();
     if(unsub3) unsub3();
   };
-
-  // ─── ALMOÇO: mostra itens das contas_mesa diretamente ───
-  // Mesas de almoço não têm documentos em 'pedidos' — os itens ficam nas contas_mesa
-  var contaCache = _contasMesaCache[mesaStr] || _contasMesaCache[num];
-  var ehAlmoco = contaCache && contaCache.tipoConta === 'almoco';
-  if(ehAlmoco){
-    // Busca todas as contas_mesa de almoço desta mesa
-    fbDb.collection('contas_mesa')
-      .where('restauranteId','==',_restauranteId)
-      .where('mesa','==',mesaInt)
-      .where('tipoConta','==','almoco')
-      .get()
-      .then(function(snap){
-        if(snap.empty){
-          var body = document.getElementById('ver-pedidos-body');
-          if(body) body.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-titulo">Nenhum pedido</div><div class="empty-sub">Ainda não há pedidos nesta mesa.</div></div>';
-          return;
-        }
-        // Converte cada conta_mesa num "pedido" virtual para renderVerPedidosMesa
-        var pedidosVirtuais = [];
-        snap.forEach(function(d){
-          var c = d.data();
-          var nomeCliente = c.nomeCliente || c.cliente || 'Pessoa';
-          pedidosVirtuais.push({
-            id: d.id,
-            mesa: mesaInt,
-            garcom: c.garcomPrincipal || c.vinculadoPor || _nomeGarcom,
-            criadoEm: c.abertaEm || c.criadoEm || 0,
-            contaId: d.id,
-            status: 'entregue',
-            itens: (c.itens||[]).map(function(it){
-              return Object.assign({}, it, {
-                nomeCliente: it.nomeCliente || nomeCliente,
-                status: it.status || 'entregue'
-              });
-            })
-          });
-        });
-        pedidosVirtuais.sort(function(a,b){ return (b.criadoEm||0)-(a.criadoEm||0); });
-        renderVerPedidosMesa(pedidosVirtuais);
-      });
-  }
 }
 
 function fecharVerPedidosMesa(){

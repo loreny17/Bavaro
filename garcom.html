@@ -1383,8 +1383,8 @@ html[data-anim="off"] .g-ripple{display:none!important;}
 
   <!-- Bottom Nav -->
   <!-- Bottom nav: categorias fixas com swipe para navegar -->
-  <div class="bottom-nav" id="bottom-nav-cats" style="padding:0;overflow:hidden;height:64px;touch-action:pan-y;">
-    <div id="cat-nav-track" style="display:flex;align-items:stretch;height:100%;width:100%;">
+  <div class="bottom-nav" id="bottom-nav-cats" style="padding:0;overflow:hidden;height:64px;">
+    <div id="cat-nav-track" style="display:flex;align-items:stretch;height:100%;width:100%;position:relative;">
     </div>
   </div>
 </div>
@@ -12869,20 +12869,38 @@ function _scrollCatNav(btn){} // não necessário mais
 
 var _catNavSwipeX = 0;
 var _catNavSwiping = false;
+var _catNavListenerAdded = false;
 
 function _iniciarSwipeCatNav(track, slots){
-  track.ontouchstart = function(e){
+  // Remove listeners antigos adicionando novo elemento
+  if(_catNavListenerAdded) return;
+  _catNavListenerAdded = true;
+
+  var nav = document.getElementById('bottom-nav-cats');
+  if(!nav) return;
+
+  nav.addEventListener('touchstart', function(e){
     _catNavSwipeX = e.touches[0].clientX;
     _catNavSwiping = false;
-  };
-  track.ontouchmove = function(e){
-    if(Math.abs(e.touches[0].clientX - _catNavSwipeX) > 10) _catNavSwiping = true;
-  };
-  track.ontouchend = function(e){
+  }, {passive:true});
+
+  nav.addEventListener('touchmove', function(e){
+    var dx = Math.abs(e.touches[0].clientX - _catNavSwipeX);
+    if(dx > 8) _catNavSwiping = true;
+  }, {passive:true});
+
+  nav.addEventListener('touchend', function(e){
     if(!_catNavSwiping) return;
     var dx = e.changedTouches[0].clientX - _catNavSwipeX;
     if(Math.abs(dx) < 40) return;
-    var maxPag = Math.ceil(slots.length / _catNavPorPagina) - 1;
+
+    var cats = (_categorias||[]).filter(function(c){
+      return (_itens||[]).some(function(i){ return i.categoriaId===c.id && i.disponivel!==false; });
+    });
+    var todasSlots = [{id:'__todas__'}].concat(cats).concat([
+      {id:'__sep__'},{id:'__pedidos__'},{id:'__historico__'},{id:'__sair__'}
+    ]);
+    var maxPag = Math.ceil(todasSlots.length / _catNavPorPagina) - 1;
     var novaPag = _catNavPagina + (dx < 0 ? 1 : -1);
     novaPag = Math.max(0, Math.min(novaPag, maxPag));
     if(novaPag !== _catNavPagina){
@@ -12890,7 +12908,8 @@ function _iniciarSwipeCatNav(track, slots){
       renderCatNav();
       try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
     }
-  };
+    _catNavSwiping = false;
+  }, {passive:true});
 }
 
 function selecionarCat(catId){

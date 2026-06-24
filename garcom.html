@@ -14573,18 +14573,29 @@ function _swipeFecharEnd(e){
 
 function _alterarQtdItemConta(itemKey, delta){
   if(!_fecharConta) return;
+
+  // Swipe esquerda: confirma antes de remover/diminuir
+  if(delta < 0){
+    var it = (_fecharConta.itens||[]).find(function(i){ return i.itemKey === itemKey; });
+    if(!it) return;
+    var novaQtd = (it.qtd||1) + delta;
+    var msg = novaQtd <= 0
+      ? 'Remover "'+it.nome+'" da conta?'
+      : 'Diminuir "'+it.nome+'" para '+novaQtd+'x?';
+    if(!confirm(msg)) return;
+  }
+
   var itens = (_fecharConta.itens||[]).map(function(it){
     if(it.itemKey !== itemKey || it.status === 'pago') return it;
     var novaQtd = (it.qtd||1) + delta;
     if(novaQtd <= 0) return Object.assign({}, it, {status:'cancelado', qtd: it.qtd});
-    return Object.assign({}, it, {qtd: novaQtd, preco: it.tipoVenda==='kg' ? it.preco : (it.precoBase||it.preco)});
+    return Object.assign({}, it, {qtd: novaQtd});
   });
   _fecharConta.itens = itens;
   fbDb.collection('contas_mesa').doc(_fecharContaId).update({
     itens: itens, atualizadoEm: Date.now()
   }).then(function(){
-    var label = delta > 0 ? '+1' : '−1';
-    showToast(label+' item','#4ade80');
+    showToast(delta > 0 ? '+1 item' : '−1 item','#4ade80');
     renderFecharConta();
   }).catch(function(){ showToast('Erro','#f87171'); });
 }

@@ -1740,7 +1740,8 @@ window.addEventListener('load', function(){
       var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
       if(isIOS){
         // No iOS não usa persistência — evita travamentos no Safari
-        fbDb.settings({ cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED });
+      // iOS Safari: não usa persistência para evitar travamentos
+      // cacheSizeBytes não precisa ser configurado separadamente
       } else {
         fbDb.enablePersistence({synchronizeTabs:true}).catch(function(err){
           // failed-precondition = múltiplas abas abertas
@@ -8581,17 +8582,45 @@ function selecionarMesa(num){
   _comandaSelecionada = null;
   _mesaAtiva = num;
   _carrinho = [];
-  _pessoasMesa = []; // Limpa nomes ao entrar numa mesa
-  _catAtiva = null;  // Volta para grade de categorias
-  // Limpa a busca do cardápio (não deixa pesquisa antiga presa)
+  _pessoasMesa = [];
+  _catAtiva = null;
   var buscaEl = document.getElementById('busca-input');
   if(buscaEl) buscaEl.value = '';
-  // Esconde o FAB de insumos (só aparece no mapa de mesas)
   var fabIns = document.getElementById('fab-insumos');
   if(fabIns) fabIns.style.display = 'none';
-  // Tenta restaurar carrinho salvo
   carregarCarrinho();
   document.getElementById('mesa-screen').classList.add('hidden');
+
+  // Garante que o cache da conta está preenchido antes de entrar
+  // Especialmente necessário no iOS onde o onSnapshot pode demorar
+  function _preCarregarConta(){
+    if(!_restauranteId) return;
+    if(_contasMesaCache[String(num)]) return; // já tem
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==',_restauranteId)
+      .where('mesa','==',parseInt(num))
+      .where('status','==','aberta')
+      .limit(1)
+      .get().then(function(snap){
+        if(!snap.empty){
+          var d = snap.docs[0];
+          _contasMesaCache[String(num)] = Object.assign({id:d.id}, d.data());
+          console.log('[iOS] Cache conta mesa '+num+' pré-carregado:', d.id);
+        }
+      }).catch(function(e){ console.error('Erro pré-carregar conta:', e.message||e); });
+  }
+  if(_restauranteId){
+    _preCarregarConta();
+  } else {
+    // Aguarda restauranteId ficar disponível (máx 3s)
+    var _tentativas = 0;
+    var _waitId = setInterval(function(){
+      _tentativas++;
+      if(_restauranteId){ clearInterval(_waitId); _preCarregarConta(); }
+      else if(_tentativas > 6) clearInterval(_waitId);
+    }, 500);
+  }
+
   iniciarApp();
 }
 
@@ -11282,7 +11311,7 @@ function iniciarAdicionarItemGarcom(pedidoId){
 function atualizarNavPedidos(){
   var ativos = _meusPedidos.filter(function(p){ return p.status!=='entregue'; }).length;
   var lbl = document.getElementById('nav-pedidos-label');
-  lbl.textContent = ativos > 0 ? 'Pedidos ('+ativos+')' : 'Pedidos';
+  if(lbl) lbl.textContent = ativos > 0 ? 'Pedidos ('+ativos+')' : 'Pedidos';
 }
 
 // ════════════════════════════════════════

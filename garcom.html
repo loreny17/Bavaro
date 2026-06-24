@@ -12807,11 +12807,9 @@ function renderCatNav(){
     return (_itens||[]).some(function(i){ return i.categoriaId===c.id && i.disponivel!==false; });
   });
 
-  // Usa favoritas salvas, ou as 7 primeiras por padrão
   var favIds = _catNavFavoritas.length ? _catNavFavoritas : cats.slice(0,7).map(function(c){ return c.id; });
   var catsFav = favIds.map(function(id){ return cats.find(function(c){ return c.id===id; }); }).filter(Boolean);
 
-  // Limpa e reconstrói com elementos DOM — evita problemas de aspas no onclick
   track.innerHTML = '';
   catsFav.forEach(function(c){
     var ativo = _catAtiva === c.id;
@@ -12820,9 +12818,109 @@ function renderCatNav(){
     btn.style.flex = '1';
     btn.innerHTML = '<span class="cat-nav-icon">'+(c.emoji||'📂')+'</span>'+
       '<span class="cat-nav-label">'+esc(c.nome)+'</span>';
+
+    // Clique normal — filtra categoria
     btn.onclick = (function(id){ return function(){ selecionarCat(id); }; })(c.id);
+
+    // Long press — mini cardápio rápido
+    var _lpTimer;
+    btn.addEventListener('touchstart', (function(cat){ return function(e){
+      _lpTimer = setTimeout(function(){
+        _lpTimer = null;
+        try{ if(navigator.vibrate) navigator.vibrate(40); }catch(err){}
+        abrirMiniCardapio(cat);
+      }, 500);
+    }; })(c), {passive:true});
+    btn.addEventListener('touchend', function(){ clearTimeout(_lpTimer); }, {passive:true});
+    btn.addEventListener('touchmove', function(){ clearTimeout(_lpTimer); }, {passive:true});
+
     track.appendChild(btn);
   });
+}
+
+function abrirMiniCardapio(cat){
+  var ex = document.getElementById('modal-mini-cardapio');
+  if(ex) ex.remove();
+
+  // Itens da categoria, ordenados por popularidade (mais adicionados ao carrinho)
+  var itens = (_itens||[]).filter(function(i){
+    return i.categoriaId === cat.id && i.disponivel !== false && (i.preco||0) > 0;
+  }).slice(0, 8); // máx 8 itens
+
+  if(!itens.length){ showToast('Nenhum item disponível','#f7a34f'); return; }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-mini-cardapio';
+  mod.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+
+  // Overlay fecha ao tocar fora
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.6);';
+  overlay.onclick = function(){ mod.remove(); };
+  mod.appendChild(overlay);
+
+  var box = document.createElement('div');
+  box.style.cssText = 'position:relative;background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;display:flex;flex-direction:column;z-index:1;';
+
+  // Header
+  var header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;';
+  header.innerHTML = '<span style="font-size:1.5rem;">'+(cat.emoji||'📂')+'</span>'+
+    '<div style="font-weight:800;font-size:1rem;flex:1;">'+esc(cat.nome)+'</div>'+
+    '<button onclick="document.getElementById(\'modal-mini-cardapio\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;padding:4px;">×</button>';
+  box.appendChild(header);
+
+  // Lista de itens
+  var lista = document.createElement('div');
+  lista.style.cssText = 'overflow-y:auto;padding:8px 12px 16px;display:flex;flex-direction:column;gap:6px;';
+
+  itens.forEach(function(it){
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;cursor:pointer;';
+
+    // Foto ou emoji
+    var foto = it.foto
+      ? '<img src="'+it.foto+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex-shrink:0;">'
+      : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">'+(cat.emoji||'🍽️')+'</div>';
+
+    var qtdNoCarrinho = (_carrinho||[]).filter(function(ci){ return ci.id === it.id; }).reduce(function(a,ci){ return a+(ci.qtd||1); }, 0);
+    var badge = qtdNoCarrinho > 0 ? '<span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:0.72rem;font-weight:800;">'+qtdNoCarrinho+'×</span>' : '';
+
+    row.innerHTML = foto +
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-size:0.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+'</div>'+
+        '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ '+fmtPreco(it.preco)+'</div>'+
+      '</div>'+
+      badge+
+      '<button style="background:var(--accent);border:none;color:#000;width:34px;height:34px;border-radius:50%;font-size:1.3rem;font-weight:800;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">+</button>';
+
+    // Clique no botão + ou na linha
+    var addBtn = row.querySelector('button');
+    addBtn.onclick = function(e){
+      e.stopPropagation();
+      adicionarAoCarrinho(it);
+      // Atualiza badge sem fechar
+      var qtdNova = (_carrinho||[]).filter(function(ci){ return ci.id === it.id; }).reduce(function(a,ci){ return a+(ci.qtd||1); }, 0);
+      var badgeEl = row.querySelector('span[style*="accent"]');
+      if(badgeEl){ badgeEl.textContent = qtdNova+'×'; }
+      else {
+        var sp = document.createElement('span');
+        sp.style.cssText = 'background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:0.72rem;font-weight:800;';
+        sp.textContent = qtdNova+'×';
+        addBtn.before(sp);
+      }
+      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+      showToast('✓ '+it.nome,'#4ade80');
+      atualizarFabEnviar && atualizarFabEnviar();
+    };
+    row.onclick = function(){ addBtn.click(); };
+
+    lista.appendChild(row);
+  });
+
+  box.appendChild(lista);
+  mod.appendChild(box);
+  document.body.appendChild(mod);
 }
 
 function selecionarCat(catId){

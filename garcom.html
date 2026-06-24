@@ -2581,67 +2581,111 @@ function _abrirModalVincularMesa(){
   document.body.appendChild(m);
 }
 
-// Vincula as comandas selecionadas à mesa escolhida
+// Vincula as comandas selecionadas à mesa — mescla tudo em UMA conta só
 function executarVincularMesa(contaIdIgnorado, numMesa){
   var m = document.getElementById('modal-vincular-mesa');
   if(m) m.remove();
 
   var ids = _almVincularIds.slice();
   _almVincularIds = [];
-
   if(!ids.length){ showToast('Nenhuma pessoa selecionada','#f7a34f'); return; }
 
-  var mesaInt = parseInt(numMesa) || numMesa;
+  var mesaInt = parseInt(numMesa);
   var mesaStr = String(numMesa);
-  var promessas = ids.map(function(contaId){
-    return fbDb.collection('contas_mesa').doc(contaId).update({
-      mesa: mesaInt,
-      pesagemRapida: false,
-      vinculadoEm: Date.now(),
-      vinculadoPor: _nomeGarcom
-    });
+
+  // Busca todas as comandas selecionadas
+  var promises = ids.map(function(id){
+    return fbDb.collection('contas_mesa').doc(id).get();
   });
 
-  Promise.all(promessas).then(function(){
-    showToast('✓ '+ids.length+' pessoa(s) vinculada(s) à Mesa '+numMesa,'#4ade80');
+  Promise.all(promises).then(function(docs){
+    var todasComandas = docs.map(function(d){ return d.exists ? Object.assign({id:d.id}, d.data()) : null; }).filter(Boolean);
+    if(!todasComandas.length) return;
 
-    // Atualiza comandasAvulsas em memória
-    _comandasAvulsas = _comandasAvulsas.map(function(c){
-      if(ids.indexOf(c.id) < 0) return c;
-      return Object.assign({}, c, { mesa: mesaInt });
+    // Verifica se já existe uma conta de almoço nesta mesa
+    var contaExistente = (_comandasAvulsas||[]).find(function(c){
+      return c.tipoConta === 'almoco' && String(c.mesa) === mesaStr && c.status === 'aberta';
     });
 
-    // Mescla TODOS os itens das comandas desta mesa no cache
-    var todasComandas = _comandasAvulsas.filter(function(c){
-      return c.tipoConta === 'almoco' && String(c.mesa) === mesaStr;
-    });
+    // Mescla itens de todas as comandas
+    var agora = Date.now();
     var itensMesclados = [];
-    todasComandas.forEach(function(c){ itensMesclados = itensMesclados.concat(c.itens||[]); });
-    var totalMesclado = itensMesclados.reduce(function(a,it){
-      return a + (it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*(it.qtd||1));
-    }, 0);
-
-    // Atualiza mapa de mesas
-    if(!_mesasOcupadas[mesaStr]){
-      _mesasOcupadas[mesaStr] = {
-        contaId: todasComandas[0] && todasComandas[0].id,
-        garcom: _nomeGarcom || '',
-        abertaEm: Date.now(),
-        count: itensMesclados.filter(function(i){ return i.status !== 'cancelado'; }).length,
-        total: totalMesclado,
-        tipoConta: 'almoco'
-      };
-    }
-
-    // Cache unificado da mesa com todos os itens
-    _contasMesaCache[mesaStr] = Object.assign({}, todasComandas[0] || {}, {
-      mesa: mesaInt,
-      itens: itensMesclados,
-      total: totalMesclado,
-      _todosItensAlmoco: todasComandas
+    var totalMesclado = 0;
+    todasComandas.forEach(function(c){
+      (c.itens||[]).forEach(function(it){
+        var itCopia = Object.assign({}, it);
+        if(!itCopia.pessoa && (c.nomeCliente || c.cliente)){
+          itCopia.pessoa = c.nomeCliente || c.cliente;
+          itCopia.nomeCliente = itCopia.pessoa;
+        }
+        itensMesclados.push(itCopia);
+        totalMesclado += (it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1));
+      });
     });
 
-    ids.forEach(function(id){ _invalidarCacheItens(id); });
+    var docPrincipalId;
+
+    if(contaExistente){
+      // Adiciona itens à conta existente
+      docPrincipalId = contaExistente.id;
+      var itensExistentes = contaExistente.itens || [];
+      var itensFinal = itensExistentes.concat(itensMesclados);
+      var totalFinal = itensFinal.reduce(function(a,it){ return a+(it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1)); },0);
+
+      fbDb.collection('contas_mesa').doc(docPrincipalId).update({
+        itens: itensFinal,
+        subtotal: totalFinal,
+        total: totalFinal * 1.1,
+        restante: totalFinal * 1.1,
+        atualizadoEm: agora
+      }).then(function(){
+        // Fecha as outras comandas que foram mescladas
+        var fecharPromises = todasComandas.map(function(c){
+          return fbDb.collection('contas_mesa').doc(c.id).update({
+            status: 'fechada', mesclada: docPrincipalId, fechadaEm: agora
+          });
+        });
+        return Promise.all(fecharPromises);
+      });
+    } else {
+      // Cria UMA conta nova para a mesa com todos os itens
+      var primComanda = todasComandas[0];
+      return fbDb.collection('contas_mesa').add({
+        restauranteId: _restauranteId,
+        tenantId: _tenantId || null,
+        tipoConta: 'almoco',
+        mesa: mesaInt,
+        cliente: primComanda.nomeCliente || primComanda.cliente || '',
+        status: 'aberta',
+        itens: itensMesclados,
+        pagamentos: [],
+        subtotal: totalMesclado,
+        taxa10: totalMesclado * 0.10,
+        total: totalMesclado * 1.10,
+        pagoTotal: 0,
+        restante: totalMesclado * 1.10,
+        garcomPrincipal: _nomeGarcom,
+        abertaEm: agora,
+        taxaServico: 10,
+        taxaServicoAtiva: true
+      }).then(function(novaRef){
+        docPrincipalId = novaRef.id;
+        // Fecha as comandas originais
+        var fecharPromises = todasComandas.map(function(c){
+          return fbDb.collection('contas_mesa').doc(c.id).update({
+            status: 'fechada', mesclada: docPrincipalId, mesa: mesaInt, fechadaEm: agora
+          });
+        });
+        return Promise.all(fecharPromises);
+      });
+    }
+  }).then(function(){
+    // Atualiza memória local
+    _comandasAvulsas = (_comandasAvulsas||[]).map(function(c){
+      if(ids.indexOf(c.id) < 0) return c;
+      return Object.assign({}, c, {status:'fechada', mesa: mesaInt});
+    });
+    showToast('✓ '+ids.length+' pessoa(s) vinculada(s) à Mesa '+numMesa,'#4ade80');
     atualizarBadgeAlmoco();
     renderAlmocos();
     renderMesas();
@@ -14099,121 +14143,28 @@ function abrirFecharConta(num){
     return;
   }
 
-  // ─── ALMOÇO: mescla itens de todas as contas_mesa ───
+  // ─── ALMOÇO: agora cada mesa tem UM documento único ───
   var ehAlmoco = conta.tipoConta === 'almoco' ||
-    (_comandasAvulsas||[]).some(function(c){ return c.tipoConta==='almoco' && String(c.mesa)===String(num); });
+    (_comandasAvulsas||[]).some(function(c){ return c.tipoConta==='almoco' && String(c.mesa)===String(num) && c.status==='aberta'; });
 
-  if(ehAlmoco){
-    document.getElementById('modal-fechar-conta').classList.add('show');
-    pushHistory('fechar-conta:' + num);
-    // Busca todas as contas_mesa de almoço desta mesa
-    var mesaInt = parseInt(num);
-    var mesaStr = String(num);
+  if(ehAlmoco && !conta.id){
+    // Busca a conta de almoço desta mesa no Firestore
     fbDb.collection('contas_mesa')
       .where('restauranteId','==',_restauranteId)
       .where('tipoConta','==','almoco')
+      .where('mesa','==',parseInt(num))
+      .where('status','==','aberta')
+      .limit(1)
       .get().then(function(snap){
-        var todasContas = [];
-        snap.forEach(function(d){
-          var c = d.data();
-          if(String(c.mesa) !== mesaStr && c.mesa !== mesaInt) return;
-          if(c.status === 'fechada') return;
-          todasContas.push(Object.assign({id: d.id}, c));
-        });
-        if(todasContas.length === 0){
-          showToast('⚠️ Nenhuma conta de almoço nesta mesa','#f7a34f');
-          return;
-        }
-        // Mescla itens de todas as contas, garantindo itemKey único
-        var itensMesclados = [];
-        var pagamentosMesclados = [];
-        todasContas.forEach(function(c){
-          var nomeCliente = c.nomeCliente || c.cliente || '';
-          (c.itens||[]).forEach(function(it, idx){
-            var itCopia = Object.assign({}, it);
-            // Garante itemKey único
-            if(!itCopia.itemKey) itCopia.itemKey = c.id + '_' + idx;
-            // Garante pessoa/nomeCliente
-            if(!itCopia.nomeCliente) itCopia.nomeCliente = nomeCliente;
-            if(!itCopia.pessoa && itCopia.nomeCliente) itCopia.pessoa = itCopia.nomeCliente;
-            // Status correto para pagamento funcionar
-            if(!itCopia.status || itCopia.status === 'entregue') itCopia.status = 'aberto';
-            // Referência à conta de origem
-            itCopia._contaId = c.id;
-            itensMesclados.push(itCopia);
-          });
-          (c.pagamentos||[]).forEach(function(p){ pagamentosMesclados.push(p); });
-        });
-
-        // Calcula total
-        var subtotal = itensMesclados.reduce(function(a,it){
-          if(it.status === 'cancelado') return a;
-          return a + (it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1));
-        }, 0);
-        var taxaServico = todasContas[0].taxaServico || 0;
-        var taxaAtiva = todasContas[0].taxaServicoAtiva !== false;
-        var total = subtotal + (taxaAtiva ? subtotal*(taxaServico/100||0.1) : 0);
-
-        // Conta virtual unificada
-        var contaUnificada = Object.assign({}, todasContas[0], {
-          id: todasContas[0].id, // usa primeiro como referência para pagamento
-          mesa: mesaInt,
-          itens: itensMesclados,
-          pagamentos: pagamentosMesclados,
-          subtotal: subtotal,
-          total: total,
-          tipoConta: 'almoco',
-          _todasContasAlmoco: todasContas // referência para salvar em todas
-        });
-
-        _fecharContaId = todasContas[0].id;
-        _fecharConta = contaUnificada;
-        _taxaServicoPct = taxaServico || 10;
-        _taxaServicoAtiva = taxaAtiva;
-
-        // Mostra botão de emergência para almoço
-        var btnLimpar = document.getElementById('btn-limpar-emergencia');
-        if(btnLimpar) btnLimpar.style.display = '';
-
-        // Listener na primeira conta (para detectar pagamentos)
-        if(_fecharUnsub) _fecharUnsub();
-        _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
-          .onSnapshot(function(doc){
-            if(doc.exists && document.getElementById('modal-fechar-conta') && document.getElementById('modal-fechar-conta').classList.contains('show')){
-              // Só re-mescla se o modal ainda está aberto
-              var novosDados = doc.data();
-              if(_fecharConta && _fecharConta._todasContasAlmoco){
-                // Atualiza os dados da primeira conta sem re-abrir o modal
-                _fecharConta._todasContasAlmoco = _fecharConta._todasContasAlmoco.map(function(c){
-                  return c.id === doc.id ? Object.assign({}, c, novosDados, {id: doc.id}) : c;
-                });
-                // Re-mescla itens
-                var itensMesclados = [];
-                var pagamentosMesclados = [];
-                _fecharConta._todasContasAlmoco.forEach(function(c){
-                  var nomeCliente = c.nomeCliente || c.cliente || '';
-                  (c.itens||[]).forEach(function(it, idx){
-                    var itCopia = Object.assign({}, it);
-                    if(!itCopia.itemKey) itCopia.itemKey = c.id + '_' + idx;
-                    if(!itCopia.nomeCliente) itCopia.nomeCliente = nomeCliente;
-                    if(!itCopia.pessoa && itCopia.nomeCliente) itCopia.pessoa = itCopia.nomeCliente;
-                    if(!itCopia.status || itCopia.status === 'entregue') itCopia.status = 'aberto';
-                    itCopia._contaId = c.id;
-                    itensMesclados.push(itCopia);
-                  });
-                  (c.pagamentos||[]).forEach(function(p){ pagamentosMesclados.push(p); });
-                });
-                _fecharConta.itens = itensMesclados;
-                _fecharConta.pagamentos = pagamentosMesclados;
-                renderFecharConta();
-              }
-            }
-          });
-
-        renderFecharConta();
-      }).catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+        if(snap.empty){ showToast('⚠️ Conta de almoço não encontrada','#f7a34f'); return; }
+        _contasMesaCache[String(num)] = Object.assign({id: snap.docs[0].id}, snap.docs[0].data());
+        abrirFecharConta(num);
+      });
     return;
   }
+  // Mostra botão emergência para almoço
+  var btnLimpar = document.getElementById('btn-limpar-emergencia');
+  if(btnLimpar) btnLimpar.style.display = ehAlmoco ? '' : 'none';
 
   _fecharContaId = conta.id;
   _fecharConta = conta;
@@ -14526,7 +14477,10 @@ function _renderItemFechar(it, c){
   var temAbatimento = (it.valorAbatido||0) > 0.01 && it.status !== 'pago';
   var valorRestante = temAbatimento ? Math.max(0, valorTotal - (it.valorAbatido||0)) : valorTotal;
   var linhaAbatido = temAbatimento ? '<div style="font-size:0.7rem;color:#4ade80;margin-top:2px;font-weight:600;">💰 R$ '+fmtPreco(it.valorAbatido)+' abatido · resta R$ '+fmtPreco(valorRestante)+'</div>' : '';
-  h += '<div class="item-pgto" style="'+(clickable?'cursor:pointer;':'')+'" '+(clickable?'onclick="toggleItemSelecao(\''+it.itemKey+'\')"':'')+'>'+
+  var swipeAttrs = (!pago && it.itemKey && it.tipoVenda !== 'kg')
+    ? ' ontouchstart="_swipeFecharStart(event,\''+it.itemKey+'\')" ontouchmove="_swipeFecharMove(event)" ontouchend="_swipeFecharEnd(event)"'
+    : '';
+  h += '<div class="item-pgto" id="fitem-'+it.itemKey+'" style="position:relative;overflow:hidden;'+(clickable?'cursor:pointer;':'')+'"'+swipeAttrs+' '+(clickable?'onclick="toggleItemSelecao(\''+it.itemKey+'\')"':'')+'>'+
     checkboxHtml+
     '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
       esc((it.qtd||1)+'x '+it.nome)+
@@ -14541,6 +14495,98 @@ function _renderItemFechar(it, c){
     btnDividir+btnAbater+btnCancelarConta+
   '</div>';
   return h;
+}
+
+// ─── SWIPE NOS ITENS DO FECHAR CONTA ───
+var _swipeFecharX = 0;
+var _swipeFecharKey = null;
+var _swipeFecharEl = null;
+var _swipeFecharBg = null;
+var _swipeFecharMoving = false;
+var _SWIPE_FECHAR_THRESHOLD = 72;
+
+function _swipeFecharStart(e, itemKey){
+  if(e.touches.length !== 1) return;
+  _swipeFecharX = e.touches[0].clientX;
+  _swipeFecharKey = itemKey;
+  _swipeFecharEl = document.getElementById('fitem-'+itemKey);
+  _swipeFecharMoving = false;
+  if(_swipeFecharBg){ _swipeFecharBg.remove(); _swipeFecharBg = null; }
+}
+
+function _swipeFecharMove(e){
+  if(!_swipeFecharEl) return;
+  var dx = e.touches[0].clientX - _swipeFecharX;
+  if(Math.abs(dx) < 6) return;
+  _swipeFecharMoving = true;
+  e.stopPropagation();
+
+  // Cria bg indicator
+  if(!_swipeFecharBg){
+    _swipeFecharBg = document.createElement('div');
+    _swipeFecharBg.style.cssText = 'position:absolute;top:0;bottom:0;display:flex;align-items:center;font-weight:800;font-size:1rem;pointer-events:none;z-index:1;padding:0 16px;';
+    _swipeFecharEl.appendChild(_swipeFecharBg);
+  }
+
+  var passou = Math.abs(dx) >= _SWIPE_FECHAR_THRESHOLD;
+  if(dx > 0){
+    _swipeFecharBg.style.left = '0';
+    _swipeFecharBg.style.right = '';
+    _swipeFecharBg.style.background = passou ? 'rgba(74,222,128,0.3)' : 'rgba(74,222,128,0.15)';
+    _swipeFecharBg.style.color = '#4ade80';
+    _swipeFecharBg.textContent = '+1 ✓';
+  } else {
+    _swipeFecharBg.style.right = '0';
+    _swipeFecharBg.style.left = '';
+    _swipeFecharBg.style.background = passou ? 'rgba(248,113,113,0.3)' : 'rgba(248,113,113,0.15)';
+    _swipeFecharBg.style.color = '#f87171';
+    _swipeFecharBg.textContent = '−1';
+  }
+  // Move conteúdo
+  var children = Array.from(_swipeFecharEl.children).filter(function(c){ return c !== _swipeFecharBg; });
+  var move = Math.min(Math.abs(dx), _SWIPE_FECHAR_THRESHOLD + 20) * (dx > 0 ? 1 : -1);
+  children.forEach(function(c){ c.style.transform = 'translateX('+move+'px)'; });
+}
+
+function _swipeFecharEnd(e){
+  if(!_swipeFecharEl || !_swipeFecharKey) return;
+  var dx = e.changedTouches[0].clientX - _swipeFecharX;
+
+  // Reset visual
+  if(_swipeFecharBg){ _swipeFecharBg.remove(); _swipeFecharBg = null; }
+  var children = Array.from(_swipeFecharEl.children);
+  children.forEach(function(c){ c.style.transform = ''; });
+
+  if(!_swipeFecharMoving || Math.abs(dx) < _SWIPE_FECHAR_THRESHOLD){
+    _swipeFecharEl = null; _swipeFecharKey = null;
+    return;
+  }
+
+  try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+
+  var itemKey = _swipeFecharKey;
+  _swipeFecharEl = null; _swipeFecharKey = null;
+
+  // Altera qtd
+  _alterarQtdItemConta(itemKey, dx > 0 ? 1 : -1);
+}
+
+function _alterarQtdItemConta(itemKey, delta){
+  if(!_fecharConta) return;
+  var itens = (_fecharConta.itens||[]).map(function(it){
+    if(it.itemKey !== itemKey || it.status === 'pago') return it;
+    var novaQtd = (it.qtd||1) + delta;
+    if(novaQtd <= 0) return Object.assign({}, it, {status:'cancelado', qtd: it.qtd});
+    return Object.assign({}, it, {qtd: novaQtd, preco: it.tipoVenda==='kg' ? it.preco : (it.precoBase||it.preco)});
+  });
+  _fecharConta.itens = itens;
+  fbDb.collection('contas_mesa').doc(_fecharContaId).update({
+    itens: itens, atualizadoEm: Date.now()
+  }).then(function(){
+    var label = delta > 0 ? '+1' : '−1';
+    showToast(label+' item','#4ade80');
+    renderFecharConta();
+  }).catch(function(){ showToast('Erro','#f87171'); });
 }
 
 function renderFecharConta(){

@@ -737,12 +737,24 @@ header{
   background:rgba(10,10,10,0.98);
   border-top:1px solid var(--border);
   display:flex;padding-bottom:env(safe-area-inset-bottom);
+  height:64px;
 }
+#cat-nav-track::-webkit-scrollbar{display:none;}
+.cat-nav-btn{
+  flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;min-width:60px;padding:6px 8px;border:none;background:none;
+  color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:0.52rem;
+  font-weight:600;letter-spacing:0.03em;text-transform:uppercase;cursor:pointer;
+  border-top:2px solid transparent;scroll-snap-align:start;
+}
+.cat-nav-btn.active{color:var(--accent);border-top-color:var(--accent);}
+.cat-nav-btn .cat-nav-icon{font-size:1.35rem;line-height:1;}
+.cat-nav-btn .cat-nav-label{font-size:0.5rem;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;}
 .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
   padding:9px 4px 10px;border:none;background:none;color:var(--muted);
   font-family:'Space Grotesk',sans-serif;font-size:0.56rem;font-weight:600;
   letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;
-  border-top:2px solid transparent;transition:none;}
+  border-top:2px solid transparent;}
 .nav-btn .nav-icon{font-size:1.2rem;}
 .nav-btn.active{color:var(--accent);border-top-color:var(--accent);}
 
@@ -1370,19 +1382,11 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   </button>
 
   <!-- Bottom Nav -->
-  <div class="bottom-nav">
-    <button class="nav-btn active" id="nav-cardapio" onclick="showTab('cardapio')">
-      <span class="nav-icon">📋</span>Cardápio
-    </button>
-    <button class="nav-btn" id="nav-pedidos" onclick="showTab('pedidos')">
-      <span class="nav-icon">🧾</span><span id="nav-pedidos-label">Pedidos</span>
-    </button>
-    <button class="nav-btn" id="nav-historico" onclick="abrirHistorico()">
-      <span class="nav-icon">📜</span>Histórico
-    </button>
-    <button class="nav-btn" id="nav-sair" onclick="sair()">
-      <span class="nav-icon">🚪</span>Sair
-    </button>
+  <!-- Bottom nav: categorias com swipe -->
+  <div class="bottom-nav" id="bottom-nav-cats" style="padding:0;overflow:hidden;height:64px;">
+    <!-- Aba Todas + categorias — populada por JS -->
+    <div id="cat-nav-track" style="display:flex;align-items:center;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;padding:0 4px;">
+    </div>
   </div>
 </div>
 
@@ -3824,6 +3828,7 @@ function alternarMostrarEmoji(){
   aplicarPrefsAparencia();
   renderItens();
   renderCatBar();
+  renderCatNav();
 }
 
 // Animações ligadas/desligadas (por aparelho — ajuda celulares lentos)
@@ -8720,6 +8725,7 @@ function iniciarListeners(){
       return (a.criadoEm||0)-(b.criadoEm||0);
     });
     renderCatBar();
+    renderCatNav();
     renderItens();
   }, function(e){
     var grid = document.getElementById('itens-grid');
@@ -9883,6 +9889,8 @@ function _adicionarItensVoz(itens){
   atualizarCarrinhoBadge();
   limparBuscaCardapio();
   renderCatBar();
+  renderCatNav();
+  renderCatNav();
   renderItens();
   if(adicionados > 0){
     showToast('✓ ' + adicionados + ' item(ns) adicionado(s)', '#4ade80', 2500);
@@ -11714,6 +11722,8 @@ function adicionarAoCarrinho(){
   // Limpa a busca e volta pras categorias (não deixa "chapas" preso)
   limparBuscaCardapio();
   renderCatBar();
+  renderCatNav();
+  renderCatNav();
   renderItens();
   abrirModalCarrinho();
 }
@@ -12781,15 +12791,88 @@ function fecharSucesso(){
 // ════════════════════════════════════════
 //  TABS
 // ════════════════════════════════════════
+function renderCatNav(){
+  var track = document.getElementById('cat-nav-track');
+  if(!track) return;
+  var cats = (_categorias||[]).filter(function(c){
+    return (_itens||[]).some(function(i){ return i.categoriaId === c.id && i.disponivel !== false; });
+  });
+  var html = '';
+  // Botão "Todas"
+  var todasAtivo = !_catAtiva;
+  html += '<button class="cat-nav-btn'+(todasAtivo?' active':'')+'" onclick="selecionarCat(null);_scrollCatNav(this)">'+
+    '<span class="cat-nav-icon">🍽️</span>'+
+    '<span class="cat-nav-label">Todas</span>'+
+  '</button>';
+  // Categorias
+  cats.forEach(function(c){
+    var ativo = _catAtiva === c.id;
+    html += '<button class="cat-nav-btn'+(ativo?' active':'')+'" onclick="selecionarCat(\''+c.id+'\');_scrollCatNav(this)">'+
+      '<span class="cat-nav-icon">'+(c.emoji||'📂')+'</span>'+
+      '<span class="cat-nav-label">'+esc(c.nome)+'</span>'+
+    '</button>';
+  });
+  // Separador + ações fixas
+  html += '<div style="width:1px;background:var(--border);margin:8px 4px;flex-shrink:0;"></div>';
+  html += '<button class="cat-nav-btn" onclick="showTab(\'pedidos\')" style="'+((_tabAtual==='pedidos')?'color:var(--accent);border-top-color:var(--accent);':'')+'">'+
+    '<span class="cat-nav-icon">🧾</span>'+
+    '<span class="cat-nav-label">Pedidos</span>'+
+  '</button>';
+  html += '<button class="cat-nav-btn" onclick="abrirHistorico()">'+
+    '<span class="cat-nav-icon">📜</span>'+
+    '<span class="cat-nav-label">Histórico</span>'+
+  '</button>';
+  html += '<button class="cat-nav-btn" onclick="sair()">'+
+    '<span class="cat-nav-icon">🚪</span>'+
+    '<span class="cat-nav-label">Sair</span>'+
+  '</button>';
+  track.innerHTML = html;
+
+  // Scroll para categoria ativa
+  setTimeout(function(){
+    var ativo = track.querySelector('.cat-nav-btn.active');
+    if(ativo) ativo.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
+  }, 50);
+
+  // Swipe na barra para navegar entre categorias
+  _iniciarSwipeCatNav(track, cats);
+}
+
+function _scrollCatNav(btn){
+  if(btn) btn.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
+}
+
+var _catNavSwipeX = 0;
+function _iniciarSwipeCatNav(track, cats){
+  track.ontouchstart = function(e){ _catNavSwipeX = e.touches[0].clientX; };
+  track.ontouchend = function(e){
+    var dx = e.changedTouches[0].clientX - _catNavSwipeX;
+    if(Math.abs(dx) < 50) return; // não era swipe, era clique
+    // Navega entre categorias
+    var todas = [null].concat(cats.map(function(c){ return c.id; }));
+    var idxAtual = todas.indexOf(_catAtiva);
+    var novoIdx = idxAtual + (dx < 0 ? 1 : -1);
+    novoIdx = Math.max(0, Math.min(novoIdx, todas.length - 1));
+    if(novoIdx !== idxAtual){
+      selecionarCat(todas[novoIdx]);
+      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+    }
+  };
+}
+
+function selecionarCat(catId){
+  _catAtiva = catId;
+  renderItens();
+  renderCatNav();
+}
+
 function showTab(tab){
   _tabAtual = tab;
   document.getElementById('tab-cardapio').style.display = tab==='cardapio'?'block':'none';
   document.getElementById('tab-pedidos').style.display = tab==='pedidos'?'block':'none';
-  document.getElementById('nav-cardapio').classList.toggle('active', tab==='cardapio');
-  document.getElementById('nav-pedidos').classList.toggle('active', tab==='pedidos');
   if(tab==='pedidos') renderPedidos();
-  if(tab==='cardapio') { renderCatBar(); renderItens(); }
-  // Atualiza FAB ao trocar de aba
+  if(tab==='cardapio'){ renderCatBar(); renderItens(); }
+  renderCatNav();
   try{ atualizarFabEnviar(); }catch(e){}
 }
 
@@ -16543,6 +16626,8 @@ function adicionarMaisItens(){
   // Volta para grade de categorias
   _catAtiva = null;
   renderCatBar();
+  renderCatNav();
+  renderCatNav();
   renderItens();
 }
 
@@ -16597,6 +16682,7 @@ window.addEventListener('popstate', function(e){
   if(_catAtiva !== null && document.getElementById('app').style.display !== 'none'){
     _catAtiva = null;
     renderCatBar();
+    renderCatNav();
     renderItens();
     try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
     return;

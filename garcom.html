@@ -15018,39 +15018,57 @@ function fecharModalFechar(){
 function limparContaAlmocoEmergencia(){
   if(!_fecharConta) return;
   var todasContas = _fecharConta._todasContasAlmoco;
-  if(!todasContas){ showToast('Não é conta de almoço','#f7a34f'); return; }
-  if(!confirm('⚠️ LIMPAR TODAS AS DUPLICAÇÕES?\n\nIsso vai restaurar cada conta ao estado original sem duplicatas.\n\nContinuar?')) return;
+  var mesaNum = _fecharMesaNum;
 
-  var promises = todasContas.map(function(c){
-    // Busca conta original no Firestore
-    return fbDb.collection('contas_mesa').doc(c.id).get().then(function(doc){
-      if(!doc.exists) return;
-      var dados = doc.data();
-      var itensOriginais = (dados.itens||[]);
-      // Remove duplicatas pelo nome+preco+qtd
-      var vistos = {};
-      var itensSemDup = itensOriginais.filter(function(it){
-        var chave = it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1)+'|'+(it.status||'');
-        if(vistos[chave]) return false;
-        vistos[chave] = true;
-        return true;
+  if(!confirm('⚠️ FORÇAR FECHAMENTO DA MESA '+mesaNum+'?\n\nIsso vai fechar e liberar a mesa imediatamente.\n\nContinuar?')) return;
+
+  // Busca TODAS as contas desta mesa no Firestore (não só as em memória)
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==',_restauranteId)
+    .get()
+    .then(function(snap){
+      var batch = fbDb.batch ? fbDb.batch() : null;
+      var promises = [];
+      var mesaInt = parseInt(mesaNum);
+      var mesaStr = String(mesaNum);
+
+      snap.forEach(function(doc){
+        var d = doc.data();
+        // Fecha qualquer conta desta mesa
+        if(String(d.mesa) === mesaStr || d.mesa === mesaInt){
+          var update = {
+            status: 'fechada',
+            fechadaEm: Date.now(),
+            fechadaPor: _nomeGarcom || 'Sistema',
+            itens: [], // limpa itens para não duplicar
+            pagamentos: []
+          };
+          promises.push(fbDb.collection('contas_mesa').doc(doc.id).update(update));
+        }
       });
-      if(itensSemDup.length < itensOriginais.length){
-        console.log('Removendo', itensOriginais.length - itensSemDup.length, 'duplicatas da conta', c.id);
-        return fbDb.collection('contas_mesa').doc(c.id).update({
-          itens: itensSemDup,
-          pagamentos: [],
-          atualizadoEm: Date.now()
-        });
-      }
-    });
-  });
 
-  Promise.all(promises).then(function(){
-    showToast('✓ Contas limpas!','#4ade80');
-    fecharModalFechar();
-    renderMesas();
-  }).catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+      if(!promises.length){
+        showToast('Nenhuma conta encontrada','#f7a34f');
+        return;
+      }
+
+      return Promise.all(promises);
+    })
+    .then(function(){
+      // Limpa memória local
+      delete _mesasOcupadas[String(mesaNum)];
+      delete _contasMesaCache[String(mesaNum)];
+      // Remove da lista de comandas
+      _comandasAvulsas = (_comandasAvulsas||[]).filter(function(c){
+        return String(c.mesa) !== String(mesaNum);
+      });
+      fecharModalFechar();
+      renderMesas();
+      showToast('✓ Mesa '+mesaNum+' liberada!','#4ade80');
+    })
+    .catch(function(e){
+      showToast('Erro: '+e.message,'#f87171');
+    });
 }
 
 function confirmarPagarTudo(){

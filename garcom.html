@@ -14175,9 +14175,34 @@ function abrirFecharConta(num){
         if(_fecharUnsub) _fecharUnsub();
         _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
           .onSnapshot(function(doc){
-            if(doc.exists){
-              // Re-mescla tudo ao detectar mudança
-              abrirFecharConta(num);
+            if(doc.exists && document.getElementById('modal-fechar-conta') && document.getElementById('modal-fechar-conta').classList.contains('show')){
+              // Só re-mescla se o modal ainda está aberto
+              var novosDados = doc.data();
+              if(_fecharConta && _fecharConta._todasContasAlmoco){
+                // Atualiza os dados da primeira conta sem re-abrir o modal
+                _fecharConta._todasContasAlmoco = _fecharConta._todasContasAlmoco.map(function(c){
+                  return c.id === doc.id ? Object.assign({}, c, novosDados, {id: doc.id}) : c;
+                });
+                // Re-mescla itens
+                var itensMesclados = [];
+                var pagamentosMesclados = [];
+                _fecharConta._todasContasAlmoco.forEach(function(c){
+                  var nomeCliente = c.nomeCliente || c.cliente || 'Pessoa';
+                  (c.itens||[]).forEach(function(it, idx){
+                    var itCopia = Object.assign({}, it);
+                    if(!itCopia.itemKey) itCopia.itemKey = c.id + '_' + idx;
+                    if(!itCopia.nomeCliente) itCopia.nomeCliente = nomeCliente;
+                    if(!itCopia.pessoa) itCopia.pessoa = itCopia.nomeCliente;
+                    if(!itCopia.status || itCopia.status === 'entregue') itCopia.status = 'aberto';
+                    itCopia._contaId = c.id;
+                    itensMesclados.push(itCopia);
+                  });
+                  (c.pagamentos||[]).forEach(function(p){ pagamentosMesclados.push(p); });
+                });
+                _fecharConta.itens = itensMesclados;
+                _fecharConta.pagamentos = pagamentosMesclados;
+                renderFecharConta();
+              }
             }
           });
 

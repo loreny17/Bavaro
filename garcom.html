@@ -14171,6 +14171,10 @@ function abrirFecharConta(num){
         _taxaServicoPct = taxaServico || 10;
         _taxaServicoAtiva = taxaAtiva;
 
+        // Mostra botão de emergência para almoço
+        var btnLimpar = document.getElementById('btn-limpar-emergencia');
+        if(btnLimpar) btnLimpar.style.display = '';
+
         // Listener na primeira conta (para detectar pagamentos)
         if(_fecharUnsub) _fecharUnsub();
         _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
@@ -15010,6 +15014,45 @@ function fecharModalFechar(){
   _fecharContaId = null;
 }
 
+// Emergência: limpa conta de almoço duplicada
+function limparContaAlmocoEmergencia(){
+  if(!_fecharConta) return;
+  var todasContas = _fecharConta._todasContasAlmoco;
+  if(!todasContas){ showToast('Não é conta de almoço','#f7a34f'); return; }
+  if(!confirm('⚠️ LIMPAR TODAS AS DUPLICAÇÕES?\n\nIsso vai restaurar cada conta ao estado original sem duplicatas.\n\nContinuar?')) return;
+
+  var promises = todasContas.map(function(c){
+    // Busca conta original no Firestore
+    return fbDb.collection('contas_mesa').doc(c.id).get().then(function(doc){
+      if(!doc.exists) return;
+      var dados = doc.data();
+      var itensOriginais = (dados.itens||[]);
+      // Remove duplicatas pelo nome+preco+qtd
+      var vistos = {};
+      var itensSemDup = itensOriginais.filter(function(it){
+        var chave = it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1)+'|'+(it.status||'');
+        if(vistos[chave]) return false;
+        vistos[chave] = true;
+        return true;
+      });
+      if(itensSemDup.length < itensOriginais.length){
+        console.log('Removendo', itensOriginais.length - itensSemDup.length, 'duplicatas da conta', c.id);
+        return fbDb.collection('contas_mesa').doc(c.id).update({
+          itens: itensSemDup,
+          pagamentos: [],
+          atualizadoEm: Date.now()
+        });
+      }
+    });
+  });
+
+  Promise.all(promises).then(function(){
+    showToast('✓ Contas limpas!','#4ade80');
+    fecharModalFechar();
+    renderMesas();
+  }).catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
 function confirmarPagarTudo(){
   var totais = calcularTotaisConta(_fecharConta);
   if(totais.restante <= 0.01) return;
@@ -15243,19 +15286,25 @@ function confirmarPagarPorItens(){
   // Para almoço com múltiplas contas, salva em cada conta de origem
   var todasContas = _fecharConta._todasContasAlmoco;
   if(todasContas && todasContas.length > 1){
-    // Agrupa itens atualizados por conta de origem
-    var itensPorConta = {};
-    todasContas.forEach(function(c){ itensPorConta[c.id] = []; });
-    itensAtualizados.forEach(function(it){
-      var cId = it._contaId || _fecharContaId;
-      if(!itensPorConta[cId]) itensPorConta[cId] = [];
-      itensPorConta[cId].push(it);
-    });
     var promessas = todasContas.map(function(c){
-      var itensC = itensPorConta[c.id] || c.itens || [];
-      var pagsC = c.id === _fecharContaId ? pagamentos : (c.pagamentos||[]);
+      // Pega APENAS os itens que pertencem a esta conta
+      var itensDaConta = itensAtualizados.filter(function(it){
+        return it._contaId === c.id;
+      });
+      // Remove campos internos antes de salvar
+      var itensSalvar = itensDaConta.map(function(it){
+        var copia = Object.assign({}, it);
+        delete copia._contaId;
+        return copia;
+      });
+      if(!itensSalvar.length) return Promise.resolve();
+      var pagsC = c.id === _fecharContaId
+        ? pagamentos
+        : (c.pagamentos||[]);
       return fbDb.collection('contas_mesa').doc(c.id).update({
-        itens: itensC, pagamentos: pagsC, atualizadoEm: Date.now()
+        itens: itensSalvar,
+        pagamentos: pagsC,
+        atualizadoEm: Date.now()
       });
     });
     Promise.all(promessas).then(function(){
@@ -15263,8 +15312,8 @@ function confirmarPagarPorItens(){
       showToast(msg,'#4ade80');
       _fecharSelecaoItens = {};
       _fecharSelecaoFragmentos = {};
-      // Recarrega a tela
-      abrirFecharConta(_fecharMesaNum);
+      // Recarrega
+      setTimeout(function(){ abrirFecharConta(_fecharMesaNum); }, 500);
     }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
   } else {
     fbDb.collection('contas_mesa').doc(_fecharContaId).update({
@@ -16543,7 +16592,8 @@ try{
 <div class="modal" id="modal-fechar-conta">
   <div class="modal-box">
     <div class="modal-header">
-      <div class="modal-titulo">FECHAR CONTA</div>
+      <div class="modal-titulo" style="flex:1;">FECHAR CONTA</div>
+      <button onclick="limparContaAlmocoEmergencia()" id="btn-limpar-emergencia" style="display:none;background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:5px 10px;font-size:0.7rem;font-family:inherit;cursor:pointer;margin-right:6px;">🧹 Limpar</button>
       <button class="modal-fechar" onclick="fecharModalFechar()">×</button>
     </div>
     <div class="modal-body" id="fechar-conta-body"></div>

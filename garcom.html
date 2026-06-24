@@ -12843,6 +12843,32 @@ function renderCatNav(){
   });
 }
 
+function _adicionarItemDireto(it){
+  // Verifica se já tem no carrinho e aumenta qty
+  var existente = _carrinho.find(function(c){
+    return c.id === it.id && !c.obs && (!c.selecoes || !c.selecoes.length);
+  });
+  if(existente){
+    existente.qtd = (existente.qtd||1) + 1;
+  } else {
+    _carrinho.push({
+      id: it.id,
+      nome: it.nome,
+      preco: it.preco,
+      precoBase: it.preco,
+      extras: 0,
+      qtd: 1,
+      obs: '',
+      foto: it.foto || '',
+      selecoes: [],
+      tipoVenda: it.tipoVenda || 'unidade',
+      categoriaId: it.categoriaId || ''
+    });
+  }
+  atualizarCarrinhoBadge && atualizarCarrinhoBadge();
+  atualizarFabEnviar && atualizarFabEnviar();
+}
+
 function abrirMiniCardapio(cat){
   var ex = document.getElementById('modal-mini-cardapio');
   if(ex) ex.remove();
@@ -12891,7 +12917,7 @@ function abrirMiniCardapio(cat){
       if(!qtd) return;
       var it = itens.find(function(i){ return i.id===id; });
       if(!it) return;
-      for(var q=0;q<qtd;q++) adicionarAoCarrinho(it);
+      for(var q=0;q<qtd;q++) _adicionarItemDireto(it);
       total += qtd;
     });
     showToast('✓ '+total+' item(s) adicionado(s)','#4ade80');
@@ -12904,7 +12930,7 @@ function abrirMiniCardapio(cat){
 
   // Lista
   var lista = document.createElement('div');
-  lista.style.cssText = 'overflow-y:auto;flex:1;padding:8px 12px 12px;display:flex;flex-direction:column;gap:5px;';
+  lista.style.cssText = 'overflow-y:auto;flex:1;padding:6px 10px 10px;display:flex;flex-direction:column;gap:4px;';
 
   function atualizarFooter(){
     var total = Object.values(selecionados).reduce(function(a,v){ return a+v; },0);
@@ -12919,18 +12945,18 @@ function abrirMiniCardapio(cat){
   // Swipe vars por row
   function criarRow(it){
     var row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;position:relative;overflow:hidden;cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;position:relative;overflow:hidden;cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;';
 
     var foto = it.foto
-      ? '<img src="'+it.foto+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex-shrink:0;" loading="lazy">'
-      : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">'+(cat.emoji||'🍽️')+'</div>';
+      ? '<img src="'+it.foto+'" style="width:36px;height:36px;object-fit:cover;border-radius:7px;flex-shrink:0;" loading="lazy">'
+      : '<span style="font-size:1.2rem;flex-shrink:0;width:36px;text-align:center;">'+(cat.emoji||'🍽️')+'</span>';
 
     var inner = document.createElement('div');
-    inner.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;position:relative;z-index:1;';
+    inner.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;position:relative;z-index:1;';
     inner.innerHTML = foto+
-      '<div style="flex:1;min-width:0;">'+
-        '<div style="font-size:0.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(it.nome)+'</div>'+
-        '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;margin-top:2px;">R$ '+fmtPreco(it.preco)+'</div>'+
+      '<div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<div style="font-size:0.85rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">'+esc(it.nome)+'</div>'+
+        '<div style="font-size:0.8rem;color:var(--accent);font-weight:700;flex-shrink:0;">R$ '+fmtPreco(it.preco)+'</div>'+
       '</div>';
 
     // Badge de selecionados
@@ -12967,7 +12993,7 @@ function abrirMiniCardapio(cat){
       var dx = e.changedTouches[0].clientX - _swX;
       if(!_swMoving || Math.abs(dx) < 30){
         // TAP — adiciona e fecha
-        adicionarAoCarrinho(it);
+        _adicionarItemDireto(it);
         showToast('✓ '+it.nome,'#4ade80');
         try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
         atualizarFabEnviar && atualizarFabEnviar();

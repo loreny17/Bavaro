@@ -2539,7 +2539,7 @@ function _abrirModalVincularMesa(){
       '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
     pendentes.forEach(function(c){
       var sel = _almVincularIds.indexOf(c.id) >= 0;
-      var nome = c.nomeCliente || c.cliente || c.garcomPrincipal || 'Pessoa';
+      var nome = c.nomeCliente || c.cliente || '';
       selHtml += '<button onclick="_toggleAlmVincular(\''+c.id+'\')" style="padding:7px 12px;border-radius:8px;border:1.5px solid '+(sel?'var(--accent)':'var(--border2)')+';background:'+(sel?'rgba(212,168,67,0.12)':'var(--surface2)')+';color:'+(sel?'var(--accent)':'var(--text)')+';font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;">'+
         (sel?'✓ ':'')+esc(nome)+
       '</button>';
@@ -14128,14 +14128,14 @@ function abrirFecharConta(num){
         var itensMesclados = [];
         var pagamentosMesclados = [];
         todasContas.forEach(function(c){
-          var nomeCliente = c.nomeCliente || c.cliente || 'Pessoa';
+          var nomeCliente = c.nomeCliente || c.cliente || '';
           (c.itens||[]).forEach(function(it, idx){
             var itCopia = Object.assign({}, it);
             // Garante itemKey único
             if(!itCopia.itemKey) itCopia.itemKey = c.id + '_' + idx;
             // Garante pessoa/nomeCliente
             if(!itCopia.nomeCliente) itCopia.nomeCliente = nomeCliente;
-            if(!itCopia.pessoa) itCopia.pessoa = itCopia.nomeCliente;
+            if(!itCopia.pessoa && itCopia.nomeCliente) itCopia.pessoa = itCopia.nomeCliente;
             // Status correto para pagamento funcionar
             if(!itCopia.status || itCopia.status === 'entregue') itCopia.status = 'aberto';
             // Referência à conta de origem
@@ -14187,12 +14187,12 @@ function abrirFecharConta(num){
                 var itensMesclados = [];
                 var pagamentosMesclados = [];
                 _fecharConta._todasContasAlmoco.forEach(function(c){
-                  var nomeCliente = c.nomeCliente || c.cliente || 'Pessoa';
+                  var nomeCliente = c.nomeCliente || c.cliente || '';
                   (c.itens||[]).forEach(function(it, idx){
                     var itCopia = Object.assign({}, it);
                     if(!itCopia.itemKey) itCopia.itemKey = c.id + '_' + idx;
                     if(!itCopia.nomeCliente) itCopia.nomeCliente = nomeCliente;
-                    if(!itCopia.pessoa) itCopia.pessoa = itCopia.nomeCliente;
+                    if(!itCopia.pessoa && itCopia.nomeCliente) itCopia.pessoa = itCopia.nomeCliente;
                     if(!itCopia.status || itCopia.status === 'entregue') itCopia.status = 'aberto';
                     itCopia._contaId = c.id;
                     itensMesclados.push(itCopia);
@@ -14353,18 +14353,36 @@ function _renderItemFecharDrag(it, c){
 
 function _trocarPessoaItem(itemKey, novaPessoa){
   if(!_fecharConta || !itemKey) return;
+
+  // Atualiza localmente
   var itens = (_fecharConta.itens||[]).map(function(it){
     if(it.itemKey !== itemKey) return it;
     return Object.assign({}, it, {pessoa: novaPessoa});
   });
   _fecharConta.itens = itens;
-  fbDb.collection('contas_mesa').doc(_fecharContaId).update({itens: itens})
-    .then(function(){
-      var nomeItem = ((_fecharConta.itens||[]).find(function(i){ return i.itemKey===itemKey; })||{}).nome || '';
+
+  // Para almoço com múltiplas contas — salva em cada conta de origem separadamente
+  var todasContas = _fecharConta._todasContasAlmoco;
+  if(todasContas && todasContas.length > 1){
+    var promises = todasContas.map(function(c){
+      var itensDaConta = itens.filter(function(it){ return it._contaId === c.id; });
+      if(!itensDaConta.length) return Promise.resolve();
+      return fbDb.collection('contas_mesa').doc(c.id).update({itens: itensDaConta});
+    });
+    Promise.all(promises).then(function(){
+      var nomeItem = (itens.find(function(i){ return i.itemKey===itemKey; })||{}).nome||'';
       showToast('👤 '+(novaPessoa||'Mesa toda')+': '+nomeItem,'#4ade80');
       renderFecharConta();
-    })
-    .catch(function(){ showToast('❌ Erro ao trocar pessoa','#f87171'); });
+    }).catch(function(){ showToast('❌ Erro ao trocar pessoa','#f87171'); });
+  } else {
+    fbDb.collection('contas_mesa').doc(_fecharContaId).update({itens: itens})
+      .then(function(){
+        var nomeItem = (itens.find(function(i){ return i.itemKey===itemKey; })||{}).nome||'';
+        showToast('👤 '+(novaPessoa||'Mesa toda')+': '+nomeItem,'#4ade80');
+        renderFecharConta();
+      })
+      .catch(function(){ showToast('❌ Erro ao trocar pessoa','#f87171'); });
+  }
 }
 
 // ─── TOUCH DRAG SYSTEM ───
@@ -14547,7 +14565,7 @@ function renderFecharConta(){
 
   var _fecharAgruparPessoa = true; // sempre agrupa se tiver pessoas
   if(itensVisiveis.length){
-    var temPessoas = itensVisiveis.some(function(it){ return it.pessoa || it.nomeCliente; });
+    var temPessoas = itensVisiveis.some(function(it){ return (it.pessoa && it.pessoa.trim()) || (it.nomeCliente && it.nomeCliente.trim()); });
     html += '<div class="fechar-bloco">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">'+
         '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Itens</div>'+
@@ -15597,7 +15615,7 @@ function abrirMenuImpressaoConta(){
   // Se tiver pessoas vinculadas, abre modal de separado/junto
   var c = _fecharConta;
   if(c){
-    var temPessoas = (c.itens||[]).some(function(it){ return it.pessoa || it.nomeCliente; });
+    var temPessoas = (c.itens||[]).some(function(it){ return (it.pessoa && it.pessoa.trim()) || (it.nomeCliente && it.nomeCliente.trim()); });
     if(temPessoas){
       abrirImprimirPorPessoaFechar();
       return;
@@ -15689,7 +15707,7 @@ function abrirVerPedidosMesa(num){
           var c = d.data();
           if(String(c.mesa) !== mesaStr && c.mesa !== mesaInt) return;
           if((c.itens||[]).length === 0) return;
-          var nomeCliente = c.nomeCliente || c.cliente || c.garcomPrincipal || 'Pessoa';
+          var nomeCliente = (c.nomeCliente && c.nomeCliente !== 'Pessoa') ? c.nomeCliente : (c.cliente && c.cliente !== 'Pessoa') ? c.cliente : '';
           pedidosVirtuais.push({
             id: d.id, mesa: mesaInt,
             garcom: c.garcomPrincipal || c.vinculadoPor || _nomeGarcom,

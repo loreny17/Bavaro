@@ -1382,10 +1382,9 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   </button>
 
   <!-- Bottom Nav -->
-  <!-- Bottom nav: categorias com swipe -->
-  <div class="bottom-nav" id="bottom-nav-cats" style="padding:0;overflow:hidden;height:64px;">
-    <!-- Aba Todas + categorias — populada por JS -->
-    <div id="cat-nav-track" style="display:flex;align-items:center;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;padding:0 4px;">
+  <!-- Bottom nav: categorias fixas com swipe para navegar -->
+  <div class="bottom-nav" id="bottom-nav-cats" style="padding:0;overflow:hidden;height:64px;touch-action:pan-y;">
+    <div id="cat-nav-track" style="display:flex;align-items:stretch;height:100%;width:100%;">
     </div>
   </div>
 </div>
@@ -12791,70 +12790,104 @@ function fecharSucesso(){
 // ════════════════════════════════════════
 //  TABS
 // ════════════════════════════════════════
+var _catNavPagina = 0;
+var _catNavPorPagina = 5;
+
 function renderCatNav(){
   var track = document.getElementById('cat-nav-track');
   if(!track) return;
+
   var cats = (_categorias||[]).filter(function(c){
     return (_itens||[]).some(function(i){ return i.categoriaId === c.id && i.disponivel !== false; });
   });
+
+  // Lista completa: Todas + categorias + separador + Pedidos + Histórico + Sair
+  var slots = [{id:'__todas__', emoji:'🍽️', label:'Todas'}];
+  cats.forEach(function(c){ slots.push({id:c.id, emoji:c.emoji||'📂', label:c.nome}); });
+  slots.push({id:'__sep__', emoji:'', label:''});
+  slots.push({id:'__pedidos__', emoji:'🧾', label:'Pedidos'});
+  slots.push({id:'__historico__', emoji:'📜', label:'Histórico'});
+  slots.push({id:'__sair__', emoji:'🚪', label:'Sair'});
+
+  // Garante página válida
+  var maxPag = Math.ceil(slots.length / _catNavPorPagina) - 1;
+  _catNavPagina = Math.max(0, Math.min(_catNavPagina, maxPag));
+
+  // Encontra página da categoria ativa
+  var idxAtivo = slots.findIndex(function(s){ return s.id === (_catAtiva || '__todas__'); });
+  if(idxAtivo >= 0){
+    var paginaAtiva = Math.floor(idxAtivo / _catNavPorPagina);
+    _catNavPagina = paginaAtiva;
+  }
+
+  var inicio = _catNavPagina * _catNavPorPagina;
+  var visiveis = slots.slice(inicio, inicio + _catNavPorPagina);
+
+  // Preenche com slots vazios se tiver menos de 5
+  while(visiveis.length < _catNavPorPagina) visiveis.push(null);
+
   var html = '';
-  // Botão "Todas"
-  var todasAtivo = !_catAtiva;
-  html += '<button class="cat-nav-btn'+(todasAtivo?' active':'')+'" onclick="selecionarCat(null);_scrollCatNav(this)">'+
-    '<span class="cat-nav-icon">🍽️</span>'+
-    '<span class="cat-nav-label">Todas</span>'+
-  '</button>';
-  // Categorias
-  cats.forEach(function(c){
-    var ativo = _catAtiva === c.id;
-    html += '<button class="cat-nav-btn'+(ativo?' active':'')+'" onclick="selecionarCat(\''+c.id+'\');_scrollCatNav(this)">'+
-      '<span class="cat-nav-icon">'+(c.emoji||'📂')+'</span>'+
-      '<span class="cat-nav-label">'+esc(c.nome)+'</span>'+
+  visiveis.forEach(function(s){
+    if(!s){ html += '<div style="flex:1;"></div>'; return; }
+    if(s.id === '__sep__'){ html += '<div style="width:1px;background:var(--border);margin:10px 2px;flex-shrink:0;"></div>'; return; }
+
+    var ativo = (s.id === '__todas__' && !_catAtiva) ||
+                (s.id === _catAtiva) ||
+                (s.id === '__pedidos__' && _tabAtual === 'pedidos');
+
+    var onclick = '';
+    if(s.id === '__todas__') onclick = 'selecionarCat(null)';
+    else if(s.id === '__pedidos__') onclick = 'showTab(\'pedidos\')';
+    else if(s.id === '__historico__') onclick = 'abrirHistorico()';
+    else if(s.id === '__sair__') onclick = 'sair()';
+    else onclick = 'selecionarCat(\''+s.id+'\')';
+
+    html += '<button class="cat-nav-btn'+(ativo?' active':'')+'" style="flex:1;" onclick="'+onclick+'">'+
+      '<span class="cat-nav-icon">'+s.emoji+'</span>'+
+      '<span class="cat-nav-label">'+esc(s.label)+'</span>'+
     '</button>';
   });
-  // Separador + ações fixas
-  html += '<div style="width:1px;background:var(--border);margin:8px 4px;flex-shrink:0;"></div>';
-  html += '<button class="cat-nav-btn" onclick="showTab(\'pedidos\')" style="'+((_tabAtual==='pedidos')?'color:var(--accent);border-top-color:var(--accent);':'')+'">'+
-    '<span class="cat-nav-icon">🧾</span>'+
-    '<span class="cat-nav-label">Pedidos</span>'+
-  '</button>';
-  html += '<button class="cat-nav-btn" onclick="abrirHistorico()">'+
-    '<span class="cat-nav-icon">📜</span>'+
-    '<span class="cat-nav-label">Histórico</span>'+
-  '</button>';
-  html += '<button class="cat-nav-btn" onclick="sair()">'+
-    '<span class="cat-nav-icon">🚪</span>'+
-    '<span class="cat-nav-label">Sair</span>'+
-  '</button>';
+
+  // Indicador de páginas (pontinhos)
+  var totalPags = Math.ceil(slots.length / _catNavPorPagina);
+  if(totalPags > 1){
+    var dots = '';
+    for(var i=0;i<totalPags;i++){
+      dots += '<div style="width:'+(i===_catNavPagina?'14px':'5px')+';height:3px;border-radius:2px;background:'+(i===_catNavPagina?'var(--accent)':'rgba(255,255,255,0.2)')+';transition:none;"></div>';
+    }
+    html += '<div style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:center;">'+dots+'</div>';
+  }
+
+  track.style.position = 'relative';
   track.innerHTML = html;
 
-  // Scroll para categoria ativa
-  setTimeout(function(){
-    var ativo = track.querySelector('.cat-nav-btn.active');
-    if(ativo) ativo.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
-  }, 50);
-
-  // Swipe na barra para navegar entre categorias
-  _iniciarSwipeCatNav(track, cats);
+  // Swipe na barra para paginar
+  _iniciarSwipeCatNav(track, slots);
 }
 
-function _scrollCatNav(btn){
-  if(btn) btn.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
-}
+function _scrollCatNav(btn){} // não necessário mais
 
 var _catNavSwipeX = 0;
-function _iniciarSwipeCatNav(track, cats){
-  track.ontouchstart = function(e){ _catNavSwipeX = e.touches[0].clientX; };
+var _catNavSwiping = false;
+
+function _iniciarSwipeCatNav(track, slots){
+  track.ontouchstart = function(e){
+    _catNavSwipeX = e.touches[0].clientX;
+    _catNavSwiping = false;
+  };
+  track.ontouchmove = function(e){
+    if(Math.abs(e.touches[0].clientX - _catNavSwipeX) > 10) _catNavSwiping = true;
+  };
   track.ontouchend = function(e){
+    if(!_catNavSwiping) return;
     var dx = e.changedTouches[0].clientX - _catNavSwipeX;
-    if(Math.abs(dx) < 50) return; // não era swipe, era clique
-    // Navega entre categorias
-    var todas = [null].concat(cats.map(function(c){ return c.id; }));
-    var idxAtual = todas.indexOf(_catAtiva);
-    var novoIdx = idxAtual + (dx < 0 ? 1 : -1);
-    novoIdx = Math.max(0, Math.min(novoIdx, todas.length - 1));
-    if(novoIdx !== idxAtual){
-      selecionarCat(todas[novoIdx]);
+    if(Math.abs(dx) < 40) return;
+    var maxPag = Math.ceil(slots.length / _catNavPorPagina) - 1;
+    var novaPag = _catNavPagina + (dx < 0 ? 1 : -1);
+    novaPag = Math.max(0, Math.min(novaPag, maxPag));
+    if(novaPag !== _catNavPagina){
+      _catNavPagina = novaPag;
+      renderCatNav();
       try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
     }
   };

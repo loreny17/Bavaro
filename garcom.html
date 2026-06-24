@@ -10347,7 +10347,7 @@ function obsRapidaConfirmar(){
       selecoes: []
     });
   }
-  atualizarCarrinhoBadge();
+  salvarCarrinho();
   var m = document.getElementById('modal-obs-rapida');
   if(m) m.remove();
   var msg = obs ? ('+1 ' + _itemObsRapida.nome + ' (' + obs.substring(0,20) + ')') : ('+1 ' + _itemObsRapida.nome);
@@ -10418,7 +10418,7 @@ function quickAddItem(item, delta){
       showToast('-1 ' + item.nome, '#f87171', 1200);
     }
   }
-  atualizarCarrinhoBadge();
+  salvarCarrinho();
   renderItens();
   renderCarrinho();
   atualizarFabEnviar();
@@ -12819,13 +12819,20 @@ function renderCatNav(){
     btn.innerHTML = '<span class="cat-nav-icon">'+(c.emoji||'📂')+'</span>'+
       '<span class="cat-nav-label">'+esc(c.nome)+'</span>';
 
-    // Toque — abre direto a lista completa de itens da categoria
-    btn.onclick = (function(cat){ return function(){
-      _catAtiva = cat.id;
-      renderCatNav();
-      abrirMiniCardapio(cat);
-    }; })(c);
+    // Clique normal — filtra categoria
+    btn.onclick = (function(id){ return function(){ selecionarCat(id); }; })(c.id);
 
+    // Long press — mini cardápio rápido
+    var _lpTimer;
+    btn.addEventListener('touchstart', (function(cat){ return function(e){
+      _lpTimer = setTimeout(function(){
+        _lpTimer = null;
+        try{ if(navigator.vibrate) navigator.vibrate(40); }catch(err){}
+        abrirMiniCardapio(cat);
+      }, 500);
+    }; })(c), {passive:true});
+    btn.addEventListener('touchend', function(e){ clearTimeout(_lpTimer); }, {passive:true});
+    btn.addEventListener('touchmove', function(e){ clearTimeout(_lpTimer); }, {passive:true});
     // Bloqueia menu nativo de copiar/salvar
     btn.addEventListener('contextmenu', function(e){ e.preventDefault(); return false; });
     btn.style.webkitUserSelect = 'none';
@@ -12841,7 +12848,7 @@ function abrirMiniCardapio(cat){
   if(ex) ex.remove();
 
   var itens = (_itens||[]).filter(function(i){
-    return i.categoriaId === cat.id && i.disponivel !== false;
+    return i.categoriaId === cat.id && i.disponivel !== false && (i.preco||0) > 0;
   });
 
   if(!itens.length){ showToast('Nenhum item disponível','#f7a34f'); return; }
@@ -12856,181 +12863,105 @@ function abrirMiniCardapio(cat){
   mod.appendChild(overlay);
 
   var box = document.createElement('div');
-  box.style.cssText = 'position:relative;background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:78vh;display:flex;flex-direction:column;z-index:1;';
+  box.style.cssText = 'position:relative;background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;z-index:1;';
 
   var header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 16px 8px;border-bottom:1px solid var(--border);flex-shrink:0;';
+  header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;';
   header.innerHTML = '<span style="font-size:1.5rem;">'+(cat.emoji||'📂')+'</span>'+
     '<div style="font-weight:800;font-size:1rem;flex:1;">'+esc(cat.nome)+'</div>'+
     '<button style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;padding:4px;line-height:1;">×</button>';
   header.querySelector('button').onclick = function(){ mod.remove(); };
   box.appendChild(header);
 
-  var dica = document.createElement('div');
-  dica.style.cssText = 'padding:8px 16px 4px;font-size:0.68rem;color:var(--muted);flex-shrink:0;';
-  dica.textContent = '👉 Toque pra adicionar  •  ➡️ arraste pra direita +1  •  ⬅️ esquerda -1';
-  box.appendChild(dica);
-
   var lista = document.createElement('div');
   lista.style.cssText = 'overflow-y:auto;padding:8px 12px 20px;display:flex;flex-direction:column;gap:6px;';
 
   function getQtd(id){
-    return (_carrinho||[]).filter(function(ci){ return ci.id===id && (!ci.selecoes||!ci.selecoes.length) && !ci.obs; }).reduce(function(a,ci){ return a+(ci.qtd||1); },0);
+    return (_carrinho||[]).filter(function(ci){ return ci.id===id; }).reduce(function(a,ci){ return a+(ci.qtd||1); },0);
   }
 
-  itens.forEach(function(it){ lista.appendChild(renderMiniRow(it, cat, mod, getQtd)); });
-  box.appendChild(lista);
-  mod.appendChild(box);
-  document.body.appendChild(mod);
-  try{ pushHistory('modal-mini-cardapio'); }catch(e){}
-}
-
-// Renderiza uma linha de item dentro do mini-cardápio (toque = adiciona e fecha / swipe = +1 / -1)
-function renderMiniRow(it, cat, mod, getQtd){
-  var pausado = it.pausado === true;
-  var ctrlEstoque = it.controlarEstoque === true;
-  var qtdEstoque = (typeof it.estoque === 'number') ? it.estoque : null;
-  var esgotado = ctrlEstoque && qtdEstoque !== null && qtdEstoque <= 0;
-  var bloqueado = pausado || esgotado;
-  var ehKg = it.tipoVenda === 'kg';
-  var precisaModal = ehKg || itemTemObrigatorio(it);
-
-  var row = document.createElement('div');
-  row.id = 'mini-row-'+it.id;
-  row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;position:relative;overflow:hidden;user-select:none;-webkit-user-select:none;'+(bloqueado?'opacity:0.5;':'');
-
-  var foto = it.foto
-    ? '<img src="'+it.foto+'" style="width:46px;height:46px;object-fit:cover;border-radius:8px;flex-shrink:0;">'
-    : '<div style="width:46px;height:46px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">'+(cat.emoji||'🍽️')+'</div>';
-
-  var sufixo = ehKg ? ' <span style="font-size:0.66rem;color:var(--muted);">/kg</span>' : '';
-  var statusTxt = bloqueado ? ' <span style="font-size:0.66rem;color:#f87171;font-weight:700;">'+(pausado?'(pausado)':'(esgotado)')+'</span>' : '';
-
-  var conteudo = document.createElement('div');
-  conteudo.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;position:relative;z-index:1;background:inherit;';
-  conteudo.innerHTML = foto+
-    '<div style="flex:1;min-width:0;">'+
-      '<div style="font-size:0.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+statusTxt+'</div>'+
-      '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;margin-top:2px;">R$ '+fmtPreco(it.preco)+sufixo+'</div>'+
-    '</div>'+
-    '<div class="mini-qtd-badge" style="min-width:26px;height:26px;border-radius:8px;background:var(--accent);color:#000;font-weight:800;font-size:0.86rem;display:none;align-items:center;justify-content:center;flex-shrink:0;padding:0 6px;"></div>';
-  row.appendChild(conteudo);
-
-  var badgeEl = conteudo.querySelector('.mini-qtd-badge');
-  function atualizarBadge(){
-    var q = getQtd(it.id);
-    if(q > 0){ badgeEl.style.display='flex'; badgeEl.textContent = q; }
-    else { badgeEl.style.display='none'; }
+  function removerUm(it){
+    for(var i=_carrinho.length-1;i>=0;i--){
+      if(_carrinho[i].id===it.id){
+        if((_carrinho[i].qtd||1) > 1){ _carrinho[i].qtd--; }
+        else { _carrinho.splice(i,1); }
+        break;
+      }
+    }
   }
-  atualizarBadge();
 
-  if(bloqueado){
-    row.onclick = function(){ showToast(pausado ? '⏸️ Item pausado' : '✕ Item esgotado', '#f87171'); };
+  function renderRow(it){
+    var row = document.createElement('div');
+    row.id = 'mini-row-'+it.id;
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;position:relative;overflow:hidden;user-select:none;-webkit-user-select:none;';
+
+    var foto = it.foto
+      ? '<img src="'+it.foto+'" style="width:46px;height:46px;object-fit:cover;border-radius:8px;flex-shrink:0;">'
+      : '<div style="width:46px;height:46px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">'+(cat.emoji||'🍽️')+'</div>';
+
+    var inner = document.createElement('div');
+    inner.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;';
+    inner.innerHTML = foto+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-size:0.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.nome)+'</div>'+
+        '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;margin-top:2px;">R$ '+fmtPreco(it.preco)+'</div>'+
+      '</div>';
+
+    // Controles qty
+    var ctrl = document.createElement('div');
+    ctrl.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
+
+    var btnMenos = document.createElement('button');
+    btnMenos.style.cssText = 'width:30px;height:30px;border-radius:50%;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+    btnMenos.textContent = '−';
+
+    var lblQtd = document.createElement('span');
+    lblQtd.style.cssText = 'font-family:Bebas Neue,sans-serif;font-size:1.1rem;min-width:18px;text-align:center;color:var(--accent);';
+
+    var btnMais = document.createElement('button');
+    btnMais.style.cssText = 'width:30px;height:30px;border-radius:50%;border:none;background:var(--accent);color:#000;font-size:1.2rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+    btnMais.textContent = '+';
+
+    function atualizarQtd(){
+      var q = getQtd(it.id);
+      lblQtd.textContent = q > 0 ? q : '';
+      btnMenos.style.opacity = q > 0 ? '1' : '0.3';
+      row.style.background = q > 0 ? 'rgba(212,168,67,0.08)' : 'var(--surface2)';
+      row.style.borderColor = q > 0 ? 'rgba(212,168,67,0.4)' : 'var(--border2)';
+    }
+
+    btnMais.onclick = function(e){
+      e.stopPropagation();
+      adicionarAoCarrinho(it);
+      atualizarQtd();
+      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+      atualizarFabEnviar && atualizarFabEnviar();
+    };
+    btnMenos.onclick = function(e){
+      e.stopPropagation();
+      if(getQtd(it.id) <= 0) return;
+      removerUm(it);
+      atualizarQtd();
+      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+      atualizarFabEnviar && atualizarFabEnviar();
+    };
+
+    ctrl.appendChild(btnMenos);
+    ctrl.appendChild(lblQtd);
+    ctrl.appendChild(btnMais);
+    inner.appendChild(ctrl);
+    row.appendChild(inner);
+    atualizarQtd();
     return row;
   }
 
-  var _swipeDisparou = false;
-
-  // Toque normal — adiciona 1 ao carrinho e fecha o menu
-  // (se o item exigir peso ou opções obrigatórias, abre o modal completo)
-  row.onclick = function(){
-    if(_swipeDisparou){ _swipeDisparou = false; return; }
-    if(precisaModal){
-      mod.remove();
-      abrirModalItem(it);
-      return;
-    }
-    quickAddItem(it, +1);
-    try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
-    mod.remove();
-  };
-
-  // Swipe — direita +1 / esquerda -1, sem fechar o menu (pra adicionar vários itens)
-  if(!ehKg){
-    anexarSwipeMini(row, conteudo, function(delta){
-      _swipeDisparou = true;
-      setTimeout(function(){ _swipeDisparou = false; }, 300);
-      if(delta > 0 && itemTemObrigatorio(it)){
-        mod.remove();
-        abrirModalItem(it);
-        return;
-      }
-      quickAddItem(it, delta);
-      atualizarBadge();
-      try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
-    });
-  }
-
-  return row;
+  itens.forEach(function(it){ lista.appendChild(renderRow(it)); });
+  box.appendChild(lista);
+  mod.appendChild(box);
+  document.body.appendChild(mod);
 }
 
-// Swipe genérico de uma linha do mini-cardápio: direita = +1, esquerda = -1
-function anexarSwipeMini(row, conteudo, onSwipe){
-  var startX=0, startY=0, currentX=0, swiping=false, direcao=0, bgEl=null, ativou=false;
-  var THRESHOLD = 60, MAX_TRANSLATE = 80;
-  row.style.overflow = 'hidden';
-
-  function criarBg(dir){
-    if(bgEl) return;
-    bgEl = document.createElement('div');
-    if(dir < 0){
-      bgEl.style.cssText = 'position:absolute;top:0;right:0;bottom:0;width:100%;background:linear-gradient(90deg,transparent 0%,#dc2626 60%,#b91c1c 100%);display:flex;align-items:center;justify-content:flex-end;padding-right:14px;color:#fff;font-weight:800;font-size:1.6rem;pointer-events:none;z-index:0;border-radius:inherit;';
-      bgEl.innerHTML = '➖';
-    } else {
-      bgEl.style.cssText = 'position:absolute;top:0;left:0;bottom:0;width:100%;background:linear-gradient(90deg,#16a34a 0%,#22c55e 40%,transparent 100%);display:flex;align-items:center;justify-content:flex-start;padding-left:14px;color:#fff;font-weight:800;font-size:1.6rem;pointer-events:none;z-index:0;border-radius:inherit;';
-      bgEl.innerHTML = '➕';
-    }
-    row.insertBefore(bgEl, row.firstChild);
-  }
-  function removerBg(){ if(bgEl){ bgEl.remove(); bgEl=null; } }
-
-  function iniciar(e){
-    var p = e.touches ? e.touches[0] : e;
-    startX = p.clientX; startY = p.clientY; currentX = 0; direcao = 0; swiping = false; ativou = false;
-  }
-  function mover(e){
-    var p = e.touches ? e.touches[0] : e;
-    var dx = p.clientX - startX, dy = p.clientY - startY;
-    if(!swiping){
-      if(Math.abs(dx) < 12) return;
-      if(Math.abs(dy) > Math.abs(dx)) return;
-      direcao = dx < 0 ? -1 : 1;
-      swiping = true;
-      criarBg(direcao);
-    }
-    if(direcao < 0 && dx > 0) dx = 0;
-    if(direcao > 0 && dx < 0) dx = 0;
-    if(dx < -MAX_TRANSLATE) dx = -MAX_TRANSLATE;
-    if(dx > MAX_TRANSLATE) dx = MAX_TRANSLATE;
-    currentX = dx;
-    conteudo.style.transform = 'translateX('+dx+'px)';
-    conteudo.style.transition = 'none';
-    if(!ativou && Math.abs(dx) >= THRESHOLD){ ativou = true; try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){} }
-    else if(ativou && Math.abs(dx) < THRESHOLD){ ativou = false; }
-  }
-  function finalizar(){
-    if(!swiping){ removerBg(); return; }
-    swiping = false;
-    conteudo.style.transition = 'transform 0.18s ease';
-    conteudo.style.transform = 'translateX(0)';
-    var ativar = Math.abs(currentX) >= THRESHOLD;
-    var dirFinal = direcao;
-    setTimeout(function(){
-      removerBg();
-      conteudo.style.transition = '';
-      conteudo.style.transform = '';
-      if(ativar) onSwipe(dirFinal > 0 ? 1 : -1);
-    }, 180);
-  }
-  row.addEventListener('touchstart', iniciar, {passive:true});
-  row.addEventListener('touchmove', mover, {passive:true});
-  row.addEventListener('touchend', finalizar);
-  row.addEventListener('touchcancel', finalizar);
-  row.addEventListener('mousedown', iniciar);
-  row.addEventListener('mousemove', function(e){ if(e.buttons===1) mover(e); });
-  row.addEventListener('mouseup', finalizar);
-  row.addEventListener('mouseleave', finalizar);
-}
+function renderCatNav(){
 
 function selecionarCat(catId){
   _catAtiva = catId;
@@ -16881,7 +16812,7 @@ window.addEventListener('popstate', function(e){
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
-    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g', 'modal-confirma-voz', 'modal-add-rapido', 'modal-mini-cardapio'];
+    'modal-personalizar-gestos', 'modal-modo-teste', 'modal-insumos-garcom', 'modal-encerrar-dia-g', 'modal-confirma-voz', 'modal-add-rapido'];
   for(var i = 0; i < modaisDinamicos.length; i++){
     var md = document.getElementById(modaisDinamicos[i]);
     if(md){

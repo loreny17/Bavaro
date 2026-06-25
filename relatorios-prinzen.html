@@ -431,71 +431,81 @@ function labelRest(id){
   return nomes[id] || (id.charAt(0).toUpperCase()+id.slice(1));
 }
 
-// Busca as contas por vários caminhos (o Prinzen pode ter outro tenant/campo) e monta o cache
+// Lê as DUAS fontes: contas_fechadas (Principal/garçom) + pedidos_totem pagos (Prinzen/totem)
 function _buscarTudo(){
   var _respondeu = false;
   var _watchdog = setTimeout(function(){
     if(_respondeu) return;
-    dlog('TIMEOUT: consulta não retornou em 10s.');
+    dlog('TIMEOUT: consulta não retornou em 12s.');
     document.getElementById('relatorio-content').innerHTML =
       '<div class="loading" style="color:var(--danger);">⏱️ A consulta não respondeu.<br><small style="color:var(--muted);">Toque 5× em "Prinzen" para ver o debug.</small></div>';
-  }, 10000);
+  }, 12000);
 
-  var col = fbDb.collection('contas_fechadas');
-  function safe(q, nome){ return q.get().then(function(s){ return {nome:nome, snap:s}; })
-                                     .catch(function(e){ dlog('Busca "'+nome+'" falhou: '+(e.code||'')+' — '+e.message); return {nome:nome, snap:null}; }); }
+  var tref = fbDb.collection('tenants').doc(TENANT_ID);
 
-  Promise.all([
-    safe(col.where('tenantId','==',TENANT_ID), 'tenant'),
-    safe(col.where('restauranteId','==',RESTAURANTE_ID), 'restauranteId==prinzen'),
-    safe(col.where('id','==',RESTAURANTE_ID), 'id==prinzen')
-  ]).then(function(resultados){
-    _respondeu = true; clearTimeout(_watchdog);
+  function lerContas(){
+    return fbDb.collection('contas_fechadas').where('tenantId','==',TENANT_ID).get()
+      .then(function(s){ return {tipo:'contas', rid:null, snap:s}; })
+      .catch(function(e){ dlog('contas_fechadas falhou: '+(e.code||'')+' — '+e.message); return {tipo:'contas', rid:null, snap:null}; });
+  }
+  function lerTotem(rid){
+    return tref.collection('restaurantes').doc(rid).collection('pedidos_totem')
+      .where('status','==','pago').get()
+      .then(function(s){ return {tipo:'totem', rid:rid, snap:s}; })
+      .catch(function(e){ dlog('totem/'+rid+' falhou: '+(e.code||'')+' — '+e.message); return {tipo:'totem', rid:rid, snap:null}; });
+  }
 
-    var byId = {}, tenants = {};
-    resultados.forEach(function(r){
-      var size = r.snap ? r.snap.size : 'erro';
-      dlog('Busca "'+r.nome+'": '+size+' doc(s)');
-      if(!r.snap) return;
-      r.snap.forEach(function(d){
-        if(byId[d.id]) return; // dedupe
-        var dados = d.data();
-        var c = Object.assign({_docId:d.id}, dados);
-        c._rest = dados.restauranteId || dados.id || 'default';
-        c.fechadaEm = toMillis(dados.fechadoEm) || toMillis(dados.fechadaEm) ||
-                      toMillis(dados.criadoEm) || toMillis(dados.dataFechamento) || toMillis(dados.data);
-        byId[d.id] = c;
-        var tk = dados.tenantId || '(sem tenantId)';
-        tenants[tk] = (tenants[tk]||0) + 1;
+  // 1) Descobre os restaurantes do tenant; 2) lê contas_fechadas + pedidos_totem de cada um
+  tref.collection('restaurantes').get()
+    .then(function(rs){ var ids=[]; rs.forEach(function(d){ ids.push(d.id); }); return ids; })
+    .catch(function(e){ dlog('lista de restaurantes falhou: '+(e.code||'')+' — '+e.message); return []; })
+    .then(function(rids){
+      if(rids.indexOf(RESTAURANTE_ID) < 0) rids.push(RESTAURANTE_ID);
+      if(rids.indexOf('default') < 0) rids.push('default');
+      dlog('Restaurantes do tenant: '+rids.join(', '));
+      var jobs = [ lerContas() ].concat(rids.map(lerTotem));
+      return Promise.all(jobs);
+    })
+    .then(function(resultados){
+      _respondeu = true; clearTimeout(_watchdog);
+
+      var byKey = {}, mapRest = {};
+      resultados.forEach(function(r){
+        var size = r.snap ? r.snap.size : 'erro';
+        dlog('Fonte '+(r.tipo === 'contas' ? 'contas_fechadas' : 'totem/'+r.rid)+': '+size+' doc(s)');
+        if(!r.snap) return;
+        r.snap.forEach(function(d){
+          var key = (r.rid || 'cf') + '_' + d.id;
+          if(byKey[key]) return;
+          var dados = d.data();
+          var c = Object.assign({_docId:d.id}, dados);
+          if(r.tipo === 'totem'){
+            c._rest = r.rid;
+            c.fechadaEm = toMillis(dados.pagoEm) || toMillis(dados.data) || toMillis(dados.criadoEm);
+          } else {
+            c._rest = dados.restauranteId || dados.id || 'default';
+            c.fechadaEm = toMillis(dados.fechadoEm) || toMillis(dados.fechadaEm) || toMillis(dados.criadoEm);
+          }
+          c.total = (typeof dados.total === 'number') ? dados.total : (dados.valorTotal || 0);
+          byKey[key] = c;
+          mapRest[c._rest] = (mapRest[c._rest]||0) + 1;
+        });
       });
+
+      _todasContas = Object.keys(byKey).map(function(k){ return byKey[k]; });
+      dlog('Total de vendas (únicas): '+_todasContas.length);
+
+      _restaurantes = Object.keys(mapRest).map(function(id){ return {id:id, label:labelRest(id), count:mapRest[id]}; })
+                                          .sort(function(a,b){ return b.count - a.count; });
+      dlog('Restaurantes com vendas: '+(_restaurantes.map(function(r){ return r.id+' ('+r.count+')'; }).join(', ')||'nenhum'));
+
+      if(_restauranteSel === null){
+        var temPrinzen = _restaurantes.some(function(r){ return r.id === RESTAURANTE_ID; });
+        _restauranteSel = temPrinzen ? RESTAURANTE_ID : (_restaurantes[0] ? _restaurantes[0].id : 'default');
+      }
+      _montarSeletorRestaurante();
+      _aplicarFiltros();
     });
-
-    _todasContas = Object.keys(byId).map(function(k){ return byId[k]; });
-    dlog('Total único: '+_todasContas.length+' conta(s)');
-    dlog('TenantIds vistos: '+(Object.keys(tenants).map(function(t){ return t+' ('+tenants[t]+')'; }).join(', ')||'nenhum'));
-
-    var mapRest = {};
-    _todasContas.forEach(function(c){ mapRest[c._rest] = (mapRest[c._rest]||0) + 1; });
-    _restaurantes = Object.keys(mapRest).map(function(id){ return {id:id, label:labelRest(id), count:mapRest[id]}; })
-                                        .sort(function(a,b){ return b.count - a.count; });
-    dlog('Restaurantes: '+(_restaurantes.map(function(r){ return r.id+' ('+r.count+')'; }).join(', ')||'nenhum'));
-
-    // Se houver conta do Prinzen, mostra a estrutura dela (esquema do app do caixa)
-    var amostraPrinzen = _todasContas.filter(function(c){ return c._rest === RESTAURANTE_ID; })[0];
-    if(amostraPrinzen){
-      dlog('Campos da conta Prinzen: '+Object.keys(amostraPrinzen).join(', '));
-      dlog('Prinzen → fechadoEm='+JSON.stringify(amostraPrinzen.fechadoEm)+' total='+JSON.stringify(amostraPrinzen.total));
-    } else {
-      dlog('Nenhuma conta com restauranteId/id == "'+RESTAURANTE_ID+'" foi encontrada.');
-    }
-
-    if(_restauranteSel === null){
-      var temPrinzen = _restaurantes.some(function(r){ return r.id === RESTAURANTE_ID; });
-      _restauranteSel = temPrinzen ? RESTAURANTE_ID : (_restaurantes[0] ? _restaurantes[0].id : 'default');
-    }
-    _montarSeletorRestaurante();
-    _aplicarFiltros();
-  });
 }
 
 function _montarSeletorRestaurante(){

@@ -286,27 +286,29 @@ try {
   firebase.initializeApp(firebaseConfig);
   fbDb = firebase.firestore();
   try {
-    fbDb.settings({ experimentalForceLongPolling: true, merge: true });
-    dlog('Firestore: long-polling forçado (contorna bloqueio de streaming/WebChannel em rede móvel/proxy).');
+    fbDb.settings({ experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false });
+    dlog('Firestore: long-polling forçado.');
   } catch(e){ dlog('settings() falhou: '+e.message); }
   dlog('Firebase inicializado', {projectId: firebaseConfig.projectId});
 } catch(e){ dlog('ERRO ao inicializar Firebase: '+e.message); }
-
-firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(e){ dlog('persistence: '+e.message); });
 
 firebase.auth().onAuthStateChanged(function(user){
   if(user){ _authReady = true; clearTimeout(_authWatch); dlog('Login OK (uid: '+user.uid.slice(0,8)+'…)'); }
   else { dlog('Sem usuário autenticado ainda'); }
 });
-firebase.auth().signInAnonymously()
+
+// Persistência em MEMÓRIA (NONE) evita o SDK de Auth travar no IndexedDB,
+// que é a causa provável do login não concluir mesmo com a rede OK.
+firebase.auth().setPersistence(firebase.auth.Auth.Persistence.NONE)
+  .then(function(){ dlog('Persistência: NONE (memória).'); return firebase.auth().signInAnonymously(); })
   .then(function(){ dlog('signInAnonymously resolvido'); })
-  .catch(function(e){ dlog('ERRO login anônimo: '+(e.code||'')+' — '+e.message); console.error(e); });
+  .catch(function(e){ dlog('ERRO login: '+(e.code||'')+' — '+e.message); console.error(e); });
 
 // Watchdog do login: se em 8s não autenticar, explica as causas prováveis
 var _authWatch = setTimeout(function(){
   if(_authReady) return;
   dlog('AVISO: login anônimo NÃO concluiu em 8s.');
-  dlog('  → Causas prováveis: (1) "Anonymous" desativado em Authentication; (2) domínio/origem não autorizado (abrindo via file://?); (3) rede bloqueando *.googleapis.com.');
+  dlog('  → Se o REST funciona mas o SDK não: tente também autorizar o domínio em Authentication → Settings → Authorized domains.');
 }, 8000);
 
 // Verifica sessão salva

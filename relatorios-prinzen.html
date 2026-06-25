@@ -57,6 +57,29 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
   /* ── CONTAINER ── */
   .container{max-width:480px;margin:0 auto;padding:18px 16px 60px;}
 
+  /* ── RESTAURANTE ── */
+  .restaurante-bar{
+    display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin-bottom:6px;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--border);
+  }
+  .restaurante-bar::-webkit-scrollbar{display:none;}
+  .rest-btn{
+    flex:0 0 auto;display:flex;align-items:center;gap:7px;
+    background:var(--surface);border:1px solid var(--border);color:var(--text);
+    border-radius:14px;padding:9px 14px;font-family:var(--font);font-size:0.85rem;font-weight:600;
+    cursor:pointer;white-space:nowrap;transition:all .15s;
+  }
+  .rest-btn:hover{border-color:var(--border2);}
+  .rest-btn.active{
+    background:linear-gradient(135deg,var(--blue1),var(--blue2));border-color:transparent;color:#fff;
+    box-shadow:0 6px 18px -8px rgba(37,99,235,0.6);
+  }
+  .rest-count{
+    font-size:0.7rem;font-weight:700;background:rgba(255,255,255,0.18);color:inherit;
+    padding:1px 7px;border-radius:9px;line-height:1.5;
+  }
+  .rest-btn:not(.active) .rest-count{background:var(--surface3);color:var(--muted);}
+
   /* ── PERÍODO ── */
   .periodo-bar{
     display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:18px;
@@ -199,6 +222,9 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
   </div>
 
   <div class="container">
+    <!-- RESTAURANTE -->
+    <div class="restaurante-bar" id="restaurante-bar" style="display:none;"></div>
+
     <!-- PERÍODO -->
     <div class="periodo-bar" id="periodo-bar">
       <button class="periodo-btn active" onclick="setPeriodo('hoje',this)">Hoje</button>
@@ -237,7 +263,7 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
     <div id="dbg-actions">
       <button onclick="testarLogin()">Testar login (REST)</button>
       <button onclick="testarConexao()">Testar Firestore</button>
-      <button onclick="carregarDados()">Recarregar</button>
+      <button onclick="recarregarTudo()">Recarregar</button>
       <button onclick="copiarDebug()">Copiar log</button>
     </div>
   </div>
@@ -265,6 +291,9 @@ var fbDb = null;
 var _periodo = 'hoje';
 var _dataInicio = null;
 var _dataFim = null;
+var _todasContas = null;     // cache de todas as contas do tenant (normalizadas)
+var _restauranteSel = null;  // restauranteId selecionado
+var _restaurantes = [];      // [{id, label, count}]
 
 // ── DEBUG ──
 var _dbg = [];
@@ -359,20 +388,20 @@ function carregarDados(){
     _dataInicio = new Date(di+'T00:00:00');
     _dataFim = new Date(df+'T23:59:59');
   }
+  // Já temos os dados em cache → só refiltra (instantâneo)
+  if(_todasContas){ _aplicarFiltros(); return; }
 
   document.getElementById('relatorio-content').innerHTML =
     '<div class="loading"><div class="spinner"></div>Carregando dados...</div>';
+  dlog('Buscando contas do tenant…', {tenant:TENANT_ID});
 
-  dlog('Consulta iniciada', {periodo:_periodo, de:new Date(_dataInicio).toISOString(), ate:new Date(_dataFim).toISOString(), authReady:_authReady});
-
-  // Espera o login antes de consultar (evita a query travar aguardando auth)
   esperarAuth(function(ok){
-    if(!ok){
-      dlog('Login não confirmado — tentando consulta mesmo assim para capturar o erro do Firestore.');
-    }
-    _executarConsulta();
+    if(!ok) dlog('Login não confirmado — tentando consulta mesmo assim.');
+    _buscarTudo();
   });
 }
+
+function recarregarTudo(){ _todasContas = null; carregarDados(); }
 
 function esperarAuth(cb){
   if(_authReady) return cb(true);
@@ -397,68 +426,50 @@ function toMillis(v){
   return 0;
 }
 
-function _executarConsulta(){
+function labelRest(id){
+  var nomes = { 'default':'Principal', 'prinzen':'Prinzen' };
+  return nomes[id] || (id.charAt(0).toUpperCase()+id.slice(1));
+}
+
+// Busca TODAS as contas do tenant uma vez e monta o cache + seletor de restaurantes
+function _buscarTudo(){
   var _respondeu = false;
   var _watchdog = setTimeout(function(){
     if(_respondeu) return;
-    dlog('TIMEOUT: consulta não retornou em 10s (verifique login anônimo nas regras do Firestore e a conexão)');
+    dlog('TIMEOUT: consulta não retornou em 10s.');
     document.getElementById('relatorio-content').innerHTML =
-      '<div class="loading" style="color:var(--danger);">⏱️ A consulta não respondeu.<br><small style="color:var(--muted);">Provável causa: login anônimo desativado ou regras do Firestore bloqueando a leitura. Toque 5× em "Prinzen" para ver o debug.</small></div>';
+      '<div class="loading" style="color:var(--danger);">⏱️ A consulta não respondeu.<br><small style="color:var(--muted);">Toque 5× em "Prinzen" para ver o debug.</small></div>';
   }, 10000);
 
-  // Busca contas_fechadas no período
-  // Busca sem filtro de data no Firestore (evita índice composto)
-  // Filtra por data no cliente
   fbDb.collection('contas_fechadas')
     .where('tenantId','==',TENANT_ID)
     .get()
     .then(function(snap){
       _respondeu = true; clearTimeout(_watchdog);
-      dlog('Consulta retornou', {documentos:snap.size, filtro:'tenantId=='+TENANT_ID});
-      var contas = [];
-      var ini = _dataInicio.getTime();
-      var fim = _dataFim.getTime();
-      var maxFe = 0;
+      dlog('Consulta retornou', {documentos:snap.size});
+      _todasContas = [];
+      var mapRest = {};
       snap.forEach(function(d){
         var dados = d.data();
-        var fe = toMillis(dados.fechadoEm);
-        if(fe > maxFe) maxFe = fe;
-        if(fe >= ini && fe <= fim){
-          var conta = Object.assign({_docId:d.id}, dados);
-          conta.fechadaEm = fe; // normalizado p/ ms (render usa este campo)
-          contas.push(conta);
-        }
+        var c = Object.assign({_docId:d.id}, dados);
+        c.fechadaEm = toMillis(dados.fechadoEm);     // normalizado p/ ms
+        c._rest = dados.restauranteId || 'default';
+        _todasContas.push(c);
+        mapRest[c._rest] = (mapRest[c._rest]||0) + 1;
       });
-      dlog('Contas no período: '+contas.length+' de '+snap.size);
-      if(contas.length === 0){
-        if(snap.size > 0){
-          dlog('Há '+snap.size+' contas no tenant, mas nenhuma no período selecionado.');
-          dlog('Venda mais recente em: '+(maxFe?new Date(maxFe).toLocaleString('pt-BR'):'sem data válida'));
-          dlog('Período atual: '+_dataInicio.toLocaleString('pt-BR')+' → '+_dataFim.toLocaleString('pt-BR'));
-          var d0 = snap.docs[0].data();
-          dlog('Amostra fechadoEm bruto: '+JSON.stringify(d0.fechadoEm)+' (tipo '+typeof d0.fechadoEm+')');
-          document.getElementById('relatorio-content').innerHTML =
-            '<div class="loading">📭 Sem vendas neste período.<br><small style="color:var(--muted);">Última venda: '+
-            (maxFe?new Date(maxFe).toLocaleDateString('pt-BR'):'—')+'. Tente "7 dias" ou "Este mês".</small></div>';
-          return;
-        }
-        // Nenhum doc no tenant: lê amostra sem filtro p/ diagnosticar
-        fbDb.collection('contas_fechadas').limit(5).get().then(function(s2){
-          dlog('Amostra sem filtro: '+s2.size+' documento(s).');
-          if(s2.size > 0){
-            var dados0 = s2.docs[0].data();
-            dlog('Campos do 1º doc: '+Object.keys(dados0).join(', '));
-            dlog('Valores-chave: tenantId='+JSON.stringify(dados0.tenantId)+
-                 ' restauranteId='+JSON.stringify(dados0.restauranteId)+
-                 ' fechadoEm='+JSON.stringify(dados0.fechadoEm));
-            dlog('TENANT_ID esperado: '+TENANT_ID);
-          }
-          document.getElementById('relatorio-content').innerHTML =
-            '<div class="loading">📭 Nenhuma conta encontrada para este tenant.<br><small style="color:var(--muted);">Toque 5× em "Prinzen" e confira o tenantId no log.</small></div>';
-        }).catch(function(e){ dlog('ERRO na amostra de debug: '+(e.code||'')+' — '+e.message); });
-        return;
+
+      _restaurantes = Object.keys(mapRest).map(function(id){
+        return { id:id, label:labelRest(id), count:mapRest[id] };
+      }).sort(function(a,b){ return b.count - a.count; });
+      dlog('Restaurantes: '+_restaurantes.map(function(r){ return r.id+' ('+r.count+')'; }).join(', '));
+
+      if(_restauranteSel === null){
+        var temPrinzen = _restaurantes.some(function(r){ return r.id === RESTAURANTE_ID; });
+        _restauranteSel = temPrinzen ? RESTAURANTE_ID
+                        : (_restaurantes[0] ? _restaurantes[0].id : 'default');
       }
-      renderRelatorio(contas);
+      _montarSeletorRestaurante();
+      _aplicarFiltros();
     })
     .catch(function(e){
       _respondeu = true; clearTimeout(_watchdog);
@@ -466,6 +477,50 @@ function _executarConsulta(){
       document.getElementById('relatorio-content').innerHTML =
         '<div class="loading" style="color:var(--danger);">Erro: '+e.message+'</div>';
     });
+}
+
+function _montarSeletorRestaurante(){
+  var wrap = document.getElementById('restaurante-bar');
+  if(!wrap) return;
+  if(_restaurantes.length <= 1){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = _restaurantes.map(function(r){
+    var on = r.id === _restauranteSel ? ' active' : '';
+    return '<button class="rest-btn'+on+'" onclick="selecionarRestaurante(\''+r.id+'\', this)">'+
+             r.label+'<span class="rest-count">'+r.count+'</span></button>';
+  }).join('');
+}
+
+function selecionarRestaurante(id, btn){
+  _restauranteSel = id;
+  document.querySelectorAll('.rest-btn').forEach(function(b){ b.classList.remove('active'); });
+  if(btn) btn.classList.add('active');
+  dlog('Restaurante selecionado: '+id);
+  _aplicarFiltros();
+}
+
+// Filtra o cache por restaurante + período e renderiza
+function _aplicarFiltros(){
+  if(!_todasContas) return;
+  var ini = _dataInicio.getTime(), fim = _dataFim.getTime();
+  var contas = _todasContas.filter(function(c){
+    return c._rest === _restauranteSel && c.fechadaEm >= ini && c.fechadaEm <= fim;
+  });
+  dlog('Filtro aplicado', {restaurante:_restauranteSel, periodo:_periodo, contas:contas.length});
+
+  if(contas.length === 0){
+    var doRest = _todasContas.filter(function(c){ return c._rest === _restauranteSel; });
+    var maxFe = doRest.reduce(function(m,c){ return c.fechadaEm > m ? c.fechadaEm : m; }, 0);
+    document.getElementById('relatorio-content').innerHTML =
+      '<div class="loading">📭 Sem vendas neste período para '+labelRest(_restauranteSel)+'.<br>'+
+      '<small style="color:var(--muted);">'+
+      (doRest.length
+        ? 'Última venda: '+(maxFe?new Date(maxFe).toLocaleDateString('pt-BR'):'—')+' · '+doRest.length+' conta(s) no histórico'
+        : 'Nenhuma venda registrada para este restaurante')+
+      '</small></div>';
+    return;
+  }
+  renderRelatorio(contas);
 }
 
 // ── RENDER ──

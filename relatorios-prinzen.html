@@ -285,8 +285,14 @@ dlog('App iniciado', {restaurante: RESTAURANTE_ID, tenant: TENANT_ID});
 try {
   firebase.initializeApp(firebaseConfig);
   fbDb = firebase.firestore();
+  try {
+    fbDb.settings({ experimentalForceLongPolling: true, merge: true });
+    dlog('Firestore: long-polling forçado (contorna bloqueio de streaming/WebChannel em rede móvel/proxy).');
+  } catch(e){ dlog('settings() falhou: '+e.message); }
   dlog('Firebase inicializado', {projectId: firebaseConfig.projectId});
 } catch(e){ dlog('ERRO ao inicializar Firebase: '+e.message); }
+
+firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(e){ dlog('persistence: '+e.message); });
 
 firebase.auth().onAuthStateChanged(function(user){
   if(user){ _authReady = true; clearTimeout(_authWatch); dlog('Login OK (uid: '+user.uid.slice(0,8)+'…)'); }

@@ -176,8 +176,8 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
   #dbg-meta{padding:10px 18px;font-size:0.72rem;color:var(--muted);line-height:1.6;border-bottom:1px solid var(--border);}
   #dbg-log{flex:1;overflow:auto;padding:14px 18px;margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;
     font-size:0.7rem;line-height:1.55;color:#cde7c0;white-space:pre-wrap;word-break:break-word;background:#0c0c0c;}
-  #dbg-actions{display:flex;gap:8px;padding:12px 18px;border-top:1px solid var(--border);}
-  #dbg-actions button{flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);
+  #dbg-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px;border-top:1px solid var(--border);}
+  #dbg-actions button{flex:1 1 45%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);
     border-radius:10px;padding:11px 8px;font-family:var(--font);font-size:0.78rem;font-weight:500;cursor:pointer;}
   #dbg-actions button:active{background:var(--surface3);}
 </style>
@@ -235,7 +235,8 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
     <div id="dbg-meta"></div>
     <pre id="dbg-log"></pre>
     <div id="dbg-actions">
-      <button onclick="testarConexao()">Testar conexão</button>
+      <button onclick="testarLogin()">Testar login (REST)</button>
+      <button onclick="testarConexao()">Testar Firestore</button>
       <button onclick="carregarDados()">Recarregar</button>
       <button onclick="copiarDebug()">Copiar log</button>
     </div>
@@ -638,6 +639,34 @@ function testarConexao(){
   fbDb.collection('contas_fechadas').limit(1).get()
     .then(function(s){ dlog('Conexão OK em '+(Date.now()-t0)+'ms · coleção acessível ('+s.size+' doc lido)'); })
     .catch(function(e){ dlog('FALHA na conexão: '+(e.code||'')+' — '+e.message); });
+}
+function testarLogin(){
+  dlog('Teste REST de login anônimo… (online: '+navigator.onLine+')');
+  var url = 'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='+firebaseConfig.apiKey;
+  var ctrl = new AbortController();
+  var to = setTimeout(function(){ ctrl.abort(); }, 8000);
+  var t0 = Date.now();
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({returnSecureToken:true}), signal:ctrl.signal})
+    .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
+    .then(function(res){
+      clearTimeout(to);
+      var dt = Date.now()-t0;
+      if(res.status===200 && res.body.idToken){
+        dlog('REST OK ('+dt+'ms): login anônimo FUNCIONA pela rede. O travamento é do SDK/ambiente (ex.: file://, cookies de terceiros, webview).');
+      } else {
+        var err = (res.body && res.body.error && res.body.error.message) || '';
+        dlog('REST status '+res.status+' ('+dt+'ms): '+err);
+        if(/ADMIN_ONLY_OPERATION|OPERATION_NOT_ALLOWED/.test(err))
+          dlog('  → "Anonymous" está DESATIVADO. Ative em Authentication → Sign-in method.');
+        else if(/API key|API_KEY|invalid/i.test(err))
+          dlog('  → Problema na apiKey ou restrições da chave (Google Cloud → Credentials).');
+      }
+    })
+    .catch(function(e){
+      clearTimeout(to);
+      dlog('REST FALHOU: '+(e.name==='AbortError'?'timeout 8s':e.message));
+      dlog('  → Sem resposta nem pelo REST = é REDE/CONEXÃO (offline, firewall, proxy, ou file://). Não é config do Firebase.');
+    });
 }
 
 // ── UTILS ──

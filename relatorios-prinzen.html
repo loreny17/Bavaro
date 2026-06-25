@@ -245,7 +245,6 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
 
 <!-- FIREBASE -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
 
 <script>
@@ -292,24 +291,10 @@ try {
   dlog('Firebase inicializado', {projectId: firebaseConfig.projectId});
 } catch(e){ dlog('ERRO ao inicializar Firebase: '+e.message); }
 
-firebase.auth().onAuthStateChanged(function(user){
-  if(user){ _authReady = true; clearTimeout(_authWatch); dlog('Login OK (uid: '+user.uid.slice(0,8)+'…)'); }
-  else { dlog('Sem usuário autenticado ainda'); }
-});
-
-// Persistência em MEMÓRIA (NONE) evita o SDK de Auth travar no IndexedDB,
-// que é a causa provável do login não concluir mesmo com a rede OK.
-firebase.auth().setPersistence(firebase.auth.Auth.Persistence.NONE)
-  .then(function(){ dlog('Persistência: NONE (memória).'); return firebase.auth().signInAnonymously(); })
-  .then(function(){ dlog('signInAnonymously resolvido'); })
-  .catch(function(e){ dlog('ERRO login: '+(e.code||'')+' — '+e.message); console.error(e); });
-
-// Watchdog do login: se em 8s não autenticar, explica as causas prováveis
-var _authWatch = setTimeout(function(){
-  if(_authReady) return;
-  dlog('AVISO: login anônimo NÃO concluiu em 8s.');
-  dlog('  → Se o REST funciona mas o SDK não: tente também autorizar o domínio em Authentication → Settings → Authorized domains.');
-}, 8000);
+// Sem SDK de Auth: o Firestore faz a leitura sem autenticação.
+// Se as regras exigirem login, a consulta retorna "permission-denied" (erro claro, sem travar).
+dlog('Modo direto: sem SDK de Auth (leitura não autenticada).');
+_authReady = true;
 
 // Verifica sessão salva
 mostrarApp();
@@ -627,7 +612,7 @@ function abrirDebug(){
   meta.innerHTML =
     'Restaurante: <b>'+RESTAURANTE_ID+'</b> · Tenant: '+TENANT_ID+'<br>'+
     'Projeto: '+firebaseConfig.projectId+'<br>'+
-    'Login: '+(_authReady?'✅ autenticado':'⏳ pendente')+' · Período: '+_periodo+'<br>'+
+    'Login: modo direto (sem auth) · Período: '+_periodo+'<br>'+
     'Navegador: '+(navigator.onLine?'online':'offline');
   document.getElementById('dbg-log').textContent = _dbg.join('\n');
   var ov = document.getElementById('dbg-overlay');
@@ -688,24 +673,17 @@ function showToast(msg, cor){
 </script>
 
 <script>
+// Service Worker DESATIVADO: estava servindo versões em cache (cache-first) e
+// impedindo que atualizações aparecessem. Aqui removemos qualquer SW e cache antigos.
 if('serviceWorker' in navigator){
-  var swCode = `
-self.addEventListener('install', function(e){
-  e.waitUntil(
-    caches.open('prinzen-v1').then(function(cache){
-      return cache.addAll(['/']);
-    })
-  );
-});
-self.addEventListener('fetch', function(e){
-  e.respondWith(
-    caches.match(e.request).then(function(r){ return r || fetch(e.request); })
-  );
-});
-  `;
-  var blob = new Blob([swCode], {type:'text/javascript'});
-  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(function(){});
+  navigator.serviceWorker.getRegistrations()
+    .then(function(regs){ regs.forEach(function(r){ r.unregister(); }); })
+    .catch(function(){});
 }
+if(window.caches && caches.keys){
+  caches.keys().then(function(keys){ keys.forEach(function(k){ caches.delete(k); }); }).catch(function(){});
+}
+</script>
 
 // Install prompt
 var deferredPrompt;

@@ -428,7 +428,7 @@ function toMillis(v){
 }
 
 function labelRest(id){
-  var nomes = { 'default':'Principal', 'prinzen':'Prinzen' };
+  var nomes = { 'default':'Principal', 'prinzen':'Prinzen', 'omar_cafe':'Omar Café' };
   return nomes[id] || (id.charAt(0).toUpperCase()+id.slice(1));
 }
 
@@ -451,10 +451,13 @@ function _buscarTudo(){
   }
   function lerTotem(rid){
     return tref.collection('restaurantes').doc(rid).collection('pedidos_totem')
-      .where('status','==','pago').get()
+      .get()
       .then(function(s){ return {tipo:'totem', rid:rid, snap:s}; })
       .catch(function(e){ dlog('totem/'+rid+' falhou: '+(e.code||'')+' — '+e.message); return {tipo:'totem', rid:rid, snap:null}; });
   }
+
+  // Status que NÃO contam como venda (pedido não concluído)
+  var STATUS_NAO_VENDA = {'cancelado':1,'cancelada':1,'aguardando_pagamento':1,'pendente':1,'aberto':1,'aberta':1,'rejeitado':1,'rejeitada':1};
 
   // 1) Descobre os restaurantes do tenant; 2) lê contas_fechadas + pedidos_totem de cada um
   tref.collection('restaurantes').get()
@@ -463,6 +466,7 @@ function _buscarTudo(){
     .then(function(rids){
       if(rids.indexOf(RESTAURANTE_ID) < 0) rids.push(RESTAURANTE_ID);
       if(rids.indexOf('default') < 0) rids.push('default');
+      if(rids.indexOf('omar_cafe') < 0) rids.push('omar_cafe');
       dlog('Restaurantes do tenant: '+rids.join(', '));
       var jobs = [ lerContas() ].concat(rids.map(lerTotem));
       return Promise.all(jobs);
@@ -470,15 +474,25 @@ function _buscarTudo(){
     .then(function(resultados){
       _respondeu = true; clearTimeout(_watchdog);
 
-      var byKey = {}, mapRest = {};
+      var byKey = {}, mapRest = {}, statusPorRest = {};
       resultados.forEach(function(r){
         var size = r.snap ? r.snap.size : 'erro';
         dlog('Fonte '+(r.tipo === 'contas' ? 'contas_fechadas' : 'totem/'+r.rid)+': '+size+' doc(s)');
         if(!r.snap) return;
         r.snap.forEach(function(d){
+          var dados = d.data();
+
+          if(r.tipo === 'totem'){
+            // tally de status p/ diagnóstico
+            var st = (dados.status || '(sem status)');
+            statusPorRest[r.rid] = statusPorRest[r.rid] || {};
+            statusPorRest[r.rid][st] = (statusPorRest[r.rid][st]||0) + 1;
+            // ignora pedidos que não são venda concluída (cancelado/aguardando/etc.)
+            if(STATUS_NAO_VENDA[String(st).toLowerCase()]) return;
+          }
+
           var key = (r.rid || 'cf') + '_' + d.id;
           if(byKey[key]) return;
-          var dados = d.data();
           var c = Object.assign({_docId:d.id}, dados);
           if(r.tipo === 'totem'){
             c._rest = r.rid;
@@ -491,6 +505,12 @@ function _buscarTudo(){
           byKey[key] = c;
           mapRest[c._rest] = (mapRest[c._rest]||0) + 1;
         });
+      });
+
+      // Log dos status encontrados em cada restaurante do totem
+      Object.keys(statusPorRest).forEach(function(rid){
+        var det = Object.keys(statusPorRest[rid]).map(function(s){ return s+'='+statusPorRest[rid][s]; }).join(', ');
+        dlog('Status totem/'+rid+': '+det);
       });
 
       _todasContas = Object.keys(byKey).map(function(k){ return byKey[k]; });

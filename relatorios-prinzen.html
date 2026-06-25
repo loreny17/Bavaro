@@ -431,7 +431,7 @@ function labelRest(id){
   return nomes[id] || (id.charAt(0).toUpperCase()+id.slice(1));
 }
 
-// Busca TODAS as contas do tenant uma vez e monta o cache + seletor de restaurantes
+// Busca as contas por vários caminhos (o Prinzen pode ter outro tenant/campo) e monta o cache
 function _buscarTudo(){
   var _respondeu = false;
   var _watchdog = setTimeout(function(){
@@ -441,48 +441,67 @@ function _buscarTudo(){
       '<div class="loading" style="color:var(--danger);">⏱️ A consulta não respondeu.<br><small style="color:var(--muted);">Toque 5× em "Prinzen" para ver o debug.</small></div>';
   }, 10000);
 
-  fbDb.collection('contas_fechadas')
-    .where('tenantId','==',TENANT_ID)
-    .get()
-    .then(function(snap){
-      _respondeu = true; clearTimeout(_watchdog);
-      dlog('Consulta retornou', {documentos:snap.size});
-      _todasContas = [];
-      var mapRest = {};
-      snap.forEach(function(d){
+  var col = fbDb.collection('contas_fechadas');
+  function safe(q, nome){ return q.get().then(function(s){ return {nome:nome, snap:s}; })
+                                     .catch(function(e){ dlog('Busca "'+nome+'" falhou: '+(e.code||'')+' — '+e.message); return {nome:nome, snap:null}; }); }
+
+  Promise.all([
+    safe(col.where('tenantId','==',TENANT_ID), 'tenant'),
+    safe(col.where('restauranteId','==',RESTAURANTE_ID), 'restauranteId==prinzen'),
+    safe(col.where('id','==',RESTAURANTE_ID), 'id==prinzen')
+  ]).then(function(resultados){
+    _respondeu = true; clearTimeout(_watchdog);
+
+    var byId = {}, tenants = {};
+    resultados.forEach(function(r){
+      var size = r.snap ? r.snap.size : 'erro';
+      dlog('Busca "'+r.nome+'": '+size+' doc(s)');
+      if(!r.snap) return;
+      r.snap.forEach(function(d){
+        if(byId[d.id]) return; // dedupe
         var dados = d.data();
         var c = Object.assign({_docId:d.id}, dados);
-        c.fechadaEm = toMillis(dados.fechadoEm);     // normalizado p/ ms
-        c._rest = dados.restauranteId || 'default';
-        _todasContas.push(c);
-        mapRest[c._rest] = (mapRest[c._rest]||0) + 1;
+        c._rest = dados.restauranteId || dados.id || 'default';
+        c.fechadaEm = toMillis(dados.fechadoEm) || toMillis(dados.fechadaEm) ||
+                      toMillis(dados.criadoEm) || toMillis(dados.dataFechamento) || toMillis(dados.data);
+        byId[d.id] = c;
+        var tk = dados.tenantId || '(sem tenantId)';
+        tenants[tk] = (tenants[tk]||0) + 1;
       });
-
-      _restaurantes = Object.keys(mapRest).map(function(id){
-        return { id:id, label:labelRest(id), count:mapRest[id] };
-      }).sort(function(a,b){ return b.count - a.count; });
-      dlog('Restaurantes: '+_restaurantes.map(function(r){ return r.id+' ('+r.count+')'; }).join(', '));
-
-      if(_restauranteSel === null){
-        var temPrinzen = _restaurantes.some(function(r){ return r.id === RESTAURANTE_ID; });
-        _restauranteSel = temPrinzen ? RESTAURANTE_ID
-                        : (_restaurantes[0] ? _restaurantes[0].id : 'default');
-      }
-      _montarSeletorRestaurante();
-      _aplicarFiltros();
-    })
-    .catch(function(e){
-      _respondeu = true; clearTimeout(_watchdog);
-      dlog('ERRO na consulta: '+(e.code||'')+' — '+e.message);
-      document.getElementById('relatorio-content').innerHTML =
-        '<div class="loading" style="color:var(--danger);">Erro: '+e.message+'</div>';
     });
+
+    _todasContas = Object.keys(byId).map(function(k){ return byId[k]; });
+    dlog('Total único: '+_todasContas.length+' conta(s)');
+    dlog('TenantIds vistos: '+(Object.keys(tenants).map(function(t){ return t+' ('+tenants[t]+')'; }).join(', ')||'nenhum'));
+
+    var mapRest = {};
+    _todasContas.forEach(function(c){ mapRest[c._rest] = (mapRest[c._rest]||0) + 1; });
+    _restaurantes = Object.keys(mapRest).map(function(id){ return {id:id, label:labelRest(id), count:mapRest[id]}; })
+                                        .sort(function(a,b){ return b.count - a.count; });
+    dlog('Restaurantes: '+(_restaurantes.map(function(r){ return r.id+' ('+r.count+')'; }).join(', ')||'nenhum'));
+
+    // Se houver conta do Prinzen, mostra a estrutura dela (esquema do app do caixa)
+    var amostraPrinzen = _todasContas.filter(function(c){ return c._rest === RESTAURANTE_ID; })[0];
+    if(amostraPrinzen){
+      dlog('Campos da conta Prinzen: '+Object.keys(amostraPrinzen).join(', '));
+      dlog('Prinzen → fechadoEm='+JSON.stringify(amostraPrinzen.fechadoEm)+' total='+JSON.stringify(amostraPrinzen.total));
+    } else {
+      dlog('Nenhuma conta com restauranteId/id == "'+RESTAURANTE_ID+'" foi encontrada.');
+    }
+
+    if(_restauranteSel === null){
+      var temPrinzen = _restaurantes.some(function(r){ return r.id === RESTAURANTE_ID; });
+      _restauranteSel = temPrinzen ? RESTAURANTE_ID : (_restaurantes[0] ? _restaurantes[0].id : 'default');
+    }
+    _montarSeletorRestaurante();
+    _aplicarFiltros();
+  });
 }
 
 function _montarSeletorRestaurante(){
   var wrap = document.getElementById('restaurante-bar');
   if(!wrap) return;
-  if(_restaurantes.length <= 1){ wrap.style.display = 'none'; return; }
+  if(_restaurantes.length < 1){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'flex';
   wrap.innerHTML = _restaurantes.map(function(r){
     var on = r.id === _restauranteSel ? ' active' : '';

@@ -412,19 +412,30 @@ function _executarConsulta(){
           contas.push(Object.assign({id:d.id}, dados));
         }
       });
-      dlog('Contas no período: '+contas.length+' de '+snap.size);
+      dlog('Contas no período: '+contas.length+' de '+snap.size+' (filtro id=='+RESTAURANTE_ID+')');
       if(contas.length === 0){
-        // Mostra debug dos restauranteIds disponíveis
-        fbDb.collection('contas_fechadas').limit(10).get().then(function(s2){
+        // Diagnóstico: lê uma amostra SEM filtro e mostra a estrutura real dos documentos
+        fbDb.collection('contas_fechadas').limit(5).get().then(function(s2){
+          dlog('Amostra sem filtro: '+s2.size+' documento(s).');
           var ids = [];
-          s2.forEach(function(d){ var r=d.data().id; if(r && ids.indexOf(r)<0) ids.push(r); });
-          dlog('IDs disponíveis na coleção: '+(ids.join(', ')||'(nenhum)'));
-          var msg = ids.length
-            ? '📭 Nenhuma venda no período.<br><small style="color:var(--muted);">IDs encontrados: '+ids.join(', ')+'<br>Atual: '+RESTAURANTE_ID+'</small>'
-            : '📭 Nenhuma venda encontrada.';
+          if(s2.size > 0){
+            var dados0 = s2.docs[0].data();
+            dlog('Campos do 1º doc: '+Object.keys(dados0).join(', '));
+            dlog('Valores-chave: id='+JSON.stringify(dados0.id)+
+                 ' restauranteId='+JSON.stringify(dados0.restauranteId)+
+                 ' fechadaEm='+JSON.stringify(dados0.fechadaEm));
+            s2.forEach(function(d){ var x=d.data(); var r=(x.id!==undefined?x.id:x.restauranteId);
+              if(r && ids.indexOf(r)<0) ids.push(r); });
+            dlog('Identificadores vistos na amostra: '+(ids.join(', ')||'(nenhum campo id/restauranteId)'));
+          }
+          var msg = s2.size
+            ? '📭 Sem vendas no período (ou o campo de filtro está diferente).<br><small style="color:var(--muted);">'+
+              (ids.length?'IDs vistos: '+ids.join(', ')+' · Atual: '+RESTAURANTE_ID:'Os documentos não têm campo id/restauranteId')+
+              '<br>Toque 5× em "Prinzen" → o debug mostra os campos reais.</small>'
+            : '📭 A coleção "contas_fechadas" está vazia (ou as regras bloqueiam a leitura).';
           document.getElementById('relatorio-content').innerHTML =
             '<div class="loading">'+msg+'</div>';
-        }).catch(function(e){ dlog('ERRO na consulta de debug: '+e.message); });
+        }).catch(function(e){ dlog('ERRO na amostra de debug: '+(e.code||'')+' — '+e.message); });
         return;
       }
       renderRelatorio(contas);
@@ -683,7 +694,6 @@ if('serviceWorker' in navigator){
 if(window.caches && caches.keys){
   caches.keys().then(function(keys){ keys.forEach(function(k){ caches.delete(k); }); }).catch(function(){});
 }
-</script>
 
 // Install prompt
 var deferredPrompt;

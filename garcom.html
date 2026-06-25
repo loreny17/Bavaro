@@ -1882,16 +1882,32 @@ document.addEventListener('visibilitychange', function(){
 });
 
 function revalidarConexaoFirestore(){
-  // Throttle: não revalida mais de 1x a cada 3 segundos
   var agora = Date.now();
   if(agora - _ultimaRevalidacao < 3000) return;
   _ultimaRevalidacao = agora;
   if(!fbDb || !_restauranteId) return;
-  // Re-cria listener de mesas (cancela o velho e cria de novo)
+
+  // Mostra loading no mapa se não está dentro de mesa
+  if(_mesaAtiva === null || _mesaAtiva === undefined){
+    var grid = document.getElementById('mesas-grid');
+    if(grid && grid.children.length > 0){
+      // Adiciona overlay de reconectando
+      var overlay = document.getElementById('mesas-reconect');
+      if(!overlay){
+        overlay = document.createElement('div');
+        overlay.id = 'mesas-reconect';
+        overlay.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:var(--accent);padding:8px 18px;border-radius:10px;font-size:0.78rem;z-index:999;';
+        overlay.textContent = '🔄 Reconectando...';
+        document.body.appendChild(overlay);
+        setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 3000);
+      }
+    }
+  }
+
+  // Recria listeners
   if(typeof escutarMesasOcupadas === 'function'){
     try{ escutarMesasOcupadas(); }catch(e){ console.warn('Revalidar mesas:', e); }
   }
-  // Se está dentro de uma mesa, revalida pedidos também
   if(_mesaAtiva !== null && _mesaAtiva !== undefined && typeof escutarMeusPedidos === 'function'){
     try{ escutarMeusPedidos(); }catch(e){ console.warn('Revalidar pedidos:', e); }
   }
@@ -4976,6 +4992,33 @@ function renderMesas(){
       '<div class="mesa-status">' + status + '</div>';
     el.onclick = (function(n, ocupada){ return function(){
       if(_longPressDisparou){ _longPressDisparou = false; return; }
+      // Se mesas estão todas livres mas cache pode estar desatualizado
+      // busca no Firestore antes de abrir
+      var cacheVazio = Object.keys(_mesasOcupadas).length === 0;
+      if(!ocupada && cacheVazio && _restauranteId){
+        // Cache pode estar vazio após tela bloqueada — verifica no Firestore
+        fbDb.collection('contas_mesa')
+          .where('restauranteId','==',_restauranteId)
+          .where('mesa','==',parseInt(n))
+          .where('status','==','aberta')
+          .limit(1)
+          .get().then(function(snap){
+            if(!snap.empty){
+              // Mesa tem conta — estava com cache vazio
+              var d = snap.docs[0];
+              _contasMesaCache[n] = Object.assign({id:d.id}, d.data());
+              _mesasOcupadas[n] = {contaId:d.id, garcom:d.data().garcomPrincipal||''};
+              abrirMenuMesa(n, true);
+            } else {
+              abrirContaMesa(n);
+              pushHistory('cardapio:null');
+            }
+          }).catch(function(){
+            abrirContaMesa(n);
+            pushHistory('cardapio:null');
+          });
+        return;
+      }
       if(!ocupada){
         abrirContaMesa(n);
         pushHistory('cardapio:null');
@@ -6110,7 +6153,8 @@ function abrirPainelAdminGarcom(){
       '</div>' +
       // Sub-abas
       '<div style="display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg);overflow-x:auto;flex-wrap:nowrap;">' +
-        '<button class="adm-g-pill adm-g-pill-ativo" id="adm-g-pill-caixa" onclick="setAbaAdminGarcom(\'caixa\')">💰 Caixa do Dia</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-almoco" onclick="setAbaAdminGarcom(\'almoco\')">☀️ Almoço</button>' +
+        '<button class="adm-g-pill" id="adm-g-pill-caixa" onclick="setAbaAdminGarcom(\'caixa\')">💰 Caixa do Dia</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-mesas" onclick="setAbaAdminGarcom(\'mesas\')">🪑 Mesas Abertas</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-aviso" onclick="setAbaAdminGarcom(\'aviso\')">📨 Avisos</button>' +
         '<button class="adm-g-pill" id="adm-g-pill-pedidos" onclick="setAbaAdminGarcom(\'pedidos\')">🧾 Pedidos</button>' +
@@ -6129,7 +6173,7 @@ function abrirPainelAdminGarcom(){
       '.adm-g-card.info{border-left:3px solid #4ade80;}' +
     '</style>';
   document.body.appendChild(mod);
-  setAbaAdminGarcom('logs');
+  setAbaAdminGarcom('almoco');
 }
 
 function fecharPainelAdminGarcom(){
@@ -6143,11 +6187,10 @@ function fecharPainelAdminGarcom(){
 }
 
 function setAbaAdminGarcom(aba){
-  ['caixa','mesas','aviso','pedidos'].forEach(function(k){
+  ['almoco','caixa','mesas','aviso','pedidos'].forEach(function(k){
     var pill = document.getElementById('adm-g-pill-'+k);
     if(pill) pill.classList.toggle('adm-g-pill-ativo', k === aba);
   });
-  // Para listeners de outras abas
   if(aba !== 'pedidos' && _adminPedidosUnsub){ _adminPedidosUnsub(); _adminPedidosUnsub = null; }
   if(aba !== 'mesas' && _adminMesasUnsub){ _adminMesasUnsub(); _adminMesasUnsub = null; }
   if(aba !== 'caixa' && _adminCaixaUnsub){ _adminCaixaUnsub(); _adminCaixaUnsub = null; }
@@ -6155,7 +6198,9 @@ function setAbaAdminGarcom(aba){
 
   var conteudo = document.getElementById('adm-g-conteudo');
   if(!conteudo) return;
-  if(aba === 'caixa'){
+  if(aba === 'almoco'){
+    renderAlmocoAdmin();
+  } else if(aba === 'caixa'){
     renderCaixaDoDia();
   } else if(aba === 'mesas'){
     renderMesasAbertas();
@@ -6164,6 +6209,82 @@ function setAbaAdminGarcom(aba){
   } else if(aba === 'pedidos'){
     renderPedidosAdminGarcom();
   }
+}
+
+function renderAlmocoAdmin(){
+  var conteudo = document.getElementById('adm-g-conteudo');
+  if(!conteudo) return;
+
+  // Gera os últimos 7 dias
+  var dias = [];
+  for(var i = 0; i < 7; i++){
+    var d = new Date();
+    d.setDate(d.getDate() - i);
+    var key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    var label = i === 0 ? 'Hoje' : i === 1 ? 'Ontem' : d.toLocaleDateString('pt-BR',{weekday:'short', day:'2-digit', month:'2-digit'});
+    dias.push({key:key, label:label});
+  }
+
+  conteudo.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">Carregando...</div>';
+
+  // Busca valores já salvos
+  var promessas = dias.map(function(d){
+    return fbDb.collection('registro_almoco').doc('almoco_'+_restauranteId+'_'+d.key).get()
+      .then(function(snap){ return {key:d.key, valor: snap.exists ? (snap.data().valor||0) : 0}; })
+      .catch(function(){ return {key:d.key, valor:0}; });
+  });
+
+  Promise.all(promessas).then(function(resultados){
+    var valoresSalvos = {};
+    resultados.forEach(function(r){ valoresSalvos[r.key] = r.valor; });
+
+    var html = '<div style="margin-bottom:14px;">'+
+      '<div style="font-size:0.85rem;font-weight:700;margin-bottom:4px;">☀️ Lançar venda do almoço</div>'+
+      '<div style="font-size:0.74rem;color:var(--muted);">Valores ficam disponíveis no app de relatórios</div>'+
+    '</div>';
+
+    dias.forEach(function(d){
+      var val = valoresSalvos[d.key] || 0;
+      html += '<div class="adm-g-card" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'+
+        '<div style="min-width:70px;">'+
+          '<div style="font-size:0.82rem;font-weight:700;">'+d.label+'</div>'+
+          '<div style="font-size:0.66rem;color:var(--muted);">'+d.key+'</div>'+
+        '</div>'+
+        '<div style="position:relative;flex:1;">'+
+          '<span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:0.82rem;">R$</span>'+
+          '<input id="alm-'+d.key+'" type="number" step="0.01" min="0" value="'+(val > 0 ? val.toFixed(2) : '')+'" placeholder="0,00" '+
+            'style="width:100%;background:var(--surface);border:1.5px solid var(--border2);color:var(--text);border-radius:8px;padding:9px 10px 9px 30px;font-size:0.9rem;font-family:inherit;outline:none;">'+
+        '</div>'+
+        '<button onclick="salvarAlmocoAdmin(\''+d.key+'\')" '+
+          'style="background:rgba(212,168,67,0.15);border:1.5px solid rgba(212,168,67,0.4);color:var(--accent);border-radius:8px;padding:9px 14px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">'+
+          'Salvar'+
+        '</button>'+
+      '</div>';
+    });
+
+    conteudo.innerHTML = html;
+  });
+}
+
+function salvarAlmocoAdmin(dataKey){
+  var inp = document.getElementById('alm-'+dataKey);
+  if(!inp) return;
+  var val = parseFloat(inp.value.replace(',','.')) || 0;
+  var docKey = 'almoco_'+_restauranteId+'_'+dataKey;
+  fbDb.collection('registro_almoco').doc(docKey).set({
+    data: dataKey,
+    valor: val,
+    restauranteId: _restauranteId,
+    tenantId: _tenantId || '',
+    atualizadoEm: Date.now(),
+    lancadoPor: _nomeGarcom || ''
+  }).then(function(){
+    showToast('☀️ Almoço '+dataKey+': R$ '+val.toFixed(2).replace('.',','),'#4ade80');
+    inp.style.borderColor = 'var(--success)';
+    setTimeout(function(){ if(inp) inp.style.borderColor = 'var(--border2)'; }, 2000);
+  }).catch(function(e){
+    showToast('Erro: '+e.message,'#f87171');
+  });
 }
 
 // ════════════════════════════════════════

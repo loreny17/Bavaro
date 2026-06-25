@@ -584,6 +584,21 @@ function fmtR(v){
 }
 function fmtN(v){ return (v||0).toFixed(2).replace('.',','); }
 
+var _almocoCache = {};
+
+function _carregarAlmoco(diasKeys, cb){
+  if(!diasKeys.length){ cb({}); return; }
+  var resultado = {};
+  var promises = diasKeys.map(function(d){
+    var docKey = 'almoco_'+RESTAURANTE_ID+'_'+d;
+    return fbDb.collection('registro_almoco').doc(docKey).get()
+      .then(function(snap){
+        if(snap.exists) resultado[d] = snap.data().valor || 0;
+      }).catch(function(){});
+  });
+  Promise.all(promises).then(function(){ cb(resultado); });
+}
+
 function renderRelatorio(contas){
   if(!contas.length){
     document.getElementById('relatorio-content').innerHTML =
@@ -591,52 +606,33 @@ function renderRelatorio(contas){
     return;
   }
 
-  // ── AGREGAR ──
-  var totalVendas = 0, totalMesas = contas.length;
+  var totalJanta = 0, totalMesas = contas.length;
   var vendasPorDia = {}, itensMapa = {}, catMapa = {};
 
   contas.forEach(function(c){
     var val = c.total || c.valorTotal || 0;
-    totalVendas += val;
-
-    // Por dia
+    totalJanta += val;
     var d = new Date(c.fechadaEm);
     var dKey = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     vendasPorDia[dKey] = (vendasPorDia[dKey]||0) + val;
-
-    // Itens
     (c.itens||[]).forEach(function(it){
       if(it.status === 'cancelado') return;
       var nome = it.nome || 'Item';
       var qtd = it.qtd || 1;
       var vIt = (it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*qtd);
       if(!itensMapa[nome]) itensMapa[nome] = {qtd:0, valor:0};
-      itensMapa[nome].qtd += qtd;
-      itensMapa[nome].valor += vIt;
-
-      // Por categoria
+      itensMapa[nome].qtd += qtd; itensMapa[nome].valor += vIt;
       var cat = it.categoriaNome || it.categoriaId || 'Sem categoria';
       if(!catMapa[cat]) catMapa[cat] = {qtd:0, valor:0};
-      catMapa[cat].qtd += qtd;
-      catMapa[cat].valor += vIt;
+      catMapa[cat].qtd += qtd; catMapa[cat].valor += vIt;
     });
   });
 
-  var ticketMedio = totalMesas > 0 ? totalVendas/totalMesas : 0;
-
-  // ── TOP ITENS ──
   var topItens = Object.keys(itensMapa).map(function(k){ return {nome:k, qtd:itensMapa[k].qtd, valor:itensMapa[k].valor}; });
   topItens.sort(function(a,b){ return b.qtd-a.qtd; });
-
-  // ── TOP CATEGORIAS ──
   var topCats = Object.keys(catMapa).map(function(k){ return {nome:k, qtd:catMapa[k].qtd, valor:catMapa[k].valor}; });
   topCats.sort(function(a,b){ return b.valor-a.valor; });
-
-  // ── VENDAS POR DIA ──
   var diasOrdenados = Object.keys(vendasPorDia).sort();
-  var maxDia = Math.max.apply(null, diasOrdenados.map(function(d){ return vendasPorDia[d]; })) || 1;
-
-  // ── COMPARATIVO SEMANA ──
   var diasSemana = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   var semanaAtual = {}, semanaAnterior = {};
   var agora = new Date();
@@ -647,45 +643,82 @@ function renderRelatorio(contas){
     else if(diffDias < 14) semanaAnterior[d.getDay()] = (semanaAnterior[d.getDay()]||0) + (c.total||0);
   });
 
-  // ── HTML ──
-  var html = '';
+  // Carrega almoços lançados no garçom
+  _carregarAlmoco(diasOrdenados, function(almocoPorDia){
+    var totalAlmoco = diasOrdenados.reduce(function(a,d){ return a+(almocoPorDia[d]||0); }, 0);
+    var totalGeral = totalJanta + totalAlmoco;
+    var temAlmoco = totalAlmoco > 0;
 
-  // KPIs
-  html += '<div class="kpi-grid">';
-  html += '<div class="kpi-card full"><div class="kpi-label">Total no período</div>'+
-    '<div class="kpi-value">'+fmtR(totalVendas)+'</div>'+
-    '<div class="kpi-sub">'+totalMesas+' conta'+(totalMesas!==1?'s':'')+' fechada'+(totalMesas!==1?'s':'')+'</div></div>';
-  html += '<div class="kpi-card"><div class="kpi-label">Ticket médio</div>'+
-    '<div class="kpi-value" style="font-size:1.3rem;">'+fmtR(ticketMedio)+'</div></div>';
-  var totalItensVendidos = topItens.reduce(function(a,i){ return a+i.qtd; }, 0);
-  var kpiLabel = _kpiModo === 'itens' ? 'Itens vendidos' : 'Pedidos feitos';
-  var kpiVal   = _kpiModo === 'itens' ? totalItensVendidos : totalMesas;
-  html += '<div class="kpi-card green" onclick="alternarKpi()" style="cursor:pointer;">'+
-    '<div class="kpi-label">'+kpiLabel+'</div>'+
-    '<div class="kpi-value">'+kpiVal+'</div>'+
-    '<div class="kpi-sub" style="opacity:0.75;">toque p/ '+(_kpiModo==='itens'?'pedidos':'itens')+'</div></div>';
-  html += '</div>';
+    var html = '';
 
-  // Vendas por dia
-  if(diasOrdenados.length > 1){
-    html += '<div class="secao"><div class="secao-titulo">Vendas por dia</div><div class="bar-chart">';
-    diasOrdenados.forEach(function(d){
-      var v = vendasPorDia[d];
-      var pct = Math.max(4, Math.round(v/maxDia*100));
-      var parts = d.split('-');
-      var label = parts[2]+'/'+parts[1];
-      html += '<div class="bar-row">'+
-        '<div class="bar-label">'+label+'</div>'+
-        '<div class="bar-track">'+
-          '<div class="bar-fill" style="width:'+pct+'%">'+
-            (pct > 20 ? '<span class="bar-val">'+fmtR(v)+'</span>' : '')+
-          '</div>'+
-          (pct <= 20 ? '<span class="bar-val outside" style="--w:'+pct+'%">'+fmtR(v)+'</span>' : '')+
-        '</div>'+
-      '</div>';
-    });
-    html += '</div></div>';
-  }
+    // KPIs
+    html += '<div class="kpi-grid">';
+    if(temAlmoco){
+      html += '<div class="kpi-card full" style="border-color:rgba(212,168,67,0.4);">'+
+        '<div class="kpi-label">Total geral (almoço + janta)</div>'+
+        '<div class="kpi-value">'+fmtR(totalGeral)+'</div>'+
+        '<div class="kpi-sub">'+totalMesas+' mesa'+(totalMesas!==1?'s':'')+' · almoço R$ '+fmtR(totalAlmoco).replace('R$ ','')+'</div></div>';
+      html += '<div class="kpi-card" style="border-color:rgba(251,191,36,0.3);">'+
+        '<div class="kpi-label">☀️ Almoço</div>'+
+        '<div class="kpi-value" style="color:#fbbf24;font-size:1.4rem;">'+fmtR(totalAlmoco)+'</div></div>';
+      html += '<div class="kpi-card" style="border-color:rgba(99,102,241,0.3);">'+
+        '<div class="kpi-label">🌙 Janta</div>'+
+        '<div class="kpi-value" style="color:#818cf8;font-size:1.4rem;">'+fmtR(totalJanta)+'</div></div>';
+    } else {
+      html += '<div class="kpi-card full"><div class="kpi-label">Total no período</div>'+
+        '<div class="kpi-value">'+fmtR(totalJanta)+'</div>'+
+        '<div class="kpi-sub">'+totalMesas+' mesa'+(totalMesas!==1?'s':'')+' fechada'+(totalMesas!==1?'s':'')+'</div></div>';
+    }
+    var totalItensVendidos = topItens.reduce(function(a,i){ return a+i.qtd; }, 0);
+    var kpiLabel = _kpiModo === 'itens' ? 'Itens vendidos' : 'Pedidos feitos';
+    var kpiVal   = _kpiModo === 'itens' ? totalItensVendidos : totalMesas;
+    html += '<div class="kpi-card green" onclick="alternarKpi()" style="cursor:pointer;">'+
+      '<div class="kpi-label">'+kpiLabel+'</div>'+
+      '<div class="kpi-value">'+kpiVal+'</div>'+
+      '<div class="kpi-sub" style="opacity:0.75;">toque p/ '+(_kpiModo==='itens'?'pedidos':'itens')+'</div></div>';
+    html += '</div>';
+
+    // Vendas por dia (com almoço se houver)
+    if(diasOrdenados.length > 1){
+      var maxDia = diasOrdenados.reduce(function(mx,d){
+        return Math.max(mx,(vendasPorDia[d]||0)+(almocoPorDia[d]||0));
+      },0)||1;
+      html += '<div class="secao"><div class="secao-titulo">Vendas por dia</div><div class="bar-chart">';
+      diasOrdenados.forEach(function(d){
+        var vJ = vendasPorDia[d]||0;
+        var vA = almocoPorDia[d]||0;
+        var vT = vJ+vA;
+        var pct = Math.max(4,Math.round(vT/maxDia*100));
+        var parts = d.split('-');
+        var label = parts[2]+'/'+parts[1];
+        if(temAlmoco && vA > 0){
+          var pA = Math.round(vA/vT*pct); var pJ = pct-pA;
+          html += '<div class="bar-row"><div class="bar-label">'+label+'</div>'+
+            '<div class="bar-track" style="display:flex;">'+
+              '<div style="width:'+pA+'%;background:rgba(251,191,36,0.75);height:100%;border-radius:4px 0 0 4px;"></div>'+
+              '<div style="width:'+pJ+'%;background:rgba(129,140,248,0.75);height:100%;border-radius:0 4px 4px 0;display:flex;align-items:center;padding-left:6px;">'+
+                (pct>18?'<span class="bar-val">'+fmtR(vT)+'</span>':'')+
+              '</div>'+
+              (pct<=18?'<span class="bar-val outside" style="--w:'+pct+'%">'+fmtR(vT)+'</span>':'')+
+            '</div></div>';
+        } else {
+          html += '<div class="bar-row"><div class="bar-label">'+label+'</div>'+
+            '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%">'+
+              (pct>20?'<span class="bar-val">'+fmtR(vT)+'</span>':'')+
+            '</div>'+
+            (pct<=20?'<span class="bar-val outside" style="--w:'+pct+'%">'+fmtR(vT)+'</span>':'')+
+            '</div></div>';
+        }
+      });
+      html += '</div>';
+      if(temAlmoco){
+        html += '<div style="display:flex;gap:14px;margin-top:8px;">'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:rgba(251,191,36,0.75);"></div>Almoço</div>'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:rgba(129,140,248,0.75);"></div>Janta</div>'+
+        '</div>';
+      }
+      html += '</div>';
+    }
 
   // Top itens mais vendidos
   html += '<div class="secao"><div class="secao-titulo">🏆 Itens mais vendidos</div>';
@@ -743,6 +776,7 @@ function renderRelatorio(contas){
   }
 
   document.getElementById('relatorio-content').innerHTML = html;
+  }); // fim _carregarAlmoco
 }
 
 // ── DEBUG PANEL ──

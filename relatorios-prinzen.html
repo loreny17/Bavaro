@@ -384,6 +384,19 @@ function esperarAuth(cb){
   }, 200);
 }
 
+// Converte vários formatos de data para milissegundos
+function toMillis(v){
+  if(v == null) return 0;
+  if(typeof v === 'number') return v < 1e12 ? v * 1000 : v; // segundos vs ms
+  if(typeof v === 'string'){ var t = Date.parse(v); return isNaN(t) ? 0 : t; }
+  if(typeof v === 'object'){
+    if(typeof v.toMillis === 'function') return v.toMillis();           // Firestore Timestamp
+    if(typeof v.seconds === 'number') return v.seconds * 1000 + (v.nanoseconds ? Math.floor(v.nanoseconds/1e6) : 0);
+    if(typeof v._seconds === 'number') return v._seconds * 1000;
+  }
+  return 0;
+}
+
 function _executarConsulta(){
   var _respondeu = false;
   var _watchdog = setTimeout(function(){
@@ -397,44 +410,51 @@ function _executarConsulta(){
   // Busca sem filtro de data no Firestore (evita índice composto)
   // Filtra por data no cliente
   fbDb.collection('contas_fechadas')
-    .where('id','==',RESTAURANTE_ID)
+    .where('tenantId','==',TENANT_ID)
     .get()
     .then(function(snap){
       _respondeu = true; clearTimeout(_watchdog);
-      dlog('Consulta retornou', {documentos:snap.size});
+      dlog('Consulta retornou', {documentos:snap.size, filtro:'tenantId=='+TENANT_ID});
       var contas = [];
       var ini = _dataInicio.getTime();
       var fim = _dataFim.getTime();
+      var maxFe = 0;
       snap.forEach(function(d){
         var dados = d.data();
-        var fe = dados.fechadaEm || 0;
+        var fe = toMillis(dados.fechadoEm);
+        if(fe > maxFe) maxFe = fe;
         if(fe >= ini && fe <= fim){
-          contas.push(Object.assign({id:d.id}, dados));
+          var conta = Object.assign({_docId:d.id}, dados);
+          conta.fechadaEm = fe; // normalizado p/ ms (render usa este campo)
+          contas.push(conta);
         }
       });
-      dlog('Contas no período: '+contas.length+' de '+snap.size+' (filtro id=='+RESTAURANTE_ID+')');
+      dlog('Contas no período: '+contas.length+' de '+snap.size);
       if(contas.length === 0){
-        // Diagnóstico: lê uma amostra SEM filtro e mostra a estrutura real dos documentos
+        if(snap.size > 0){
+          dlog('Há '+snap.size+' contas no tenant, mas nenhuma no período selecionado.');
+          dlog('Venda mais recente em: '+(maxFe?new Date(maxFe).toLocaleString('pt-BR'):'sem data válida'));
+          dlog('Período atual: '+_dataInicio.toLocaleString('pt-BR')+' → '+_dataFim.toLocaleString('pt-BR'));
+          var d0 = snap.docs[0].data();
+          dlog('Amostra fechadoEm bruto: '+JSON.stringify(d0.fechadoEm)+' (tipo '+typeof d0.fechadoEm+')');
+          document.getElementById('relatorio-content').innerHTML =
+            '<div class="loading">📭 Sem vendas neste período.<br><small style="color:var(--muted);">Última venda: '+
+            (maxFe?new Date(maxFe).toLocaleDateString('pt-BR'):'—')+'. Tente "7 dias" ou "Este mês".</small></div>';
+          return;
+        }
+        // Nenhum doc no tenant: lê amostra sem filtro p/ diagnosticar
         fbDb.collection('contas_fechadas').limit(5).get().then(function(s2){
           dlog('Amostra sem filtro: '+s2.size+' documento(s).');
-          var ids = [];
           if(s2.size > 0){
             var dados0 = s2.docs[0].data();
             dlog('Campos do 1º doc: '+Object.keys(dados0).join(', '));
-            dlog('Valores-chave: id='+JSON.stringify(dados0.id)+
+            dlog('Valores-chave: tenantId='+JSON.stringify(dados0.tenantId)+
                  ' restauranteId='+JSON.stringify(dados0.restauranteId)+
-                 ' fechadaEm='+JSON.stringify(dados0.fechadaEm));
-            s2.forEach(function(d){ var x=d.data(); var r=(x.id!==undefined?x.id:x.restauranteId);
-              if(r && ids.indexOf(r)<0) ids.push(r); });
-            dlog('Identificadores vistos na amostra: '+(ids.join(', ')||'(nenhum campo id/restauranteId)'));
+                 ' fechadoEm='+JSON.stringify(dados0.fechadoEm));
+            dlog('TENANT_ID esperado: '+TENANT_ID);
           }
-          var msg = s2.size
-            ? '📭 Sem vendas no período (ou o campo de filtro está diferente).<br><small style="color:var(--muted);">'+
-              (ids.length?'IDs vistos: '+ids.join(', ')+' · Atual: '+RESTAURANTE_ID:'Os documentos não têm campo id/restauranteId')+
-              '<br>Toque 5× em "Prinzen" → o debug mostra os campos reais.</small>'
-            : '📭 A coleção "contas_fechadas" está vazia (ou as regras bloqueiam a leitura).';
           document.getElementById('relatorio-content').innerHTML =
-            '<div class="loading">'+msg+'</div>';
+            '<div class="loading">📭 Nenhuma conta encontrada para este tenant.<br><small style="color:var(--muted);">Toque 5× em "Prinzen" e confira o tenantId no log.</small></div>';
         }).catch(function(e){ dlog('ERRO na amostra de debug: '+(e.code||'')+' — '+e.message); });
         return;
       }

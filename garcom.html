@@ -7124,14 +7124,29 @@ function renderCaixaDoDia(){
     });
 
 
-    _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem);
+    // Busca valor do almoço do dia antes de renderizar
+    var dKey = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
+    var dKeyOntemDate = new Date(inicioOntem);
+    var dKeyOntemStr = dKeyOntemDate.getFullYear()+'-'+String(dKeyOntemDate.getMonth()+1).padStart(2,'0')+'-'+String(dKeyOntemDate.getDate()).padStart(2,'0');
+    Promise.all([
+      fbDb.collection('registro_almoco').doc('almoco_'+_restauranteId+'_'+dKey).get().catch(function(){ return null; }),
+      fbDb.collection('registro_almoco').doc('almoco_'+_restauranteId+'_'+dKeyOntemStr).get().catch(function(){ return null; })
+    ]).then(function(snaps){
+      var almocoHoje = (snaps[0] && snaps[0].exists) ? (snaps[0].data().valor||0) : 0;
+      var almocoOntem = (snaps[1] && snaps[1].exists) ? (snaps[1].data().valor||0) : 0;
+      _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem, almocoHoje, almocoOntem);
+    }).catch(function(){
+      _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem, 0, 0);
+    });
   }).catch(function(e){
     console.error('[CAIXA] erro final:', e);
     conteudo.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Erro: ' + esc(e.message||'') + '</div>';
   });
 }
 
-function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem){
+function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem, almocoHoje, almocoOntem){
+  almocoHoje = almocoHoje || 0;
+  almocoOntem = almocoOntem || 0;
   var conteudo = document.getElementById('adm-g-conteudo');
   if(!conteudo) return;
 
@@ -7169,21 +7184,15 @@ function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem){
     totalOntem += totalConta(c);
   });
 
-  // Variação vs ontem
-  var variacao = 0;
-  var variacaoStr = '—';
-  var variacaoCor = 'var(--muted)';
-  if(totalOntem > 0){
-    variacao = ((totalHoje - totalOntem) / totalOntem) * 100;
-    if(variacao > 0){
-      variacaoStr = '📈 +' + variacao.toFixed(1) + '%';
-      variacaoCor = '#4ade80';
-    } else if(variacao < 0){
-      variacaoStr = '📉 ' + variacao.toFixed(1) + '%';
-      variacaoCor = '#f87171';
-    } else {
-      variacaoStr = '➡️ 0%';
-    }
+  // Variação vs ontem (inclui almoço)
+  var totalHojeGeral = totalHoje + almocoHoje;
+  var totalOntemGeral = totalOntem + almocoOntem;
+  var variacao = 0, variacaoStr = '—', variacaoCor = 'var(--muted)';
+  if(totalOntemGeral > 0){
+    variacao = ((totalHojeGeral - totalOntemGeral) / totalOntemGeral) * 100;
+    if(variacao > 0){ variacaoStr = '📈 +'+variacao.toFixed(1)+'%'; variacaoCor = '#4ade80'; }
+    else if(variacao < 0){ variacaoStr = '📉 '+variacao.toFixed(1)+'%'; variacaoCor = '#f87171'; }
+    else { variacaoStr = '➡️ 0%'; }
   }
 
   // Top itens vendidos
@@ -7195,8 +7204,7 @@ function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem){
       var qtd = (it.tipoVenda === 'kg' && it.peso) ? 1 : (it.qtd||1);
       var valor = (it.tipoVenda === 'kg' && it.peso) ? (it.preco||0) : (it.preco||0)*(it.qtd||1);
       if(!itensMap[nome]) itensMap[nome] = { qtd: 0, total: 0 };
-      itensMap[nome].qtd += qtd;
-      itensMap[nome].total += valor;
+      itensMap[nome].qtd += qtd; itensMap[nome].total += valor;
     });
   });
   var topItens = Object.keys(itensMap).map(function(n){
@@ -7223,11 +7231,17 @@ function _renderCaixaConteudo(fechadasHoje, abertas, fechadasOntem){
 
   // Card principal — Total do dia
   html += '<div style="background:linear-gradient(135deg,rgba(212,168,67,0.15),rgba(212,168,67,0.03));border:1px solid rgba(212,168,67,0.3);border-radius:14px;padding:16px;margin-bottom:10px;">' +
-    '<div style="font-size:0.74rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:4px;">💰 Total Vendido Hoje</div>' +
-    '<div style="font-size:1.8rem;font-weight:700;color:var(--text);font-family:Bebas Neue,sans-serif;">R$ ' + fmt(totalHoje) + '</div>' +
-    '<div style="font-size:0.78rem;color:' + variacaoCor + ';margin-top:4px;font-weight:600;">' + variacaoStr + ' vs ontem (R$ ' + fmt(totalOntem) + ')</div>' +
-    '<div style="display:flex;gap:8px;margin-top:10px;font-size:0.74rem;color:var(--muted);">' +
-      '<div style="flex:1;background:var(--bg);border-radius:8px;padding:6px 8px;">Com 10%: <strong style="color:var(--text);">R$ ' + fmt(totalComCaixinha) + '</strong></div>' +
+    '<div style="font-size:0.74rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:4px;">💰 Total do Dia</div>' +
+    '<div style="font-size:1.8rem;font-weight:700;color:var(--text);font-family:Bebas Neue,sans-serif;">R$ ' + fmt(totalHojeGeral) + '</div>' +
+    '<div style="font-size:0.78rem;color:'+variacaoCor+';margin-top:4px;font-weight:600;">'+variacaoStr+' vs ontem (R$ '+fmt(totalOntemGeral)+')</div>' +
+    (almocoHoje > 0 ?
+      '<div style="display:flex;gap:8px;margin-top:8px;">' +
+        '<div style="flex:1;background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:6px 8px;font-size:0.74rem;">☀️ Almoço<br><strong style="color:#fbbf24;font-size:0.9rem;">R$ '+fmt(almocoHoje)+'</strong></div>' +
+        '<div style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:6px 8px;font-size:0.74rem;">🌙 Janta<br><strong style="color:#818cf8;font-size:0.9rem;">R$ '+fmt(totalHoje)+'</strong></div>' +
+      '</div>'
+    : '') +
+    '<div style="display:flex;gap:8px;margin-top:8px;font-size:0.74rem;color:var(--muted);">' +
+      '<div style="flex:1;background:var(--bg);border-radius:8px;padding:6px 8px;">Com 10%: <strong style="color:var(--text);">R$ ' + fmt(totalComCaixinha + almocoHoje) + '</strong></div>' +
       '<div style="flex:1;background:var(--bg);border-radius:8px;padding:6px 8px;">Em aberto: <strong style="color:#f7a34f;">R$ ' + fmt(totalAbertas) + '</strong></div>' +
     '</div>' +
   '</div>';

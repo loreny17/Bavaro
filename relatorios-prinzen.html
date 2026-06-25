@@ -288,12 +288,19 @@ try {
 } catch(e){ dlog('ERRO ao inicializar Firebase: '+e.message); }
 
 firebase.auth().onAuthStateChanged(function(user){
-  if(user){ _authReady = true; dlog('Login OK (uid: '+user.uid.slice(0,8)+'…)'); }
+  if(user){ _authReady = true; clearTimeout(_authWatch); dlog('Login OK (uid: '+user.uid.slice(0,8)+'…)'); }
   else { dlog('Sem usuário autenticado ainda'); }
 });
 firebase.auth().signInAnonymously()
   .then(function(){ dlog('signInAnonymously resolvido'); })
-  .catch(function(e){ dlog('ERRO login anônimo: '+e.code+' — '+e.message); console.error(e); });
+  .catch(function(e){ dlog('ERRO login anônimo: '+(e.code||'')+' — '+e.message); console.error(e); });
+
+// Watchdog do login: se em 8s não autenticar, explica as causas prováveis
+var _authWatch = setTimeout(function(){
+  if(_authReady) return;
+  dlog('AVISO: login anônimo NÃO concluiu em 8s.');
+  dlog('  → Causas prováveis: (1) "Anonymous" desativado em Authentication; (2) domínio/origem não autorizado (abrindo via file://?); (3) rede bloqueando *.googleapis.com.');
+}, 8000);
 
 // Verifica sessão salva
 mostrarApp();
@@ -364,7 +371,26 @@ function carregarDados(){
 
   dlog('Consulta iniciada', {periodo:_periodo, de:new Date(_dataInicio).toISOString(), ate:new Date(_dataFim).toISOString(), authReady:_authReady});
 
-  // Watchdog: se nada retornar em 10s, avisa em vez de girar pra sempre
+  // Espera o login antes de consultar (evita a query travar aguardando auth)
+  esperarAuth(function(ok){
+    if(!ok){
+      dlog('Login não confirmado — tentando consulta mesmo assim para capturar o erro do Firestore.');
+    }
+    _executarConsulta();
+  });
+}
+
+function esperarAuth(cb){
+  if(_authReady) return cb(true);
+  var esperou = 0;
+  var iv = setInterval(function(){
+    if(_authReady){ clearInterval(iv); return cb(true); }
+    esperou += 200;
+    if(esperou >= 8000){ clearInterval(iv); dlog('esperarAuth: tempo esgotado (8s) sem login'); return cb(false); }
+  }, 200);
+}
+
+function _executarConsulta(){
   var _respondeu = false;
   var _watchdog = setTimeout(function(){
     if(_respondeu) return;

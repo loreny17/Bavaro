@@ -1692,14 +1692,18 @@ function _confirmarAdicionaisSugeridos(){
   clearTimeout(_sugAutoClose);
   var tela = document.getElementById('tela-adicionais');
   if(tela) tela.remove();
-  // Adiciona itens selecionados desta tela
+  // Adiciona extras selecionados desta tela (item principal já foi confirmado ao abrir)
+  var temExtras = false;
   Object.keys(_sugSelecoes).forEach(function(itemId){
     var qtd = _sugSelecoes[itemId]; if(!qtd) return;
     var it = _sugItens.find(function(x){ return x.id===itemId; });
     if(!it) return;
     _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
+    temExtras = true;
   });
-  if(Object.keys(_sugSelecoes).length){ atualizarBarra(); renderItens(); try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
+  if(temExtras){ try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
+  atualizarBarra();
+  renderItens();
   _sugSelecoes = {};
   _sugItens = [];
   // Vai para próxima tela ou fecha
@@ -1707,7 +1711,6 @@ function _confirmarAdicionaisSugeridos(){
   if(_sugTelaIdx < _sugTelas.length){
     _abrirProximaTela();
   } else {
-    _confirmarAdicionarPendente();
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
   }
@@ -1794,6 +1797,10 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
     _abrirProximaTela();
     return;
   }
+
+  // Confirma o item principal IMEDIATAMENTE ao abrir a tela de sugestão
+  // O cliente já escolheu — o item vai pro carrinho agora
+  _confirmarAdicionarPendente();
   _sugSelecoes = {};
   clearTimeout(_sugAutoClose);
   var ex = document.getElementById('tela-adicionais');
@@ -1828,6 +1835,8 @@ function _fecharTelaAdicionais(){
   clearTimeout(_sugAutoClose);
   var el = document.getElementById('tela-adicionais');
   if(el) el.remove();
+  // Item principal já foi confirmado ao abrir a tela
+  // Só precisa garantir que não ficou nada pendente
   _confirmarAdicionarPendente();
   resetTimerInatividade();
 }
@@ -1841,7 +1850,6 @@ function _pularTelaSugestao(){
   if(_sugTelaIdx < _sugTelas.length){
     _abrirProximaTela();
   } else {
-    _confirmarAdicionarPendente();
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
   }

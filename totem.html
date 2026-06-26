@@ -1389,9 +1389,22 @@ function renderItens(){
     if(it.controlarEstoque === true && typeof it.estoque === 'number' && it.estoque > 0 && it.estoque <= 3){
       avisoEstoque = '<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#fb923c,#ea580c);color:#fff;font-size:0.7rem;font-weight:800;padding:3px 8px;border-radius:6px;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,0.3);">🔥 Últimas ' + it.estoque + '</div>';
     }
-    return '<div class="item" onclick="adicionarItem(\'' + it.id + '\',\'' + it.fonte + '\')">' +
+    // Badge vegano/vegetariano
+    var catInfo = (window._cardapioCats||[]).find(function(c){ return c.id === (it.categoriaId||it.categoria); });
+    var vegTipo = catInfo ? (catInfo.tipo||'') : '';
+    var vegStyle = '';
+    var vegBadge = '';
+    if(vegTipo === 'vegano'){
+      vegStyle = 'border:2px solid #16a34a;box-shadow:0 0 0 1px rgba(22,163,74,0.3);';
+      vegBadge = '<div style="position:absolute;bottom:6px;left:6px;background:#16a34a;color:#fff;border-radius:20px;padding:2px 8px;font-size:0.62rem;font-weight:800;z-index:3;">🌱 VEGANO</div>';
+    } else if(vegTipo === 'vegetariano'){
+      vegStyle = 'border:2px solid #86efac;box-shadow:0 0 0 1px rgba(134,239,172,0.3);';
+      vegBadge = '<div style="position:absolute;bottom:6px;left:6px;background:#86efac;color:#000;border-radius:20px;padding:2px 8px;font-size:0.62rem;font-weight:800;z-index:3;">🥗 VEGETARIANO</div>';
+    }
+    return '<div class="item" onclick="adicionarItem(\'' + it.id + '\',\'' + it.fonte + '\')" style="'+vegStyle+'">' +
       badge +
       avisoEstoque +
+      vegBadge +
       '<div class="foto">' + fotoHtml + '</div>' +
       '<div class="info">' +
         '<div class="nome">' + escapar(it.nome||'') + '</div>' +
@@ -1701,9 +1714,18 @@ function _confirmarAdicionaisSugeridos(){
 }
 
 function _abrirTelaAdicionais(itemAdicionado){
+  // Pega IDs das categorias de bebidas
+  var catsBebidas = (window._cardapioCats||[]).filter(function(c){
+    var n = (c.nome||'').toLowerCase();
+    return n.match(/beb|chopp|drink|suco|refri|long|cervej|vinho|gin|dose|licor|shot|coquetel|agua|chá|cha|energet/);
+  }).map(function(c){ return c.id; });
+
   _sugItens = (window._cardapioItens || []).filter(function(i){
-    return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itemAdicionado.id;
-  }).sort(function(a,b){ return (a.ordemSugerido||99)-(b.ordemSugerido||99); });
+    if(!i.disponivel || i.pausado || i.id === itemAdicionado.id) return false;
+    // Só itens de categorias de bebidas
+    var catId = i.categoriaId || i.categoria;
+    return catsBebidas.indexOf(catId) >= 0;
+  }).sort(function(){ return Math.random()-0.5; }).slice(0, 6);
   if(!_sugItens.length) return;
   _sugSelecoes = {};
   clearTimeout(_sugAutoClose);
@@ -1718,7 +1740,7 @@ function _abrirTelaAdicionais(itemAdicionado){
       '<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:50px;padding:7px 16px;margin-bottom:10px;">'+
         '<span>✅</span><span style="font-size:0.85rem;font-weight:700;color:#4ade80;">'+itemAdicionado.nome+' adicionado!</span>'+
       '</div>'+
-      '<div style="font-size:1.3rem;font-weight:900;color:#fff;">Quer adicionar algo mais?</div>'+
+      '<div style="font-size:1.3rem;font-weight:900;color:#fff;">🍺 Quer adicionar uma Bebida?</div>'+
     '</div>'+
     '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:600px;"></div>'+
     '<div style="display:flex;gap:10px;width:100%;max-width:480px;flex-shrink:0;">'+

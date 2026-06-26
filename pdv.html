@@ -930,9 +930,20 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
           <button class="emoji-suggest" type="button" onclick="document.getElementById('cat-emoji').value='🥤'">🥤</button>
         </div>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button class="f-btn danger" id="btn-excluir-cat" onclick="excluirCategoria()" style="display:none;flex:0 0 auto;padding:11px 14px;">Excluir</button>
+      <div class="f-grupo">
+        <label class="f-label">Tipo especial</label>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button type="button" id="cat-tipo-normal" onclick="setCatTipo('')" style="flex:1;padding:10px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;">
+            Nenhum
+          </button>
+          <button type="button" id="cat-tipo-vegetariano" onclick="setCatTipo('vegetariano')" style="flex:1;padding:10px;border-radius:10px;border:2px solid #86efac;background:rgba(134,239,172,0.1);color:#86efac;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;">
+            🥗 Vegetariano
+          </button>
+          <button type="button" id="cat-tipo-vegano" onclick="setCatTipo('vegano')" style="flex:1;padding:10px;border-radius:10px;border:2px solid #16a34a;background:rgba(22,163,74,0.1);color:#4ade80;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;">
+            🌱 Vegano
+          </button>
+        </div>
+      </div>
       <button class="f-btn secondary" onclick="fecharModalCat()" style="flex:0 0 auto;padding:11px 16px;">Cancelar</button>
       <button class="f-btn" onclick="salvarCategoria()">Salvar</button>
     </div>
@@ -2249,6 +2260,17 @@ function abrirModalCat(){
   document.getElementById('modal-cat').classList.add('show');
   setTimeout(function(){ try{ document.getElementById('cat-nome').focus(); }catch(e){} }, 100);
 }
+function setCatTipo(tipo){
+  ['normal','vegetariano','vegano'].forEach(function(t){
+    var btn = document.getElementById('cat-tipo-'+t);
+    if(!btn) return;
+    var ativo = (tipo === t) || (tipo === '' && t === 'normal');
+    btn.style.opacity = ativo ? '1' : '0.4';
+    btn.style.fontWeight = ativo ? '900' : '700';
+  });
+  document.getElementById('cat-tipo-normal')._valor = tipo;
+}
+
 function editarCategoria(id){
   var c = _categorias.find(function(x){ return x.id === id; });
   if(!c) return;
@@ -2257,6 +2279,17 @@ function editarCategoria(id){
   document.getElementById('cat-nome').value = c.nome;
   document.getElementById('cat-emoji').value = c.emoji;
   document.getElementById('btn-excluir-cat').style.display = 'block';
+  setCatTipo(c.tipo || '');
+  document.getElementById('modal-cat').classList.add('show');
+}
+
+function novaCategoria(){
+  _catEditando = null;
+  document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
+  document.getElementById('cat-nome').value = '';
+  document.getElementById('cat-emoji').value = '';
+  document.getElementById('btn-excluir-cat').style.display = 'none';
+  setCatTipo('');
   document.getElementById('modal-cat').classList.add('show');
 }
 function fecharModalCat(){
@@ -2265,8 +2298,10 @@ function fecharModalCat(){
 function salvarCategoria(){
   var nome = document.getElementById('cat-nome').value.trim();
   var emoji = document.getElementById('cat-emoji').value.trim() || '📂';
+  var tipoBtn = document.getElementById('cat-tipo-normal');
+  var tipo = tipoBtn ? (tipoBtn._valor || '') : '';
   if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
-  var dados = {nome:nome, emoji:emoji, atualizadoEm:Date.now()};
+  var dados = {nome:nome, emoji:emoji, tipo:tipo, atualizadoEm:Date.now()};
   var col = fbColCardapio('categorias');
   var prom;
   if(_catEditando){

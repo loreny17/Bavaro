@@ -274,7 +274,7 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
     <div id="dbg-meta"></div>
     <pre id="dbg-log"></pre>
     <div id="dbg-actions">
-      <button onclick="testarLogin()">Testar login (REST)</button>
+      <button onclick="verAcessos()">👁️ Acessos</button>
       <button onclick="testarConexao()">Testar Firestore</button>
       <button onclick="recarregarTudo()">Recarregar</button>
       <button onclick="copiarDebug()">Copiar log</button>
@@ -343,6 +343,7 @@ _authReady = true;
 
 // Verifica sessão salva
 mostrarApp();
+registrarAcesso();
 
 // ── LOGIN ──
 function sair(){ location.reload(); }
@@ -847,6 +848,64 @@ function testarConexao(){
     .then(function(s){ dlog('Conexão OK em '+(Date.now()-t0)+'ms · coleção acessível ('+s.size+' doc lido)'); })
     .catch(function(e){ dlog('FALHA na conexão: '+(e.code||'')+' — '+e.message); });
 }
+
+// Identifica o aparelho de forma amigável a partir do userAgent
+function _apelhoAparelho(){
+  var ua = navigator.userAgent || '';
+  var so = /iPhone/.test(ua) ? 'iPhone'
+         : /iPad/.test(ua) ? 'iPad'
+         : /Android/.test(ua) ? 'Android'
+         : /Windows/.test(ua) ? 'Windows'
+         : /Mac/.test(ua) ? 'Mac'
+         : 'Outro';
+  var nav = /CriOS|Chrome/.test(ua) ? 'Chrome'
+          : /FxiOS|Firefox/.test(ua) ? 'Firefox'
+          : /Safari/.test(ua) ? 'Safari'
+          : 'Navegador';
+  return so + ' · ' + nav;
+}
+
+// Grava um acesso (silencioso). Throttle de 5 min p/ não contar recarregamentos seguidos.
+function registrarAcesso(){
+  if(!fbDb) return;
+  try {
+    var agora = Date.now();
+    var ultimo = parseInt(localStorage.getItem('rel_last_acesso') || '0', 10);
+    if(agora - ultimo < 5*60*1000){ dlog('Acesso já registrado há pouco (throttle).'); return; }
+    localStorage.setItem('rel_last_acesso', String(agora));
+  } catch(e){ /* localStorage indisponível: registra mesmo assim */ }
+
+  fbDb.collection('acessos_relatorio').add({
+    ts: Date.now(),
+    quando: new Date().toLocaleString('pt-BR'),
+    aparelho: _apelhoAparelho(),
+    ua: (navigator.userAgent || '').slice(0, 180)
+  }).then(function(){ dlog('Acesso registrado ('+_apelhoAparelho()+').'); })
+    .catch(function(e){ dlog('Não registrou acesso: '+(e.code||'')+' — '+e.message); });
+}
+
+// Lê e mostra os últimos acessos no log do debug
+function verAcessos(){
+  if(!fbDb){ dlog('ERRO: Firestore não inicializado'); return; }
+  dlog('Buscando acessos…');
+  fbDb.collection('acessos_relatorio').limit(300).get()
+    .then(function(snap){
+      var arr = [];
+      snap.forEach(function(d){ arr.push(d.data()); });
+      arr.sort(function(a,b){ return (b.ts||0) - (a.ts||0); });
+      if(arr.length === 0){ dlog('ACESSOS: nenhum registro ainda.'); return; }
+      var ultimo = arr[0];
+      dlog('ACESSOS: '+arr.length+' no total · último: '+(ultimo.quando||'?')+' ('+(ultimo.aparelho||'?')+')');
+      // conta por aparelho
+      var porAp = {};
+      arr.forEach(function(a){ var k=a.aparelho||'?'; porAp[k]=(porAp[k]||0)+1; });
+      dlog('Por aparelho: '+Object.keys(porAp).map(function(k){ return k+'='+porAp[k]; }).join(' · '));
+      dlog('— Últimos 15 acessos —');
+      arr.slice(0,15).forEach(function(a){ dlog('• '+(a.quando||'?')+'  '+(a.aparelho||'?')); });
+    })
+    .catch(function(e){ dlog('Erro ao ler acessos: '+(e.code||'')+' — '+e.message+' (libere leitura de acessos_relatorio nas regras)'); });
+}
+
 function testarLogin(){
   dlog('Teste REST de login anônimo… (online: '+navigator.onLine+')');
   var url = 'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='+firebaseConfig.apiKey;

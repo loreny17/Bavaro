@@ -2283,6 +2283,8 @@ function editarCategoria(id){
   document.getElementById('modal-cat').classList.add('show');
 }
 
+function abrirModalCat(){ novaCategoria(); }
+
 function novaCategoria(){
   _catEditando = null;
   document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
@@ -10249,7 +10251,12 @@ function totemEditarCategoria(id){
       '<div style="padding:16px;">' +
         '<label style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Nome</label>' +
         '<input type="text" id="edit-cat-nome" value="' + escapeHtml(cat.nome||'') + '" style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;font-size:0.95rem;margin-bottom:14px;">' +
-        '<label style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Emoji</label>' +
+        '<label style="font-size:0.78rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Tipo especial</label>' +
+        '<div style="display:flex;gap:6px;margin-bottom:14px;">' +
+          '<button type="button" id="tcat-tipo-normal" onclick="setTotemCatTipo(\'\')" style="flex:1;padding:9px 6px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.75rem;font-weight:700;cursor:pointer;">Nenhum</button>' +
+          '<button type="button" id="tcat-tipo-vegetariano" onclick="setTotemCatTipo(\'vegetariano\')" style="flex:1;padding:9px 6px;border-radius:10px;border:2px solid #86efac;background:rgba(134,239,172,0.1);color:#86efac;font-family:inherit;font-size:0.75rem;font-weight:700;cursor:pointer;">🥗 Vegetariano</button>' +
+          '<button type="button" id="tcat-tipo-vegano" onclick="setTotemCatTipo(\'vegano\')" style="flex:1;padding:9px 6px;border-radius:10px;border:2px solid #16a34a;background:rgba(22,163,74,0.1);color:#4ade80;font-family:inherit;font-size:0.75rem;font-weight:700;cursor:pointer;">🌱 Vegano</button>' +
+        '</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
           '<input type="text" id="edit-cat-emoji" value="' + escapeHtml(cat.emoji || '🍽️') + '" maxlength="4" style="width:64px;padding:11px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;font-size:1.4rem;text-align:center;">' +
           '<div style="font-size:0.72rem;color:var(--muted);flex:1;">Toque num emoji abaixo ou cole direto no campo</div>' +
@@ -10266,17 +10273,35 @@ function totemEditarCategoria(id){
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
-  setTimeout(function(){ document.getElementById('edit-cat-nome').focus(); }, 100);
+  setTimeout(function(){
+    document.getElementById('edit-cat-nome').focus();
+    setTotemCatTipo(cat.tipo || '');
+  }, 100);
+}
+
+function setTotemCatTipo(tipo){
+  ['normal','vegetariano','vegano'].forEach(function(t){
+    var btn = document.getElementById('tcat-tipo-'+t);
+    if(!btn) return;
+    var ativo = (tipo === '' && t === 'normal') || tipo === t;
+    btn.style.opacity = ativo ? '1' : '0.4';
+    btn.style.fontWeight = ativo ? '900' : '700';
+  });
+  var n = document.getElementById('tcat-tipo-normal');
+  if(n) n._valor = tipo;
 }
 
 function totemSalvarCategoriaEdit(id){
   var nome = (document.getElementById('edit-cat-nome').value||'').trim();
   var emoji = (document.getElementById('edit-cat-emoji').value||'').trim();
+  var tipoBtn = document.getElementById('tcat-tipo-normal');
+  var tipo = tipoBtn ? (tipoBtn._valor || '') : '';
   if(!nome){ showToast('Digite o nome', '#f7a34f'); return; }
   if(!emoji) emoji = '🍽️';
   _refTotemBase().doc('data').collection('categorias').doc(id).update({
     nome: nome,
     emoji: emoji,
+    tipo: tipo,
     atualizadoEm: Date.now()
   }).then(function(){
     var m = document.getElementById('modal-edit-cat-totem');

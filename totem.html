@@ -1740,7 +1740,11 @@ function _carregarTelasEAbrir(itemAdicionado){
       snap.forEach(function(d){
         var dados = d.data();
         if((dados.categorias||[]).length > 0){
-          _sugTelas.push({titulo: dados.titulo||'Quer adicionar mais?', categorias: dados.categorias||[]});
+          _sugTelas.push({
+            titulo: dados.titulo||'Quer adicionar mais?',
+            categorias: dados.categorias||[],
+            dispararEm: dados.dispararEm||[]
+          });
         }
       });
       if(!_sugTelas.length){
@@ -1758,6 +1762,15 @@ function _carregarTelasEAbrir(itemAdicionado){
 }
 
 function _abrirProximaTela(){
+  // Pula telas cujo gatilho não bate com o item adicionado
+  while(_sugTelaIdx < _sugTelas.length){
+    var tela = _sugTelas[_sugTelaIdx];
+    var dispararEm = tela.dispararEm||[];
+    if(dispararEm.length === 0) break; // sem gatilho = sempre dispara
+    var catItem = _itemAdicionadoRef ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'') : '';
+    if(dispararEm.indexOf(catItem) >= 0) break; // bate com a categoria
+    _sugTelaIdx++; // pula esta tela
+  }
   if(_sugTelaIdx >= _sugTelas.length){
     _confirmarAdicionarPendente();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }

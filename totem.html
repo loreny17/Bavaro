@@ -633,9 +633,8 @@
       <div id="mi-grupos"></div>
       <div style="margin-top:14px;">
         <label style="display:block;font-size:0.84rem;color:var(--muted);margin-bottom:6px;font-weight:600;">💬 Observação <span style="font-weight:400;font-size:0.76rem;">(opcional — ex: sem cebola)</span></label>
-        <div id="mi-obs-display" ontouchstart="return false;" onclick="abrirTecladoVirtual()" ontouchend="event.preventDefault();event.stopPropagation();abrirTecladoVirtual()" style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:1rem;box-sizing:border-box;min-height:52px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-          <span id="mi-obs-texto" style="flex:1;color:var(--muted);font-style:italic;">Toque para digitar...</span>
-          <span style="font-size:1.2rem;">⌨️</span>
+        <div id="mi-obs-area">
+          <!-- Preenchido por renderModalItem() conforme _modoQR -->
         </div>
       </div>
       <div class="mi-qtd-box">
@@ -1923,16 +1922,49 @@ function mostrarAvisoTotem(msg){
 }
 
 // ─── Modal de personalização do item ───
+function _renderObsField(areaId, textoId){
+  var area = document.getElementById(areaId);
+  if(!area) return;
+  area.innerHTML = '';
+
+  if(_modoQR){
+    // QR = celular do cliente = teclado nativo
+    var ta = document.createElement('textarea');
+    ta.id = textoId+'-native';
+    ta.placeholder = 'Ex: sem cebola, bem passado...';
+    ta.maxLength = 150;
+    ta.style.cssText = 'width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:1rem;box-sizing:border-box;resize:none;min-height:60px;outline:none;';
+    ta.oninput = function(){ _obsTemp = ta.value; };
+    area.appendChild(ta);
+  } else {
+    // Totem direto = teclado virtual
+    var div = document.createElement('div');
+    div.id = textoId+'-display';
+    div.style.cssText = 'width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--muted);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:1rem;box-sizing:border-box;min-height:52px;cursor:pointer;display:flex;align-items:center;gap:8px;font-style:italic;';
+    var span = document.createElement('span');
+    span.id = textoId;
+    span.style.flex = '1';
+    span.textContent = _obsTemp || 'Toque para digitar...';
+    var ico = document.createElement('span');
+    ico.textContent = '⌨️';
+    ico.style.fontSize = '1.2rem';
+    div.appendChild(span);
+    div.appendChild(ico);
+    div.addEventListener('touchend', function(e){ e.preventDefault(); e.stopPropagation(); abrirTecladoVirtual(textoId); }, {passive:false});
+    div.addEventListener('click', function(){ abrirTecladoVirtual(textoId); });
+    area.appendChild(div);
+  }
+}
+
 function abrirModalItem(){
-  // Se item tem modoWizard ligado E tem grupos, abre wizard
   if(_itemAberto && _itemAberto.modoWizard && _gruposDoItem(_itemAberto).length > 0){
     abrirWizardItem();
     return;
   }
   _obsTemp = '';
-  var ta = document.getElementById('mi-obs');
-  if(ta) ta.value = '';
   renderModalItem();
+  // Monta campo de observação conforme modo
+  _renderObsField('mi-obs-area', 'mi-obs-texto');
   document.getElementById('modal-item').classList.add('aberto');
 }
 function fecharModalItem(){
@@ -2163,10 +2195,7 @@ function renderWizardRevisao(){
       // Campo de observação (opcional)
       '<div style="margin-top:18px;">' +
         '<label style="display:block;font-size:0.84rem;color:var(--muted);margin-bottom:6px;font-weight:600;">💬 Observação <span style="font-weight:400;font-size:0.76rem;">(opcional — ex: sem cebola, ponto da carne, etc)</span></label>' +
-        '<div id="wiz-obs-display" onclick="abrirTecladoVirtual()" ontouchend="event.preventDefault();abrirTecladoVirtual()" style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:1rem;box-sizing:border-box;min-height:52px;cursor:pointer;display:flex;align-items:center;gap:8px;">' +
-          '<span id="wiz-obs-texto" style="flex:1;' + (_obsTemp ? 'color:var(--text);font-style:normal;' : 'color:var(--muted);font-style:italic;') + '">' + (escapar(_obsTemp||'')||'Toque para digitar...') + '</span>' +
-          '<span style="font-size:1.2rem;">⌨️</span>' +
-        '</div>' +
+        '<div id="wiz-obs-area"></div>' +
       '</div>' +
       '<div style="margin-top:24px;display:flex;align-items:center;justify-content:center;gap:18px;">' +
         '<div style="font-size:0.86rem;color:var(--muted);">Quantidade:</div>' +
@@ -2183,6 +2212,8 @@ function renderWizardRevisao(){
       '</div>' +
       '<button onclick="wizardAdicionar()" style="width:100%;padding:18px;background:var(--accent);color:#000;border:none;border-radius:14px;font-family:inherit;font-weight:800;font-size:1.15rem;cursor:pointer;">✓ Adicionar ao carrinho</button>' +
     '</div>';
+  // Renderiza campo de obs após setar innerHTML
+  setTimeout(function(){ _renderObsField('wiz-obs-area','wiz-obs-texto'); }, 10);
 }
 
 function wizardQtd(delta){
@@ -2904,7 +2935,7 @@ function escapar(s){
 
 <script>
 // ── TECLADO VIRTUAL ── (bloco separado para não ser removido por edições)
-function abrirTecladoVirtual(){
+function abrirTecladoVirtual(spanId){
   var ex = document.getElementById('teclado-virtual');
   if(ex){ ex.remove(); return; }
   var texto = _obsTemp || '';
@@ -3002,12 +3033,14 @@ function abrirTecladoVirtual(){
     ok.appendChild(mkBtn('Cancelar', 1, '#1e1e1e', '#666', function(){ mod.remove(); }));
     ok.appendChild(mkBtn('✓  OK', 2, '#d4a843', '#000', function(){
       _obsTemp = texto.trim();
-      ['mi-obs-texto','wiz-obs-texto'].forEach(function(id){
+      var ids = spanId ? [spanId] : ['mi-obs-texto','wiz-obs-texto'];
+      ids.forEach(function(id){
         var el=document.getElementById(id);
         if(el){
           el.textContent = _obsTemp||'Toque para digitar...';
           el.style.color = _obsTemp?'var(--text)':'var(--muted)';
           el.style.fontStyle = _obsTemp?'normal':'italic';
+          var par=el.parentNode; if(par){ par.style.color=''; par.style.fontStyle=''; }
         }
       });
       mod.remove();

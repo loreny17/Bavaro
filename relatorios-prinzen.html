@@ -130,6 +130,19 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
   .kpi-card.green .kpi-value,.kpi-card:not(.full):not(.green) .kpi-value{color:#fff;}
   .kpi-sub{font-size:0.74rem;margin-top:8px;color:rgba(255,255,255,0.8);position:relative;}
 
+  /* ── CAIXA DO DIA (Almoço/Janta/Total) ── */
+  .caixa-dia{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin:2px 0 4px;}
+  .cd-cell{border-radius:15px;padding:13px 8px;border:1px solid var(--border);background:var(--surface);text-align:center;}
+  .cd-cell.alm{background:linear-gradient(135deg,rgba(251,191,36,0.16),rgba(251,191,36,0.04));border-color:rgba(251,191,36,0.35);}
+  .cd-cell.jan{background:linear-gradient(135deg,rgba(129,140,248,0.16),rgba(129,140,248,0.04));border-color:rgba(129,140,248,0.35);}
+  .cd-cell.tot{background:linear-gradient(135deg,var(--blue1),var(--blue2));border-color:transparent;box-shadow:0 6px 18px -10px rgba(37,99,235,0.6);}
+  .cd-lbl{font-size:0.7rem;color:var(--muted);font-weight:600;margin-bottom:5px;}
+  .cd-cell.tot .cd-lbl{color:rgba(255,255,255,0.85);}
+  .cd-val{font-family:var(--display);font-size:1.15rem;letter-spacing:0.01em;color:var(--text);line-height:1.1;}
+  .cd-cell.alm .cd-val{color:#fbbf24;}
+  .cd-cell.jan .cd-val{color:#a5b4fc;}
+  .cd-cell.tot .cd-val{color:#fff;font-size:1.3rem;}
+
   /* ── SEÇÃO ── */
   .secao{
     background:var(--surface);border:1px solid var(--border);border-radius:20px;
@@ -295,6 +308,8 @@ var _todasContas = null;     // cache de todas as contas do tenant (normalizadas
 var _restauranteSel = null;  // restauranteId selecionado
 var _restaurantes = [];      // [{id, label, count}]
 var _kpiModo = 'pedidos';    // 'pedidos' (padrão) ou 'itens'
+var _almocos = [];           // [{rest, ms, valor}] — almoço manual (registro_almoco)
+var _almocoPeriodo = 0;      // soma do almoço no período/restaurante atual
 
 // ── DEBUG ──
 var _dbg = [];
@@ -459,6 +474,29 @@ function _buscarTudo(){
   // Status que NÃO contam como venda (pedido não concluído)
   var STATUS_NAO_VENDA = {'cancelado':1,'cancelada':1,'aguardando_pagamento':1,'pendente':1,'aberto':1,'aberta':1,'rejeitado':1,'rejeitada':1};
 
+  // Lê o almoço manual (registro_almoco) — por tenant e por restauranteId 'default' (cobre docs sem tenantId)
+  function lerAlmocos(){
+    var col = fbDb.collection('registro_almoco');
+    return Promise.all([
+      col.where('tenantId','==',TENANT_ID).get().catch(function(){ return null; }),
+      col.where('restauranteId','==','default').get().catch(function(){ return null; })
+    ]).then(function(snaps){
+      var vistos = {}; _almocos = [];
+      snaps.forEach(function(s){
+        if(!s) return;
+        s.forEach(function(d){
+          if(vistos[d.id]) return; vistos[d.id] = 1;
+          var x = d.data();
+          var dataStr = x.data || '';
+          var ms = dataStr ? new Date(dataStr+'T12:00:00').getTime() : toMillis(x.atualizadoEm);
+          _almocos.push({ rest: x.restauranteId || 'default', ms: ms, valor: x.valor || 0 });
+        });
+      });
+      dlog('registro_almoco: '+_almocos.length+' lançamento(s) de almoço');
+      return {tipo:'almoco'};
+    });
+  }
+
   // 1) Descobre os restaurantes do tenant; 2) lê contas_fechadas + pedidos_totem de cada um
   tref.collection('restaurantes').get()
     .then(function(rs){ var ids=[]; rs.forEach(function(d){ ids.push(d.id); }); return ids; })
@@ -468,7 +506,7 @@ function _buscarTudo(){
       if(rids.indexOf('default') < 0) rids.push('default');
       if(rids.indexOf('omar_cafe') < 0) rids.push('omar_cafe');
       dlog('Restaurantes do tenant: '+rids.join(', '));
-      var jobs = [ lerContas() ].concat(rids.map(lerTotem));
+      var jobs = [ lerContas(), lerAlmocos() ].concat(rids.map(lerTotem));
       return Promise.all(jobs);
     })
     .then(function(resultados){
@@ -476,6 +514,7 @@ function _buscarTudo(){
 
       var byKey = {}, mapRest = {}, statusPorRest = {};
       resultados.forEach(function(r){
+        if(!r || r.tipo === 'almoco') return;
         var size = r.snap ? r.snap.size : 'erro';
         dlog('Fonte '+(r.tipo === 'contas' ? 'contas_fechadas' : 'totem/'+r.rid)+': '+size+' doc(s)');
         if(!r.snap) return;
@@ -561,9 +600,14 @@ function _aplicarFiltros(){
   var contas = _todasContas.filter(function(c){
     return c._rest === _restauranteSel && c.fechadaEm >= ini && c.fechadaEm <= fim;
   });
-  dlog('Filtro aplicado', {restaurante:_restauranteSel, periodo:_periodo, contas:contas.length});
+  // Soma do almoço manual (só o Bavaro/default usa) no período
+  _almocoPeriodo = _almocos.filter(function(a){
+    return a.rest === _restauranteSel && a.ms >= ini && a.ms <= fim;
+  }).reduce(function(s,a){ return s + (a.valor||0); }, 0);
 
-  if(contas.length === 0){
+  dlog('Filtro aplicado', {restaurante:_restauranteSel, periodo:_periodo, contas:contas.length, almoco:_almocoPeriodo});
+
+  if(contas.length === 0 && _almocoPeriodo <= 0){
     var doRest = _todasContas.filter(function(c){ return c._rest === _restauranteSel; });
     var maxFe = doRest.reduce(function(m,c){ return c.fechadaEm > m ? c.fechadaEm : m; }, 0);
     document.getElementById('relatorio-content').innerHTML =
@@ -650,11 +694,16 @@ function renderRelatorio(contas){
   // ── HTML ──
   var html = '';
 
+  var almoco = _almocoPeriodo || 0;
+  var janta = totalVendas;            // contas_fechadas / vendas do app
+  var totalGeral = janta + almoco;    // total do período (inclui almoço manual)
+
   // KPIs
   html += '<div class="kpi-grid">';
   html += '<div class="kpi-card full"><div class="kpi-label">Total no período</div>'+
-    '<div class="kpi-value">'+fmtR(totalVendas)+'</div>'+
-    '<div class="kpi-sub">'+totalMesas+' conta'+(totalMesas!==1?'s':'')+' fechada'+(totalMesas!==1?'s':'')+'</div></div>';
+    '<div class="kpi-value">'+fmtR(totalGeral)+'</div>'+
+    '<div class="kpi-sub">'+totalMesas+' conta'+(totalMesas!==1?'s':'')+' fechada'+(totalMesas!==1?'s':'')+
+    (almoco>0 ? ' · inclui almoço manual' : '')+'</div></div>';
   html += '<div class="kpi-card"><div class="kpi-label">Ticket médio</div>'+
     '<div class="kpi-value" style="font-size:1.3rem;">'+fmtR(ticketMedio)+'</div></div>';
   var totalItensVendidos = topItens.reduce(function(a,i){ return a+i.qtd; }, 0);
@@ -665,6 +714,15 @@ function renderRelatorio(contas){
     '<div class="kpi-value">'+kpiVal+'</div>'+
     '<div class="kpi-sub" style="opacity:0.75;">toque p/ '+(_kpiModo==='itens'?'pedidos':'itens')+'</div></div>';
   html += '</div>';
+
+  // ☀️ Almoço + 🌙 Janta (só aparece quando há almoço manual lançado)
+  if(almoco > 0){
+    html += '<div class="caixa-dia">'+
+      '<div class="cd-cell alm"><div class="cd-lbl">☀️ Almoço</div><div class="cd-val">'+fmtR(almoco)+'</div></div>'+
+      '<div class="cd-cell jan"><div class="cd-lbl">🌙 Janta</div><div class="cd-val">'+fmtR(janta)+'</div></div>'+
+      '<div class="cd-cell tot"><div class="cd-lbl">Total</div><div class="cd-val">'+fmtR(totalGeral)+'</div></div>'+
+    '</div>';
+  }
 
   // Vendas por dia
   if(diasOrdenados.length > 1){

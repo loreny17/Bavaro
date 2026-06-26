@@ -474,25 +474,35 @@ function _buscarTudo(){
   // Status que NÃO contam como venda (pedido não concluído)
   var STATUS_NAO_VENDA = {'cancelado':1,'cancelada':1,'aguardando_pagamento':1,'pendente':1,'aberto':1,'aberta':1,'rejeitado':1,'rejeitada':1};
 
-  // Lê o almoço manual (registro_almoco) — por tenant e por restauranteId 'default' (cobre docs sem tenantId)
+  // Lê o almoço manual (registro_almoco) por ID de documento (get), cobrindo os últimos 70 dias.
+  // Buscar por ID contorna regras que bloqueiam consulta (list) mas liberam leitura simples (get).
   function lerAlmocos(){
+    _almocos = [];
     var col = fbDb.collection('registro_almoco');
-    return Promise.all([
-      col.where('tenantId','==',TENANT_ID).get().catch(function(){ return null; }),
-      col.where('restauranteId','==','default').get().catch(function(){ return null; })
-    ]).then(function(snaps){
-      var vistos = {}; _almocos = [];
-      snaps.forEach(function(s){
-        if(!s) return;
-        s.forEach(function(d){
-          if(vistos[d.id]) return; vistos[d.id] = 1;
-          var x = d.data();
-          var dataStr = x.data || '';
-          var ms = dataStr ? new Date(dataStr+'T12:00:00').getTime() : toMillis(x.atualizadoEm);
-          _almocos.push({ rest: x.restauranteId || 'default', ms: ms, valor: x.valor || 0 });
-        });
+    var dias = 70, jobs = [];
+    var base = new Date(); base.setHours(12,0,0,0);
+    for(var i=0; i<dias; i++){
+      (function(d){
+        var ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+        jobs.push(
+          col.doc('almoco_default_'+ds).get()
+            .then(function(snap){ return {ds:ds, snap:snap, err:null}; })
+            .catch(function(e){ return {ds:ds, snap:null, err:e}; })
+        );
+      })(new Date(base.getTime() - i*86400000));
+    }
+    return Promise.all(jobs).then(function(rs){
+      var permErr=null, n=0;
+      rs.forEach(function(r){
+        if(r.err){ if(!permErr) permErr=r.err; return; }
+        if(r.snap && r.snap.exists){
+          var x = r.snap.data() || {};
+          _almocos.push({ rest:'default', ms:new Date(r.ds+'T12:00:00').getTime(), valor:x.valor||0 });
+          n++;
+        }
       });
-      dlog('registro_almoco: '+_almocos.length+' lançamento(s) de almoço');
+      if(permErr) dlog('registro_almoco BLOQUEADO: '+(permErr.code||'')+' — '+permErr.message+' (libere leitura nas regras do Firestore)');
+      dlog('registro_almoco: '+n+' lançamento(s) de almoço (últimos '+dias+' dias)');
       return {tipo:'almoco'};
     });
   }

@@ -2251,15 +2251,6 @@ function excluirItem(){
 }
 
 // ═══ MODAL CATEGORIA ═══
-function abrirModalCat(){
-  _catEditando = null;
-  document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
-  document.getElementById('cat-nome').value = '';
-  document.getElementById('cat-emoji').value = '';
-  document.getElementById('btn-excluir-cat').style.display = 'none';
-  document.getElementById('modal-cat').classList.add('show');
-  setTimeout(function(){ try{ document.getElementById('cat-nome').focus(); }catch(e){} }, 100);
-}
 function setCatTipo(tipo){
   ['normal','vegetariano','vegano'].forEach(function(t){
     var btn = document.getElementById('cat-tipo-'+t);
@@ -2268,7 +2259,19 @@ function setCatTipo(tipo){
     btn.style.opacity = ativo ? '1' : '0.4';
     btn.style.fontWeight = ativo ? '900' : '700';
   });
-  document.getElementById('cat-tipo-normal')._valor = tipo;
+  var n = document.getElementById('cat-tipo-normal');
+  if(n) n._valor = tipo;
+}
+
+function abrirModalCat(){
+  _catEditando = null;
+  document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
+  document.getElementById('cat-nome').value = '';
+  document.getElementById('cat-emoji').value = '';
+  document.getElementById('btn-excluir-cat').style.display = 'none';
+  setCatTipo('');
+  document.getElementById('modal-cat').classList.add('show');
+  setTimeout(function(){ try{ document.getElementById('cat-nome').focus(); }catch(e){} }, 100);
 }
 
 function editarCategoria(id){
@@ -2280,18 +2283,6 @@ function editarCategoria(id){
   document.getElementById('cat-emoji').value = c.emoji;
   document.getElementById('btn-excluir-cat').style.display = 'block';
   setCatTipo(c.tipo || '');
-  document.getElementById('modal-cat').classList.add('show');
-}
-
-function abrirModalCat(){ novaCategoria(); }
-
-function novaCategoria(){
-  _catEditando = null;
-  document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
-  document.getElementById('cat-nome').value = '';
-  document.getElementById('cat-emoji').value = '';
-  document.getElementById('btn-excluir-cat').style.display = 'none';
-  setCatTipo('');
   document.getElementById('modal-cat').classList.add('show');
 }
 function fecharModalCat(){
@@ -11074,26 +11065,81 @@ function totemRenderSugestoes(){
 
       var div=document.createElement('div');
       div.style.cssText='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;';
-      div.innerHTML=
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'+
-          '<div style="display:flex;flex-direction:column;gap:2px;">'+
-            '<button onclick="totemMoverSugestao(''+sug.id+'',-1)" '+(primeiro?'disabled ':'')+
-              'style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;width:26px;height:22px;cursor:pointer;font-size:0.65rem;'+(primeiro?'opacity:0.3;':'')+'">▲</button>'+
-            '<button onclick="totemMoverSugestao(''+sug.id+'',1)" '+(ultimo?'disabled ':'')+
-              'style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;width:26px;height:22px;cursor:pointer;font-size:0.65rem;'+(ultimo?'opacity:0.3;':'')+'">▼</button>'+
-          '</div>'+
-          '<div style="font-size:0.7rem;color:var(--muted);background:var(--surface2);border-radius:4px;padding:2px 7px;font-weight:800;flex-shrink:0;">#'+(idx+1)+'</div>'+
-          '<input id="sug-titulo-'+sug.id+'" value="'+escapeHtml(sug.titulo||'')+'" placeholder="Ex: Quer uma Bebida?" '+
-            'style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-family:inherit;font-size:0.85rem;" '+
-            'onblur="totemSalvarSugestao(''+sug.id+'')">'+
-          '<button onclick="totemExcluirSugestao(''+sug.id+'')" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;padding:6px 10px;cursor:pointer;flex-shrink:0;">✕</button>'+
-        '</div>'+
-        '<div style="font-size:0.68rem;color:var(--accent);text-transform:uppercase;font-weight:700;margin-bottom:3px;">📋 Mostra itens de</div>'+
-        '<div style="font-size:0.8rem;margin-bottom:6px;padding:6px 8px;background:var(--bg);border-radius:7px;">'+catNames+'</div>'+
-        '<button onclick="totemEditarCatsSugestao(''+sug.id+'')" style="background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:6px 12px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;margin-right:6px;margin-bottom:10px;">⚙️ Editar categorias</button>'+
-        '<div style="font-size:0.68rem;color:#818cf8;text-transform:uppercase;font-weight:700;margin-bottom:3px;">⚡ Aparece quando cliente adicionar item de</div>'+
-        '<div style="font-size:0.8rem;margin-bottom:6px;padding:6px 8px;background:var(--bg);border-radius:7px;">'+triggerNames+'</div>'+
-        '<button onclick="totemEditarDisparoSugestao(''+sug.id+'')" style="background:rgba(99,102,241,0.1);border:1.5px solid rgba(99,102,241,0.3);color:#818cf8;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;">⚡ Editar gatilho</button>';
+      // Cria botões de ordem via DOM para evitar problemas de aspas
+      var btnUp = document.createElement('button');
+      btnUp.textContent = '▲';
+      btnUp.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;width:26px;height:22px;cursor:pointer;font-size:0.65rem;'+(primeiro?'opacity:0.3;':'');
+      if(primeiro) btnUp.disabled = true;
+      btnUp.onclick = (function(sid){ return function(){ totemMoverSugestao(sid,-1); }; })(sug.id);
+      var btnDn = document.createElement('button');
+      btnDn.textContent = '▼';
+      btnDn.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;width:26px;height:22px;cursor:pointer;font-size:0.65rem;'+(ultimo?'opacity:0.3;':'');
+      if(ultimo) btnDn.disabled = true;
+      btnDn.onclick = (function(sid){ return function(){ totemMoverSugestao(sid,1); }; })(sug.id);
+      var ordemDiv = document.createElement('div');
+      ordemDiv.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+      ordemDiv.appendChild(btnUp); ordemDiv.appendChild(btnDn);
+
+      
+      // Build card via DOM — avoids quote issues
+      function mkBtn(txt, bg, color, fn){
+        var b=document.createElement('button');
+        b.textContent=txt;
+        b.style.cssText='border-radius:8px;padding:6px 12px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;border:1.5px solid;background:'+bg+';color:'+color+';border-color:'+color.replace(')',',0.3)').replace('rgb','rgba')+';margin-right:6px;margin-bottom:6px;';
+        b.onclick=fn; return b;
+      }
+
+      // Header row
+      var hdr=document.createElement('div');
+      hdr.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:10px;';
+      hdr.appendChild(ordemDiv);
+
+      var numBadge=document.createElement('div');
+      numBadge.style.cssText='font-size:0.7rem;color:var(--muted);background:var(--surface2);border-radius:4px;padding:2px 7px;font-weight:800;flex-shrink:0;';
+      numBadge.textContent='#'+(idx+1);
+      hdr.appendChild(numBadge);
+
+      var inpTitulo=document.createElement('input');
+      inpTitulo.id='sug-titulo-'+sug.id;
+      inpTitulo.value=sug.titulo||'';
+      inpTitulo.placeholder='Ex: Quer uma Bebida?';
+      inpTitulo.style.cssText='flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-family:inherit;font-size:0.85rem;';
+      inpTitulo.onblur=(function(sid){ return function(){ totemSalvarSugestao(sid); }; })(sug.id);
+      hdr.appendChild(inpTitulo);
+
+      var btnDel=document.createElement('button');
+      btnDel.textContent='✕';
+      btnDel.style.cssText='background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;padding:6px 10px;cursor:pointer;flex-shrink:0;';
+      btnDel.onclick=(function(sid){ return function(){ totemExcluirSugestao(sid); }; })(sug.id);
+      hdr.appendChild(btnDel);
+      div.appendChild(hdr);
+
+      // Categorias
+      var lblCats=document.createElement('div');
+      lblCats.style.cssText='font-size:0.68rem;color:var(--accent);text-transform:uppercase;font-weight:700;margin-bottom:3px;';
+      lblCats.textContent='📋 Mostra itens de';
+      div.appendChild(lblCats);
+      var valCats=document.createElement('div');
+      valCats.style.cssText='font-size:0.8rem;margin-bottom:6px;padding:6px 8px;background:var(--bg);border-radius:7px;';
+      valCats.innerHTML=catNames;
+      div.appendChild(valCats);
+      var btnCats=mkBtn('⚙️ Editar categorias','rgba(212,168,67,0.1)','#d4a843',
+        (function(sid){ return function(){ totemEditarCatsSugestao(sid); }; })(sug.id));
+      div.appendChild(btnCats);
+
+      // Disparo
+      var lblDisp=document.createElement('div');
+      lblDisp.style.cssText='font-size:0.68rem;color:#818cf8;text-transform:uppercase;font-weight:700;margin-bottom:3px;margin-top:6px;';
+      lblDisp.textContent='⚡ Aparece quando cliente adicionar item de';
+      div.appendChild(lblDisp);
+      var valDisp=document.createElement('div');
+      valDisp.style.cssText='font-size:0.8rem;margin-bottom:6px;padding:6px 8px;background:var(--bg);border-radius:7px;';
+      valDisp.textContent=triggerNames;
+      div.appendChild(valDisp);
+      var btnDisp=mkBtn('⚡ Editar gatilho','rgba(99,102,241,0.1)','#818cf8',
+        (function(sid){ return function(){ totemEditarDisparoSugestao(sid); }; })(sug.id));
+      div.appendChild(btnDisp);
+
       box.appendChild(div);
     });
   });
@@ -11123,7 +11169,7 @@ function _abrirModalSelecaoCats(titulo, descricao, todasCats, selecionadas, onSa
   box.innerHTML='<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">'+
     '<div><div style="font-weight:800;margin-bottom:3px;">'+titulo+'</div>'+
     '<div style="font-size:0.72rem;color:var(--muted);">'+descricao+'</div></div>'+
-    '<button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button></div>';
+    '<button id="modal-sel-cats-close" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button></div>';
   var lista=document.createElement('div');
   lista.style.cssText='overflow-y:auto;padding:14px;flex:1;display:flex;flex-direction:column;gap:6px;';
   todasCats.forEach(function(c){

@@ -2191,16 +2191,41 @@ function wizardQtd(delta){
 }
 
 function wizardAdicionar(){
-  // Captura observação do textarea (caso usuário não tenha disparado oninput)
-  // obs via teclado virtual (_obsTemp já atualizado)
-  if(ta) _obsTemp = ta.value || '';
-  // No wizard, todos os grupos obrigatórios já foram validados passo a passo,
-  // então confirmarAdicionarAoCarrinho vai passar direto e empurrar pro carrinho.
-  if(typeof confirmarAdicionarAoCarrinho === 'function'){
-    confirmarAdicionarAoCarrinho();
-  }
-  // Fecha o wizard (não esquece pq confirmarAdicionarAoCarrinho fecha "modal-item" que não está aberto)
+  if(!_itemAberto) return;
+  var it = _itemAberto;
+
+  // Monta item pendente igual ao fluxo normal
+  var grupos = _gruposDoItem(it);
+  var labelSelecoes = [];
+  grupos.forEach(function(g){
+    var sel = (_selecoesTemp[g.id]||[]).map(function(idx){
+      return g.opcoes[idx] ? g.opcoes[idx].nome : '';
+    }).filter(Boolean);
+    sel.forEach(function(n){ labelSelecoes.push(n); });
+  });
+  var precoUnit = _precoComExtras(it, _selecoesTemp);
+
+  _itemPendente = {
+    itemId: it.id,
+    fonte: it.fonte,
+    nome: it.nome,
+    preco: precoUnit,
+    precoBase: it.preco || 0,
+    foto: it.foto || '',
+    qtd: _qtdTemp,
+    selecoes: _selecoesTemp,
+    selecoesLabel: labelSelecoes.join(' · '),
+    observacao: (_obsTemp || '').trim(),
+    gruposIds: it.gruposIds || []
+  };
+
   fecharWizard();
+  resetTimerInatividade();
+
+  // Passa pelo fluxo de sugestões igual ao modal normal
+  _sugTelaIdx = 0;
+  _sugTelas = [];
+  _carregarTelasEAbrir(it);
 }
 
 function renderModalItem(){

@@ -10196,13 +10196,14 @@ function toggleMostrarQR(){
 
 function totemMostrarAba(aba){
   _totemAbaAtiva = aba;
-  ['comidas','grupos','cats'].forEach(function(a){
+  ['comidas','grupos','cats','sugestoes'].forEach(function(a){
     var btn = document.getElementById('totem-aba-' + a);
     var pn = document.getElementById('totem-painel-' + a);
     if(btn) btn.classList.toggle('ativo', a === aba);
     if(pn) pn.style.display = a === aba ? 'block' : 'none';
   });
   if(aba === 'cats') totemRenderCatsPrincipais();
+  if(aba === 'sugestoes') totemRenderSugestoes();
 }
 
 // ─── Categorias próprias ───
@@ -11033,6 +11034,142 @@ function totemExcluirGrupo(id){
 }
 
 // ─── Categorias do principal ───
+// ─── TELAS DE SUGESTÃO ───
+var _totemSugestoes = []; // [{id, titulo, categorias:[]}]
+
+function totemCarregarSugestoes(cb){
+  _refTotemBase().doc('data').collection('sugestoes').orderBy('ordem').get()
+    .then(function(snap){
+      _totemSugestoes = [];
+      snap.forEach(function(d){ _totemSugestoes.push(Object.assign({id:d.id}, d.data())); });
+      if(cb) cb();
+    }).catch(function(){
+      _totemSugestoes = [];
+      if(cb) cb();
+    });
+}
+
+function totemRenderSugestoes(){
+  var box = document.getElementById('totem-sugestoes-lista');
+  if(!box) return;
+  box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:10px;text-align:center;">Carregando...</div>';
+
+  // Pega todas as categorias disponíveis (totem + principal)
+  var todasCats = (_totemCats||[]).concat((_categorias||[]).map(function(c){ return Object.assign({}, c, {_principal:true}); }));
+
+  totemCarregarSugestoes(function(){
+    if(!_totemSugestoes.length){
+      box.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:20px;text-align:center;">Nenhuma tela configurada ainda.</div>';
+      return;
+    }
+    box.innerHTML = '';
+    _totemSugestoes.forEach(function(sug, idx){
+      var catNames = (sug.categorias||[]).map(function(cid){
+        var c = todasCats.find(function(x){ return x.id===cid; });
+        return c ? (c.emoji||'📂')+' '+c.nome : cid;
+      }).join(', ') || 'Nenhuma categoria';
+
+      var div = document.createElement('div');
+      div.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;';
+      div.innerHTML =
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+          '<div style="font-size:0.7rem;color:var(--muted);background:var(--surface2);border-radius:4px;padding:2px 7px;font-weight:700;">#'+(idx+1)+'</div>'+
+          '<input id="sug-titulo-'+sug.id+'" value="'+escapeHtml(sug.titulo||'')+'" placeholder="Título ex: Quer uma Bebida?" '+
+            'style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-family:inherit;font-size:0.85rem;">'+
+          '<button onclick="totemExcluirSugestao(\''+sug.id+'\')" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;padding:6px 10px;font-family:inherit;cursor:pointer;">✕</button>'+
+        '</div>'+
+        '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:6px;">Categorias: '+catNames+'</div>'+
+        '<button onclick="totemEditarCatsSugestao(\''+sug.id+'\')" style="background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.3);color:var(--accent);border-radius:8px;padding:7px 12px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer;margin-right:6px;">⚙️ Escolher categorias</button>'+
+        '<button onclick="totemSalvarSugestao(\''+sug.id+'\')" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;border-radius:8px;padding:7px 12px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer;">✓ Salvar</button>';
+      box.appendChild(div);
+    });
+  });
+}
+
+function totemAdicionarTelaSugestao(){
+  _refTotemBase().doc('data').collection('sugestoes').add({
+    titulo: 'Quer adicionar uma Bebida?',
+    categorias: [],
+    ordem: _totemSugestoes.length,
+    criadoEm: Date.now()
+  }).then(function(){ totemRenderSugestoes(); showToast('✓ Tela adicionada','#4ade80'); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
+function totemSalvarSugestao(id){
+  var titulo = (document.getElementById('sug-titulo-'+id)||{}).value || '';
+  _refTotemBase().doc('data').collection('sugestoes').doc(id).update({
+    titulo: titulo.trim(), atualizadoEm: Date.now()
+  }).then(function(){ showToast('✓ Salvo','#4ade80'); totemRenderSugestoes(); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
+function totemExcluirSugestao(id){
+  if(!confirm('Remover esta tela de sugestão?')) return;
+  _refTotemBase().doc('data').collection('sugestoes').doc(id).delete()
+    .then(function(){ showToast('🗑️ Removida','#f87171'); totemRenderSugestoes(); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
+function totemEditarCatsSugestao(id){
+  var sug = _totemSugestoes.find(function(s){ return s.id===id; });
+  if(!sug) return;
+  var todasCats = (_totemCats||[]).concat((_categorias||[]).map(function(c){ return Object.assign({}, c, {_principal:true}); }));
+  var selecionadas = (sug.categorias||[]).slice();
+
+  var mod = document.createElement('div');
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border-radius:14px;max-width:480px;width:100%;max-height:80vh;display:flex;flex-direction:column;';
+  box.innerHTML =
+    '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">'+
+      '<div style="font-weight:800;">⚙️ Categorias desta tela</div>'+
+      '<button onclick="this.closest(\'[style*=fixed]\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button>'+
+    '</div>'+
+    '<div style="overflow-y:auto;padding:14px;flex:1;display:flex;flex-direction:column;gap:6px;" id="cats-sug-list"></div>'+
+    '<div style="padding:12px 14px;border-top:1px solid var(--border);">'+
+      '<button onclick="totemSalvarCatsSugestao(\''+id+'\')" style="width:100%;padding:12px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;font-family:inherit;cursor:pointer;">✓ Salvar</button>'+
+    '</div>';
+
+  var lista = box.querySelector('#cats-sug-list');
+  todasCats.forEach(function(c){
+    var sel = selecionadas.indexOf(c.id) >= 0;
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:'+(sel?'rgba(212,168,67,0.08)':'var(--surface2)')+';border:1px solid '+(sel?'var(--accent)':'var(--border)')+';border-radius:9px;cursor:pointer;';
+    row.innerHTML = '<div style="width:22px;height:22px;border-radius:6px;border:2px solid '+(sel?'var(--accent)':'var(--border)')+';background:'+(sel?'var(--accent)':'transparent')+';display:flex;align-items:center;justify-content:center;color:#000;font-weight:800;font-size:0.8rem;">'+(sel?'✓':'')+'</div>'+
+      '<span style="font-size:1.1rem;">'+(c.emoji||'📂')+'</span>'+
+      '<span style="font-size:0.86rem;font-weight:600;">'+escapeHtml(c.nome||'')+'</span>'+
+      (c._principal ? '<span style="font-size:0.66rem;color:var(--muted);margin-left:auto;">Principal</span>' : '');
+    row.onclick = function(){
+      var idx = selecionadas.indexOf(c.id);
+      if(idx>=0) selecionadas.splice(idx,1); else selecionadas.push(c.id);
+      var s = selecionadas.indexOf(c.id)>=0;
+      row.style.background = s?'rgba(212,168,67,0.08)':'var(--surface2)';
+      row.style.borderColor = s?'var(--accent)':'var(--border)';
+      var chk = row.querySelector('div');
+      chk.style.borderColor = s?'var(--accent)':'var(--border)';
+      chk.style.background = s?'var(--accent)':'transparent';
+      chk.textContent = s?'✓':'';
+    };
+    lista.appendChild(row);
+  });
+
+  mod.appendChild(box);
+  document.body.appendChild(mod);
+
+  window.totemSalvarCatsSugestao = function(sugId){
+    _refTotemBase().doc('data').collection('sugestoes').doc(sugId).update({
+      categorias: selecionadas, atualizadoEm: Date.now()
+    }).then(function(){
+      mod.remove();
+      showToast('✓ Categorias salvas','#4ade80');
+      totemRenderSugestoes();
+    }).catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+  };
+}
+
 function totemRenderCatsPrincipais(){
   var box = document.getElementById('totem-cats-principais');
   if(!box) return;
@@ -12933,6 +13070,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <button id="totem-aba-comidas" onclick="totemMostrarAba('comidas')" class="totem-aba ativo">🍔 Comidas</button>
     <button id="totem-aba-grupos" onclick="totemMostrarAba('grupos')" class="totem-aba">➕ Grupos de Adicionais</button>
     <button id="totem-aba-cats" onclick="totemMostrarAba('cats')" class="totem-aba">🍹 Trazer do Principal</button>
+    <button id="totem-aba-sugestoes" onclick="totemMostrarAba('sugestoes')" class="totem-aba">🎯 Telas de Sugestão</button>
   </div>
 
   <!-- ── COMIDAS DO TOTEM ── -->
@@ -12983,6 +13121,15 @@ function toggleAdminUsuario(garcomId, novoValor){
     <div id="totem-cats-principais" style="display:flex;flex-direction:column;gap:8px;">
       <div style="color:var(--muted);font-size:0.85rem;padding:20px;text-align:center;">Carregando categorias...</div>
     </div>
+  </div>
+
+  <!-- PAINEL TELAS DE SUGESTÃO -->
+  <div id="totem-painel-sugestoes" style="display:none;">
+    <div style="background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.86rem;color:var(--muted);">
+      🎯 Configure as <b>telas de sugestão</b> que aparecem após o cliente adicionar um item. Cada tela mostra itens de categorias específicas. As telas aparecem na ordem definida.
+    </div>
+    <div id="totem-sugestoes-lista" style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;"></div>
+    <button onclick="totemAdicionarTelaSugestao()" style="width:100%;padding:12px;background:rgba(212,168,67,0.1);border:1.5px dashed rgba(212,168,67,0.4);color:var(--accent);border-radius:10px;font-family:inherit;font-size:0.88rem;font-weight:700;cursor:pointer;">+ Adicionar tela de sugestão</button>
   </div>
 
 </div>

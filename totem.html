@@ -1616,18 +1616,10 @@ function confirmarAdicionarAoCarrinho(){
   fecharModalItem();
   resetTimerInatividade();
 
-  // Verifica se tem sugestões — se sim, mostra ANTES de adicionar ao carrinho
-  var todosItensAdic = (window._cardapioItens||[]).filter(function(i){
-    return i.disponivel && !i.pausado && i.sugerido === true && i.id !== itRef.id;
-  });
-
-  if(todosItensAdic.length){
-    // Mostra tela de adicionais — o item só vai pro carrinho quando o cliente dispensar ou escolher
-    _abrirTelaAdicionais(itRef);
-  } else {
-    // Sem sugestões — adiciona direto
-    _confirmarAdicionarPendente();
-  }
+  // Carrega telas de sugestão configuradas e exibe em sequência
+  _sugTelaIdx = 0;
+  _sugTelas = [];
+  _carregarTelasEAbrir(itRef);
 }
 
 // Efetivamente adiciona o item pendente ao carrinho (chamado após tela de adicionais)
@@ -1727,14 +1719,12 @@ var _itemAdicionadoRef = null;
 
 function _carregarTelasEAbrir(itemAdicionado){
   _itemAdicionadoRef = itemAdicionado;
-  // Busca telas configuradas no Firestore
-  var restId = window._totemRestauranteId || 'default';
-  var tenantId = window._totemTenantId || '';
-  var refBase = fbDb.collection('tenants').doc(tenantId)
-    .collection('restaurantes').doc(restId)
-    .collection('cardapio_totem');
+  // Usa o mesmo caminho que o resto do totem
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
 
-  refBase.doc('data').collection('sugestoes').orderBy('ordem').get()
+  base.collection('cardapio_totem').doc('data').collection('sugestoes')
+    .orderBy('ordem').get()
     .then(function(snap){
       _sugTelas = [];
       snap.forEach(function(d){
@@ -1748,16 +1738,15 @@ function _carregarTelasEAbrir(itemAdicionado){
         }
       });
       if(!_sugTelas.length){
-        // Fallback: usa itens com sugerido=true
-        _sugTelas = [{titulo:'Quer adicionar algo mais?', categorias:[]}];
+        // Sem telas configuradas — adiciona direto ao carrinho
+        _confirmarAdicionarPendente();
+        return;
       }
       _sugTelaIdx = 0;
       _abrirProximaTela();
     }).catch(function(){
-      // Fallback sem Firestore
-      _sugTelas = [{titulo:'Quer adicionar algo mais?', categorias:[]}];
-      _sugTelaIdx = 0;
-      _abrirProximaTela();
+      // Erro no Firestore — adiciona item direto sem sugestões
+      _confirmarAdicionarPendente();
     });
 }
 

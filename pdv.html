@@ -2265,13 +2265,19 @@ function setCatTipo(tipo){
 
 function abrirModalCat(){
   _catEditando = null;
-  document.getElementById('modal-cat-titulo').textContent = 'NOVA CATEGORIA';
-  document.getElementById('cat-nome').value = '';
-  document.getElementById('cat-emoji').value = '';
-  document.getElementById('btn-excluir-cat').style.display = 'none';
+  var tit = document.getElementById('modal-cat-titulo');
+  var nom = document.getElementById('cat-nome');
+  var emo = document.getElementById('cat-emoji');
+  var del = document.getElementById('btn-excluir-cat');
+  var mod = document.getElementById('modal-cat');
+  if(!tit||!nom||!emo||!del||!mod){ console.error('modal-cat elements missing'); return; }
+  tit.textContent = 'NOVA CATEGORIA';
+  nom.value = '';
+  emo.value = '';
+  del.style.display = 'none';
   setCatTipo('');
-  document.getElementById('modal-cat').classList.add('show');
-  setTimeout(function(){ try{ document.getElementById('cat-nome').focus(); }catch(e){} }, 100);
+  mod.classList.add('show');
+  setTimeout(function(){ try{ nom.focus(); }catch(e){} }, 150);
 }
 
 function editarCategoria(id){
@@ -11027,6 +11033,33 @@ function totemExcluirGrupo(id){
 // ─── Categorias do principal ───
 // ─── TELAS DE SUGESTÃO ───
 var _totemSugestoes = []; // [{id, titulo, categorias:[]}]
+
+function totemAdicionarTelaSugestao(){
+  _refTotemBase().doc('data').collection('sugestoes').add({
+    titulo: 'Quer adicionar algo mais?',
+    categorias: [],
+    dispararEm: [],
+    ordem: _totemSugestoes.length,
+    criadoEm: Date.now()
+  }).then(function(){ showToast('✓ Tela adicionada','#4ade80'); totemRenderSugestoes(); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
+function totemSalvarSugestao(id){
+  var inp = document.getElementById('sug-titulo-'+id);
+  var titulo = inp ? inp.value.trim() : '';
+  _refTotemBase().doc('data').collection('sugestoes').doc(id).update({
+    titulo: titulo, atualizadoEm: Date.now()
+  }).then(function(){ showToast('✓ Salvo','#4ade80'); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
+function totemExcluirSugestao(id){
+  if(!confirm('Remover esta tela de sugestão?')) return;
+  _refTotemBase().doc('data').collection('sugestoes').doc(id).delete()
+    .then(function(){ showToast('🗑️ Removida','#f87171'); totemRenderSugestoes(); })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
 
 function totemCarregarSugestoes(cb){
   _refTotemBase().doc('data').collection('sugestoes').orderBy('ordem').get()

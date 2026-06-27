@@ -1693,7 +1693,6 @@ var _itemAdicionadoRef = null;
 
 function _carregarTelasEAbrir(itemAdicionado){
   _itemAdicionadoRef = itemAdicionado;
-  // Usa o mesmo caminho que o resto do totem
   var base = fbDb.collection('tenants').doc(_tenantId)
     .collection('restaurantes').doc(_restauranteId);
 
@@ -1703,43 +1702,55 @@ function _carregarTelasEAbrir(itemAdicionado){
       _sugTelas = [];
       snap.forEach(function(d){
         var dados = d.data();
-        if((dados.categorias||[]).length > 0){
-          _sugTelas.push({
-            titulo: dados.titulo||'Quer adicionar mais?',
-            categorias: dados.categorias||[],
-            dispararEm: dados.dispararEm||[],
-            ordem: dados.ordem||0
-          });
-        }
+        // Inclui TODAS as telas com título, mesmo sem categorias configuradas ainda
+        _sugTelas.push({
+          titulo: dados.titulo||'Quer adicionar mais?',
+          categorias: dados.categorias||[],
+          dispararEm: dados.dispararEm||[],
+          ordem: dados.ordem||0
+        });
       });
-      // Ordena por ordem no cliente (evita índice no Firestore)
       _sugTelas.sort(function(a,b){ return (a.ordem||0)-(b.ordem||0); });
+
+      dbg('[SUGESTOES] Telas carregadas: '+_sugTelas.length);
+      _sugTelas.forEach(function(t,i){
+        dbg('[SUGESTOES] Tela '+i+': "'+t.titulo+'" cats='+t.categorias.length+' dispararEm='+t.dispararEm.length);
+      });
+
       if(!_sugTelas.length){
-        // Sem telas configuradas — adiciona direto ao carrinho
         _confirmarAdicionarPendente();
         return;
       }
       _sugTelaIdx = 0;
       _abrirProximaTela();
-    }).catch(function(){
-      // Erro no Firestore — adiciona item direto sem sugestões
+    }).catch(function(e){
+      dbg('[SUGESTOES] Erro: '+(e&&e.message||e));
       _confirmarAdicionarPendente();
     });
 }
 
 function _abrirProximaTela(){
+  dbg('[SUGESTOES] _abrirProximaTela idx='+_sugTelaIdx+'/'+_sugTelas.length);
   while(_sugTelaIdx < _sugTelas.length){
     var tela = _sugTelas[_sugTelaIdx];
     var dispararEm = tela.dispararEm||[];
-    if(dispararEm.length === 0) break;
+    if(dispararEm.length === 0){
+      dbg('[SUGESTOES] Tela '+_sugTelaIdx+' sem gatilho — dispara sempre');
+      break;
+    }
     var catItem = _itemAdicionadoRef
       ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'')
       : '';
-    if(dispararEm.indexOf(catItem) >= 0) break;
+    dbg('[SUGESTOES] Tela '+_sugTelaIdx+' dispararEm='+JSON.stringify(dispararEm)+' catItem='+catItem);
+    if(dispararEm.indexOf(catItem) >= 0){
+      dbg('[SUGESTOES] Tela '+_sugTelaIdx+' BATE — abre');
+      break;
+    }
+    dbg('[SUGESTOES] Tela '+_sugTelaIdx+' NAO bate — pula');
     _sugTelaIdx++;
   }
   if(_sugTelaIdx >= _sugTelas.length){
-    // Sem mais telas — garante item pendente no carrinho
+    dbg('[SUGESTOES] Fim das telas');
     _confirmarAdicionarPendente();
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
@@ -1786,9 +1797,9 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
       if(!i.disponivel || i.pausado || i.id === (itemAdicionado||{}).id) return false;
       var catId = i.categoriaId || i.categoria;
       return catIds.indexOf(catId) >= 0;
-    }).sort(function(){ return Math.random()-0.5; }).slice(0, 9);
+    });
+    dbg('[SUGESTOES] Itens encontrados para cats '+JSON.stringify(catIds)+': '+_sugItens.length);
   } else {
-    // Fallback: itens marcados como sugerido
     _sugItens = (window._cardapioItens || []).filter(function(i){
       return i.disponivel && !i.pausado && i.sugerido === true && i.id !== (itemAdicionado||{}).id;
     }).sort(function(a,b){ return (a.ordemSugerido||99)-(b.ordemSugerido||99); });

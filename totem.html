@@ -1728,17 +1728,19 @@ function _carregarTelasEAbrir(itemAdicionado){
 }
 
 function _abrirProximaTela(){
-  // Pula telas cujo gatilho não bate com o item adicionado
+  // Pula telas cujo gatilho está configurado E não bate com o item adicionado
+  // Se dispararEm está VAZIO = aparece sempre (não pula)
   while(_sugTelaIdx < _sugTelas.length){
     var tela = _sugTelas[_sugTelaIdx];
     var dispararEm = tela.dispararEm||[];
-    if(dispararEm.length === 0) break; // sem gatilho = sempre dispara
-    var catItem = _itemAdicionadoRef ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'') : '';
-    if(dispararEm.indexOf(catItem) >= 0) break;
-    _sugTelaIdx++; // pula esta tela
+    if(dispararEm.length === 0) break; // sem gatilho = sempre dispara, para o while
+    var catItem = _itemAdicionadoRef
+      ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'')
+      : '';
+    if(dispararEm.indexOf(catItem) >= 0) break; // bate = dispara, para o while
+    _sugTelaIdx++; // não bate = pula esta tela
   }
   if(_sugTelaIdx >= _sugTelas.length){
-    // Acabaram todas as telas
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
     return;
@@ -2998,7 +3000,13 @@ function abrirTecladoVirtual(spanId){
       var ids=spanId?[spanId]:['mi-obs-texto','wiz-obs-texto'];
       ids.forEach(function(id){
         var el=document.getElementById(id);
-        if(el){el.textContent=_obsTemp||'Toque para digitar...';el.style.color=_obsTemp?'var(--text)':'var(--muted)';el.style.fontStyle=_obsTemp?'normal':'italic';}
+        if(el){
+          el.textContent=_obsTemp||'Toque para digitar...';
+          el.style.color=_obsTemp?'var(--text)':'var(--muted)';
+          el.style.fontStyle=_obsTemp?'normal':'italic';
+          var par=el.parentNode;
+          if(par){par.style.color=_obsTemp?'var(--text)':'var(--muted)';par.style.fontStyle=_obsTemp?'normal':'italic';}
+        }
       });
       mod.remove();
       try{if(navigator.vibrate)navigator.vibrate(20);}catch(e){}

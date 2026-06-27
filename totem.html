@@ -1728,19 +1728,19 @@ function _carregarTelasEAbrir(itemAdicionado){
 }
 
 function _abrirProximaTela(){
-  // Pula telas cujo gatilho está configurado E não bate com o item adicionado
-  // Se dispararEm está VAZIO = aparece sempre (não pula)
   while(_sugTelaIdx < _sugTelas.length){
     var tela = _sugTelas[_sugTelaIdx];
     var dispararEm = tela.dispararEm||[];
-    if(dispararEm.length === 0) break; // sem gatilho = sempre dispara, para o while
+    if(dispararEm.length === 0) break;
     var catItem = _itemAdicionadoRef
       ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'')
       : '';
-    if(dispararEm.indexOf(catItem) >= 0) break; // bate = dispara, para o while
-    _sugTelaIdx++; // não bate = pula esta tela
+    if(dispararEm.indexOf(catItem) >= 0) break;
+    _sugTelaIdx++;
   }
   if(_sugTelaIdx >= _sugTelas.length){
+    // Sem mais telas — garante item pendente no carrinho
+    _confirmarAdicionarPendente();
     resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
     return;
@@ -1794,14 +1794,13 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
     }).sort(function(a,b){ return (a.ordemSugerido||99)-(b.ordemSugerido||99); });
   }
   if(!_sugItens.length){
-    // Pula esta tela e vai para próxima
+    // Sem itens nesta tela — pula para próxima
     _sugTelaIdx++;
     _abrirProximaTela();
     return;
   }
 
-  // Confirma o item principal IMEDIATAMENTE ao abrir a tela de sugestão
-  // O cliente já escolheu — o item vai pro carrinho agora
+  // Confirma o item principal IMEDIATAMENTE ao abrir a primeira tela
   _confirmarAdicionarPendente();
   _sugSelecoes = {};
   clearTimeout(_sugAutoClose);
@@ -2934,7 +2933,7 @@ function abrirTecladoVirtual(spanId){
   mod.style.cssText='position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:99999;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(0,0,0,0.75);';
   mod.addEventListener('touchend',function(e){if(e.target===mod){e.preventDefault();mod.remove();}},{passive:false});
   var box=document.createElement('div');
-  box.style.cssText='background:#111;border-radius:20px 20px 0 0;padding:14px;width:100%;';
+  box.style.cssText='background:#111;border-radius:20px 20px 0 0;padding:14px;width:100%;max-height:90vh;overflow-y:auto;';
   box.addEventListener('touchend',function(e){e.stopPropagation();},{passive:false});
   var display=document.createElement('div');
   display.style.cssText='background:#1a1a1a;border:1.5px solid #333;border-radius:10px;padding:12px 14px;font-size:1rem;min-height:50px;margin-bottom:12px;word-break:break-all;line-height:1.5;color:#f0ede8;';
@@ -2993,9 +2992,9 @@ function abrirTecladoVirtual(spanId){
     ctrl.appendChild(delBtn);
     teclasDiv.appendChild(ctrl);
     var ok=document.createElement('div');
-    ok.style.cssText='display:flex;gap:8px;margin-top:2px;';
-    ok.appendChild(mkBtn('Cancelar',1,'#1e1e1e','#666',function(){mod.remove();}));
-    ok.appendChild(mkBtn('OK',2,'#d4a843','#000',function(){
+    ok.style.cssText='display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #2a2a2a;';
+    ok.appendChild(mkBtn('Cancelar',1,'#2a2a2a','#aaa',function(){mod.remove();}));
+    ok.appendChild(mkBtn('Confirmar',2,'#4ade80','#000',function(){
       _obsTemp=texto.trim();
       var ids=spanId?[spanId]:['mi-obs-texto','wiz-obs-texto'];
       ids.forEach(function(id){

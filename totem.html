@@ -1687,34 +1687,6 @@ function _sugRenderGrid(){
   }
 }
 
-function _confirmarAdicionaisSugeridos(){
-  clearTimeout(_sugAutoClose);
-  var tela = document.getElementById('tela-adicionais');
-  if(tela) tela.remove();
-  // Adiciona extras selecionados desta tela (item principal já foi confirmado ao abrir)
-  var temExtras = false;
-  Object.keys(_sugSelecoes).forEach(function(itemId){
-    var qtd = _sugSelecoes[itemId]; if(!qtd) return;
-    var it = _sugItens.find(function(x){ return x.id===itemId; });
-    if(!it) return;
-    _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
-    temExtras = true;
-  });
-  if(temExtras){ try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
-  atualizarBarra();
-  renderItens();
-  _sugSelecoes = {};
-  _sugItens = [];
-  // Vai para próxima tela ou fecha
-  _sugTelaIdx++;
-  if(_sugTelaIdx < _sugTelas.length){
-    _abrirProximaTela();
-  } else {
-    resetTimerInatividade();
-    if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
-  }
-}
-
 var _sugTelas = [];     // telas configuradas [{titulo, categorias:[]}]
 var _sugTelaIdx = 0;    // tela atual
 var _itemAdicionadoRef = null;
@@ -1762,16 +1734,45 @@ function _abrirProximaTela(){
     var dispararEm = tela.dispararEm||[];
     if(dispararEm.length === 0) break; // sem gatilho = sempre dispara
     var catItem = _itemAdicionadoRef ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'') : '';
-    if(dispararEm.indexOf(catItem) >= 0) break; // bate com a categoria
+    if(dispararEm.indexOf(catItem) >= 0) break;
     _sugTelaIdx++; // pula esta tela
   }
   if(_sugTelaIdx >= _sugTelas.length){
-    _confirmarAdicionarPendente();
+    // Acabaram todas as telas
+    resetTimerInatividade();
     if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
     return;
   }
-  var tela = _sugTelas[_sugTelaIdx];
-  _abrirTelaAdicionais(_itemAdicionadoRef, tela);
+  _abrirTelaAdicionais(_itemAdicionadoRef, _sugTelas[_sugTelaIdx]);
+}
+
+function _pularTelaSugestao(){
+  clearTimeout(_sugAutoClose);
+  var el = document.getElementById('tela-adicionais');
+  if(el) el.remove();
+  _sugSelecoes = {};
+  _sugTelaIdx++;
+  _abrirProximaTela();
+}
+
+function _confirmarAdicionaisSugeridos(){
+  clearTimeout(_sugAutoClose);
+  var tela = document.getElementById('tela-adicionais');
+  if(tela) tela.remove();
+  // Adiciona extras selecionados desta tela
+  var temExtras = false;
+  Object.keys(_sugSelecoes).forEach(function(itemId){
+    var qtd = _sugSelecoes[itemId]; if(!qtd) return;
+    var it = _sugItens.find(function(x){ return x.id===itemId; });
+    if(!it) return;
+    _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
+    temExtras = true;
+  });
+  if(temExtras){ atualizarBarra(); renderItens(); try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
+  _sugSelecoes = {};
+  _sugItens = [];
+  _sugTelaIdx++;
+  _abrirProximaTela();
 }
 
 function _abrirTelaAdicionais(itemAdicionado, telaConfig){
@@ -1840,19 +1841,7 @@ function _fecharTelaAdicionais(){
   resetTimerInatividade();
 }
 
-function _pularTelaSugestao(){
-  clearTimeout(_sugAutoClose);
-  var el = document.getElementById('tela-adicionais');
-  if(el) el.remove();
-  _sugSelecoes = {};
-  _sugTelaIdx++;
-  if(_sugTelaIdx < _sugTelas.length){
-    _abrirProximaTela();
-  } else {
-    resetTimerInatividade();
-    if(_carrinho.length){ var b=document.getElementById('barra-carrinho'); if(b) b.click(); }
-  }
-}
+
 
 function _adicionarSugerido(itemId){
   var it = (window._cardapioItens||[]).find(function(i){ return i.id === itemId; });
@@ -2934,121 +2923,88 @@ function escapar(s){
 
 
 <script>
-// ── TECLADO VIRTUAL ── (bloco separado para não ser removido por edições)
 function abrirTecladoVirtual(spanId){
-  var ex = document.getElementById('teclado-virtual');
-  if(ex){ ex.remove(); return; }
-  var texto = _obsTemp || '';
-
-  var mod = document.createElement('div');
-  mod.id = 'teclado-virtual';
-  mod.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:99999;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(0,0,0,0.75);';
-  mod.addEventListener('touchend', function(e){ if(e.target===mod){ e.preventDefault(); mod.remove(); } }, {passive:false});
-
-  var box = document.createElement('div');
-  box.style.cssText = 'background:#111;border-radius:20px 20px 0 0;padding:14px;width:100%;';
-  box.addEventListener('touchend', function(e){ e.stopPropagation(); }, {passive:false});
-
-  var display = document.createElement('div');
-  display.style.cssText = 'background:#1a1a1a;border:1.5px solid #333;border-radius:10px;padding:12px 14px;font-size:1rem;min-height:50px;margin-bottom:12px;word-break:break-all;line-height:1.5;color:#f0ede8;';
-
-  function atualizar(){ display.textContent = texto || ''; }
+  var ex=document.getElementById('teclado-virtual');
+  if(ex){ex.remove();return;}
+  var texto=_obsTemp||'';
+  var mod=document.createElement('div');
+  mod.id='teclado-virtual';
+  mod.style.cssText='position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:99999;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(0,0,0,0.75);';
+  mod.addEventListener('touchend',function(e){if(e.target===mod){e.preventDefault();mod.remove();}},{passive:false});
+  var box=document.createElement('div');
+  box.style.cssText='background:#111;border-radius:20px 20px 0 0;padding:14px;width:100%;';
+  box.addEventListener('touchend',function(e){e.stopPropagation();},{passive:false});
+  var display=document.createElement('div');
+  display.style.cssText='background:#1a1a1a;border:1.5px solid #333;border-radius:10px;padding:12px 14px;font-size:1rem;min-height:50px;margin-bottom:12px;word-break:break-all;line-height:1.5;color:#f0ede8;';
+  function atualizar(){display.textContent=texto||'';}
   atualizar();
-
-  var maiuscula = false, numeros = false;
-
-  var linhasABC = [
+  var maiuscula=false,numeros=false;
+  var linhasABC=[
     ['1','2','3','4','5','6','7','8','9','0'],
     ['q','w','e','r','t','y','u','i','o','p'],
     ['a','s','d','f','g','h','j','k','l'],
     ['z','x','c','v','b','n','m']
   ];
-  var linhas123 = [
+  var linhas123=[
     ['1','2','3','4','5','6','7','8','9','0'],
     ['!','?',',','.',';',':','-','_','(',')'],
-    ['"',"'",'@','#','$','%','&','*','+','='],
-    ['/','<','>','~','^','`','|','{','}','\']
+    ['@','#','$','%','&','*','+','=','<','>'],
+    ['/','~','^','|','{','}','[',']','`',"'"]
   ];
-
-  var teclasDiv = document.createElement('div');
-  teclasDiv.style.cssText = 'display:flex;flex-direction:column;gap:5px;';
-
-  function mkBtn(label, flex, bg, color, onTap){
-    var b = document.createElement('button');
-    b.textContent = label;
-    b.style.cssText = 'height:46px;flex:'+flex+';background:'+bg+';border:1px solid #3a3a3a;border-radius:8px;color:'+color+';font-size:0.95rem;font-family:inherit;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;';
-    var fired = false;
-    b.addEventListener('touchstart', function(e){ e.preventDefault(); fired=false; }, {passive:false});
-    b.addEventListener('touchend', function(e){ e.preventDefault(); e.stopPropagation(); if(!fired){ fired=true; onTap(); } }, {passive:false});
-    b.addEventListener('click', function(e){ if(!fired){ fired=true; onTap(); } setTimeout(function(){ fired=false; },300); });
+  var teclasDiv=document.createElement('div');
+  teclasDiv.style.cssText='display:flex;flex-direction:column;gap:5px;';
+  function mkBtn(label,flex,bg,color,onTap){
+    var b=document.createElement('button');
+    b.textContent=label;
+    b.style.cssText='height:46px;flex:'+flex+';background:'+bg+';border:1px solid #3a3a3a;border-radius:8px;color:'+color+';font-size:0.95rem;font-family:inherit;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;';
+    var fired=false;
+    b.addEventListener('touchstart',function(e){e.preventDefault();fired=false;},{passive:false});
+    b.addEventListener('touchend',function(e){e.preventDefault();e.stopPropagation();if(!fired){fired=true;onTap();}},{passive:false});
+    b.addEventListener('click',function(){if(!fired){fired=true;onTap();}setTimeout(function(){fired=false;},300);});
     return b;
   }
-
   function renderTeclas(){
-    teclasDiv.innerHTML = '';
-    var linhas = numeros ? linhas123 : linhasABC;
+    teclasDiv.innerHTML='';
+    var linhas=numeros?linhas123:linhasABC;
     linhas.forEach(function(linha){
-      var row = document.createElement('div');
-      row.style.cssText = 'display:flex;gap:4px;';
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;gap:4px;';
       linha.forEach(function(k){
-        var ch = (!numeros && maiuscula) ? k.toUpperCase() : k;
-        row.appendChild(mkBtn(ch, 1, '#2a2a2a', '#f0ede8', function(){
-          if(texto.length < 150) texto += ch;
-          if(maiuscula && !numeros){ maiuscula=false; renderTeclas(); }
+        var ch=(!numeros&&maiuscula)?k.toUpperCase():k;
+        row.appendChild(mkBtn(ch,1,'#2a2a2a','#f0ede8',function(){
+          if(texto.length<150)texto+=ch;
+          if(maiuscula&&!numeros){maiuscula=false;renderTeclas();}
           atualizar();
         }));
       });
       teclasDiv.appendChild(row);
     });
-
-    var ctrl = document.createElement('div');
-    ctrl.style.cssText = 'display:flex;gap:4px;';
-
-    ctrl.appendChild(mkBtn(numeros?'ABC':(maiuscula?'⬆️':'⬆'), 1.5,
-      (!numeros&&maiuscula)?'#d4a843':'#2a2a2a',
-      (!numeros&&maiuscula)?'#000':'#f0ede8',
-      function(){ if(numeros){numeros=false;}else{maiuscula=!maiuscula;} renderTeclas(); }
-    ));
-    ctrl.appendChild(mkBtn(numeros?'ABC':'123', 1.5, '#2a2a2a', '#f0ede8',
-      function(){ numeros=!numeros; maiuscula=false; renderTeclas(); }
-    ));
-    ctrl.appendChild(mkBtn('espaço', 4, '#1e1e1e', '#888',
-      function(){ if(texto.length<150){texto+=' ';} atualizar(); }
-    ));
-
-    var delBtn = mkBtn('⌫', 1.5, '#3a1a1a', '#f87171', function(){
-      if(texto.length>0){texto=texto.slice(0,-1);} atualizar();
-    });
+    var ctrl=document.createElement('div');
+    ctrl.style.cssText='display:flex;gap:4px;';
+    ctrl.appendChild(mkBtn(numeros?'ABC':(maiuscula?'MAI':'mai'),1.5,(!numeros&&maiuscula)?'#d4a843':'#2a2a2a',(!numeros&&maiuscula)?'#000':'#f0ede8',function(){if(numeros){numeros=false;}else{maiuscula=!maiuscula;}renderTeclas();}));
+    ctrl.appendChild(mkBtn(numeros?'ABC':'123',1.5,'#2a2a2a','#f0ede8',function(){numeros=!numeros;maiuscula=false;renderTeclas();}));
+    ctrl.appendChild(mkBtn('espaco',4,'#1e1e1e','#888',function(){if(texto.length<150)texto+=' ';atualizar();}));
+    var delBtn=mkBtn('apagar',1.5,'#3a1a1a','#f87171',function(){if(texto.length>0)texto=texto.slice(0,-1);atualizar();});
     var delInt;
-    delBtn.addEventListener('touchstart', function(e){
-      e.preventDefault();
-      delInt = setInterval(function(){ if(texto.length>0){texto=texto.slice(0,-1);atualizar();}else{clearInterval(delInt);} }, 80);
-    }, {passive:false});
-    delBtn.addEventListener('touchend', function(e){ e.preventDefault(); clearInterval(delInt); }, {passive:false});
+    delBtn.addEventListener('touchstart',function(e){e.preventDefault();delInt=setInterval(function(){if(texto.length>0){texto=texto.slice(0,-1);atualizar();}else{clearInterval(delInt);}},80);},{passive:false});
+    delBtn.addEventListener('touchend',function(e){e.preventDefault();clearInterval(delInt);},{passive:false});
     ctrl.appendChild(delBtn);
     teclasDiv.appendChild(ctrl);
-
-    var ok = document.createElement('div');
-    ok.style.cssText = 'display:flex;gap:8px;margin-top:2px;';
-    ok.appendChild(mkBtn('Cancelar', 1, '#1e1e1e', '#666', function(){ mod.remove(); }));
-    ok.appendChild(mkBtn('✓  OK', 2, '#d4a843', '#000', function(){
-      _obsTemp = texto.trim();
-      var ids = spanId ? [spanId] : ['mi-obs-texto','wiz-obs-texto'];
+    var ok=document.createElement('div');
+    ok.style.cssText='display:flex;gap:8px;margin-top:2px;';
+    ok.appendChild(mkBtn('Cancelar',1,'#1e1e1e','#666',function(){mod.remove();}));
+    ok.appendChild(mkBtn('OK',2,'#d4a843','#000',function(){
+      _obsTemp=texto.trim();
+      var ids=spanId?[spanId]:['mi-obs-texto','wiz-obs-texto'];
       ids.forEach(function(id){
         var el=document.getElementById(id);
-        if(el){
-          el.textContent = _obsTemp||'Toque para digitar...';
-          el.style.color = _obsTemp?'var(--text)':'var(--muted)';
-          el.style.fontStyle = _obsTemp?'normal':'italic';
-          var par=el.parentNode; if(par){ par.style.color=''; par.style.fontStyle=''; }
-        }
+        if(el){el.textContent=_obsTemp||'Toque para digitar...';el.style.color=_obsTemp?'var(--text)':'var(--muted)';el.style.fontStyle=_obsTemp?'normal':'italic';}
       });
       mod.remove();
       try{if(navigator.vibrate)navigator.vibrate(20);}catch(e){}
     }));
     teclasDiv.appendChild(ok);
   }
-
   renderTeclas();
   box.appendChild(display);
   box.appendChild(teclasDiv);
@@ -3057,4 +3013,3 @@ function abrirTecladoVirtual(spanId){
 }
 </script>
 </body>
-</html>

@@ -1802,11 +1802,16 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
   var catIds = telaConfig.categorias;
 
   if(catIds.length > 0){
-    _sugItens = (window._cardapioItens || []).filter(function(i){
+    // Busca em todos os itens disponíveis (totem + principal)
+    var todosItens = (window._cardapioItens || []).concat(window._itensPrincipal || []);
+    _sugItens = todosItens.filter(function(i){
       if(!i.disponivel || i.pausado || i.id === (itemAdicionado||{}).id) return false;
       var catId = i.categoriaId || i.categoria;
       return catIds.indexOf(catId) >= 0;
     });
+    // Remove duplicatas por id
+    var vistos = {};
+    _sugItens = _sugItens.filter(function(i){ if(vistos[i.id]) return false; vistos[i.id]=true; return true; });
     dbg('[SUGESTOES] Itens encontrados para cats '+JSON.stringify(catIds)+': '+_sugItens.length);
   } else {
     _sugItens = (window._cardapioItens || []).filter(function(i){
@@ -2915,8 +2920,18 @@ function debugSugestoes(){
         out.textContent += '  dispararEm('+t.dispararEm.length+'): '+JSON.stringify(t.dispararEm)+'\n';
       });
 
-      // Item adicionado mais recente
-      out.textContent += '\n=== ÚLTIMO ITEM ADICIONADO ===\n';
+      // Conta itens por categoria nas telas
+      out.textContent += '\n=== ITENS POR CATEGORIA DAS TELAS ===\n';
+      _sugTelas.forEach(function(t,i){
+        out.textContent += 'Tela '+i+' "'+t.titulo+'":\n';
+        t.categorias.forEach(function(catId){
+          var count = (window._cardapioItens||[]).filter(function(it){
+            return (it.categoriaId||it.categoria) === catId && it.disponivel && !it.pausado;
+          }).length;
+          var catNome = (window._cardapioCats||[]).find(function(c){return c.id===catId;});
+          out.textContent += '  '+catId.slice(0,12)+'... ('+( catNome?catNome.nome:'?')+') = '+count+' itens\n';
+        });
+      });
       if(_itemAdicionadoRef){
         out.textContent += 'Nome: ' + (_itemAdicionadoRef.nome||'?') + '\n';
         out.textContent += 'CategoriaId: ' + (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'VAZIO') + '\n';

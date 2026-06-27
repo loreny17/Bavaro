@@ -1869,38 +1869,54 @@ document.addEventListener('visibilitychange', function(){
   if(document.hidden){
     _backgroundDesde = Date.now();
   } else {
-    var tempoBack = Date.now() - _backgroundDesde;
-    if(tempoBack > 120000){
-      _ultimaRevalidacao = 0;
+    var tempoBack = _backgroundDesde ? (Date.now() - _backgroundDesde) : 0;
+    _backgroundDesde = 0;
+    // Sempre reseta throttle ao voltar do background
+    _ultimaRevalidacao = 0;
+    if(tempoBack > 30000){
+      // Ficou mais de 30s — reconexão completa
       Object.keys(_saudeListeners).forEach(function(k){ _saudeListeners[k].ultimoUpdate = 0; });
+    }
+    // Aguarda Firebase estar pronto antes de reconectar
+    if(_restauranteId){
       revalidarConexaoFirestore();
     } else {
-      revalidarConexaoFirestore();
+      // _restauranteId ainda null — tenta em breve
+      var _tentativas = 0;
+      var _wId = setInterval(function(){
+        _tentativas++;
+        if(_restauranteId){ clearInterval(_wId); revalidarConexaoFirestore(); }
+        else if(_tentativas > 10) clearInterval(_wId);
+      }, 500);
     }
-    _backgroundDesde = 0;
   }
+});
+
+window.addEventListener('focus', function(){
+  _ultimaRevalidacao = 0;
+  if(_restauranteId) revalidarConexaoFirestore();
+});
+window.addEventListener('online', function(){
+  _ultimaRevalidacao = 0;
+  if(_restauranteId) revalidarConexaoFirestore();
 });
 
 function revalidarConexaoFirestore(){
   var agora = Date.now();
-  if(agora - _ultimaRevalidacao < 3000) return;
+  if(agora - _ultimaRevalidacao < 2000) return;
   _ultimaRevalidacao = agora;
   if(!fbDb || !_restauranteId) return;
 
-  // Mostra loading no mapa se não está dentro de mesa
+  // Toast discreto de reconectando
   if(_mesaAtiva === null || _mesaAtiva === undefined){
-    var grid = document.getElementById('mesas-grid');
-    if(grid && grid.children.length > 0){
-      // Adiciona overlay de reconectando
-      var overlay = document.getElementById('mesas-reconect');
-      if(!overlay){
-        overlay = document.createElement('div');
-        overlay.id = 'mesas-reconect';
-        overlay.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:var(--accent);padding:8px 18px;border-radius:10px;font-size:0.78rem;z-index:999;';
-        overlay.textContent = '🔄 Reconectando...';
-        document.body.appendChild(overlay);
-        setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 3000);
-      }
+    var overlay = document.getElementById('mesas-reconect');
+    if(!overlay){
+      overlay = document.createElement('div');
+      overlay.id = 'mesas-reconect';
+      overlay.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:var(--accent);padding:8px 18px;border-radius:10px;font-size:0.78rem;z-index:999;pointer-events:none;';
+      overlay.textContent = '🔄 Reconectando...';
+      document.body.appendChild(overlay);
+      setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 3000);
     }
   }
 
@@ -1908,49 +1924,25 @@ function revalidarConexaoFirestore(){
   if(typeof escutarMesasOcupadas === 'function'){
     try{ escutarMesasOcupadas(); }catch(e){ console.warn('Revalidar mesas:', e); }
   }
-  if(_mesaAtiva !== null && _mesaAtiva !== undefined && typeof escutarMeusPedidos === 'function'){
-    try{ escutarMeusPedidos(); }catch(e){ console.warn('Revalidar pedidos:', e); }
+  if(_mesaAtiva !== null && _mesaAtiva !== undefined){
+    if(typeof escutarMeusPedidos === 'function'){
+      try{ escutarMeusPedidos(); }catch(e){ console.warn('Revalidar pedidos:', e); }
+    }
   }
 }
 
-// ════════════════════════════════════════
-//  PROTEÇÃO CONTRA TOQUES ENFILEIRADOS
-//  DESATIVADA — estava bloqueando toques normais
-// ════════════════════════════════════════
-var _wakeBloqueado = false;
-var _wakeAteQuando = 0;
-var _ultimoEscondidoEm = 0; // quando ficou escondido pela última vez
-
-function ativarWakeBloqueio(motivo){
-  // Apenas re-conecta Firebase, NÃO bloqueia toques
-  revalidarConexaoFirestore();
-}
-
-function isWakeBloqueado(){
-  return false; // sempre false — não bloqueia mais
-}
-
-function mostrarOverlayWake(){ /* desativado */ }
-function esconderOverlayWake(){ /* desativado */ }
-
-// Removidos os listeners de click/touchend que bloqueavam
-document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'hidden'){
-    // App ficou escondido — marca o momento
-    _ultimoEscondidoEm = Date.now();
-  } else if(document.visibilityState === 'visible'){
-    // App voltou — só bloqueia se ficou MAIS de 5 segundos escondido
-    var tempoEscondido = _ultimoEscondidoEm ? (Date.now() - _ultimoEscondidoEm) : 0;
-    if(tempoEscondido > 5000){
-      ativarWakeBloqueio('visible-longo');
-    }
+// ── WATCHDOG: verifica a cada 30s se os listeners estão vivos ──
+setInterval(function(){
+  if(document.hidden || !_restauranteId || !fbDb) return;
+  var agora = Date.now();
+  var ultimoUpdate = _saudeListeners.mesas ? (_saudeListeners.mesas.ultimoUpdate || 0) : 0;
+  // Se não recebeu update das mesas em mais de 90s, listener provavelmente morreu
+  if(ultimoUpdate > 0 && agora - ultimoUpdate > 90000){
+    console.warn('[Watchdog] Listener mesas sem update há '+ Math.round((agora-ultimoUpdate)/1000)+'s — reconectando');
+    _ultimaRevalidacao = 0;
     revalidarConexaoFirestore();
   }
-});
-// REMOVIDO bloqueio no focus (era muito agressivo, disparava em toques normais)
-window.addEventListener('focus', function(){ revalidarConexaoFirestore(); });
-// Online apenas revalida, não bloqueia
-window.addEventListener('online', function(){ revalidarConexaoFirestore(); });
+}, 30000);
 
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;
@@ -10195,6 +10187,17 @@ function _renderCardItem(it, grid){
     card.style.opacity = '0.5';
     card.style.position = 'relative';
   }
+
+  // Borda verde para vegano/vegetariano
+  var catInfo = (_categorias||[]).find(function(c){ return c.id === (it.categoriaId||it.categoria||''); });
+  var vegTipo = catInfo ? (catInfo.tipo||'') : '';
+  if(vegTipo === 'vegano'){
+    card.style.border = '2px solid #16a34a';
+    card.style.boxShadow = '0 0 0 1px rgba(22,163,74,0.2)';
+  } else if(vegTipo === 'vegetariano'){
+    card.style.border = '2px solid #86efac';
+    card.style.boxShadow = '0 0 0 1px rgba(134,239,172,0.2)';
+  }
   var fotoHtml = it.foto
     ? '<div class="item-foto"><img src="'+it.foto+'" alt="'+it.nome+'" loading="lazy" onerror="this.parentNode.innerHTML=\'🍽️\'"></div>'
     : '<div class="item-foto">🍽️</div>';
@@ -10213,7 +10216,14 @@ function _renderCardItem(it, grid){
   }
   var ehKg = it.tipoVenda === 'kg';
   var sufixoPreco = ehKg ? '<span style="font-size:0.7rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
-  card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+statusBadge+'</div>'+
+  var vegBadge = '';
+  if(vegTipo === 'vegano'){
+    vegBadge = '<div style="position:absolute;bottom:5px;left:5px;background:#16a34a;color:#fff;border-radius:20px;padding:2px 7px;font-size:0.58rem;font-weight:800;z-index:5;">🌱 VEGANO</div>';
+  } else if(vegTipo === 'vegetariano'){
+    vegBadge = '<div style="position:absolute;bottom:5px;left:5px;background:#86efac;color:#000;border-radius:20px;padding:2px 7px;font-size:0.58rem;font-weight:800;z-index:5;">🥗 VEG</div>';
+  }
+
+  card.innerHTML = '<div style="position:relative;">'+fotoHtml+badge+statusBadge+vegBadge+'</div>'+
     '<div class="item-info">'+
       '<div class="item-nome">'+esc(it.nome)+'</div>'+
       (it.desc ? '<div class="item-desc">'+esc(it.desc)+'</div>' : '')+

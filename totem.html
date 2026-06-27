@@ -695,6 +695,12 @@
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
       </div>
+      <!-- DEBUG SUGESTÕES -->
+      <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
+        <div style="font-weight:700;font-size:0.9rem;margin-bottom:10px;">🔍 Debug — Telas de Sugestão</div>
+        <button onclick="debugSugestoes()" style="width:100%;padding:11px;background:rgba(212,168,67,0.1);border:1.5px solid rgba(212,168,67,0.4);color:var(--accent);border-radius:10px;font-weight:700;font-family:inherit;cursor:pointer;margin-bottom:10px;">Verificar telas configuradas</button>
+        <div id="debug-sug-output" style="background:#0a0a0a;border-radius:8px;padding:10px;font-size:0.68rem;font-family:monospace;color:#4ade80;max-height:200px;overflow-y:auto;white-space:pre-wrap;display:none;"></div>
+      </div>
     </div>
     <div class="cart-rodape" style="display:flex;gap:8px;">
       <button onclick="restaurarPadrao()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Restaurar padrão</button>
@@ -2845,6 +2851,48 @@ function aplicarCfg(cfg){
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
+function debugSugestoes(){
+  var out = document.getElementById('debug-sug-output');
+  if(!out) return;
+  out.style.display = 'block';
+  out.textContent = 'Buscando telas...\n';
+
+  var base = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId);
+
+  base.collection('cardapio_totem').doc('data').collection('sugestoes')
+    .get()
+    .then(function(snap){
+      out.textContent = 'Total de telas: ' + snap.size + '\n\n';
+      var idx = 0;
+      snap.forEach(function(d){
+        var dados = d.data();
+        out.textContent += '--- Tela ' + (++idx) + ' ---\n';
+        out.textContent += 'ID: ' + d.id + '\n';
+        out.textContent += 'Título: ' + (dados.titulo||'?') + '\n';
+        out.textContent += 'Ordem: ' + (dados.ordem||0) + '\n';
+        out.textContent += 'Categorias (' + (dados.categorias||[]).length + '): ' + JSON.stringify(dados.categorias||[]) + '\n';
+        out.textContent += 'DispararEm (' + (dados.dispararEm||[]).length + '): ' + JSON.stringify(dados.dispararEm||[]) + '\n\n';
+      });
+
+      // Também mostra últimas telas carregadas em memória
+      out.textContent += '=== EM MEMÓRIA ===\n';
+      out.textContent += '_sugTelas: ' + _sugTelas.length + '\n';
+      _sugTelas.forEach(function(t,i){
+        out.textContent += 'Tela '+i+': "'+t.titulo+'" cats='+t.categorias.length+' dispararEm='+t.dispararEm.length+'\n';
+      });
+
+      // IDs de categorias disponíveis
+      out.textContent += '\n=== CATEGORIAS NO TOTEM ===\n';
+      (window._cardapioCats||[]).forEach(function(c){
+        out.textContent += c.id.slice(0,8)+'... = '+c.nome+'\n';
+      });
+    })
+    .catch(function(e){
+      out.textContent = 'ERRO: ' + (e&&e.message||String(e));
+    });
+}
+
 function contarToqueLogo(){
   var agora = Date.now();
   if(agora - _ultimoToqueLogo > 1500) _toquesLogo = 0;

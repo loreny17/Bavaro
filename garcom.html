@@ -6084,6 +6084,22 @@ function copiarLogsDebug(){
   };
   var texto = '=== DEBUG BÁVARO ===\n';
   texto += JSON.stringify(info, null, 2) + '\n\n';
+
+  // Adiciona itens da conta atual com campo pessoa
+  if(_fecharConta && _fecharConta.itens){
+    texto += '=== ITENS CONTA (pessoa) ===\n';
+    (_fecharConta.itens||[]).forEach(function(it,i){
+      texto += i+': '+it.nome+' | pessoa='+(it.pessoa||'(vazio)')+' | key='+(it.itemKey||'(sem key)')+'\n';
+    });
+    texto += '\n=== PEDIDOS (pessoa) ===\n';
+    (_meusPedidos||[]).forEach(function(p){
+      (p.itens||[]).forEach(function(it){
+        if(it.pessoa) texto += it.nome+' → '+it.pessoa+' | key='+(it.itemKey||'?')+'\n';
+      });
+    });
+    texto += '\n';
+  }
+
   texto += '=== LOGS ===\n';
   _debugLogs.forEach(function(l){
     texto += '[' + l.hora + '][' + l.tipo + '] ' + l.msg + '\n';
@@ -15169,6 +15185,15 @@ function _alterarQtdItemConta(itemKey, delta){
 
 function renderFecharConta(){
   if(!_fecharConta) return;
+
+  // LOG: mostra campo pessoa de cada item (para debug)
+  var logItens = (_fecharConta.itens||[]).map(function(it,i){
+    return i+': '+it.nome+' | pessoa='+( it.pessoa||'(vazio)')+' | itemKey='+(it.itemKey||'(sem key)');
+  }).join('\n');
+  console.log('[FECHAR CONTA] Itens:\n'+logItens);
+  console.log('[FECHAR CONTA] _meusPedidos pessoa:', (_meusPedidos||[]).map(function(p){
+    return (p.itens||[]).map(function(it){ return it.nome+'='+( it.pessoa||'-'); }).join(', ');
+  }).join(' | '));
   var body = document.getElementById('fechar-conta-body');
   var footer = document.getElementById('fechar-conta-footer');
   var c = _fecharConta;

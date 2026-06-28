@@ -12594,14 +12594,18 @@ function enviarPedido(){
   var mesaInt = ehComanda ? null : (parseInt(_mesaAtiva) || _mesaAtiva);
   var contaId = conta.id;
   var _agoraPedido = Date.now();
-  var itensPedido = _carrinho.map(function(it){
+  var _pedidoId = fbDb.collection('pedidos').doc().id; // gera ID antecipado
+  var itensPedido = _carrinho.map(function(it, idx){
     var ehKg = it.tipoVenda === 'kg' && it.peso;
+    // itemKey único: pedidoId + sufixo aleatório — mesmo key na conta e no pedido
+    var itemKey = _pedidoId + '_' + Math.random().toString(36).slice(2,8);
     var item = {
       id:it.id, nome:it.nome, preco:it.preco, qtd:it.qtd, obs:it.obs||'',
       selecoes: it.selecoes || [],
       precoBase: it.precoBase || it.preco,
       extras: it.extras || 0,
       pessoa: it.pessoa || '',
+      itemKey: itemKey,
       cozinhaCriadoEm: _agoraPedido
     };
     // Itens por kg: passa tipoVenda + peso + nomeCliente pro cupom mostrar corretamente
@@ -12680,18 +12684,19 @@ function enviarPedido(){
   // 1. Gera número sequencial e cria pedido
   gerarNumeroSequencial().then(function(numero){
     if(numero) pedido.numeroSequencial = numero;
-    return fbDb.collection('pedidos').add(pedido);
-  }).then(function(ref){
-    var pedidoId = ref.id;
+    return fbDb.collection('pedidos').doc(_pedidoId).set(pedido);
+  }).then(function(){
+    var pedidoId = _pedidoId;
     // ⚡ Decrementa estoque dos itens que têm controle (em background, fire-and-forget)
     decrementarEstoque(carrinhoBackup, pedidoId);
-    // 2. Adiciona itens na conta da mesa (com status: aberto)
+    // 2. Adiciona itens na conta da mesa — usa o MESMO itemKey do pedido
     var itensConta = itensPedido.map(function(it){
       var item = {
-        itemKey: pedidoId + '_' + Math.random().toString(36).substring(2,8),
+        itemKey: it.itemKey, // mesmo key do pedido — permite cruzar pessoa
         pedidoId: pedidoId,
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs||'',
         selecoes: it.selecoes || [],
+        pessoa: it.pessoa || '', // carrega pessoa do carrinho
         status: 'ativo',
         pagamentoId: null,
         adicionadoEm: Date.now(),
@@ -13663,6 +13668,10 @@ function vincularPessoaFechar(itemKey, nomeItem){
 
 function _salvarPessoaFechar(itemKey, nomePessoa){
   if(!_fecharConta || !_fecharConta.id) return;
+  // Atualiza mapa em memória
+  if(nomePessoa) _mapaPessoaItens[itemKey] = nomePessoa;
+  else delete _mapaPessoaItens[itemKey];
+
   var atualizado = false;
   var itens = (_fecharConta.itens||[]).map(function(it){
     if(it.itemKey === itemKey){
@@ -14072,29 +14081,20 @@ function _imprimirTudoJunto(num){
   imprimirContaMesa('simplificada');
 }
 
+var _mapaPessoaItens = {}; // itemKey → pessoa (persiste durante sessão do fechar conta)
+
 function _carregarPessoasPedidos(num, contaId){
   var mesaInt = parseInt(num);
   var snapPedidos = {};
   function _cruzar(snap){
     snap.forEach(function(d){ snapPedidos[d.id] = d.data(); });
-    // Monta mapa: itemKey → pessoa (SÓ por itemKey, sem fallback por nome)
-    var mapaPessoa = {};
     Object.values(snapPedidos).forEach(function(p){
       (p.itens||[]).forEach(function(it){
         if(!it.pessoa || !it.itemKey) return;
-        mapaPessoa[it.itemKey] = it.pessoa;
+        _mapaPessoaItens[it.itemKey] = it.pessoa;
       });
     });
-    // Aplica no _fecharConta — só por itemKey exato
-    if(_fecharConta){
-      (_fecharConta.itens||[]).forEach(function(it){
-        if(it.pessoa) return; // já tem
-        if(it.itemKey && mapaPessoa[it.itemKey]){
-          it.pessoa = mapaPessoa[it.itemKey];
-        }
-      });
-      renderFecharConta();
-    }
+    _aplicarMapaPessoa();
   }
   fbDb.collection('pedidos').where('restauranteId','==',_restauranteId).where('mesa','==',mesaInt)
     .get().then(_cruzar).catch(function(){});
@@ -14102,6 +14102,19 @@ function _carregarPessoasPedidos(num, contaId){
     fbDb.collection('pedidos').where('restauranteId','==',_restauranteId).where('contaId','==',contaId)
       .get().then(_cruzar).catch(function(){});
   }
+}
+
+function _aplicarMapaPessoa(){
+  if(!_fecharConta || !Object.keys(_mapaPessoaItens).length) return;
+  var mudou = false;
+  (_fecharConta.itens||[]).forEach(function(it){
+    if(it.pessoa) return;
+    if(it.itemKey && _mapaPessoaItens[it.itemKey]){
+      it.pessoa = _mapaPessoaItens[it.itemKey];
+      mudou = true;
+    }
+  });
+  if(mudou) renderFecharConta();
 }
 
 function _enriquecerItensConta(conta){ /* placeholder para futuras extensões */ }
@@ -14833,6 +14846,7 @@ function abrirFecharConta(num){
 
   _fecharContaId = conta.id;
   _fecharConta = conta;
+  _mapaPessoaItens = {}; // limpa mapa ao abrir nova conta
   if(_fecharUnsub) _fecharUnsub();
   _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
     .onSnapshot(function(doc){
@@ -14851,6 +14865,8 @@ function abrirFecharConta(num){
           });
         }
         _fecharConta = novasConta;
+        // Aplica mapa de pessoas carregado dos pedidos
+        _aplicarMapaPessoa();
         renderFecharConta();
       }
     });

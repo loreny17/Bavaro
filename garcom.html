@@ -13666,25 +13666,29 @@ function _sincronizarPessoaNaConta(itemKey, nomeItem, precoItem, nomePessoa){
   var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
   if(!conta || !conta.id) return;
 
+  console.log('[PESSOA] Sincronizando: itemKey='+itemKey+' nome='+nomeItem+' pessoa='+nomePessoa+' contaId='+conta.id);
+  console.log('[PESSOA] Itens na conta:', (conta.itens||[]).map(function(it){ return it.nome+'|key='+(it.itemKey||'?'); }).join(', '));
+
   var atualizado = false;
   var itens = (conta.itens||[]).map(function(it){
     if(atualizado) return it;
-    // Tenta por itemKey primeiro (mais exato)
+    // Só por itemKey exato
     if(itemKey && it.itemKey === itemKey){
       atualizado = true;
-      return Object.assign({}, it, {pessoa: nomePessoa});
-    }
-    // Fallback: nome+preco sem pessoa ainda
-    if(!itemKey && it.nome === nomeItem && Math.abs((it.preco||0)-precoItem) < 0.01 && !it.pessoa){
-      atualizado = true;
+      console.log('[PESSOA] Match por itemKey: '+it.nome+' → '+nomePessoa);
       return Object.assign({}, it, {pessoa: nomePessoa});
     }
     return it;
   });
 
-  if(!atualizado) return;
+  if(!atualizado){
+    console.log('[PESSOA] NENHUM item encontrado com itemKey='+itemKey);
+    return;
+  }
   conta.itens = itens;
-  fbDb.collection('contas_mesa').doc(conta.id).update({itens: itens}).catch(function(){});
+  fbDb.collection('contas_mesa').doc(conta.id).update({itens: itens})
+    .then(function(){ console.log('[PESSOA] Salvo na conta com sucesso'); })
+    .catch(function(e){ console.log('[PESSOA] ERRO ao salvar: '+e.message); });
 }
 
 // ════════════════════════════════════════
@@ -14738,15 +14742,15 @@ function abrirFecharConta(num){
     .onSnapshot(function(doc){
       if(doc.exists){
         var novasConta = Object.assign({id:doc.id}, doc.data());
+        // Preserva campo pessoa que já estava em memória (por itemKey)
         if(_fecharConta && _fecharConta.itens){
-          var mapaPessoa = {};
+          var mapaPessoaMemoria = {};
           (_fecharConta.itens||[]).forEach(function(it){
-            if(it.pessoa) mapaPessoa[it.itemKey || it.nome] = it.pessoa;
+            if(it.pessoa && it.itemKey) mapaPessoaMemoria[it.itemKey] = it.pessoa;
           });
           (novasConta.itens||[]).forEach(function(it){
-            if(!it.pessoa){
-              var p = mapaPessoa[it.itemKey || it.nome];
-              if(p) it.pessoa = p;
+            if(!it.pessoa && it.itemKey && mapaPessoaMemoria[it.itemKey]){
+              it.pessoa = mapaPessoaMemoria[it.itemKey];
             }
           });
         }

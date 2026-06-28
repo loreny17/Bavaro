@@ -13701,33 +13701,21 @@ function abrirImprimirPorPessoaFechar(){
   if(!c) return;
   var taxaPct = _taxaServicoPct || 10;
 
-  // Monta mapa pessoa por itemKey (exato) cruzando com pedidos
+  // Monta mapa pessoa por itemKey (SÓ itemKey, sem fallback por nome)
   var mapaPessoa = {};
   (_meusPedidos||[]).forEach(function(p){
     (p.itens||[]).forEach(function(it){
-      if(!it.pessoa) return;
-      // Chave exata por itemKey
-      if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
-      // Fallback por nome+preco — só registra se ainda não tem
-      var chaveSimp = it.nome+'|'+(it.preco||0);
-      if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
+      if(!it.pessoa || !it.itemKey) return;
+      mapaPessoa[it.itemKey] = it.pessoa;
     });
   });
 
   // Monta grupos por pessoa
   var porPessoa = {};
   (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
-    // Tenta pegar pessoa do item direto (mais confiável)
+    // Pega pessoa do item (só por itemKey — sem fallback por nome)
     var pessoa = it.pessoa || it.nomeCliente;
-    if(!pessoa){
-      // Tenta por itemKey exato primeiro
-      if(it.itemKey && mapaPessoa[it.itemKey]){
-        pessoa = mapaPessoa[it.itemKey];
-      } else {
-        var chaveSimp = it.nome+'|'+(it.preco||0);
-        pessoa = mapaPessoa[chaveSimp];
-      }
-    }
+    if(!pessoa && it.itemKey) pessoa = mapaPessoa[it.itemKey];
     var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
     var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
@@ -13795,22 +13783,17 @@ function _executarImpPessoaFechar(modo){
 
   // Monta grupos — cruza com pedidos para pegar campo pessoa
   var porPessoa = {};
-  // Mapa de pessoa dos pedidos (mais confiável que a conta)
+  // Mapa de pessoa dos pedidos (SÓ por itemKey)
   var mapaPessoa = {};
   (_meusPedidos||[]).forEach(function(p){
     (p.itens||[]).forEach(function(it){
-      if(!it.pessoa) return;
-      if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
-      var chaveSimp = it.nome+'|'+(it.preco||0);
-      if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
+      if(!it.pessoa || !it.itemKey) return;
+      mapaPessoa[it.itemKey] = it.pessoa;
     });
   });
   (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
     var pessoa = it.pessoa || it.nomeCliente;
-    if(!pessoa){
-      if(it.itemKey && mapaPessoa[it.itemKey]) pessoa = mapaPessoa[it.itemKey];
-      else pessoa = mapaPessoa[it.nome+'|'+(it.preco||0)];
-    }
+    if(!pessoa && it.itemKey) pessoa = mapaPessoa[it.itemKey];
     var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
     var v = it.tipoVenda==='kg'?(it.preco||0):(it.preco||0)*(it.qtd||1);
@@ -13994,22 +13977,21 @@ function _carregarPessoasPedidos(num, contaId){
   var snapPedidos = {};
   function _cruzar(snap){
     snap.forEach(function(d){ snapPedidos[d.id] = d.data(); });
-    // Monta mapa: itemKey → pessoa (exato)
+    // Monta mapa: itemKey → pessoa (SÓ por itemKey, sem fallback por nome)
     var mapaPessoa = {};
     Object.values(snapPedidos).forEach(function(p){
       (p.itens||[]).forEach(function(it){
-        if(!it.pessoa) return;
-        if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
-        var chaveSimp = it.nome+'|'+(it.preco||0);
-        if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
+        if(!it.pessoa || !it.itemKey) return;
+        mapaPessoa[it.itemKey] = it.pessoa;
       });
     });
-    // Aplica no _fecharConta
+    // Aplica no _fecharConta — só por itemKey exato
     if(_fecharConta){
       (_fecharConta.itens||[]).forEach(function(it){
         if(it.pessoa) return; // já tem
-        var p = (it.itemKey && mapaPessoa[it.itemKey]) || mapaPessoa[it.nome+'|'+(it.preco||0)];
-        if(p) it.pessoa = p;
+        if(it.itemKey && mapaPessoa[it.itemKey]){
+          it.pessoa = mapaPessoa[it.itemKey];
+        }
       });
       renderFecharConta();
     }

@@ -12768,9 +12768,15 @@ function _enviarPedidoConfirmado(){
   // 1. Gera número sequencial e cria pedido
   gerarNumeroSequencial().then(function(numero){
     if(numero) pedido.numeroSequencial = numero;
-    return fbDb.collection('pedidos').doc(_pedidoId).set(pedido);
-  }).then(function(){
-    var pedidoId = _pedidoId;
+    return fbDb.collection('pedidos').add(pedido);
+  }).then(function(ref){
+    var pedidoId = ref.id;
+    // Atualiza itemKeys para usar pedidoId real (eram temporários com _pedidoId)
+    itensPedido.forEach(function(it){
+      it.itemKey = pedidoId + '_' + it.itemKey.split('_').slice(-1)[0];
+    });
+    // Atualiza pedido no Firestore com itemKeys corretos (fire-and-forget)
+    fbDb.collection('pedidos').doc(pedidoId).update({itens: itensPedido}).catch(function(){});
     // ⚡ Decrementa estoque dos itens que têm controle (em background, fire-and-forget)
     decrementarEstoque(carrinhoBackup, pedidoId);
     // 2. Adiciona itens na conta da mesa — usa o MESMO itemKey do pedido

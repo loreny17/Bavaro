@@ -12540,6 +12540,94 @@ function devolverEstoque(itemId, qtd){
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
 
+  // Se mesa tem nomes e algum item do carrinho não tem pessoa vinculada,
+  // pergunta para quem é antes de enviar
+  var pessoas = _getPessoasMesa();
+  var itensSemPessoa = _carrinho.filter(function(it){ return !it.pessoa; });
+  if(pessoas.length > 0 && itensSemPessoa.length > 0){
+    _abrirModalPessoaPedido();
+    return;
+  }
+
+  _enviarPedidoConfirmado();
+}
+
+function _abrirModalPessoaPedido(){
+  var ex = document.getElementById('modal-pessoa-pedido');
+  if(ex) ex.remove();
+
+  var pessoas = _getPessoasMesa();
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-pessoa-pedido';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom));';
+
+  var titulo = document.createElement('div');
+  titulo.style.cssText = 'font-weight:800;font-size:1.05rem;margin-bottom:6px;';
+  titulo.textContent = '👤 Para quem é este pedido?';
+  box.appendChild(titulo);
+
+  var sub = document.createElement('div');
+  sub.style.cssText = 'font-size:0.78rem;color:var(--muted);margin-bottom:16px;';
+  sub.textContent = _carrinho.length+' item(s) no carrinho';
+  box.appendChild(sub);
+
+  // Botão para cada pessoa
+  pessoas.forEach(function(p){
+    var btn = document.createElement('button');
+    btn.style.cssText = 'width:100%;text-align:left;padding:13px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:0.95rem;font-family:inherit;cursor:pointer;margin-bottom:8px;font-weight:600;';
+    btn.innerHTML = '👤 '+esc(p);
+    btn.onclick = function(){
+      // Vincula todos os itens sem pessoa a esta pessoa
+      _carrinho.forEach(function(it){ if(!it.pessoa) it.pessoa = p; });
+      mod.remove();
+      _enviarPedidoConfirmado();
+    };
+    box.appendChild(btn);
+  });
+
+  // Campo nova pessoa
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;margin-top:4px;margin-bottom:10px;';
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = 'Outro nome...';
+  inp.maxLength = 30;
+  inp.style.cssText = 'flex:1;padding:11px 12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.9rem;outline:none;';
+  var btnAdd = document.createElement('button');
+  btnAdd.style.cssText = 'padding:11px 16px;background:var(--accent);color:#000;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;';
+  btnAdd.textContent = '+ Enviar';
+  btnAdd.onclick = function(){
+    var nome = inp.value.trim();
+    if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
+    if(_pessoasMesa.indexOf(nome) < 0) _pessoasMesa.push(nome);
+    _carrinho.forEach(function(it){ if(!it.pessoa) it.pessoa = nome; });
+    mod.remove();
+    _enviarPedidoConfirmado();
+  };
+  inp.onkeydown = function(e){ if(e.key==='Enter') btnAdd.click(); };
+  row.appendChild(inp);
+  row.appendChild(btnAdd);
+  box.appendChild(row);
+
+  // Botão enviar sem nome
+  var btnSem = document.createElement('button');
+  btnSem.style.cssText = 'width:100%;padding:11px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-family:inherit;cursor:pointer;font-size:0.82rem;';
+  btnSem.textContent = 'Enviar sem vincular pessoa';
+  btnSem.onclick = function(){ mod.remove(); _enviarPedidoConfirmado(); };
+  box.appendChild(btnSem);
+
+  mod.appendChild(box);
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+  document.body.appendChild(mod);
+  setTimeout(function(){ inp.focus(); }, 100);
+}
+
+function _enviarPedidoConfirmado(){
+
   // Proteção duplo envio
   var agora = Date.now();
   if(_enviandoPedido && agora - _ultimoPedidoEnviadoTs < 5000){

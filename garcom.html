@@ -13585,6 +13585,102 @@ function _getPessoasMesa(){
   return _pessoasMesa;
 }
 
+function vincularPessoaFechar(itemKey, nomeItem){
+  // Versão para fechar conta — salva direto na conta_mesa (sem precisar do pedido)
+  if(!_fecharConta) return;
+  var pessoas = _pessoasMesa.slice();
+  // Pega pessoas que já aparecem na conta
+  (_fecharConta.itens||[]).forEach(function(it){
+    if(it.pessoa && pessoas.indexOf(it.pessoa) < 0) pessoas.push(it.pessoa);
+  });
+
+  var itAtual = (_fecharConta.itens||[]).find(function(it){ return it.itemKey === itemKey; });
+  var atual = itAtual ? (itAtual.pessoa||'') : '';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-pessoa-fechar';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target===mod) mod.remove(); };
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:100%;max-width:360px;';
+
+  var titulo = document.createElement('div');
+  titulo.style.cssText = 'font-weight:700;font-size:1rem;margin-bottom:4px;';
+  titulo.textContent = 'Vincular a:';
+  box.appendChild(titulo);
+
+  var subtit = document.createElement('div');
+  subtit.style.cssText = 'font-size:0.82rem;color:var(--muted);margin-bottom:12px;';
+  subtit.textContent = nomeItem;
+  box.appendChild(subtit);
+
+  // Botões das pessoas existentes
+  pessoas.forEach(function(p){
+    var btn = document.createElement('button');
+    btn.style.cssText = 'width:100%;text-align:left;padding:12px 14px;background:'+(p===atual?'rgba(212,168,67,0.15)':'var(--surface2)')+';border:1px solid '+(p===atual?'var(--accent)':'var(--border)')+';border-radius:10px;color:'+(p===atual?'var(--accent)':'var(--text)')+';font-size:0.95rem;font-family:inherit;cursor:pointer;margin-bottom:6px;';
+    btn.textContent = '👤 '+p+(p===atual?' ✓':'');
+    btn.onclick = function(){ _salvarPessoaFechar(itemKey, p); mod.remove(); };
+    box.appendChild(btn);
+  });
+
+  // Campo nova pessoa
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+  var inp = document.createElement('input');
+  inp.id = 'inp-nova-pessoa-fechar';
+  inp.type = 'text';
+  inp.placeholder = 'Nome da pessoa...';
+  inp.maxLength = 30;
+  inp.style.cssText = 'flex:1;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.9rem;';
+  inp.onkeydown = function(e){ if(e.key==='Enter'){ var n=inp.value.trim(); if(n){ if(_pessoasMesa.indexOf(n)<0){_pessoasMesa.push(n);_salvarPessoasMesa();} _salvarPessoaFechar(itemKey,n); mod.remove(); } } };
+  var btnAdd = document.createElement('button');
+  btnAdd.style.cssText = 'padding:10px 14px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;';
+  btnAdd.textContent = '+';
+  btnAdd.onclick = function(){ var n=inp.value.trim(); if(n){ if(_pessoasMesa.indexOf(n)<0){_pessoasMesa.push(n);_salvarPessoasMesa();} _salvarPessoaFechar(itemKey,n); mod.remove(); } };
+  row.appendChild(inp);
+  row.appendChild(btnAdd);
+  box.appendChild(row);
+
+  if(atual){
+    var btnRem = document.createElement('button');
+    btnRem.style.cssText = 'width:100%;margin-top:8px;padding:10px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:8px;font-family:inherit;cursor:pointer;';
+    btnRem.textContent = '✕ Remover pessoa';
+    btnRem.onclick = function(){ _salvarPessoaFechar(itemKey,''); mod.remove(); };
+    box.appendChild(btnRem);
+  }
+
+  var btnClose = document.createElement('button');
+  btnClose.style.cssText = 'width:100%;margin-top:8px;padding:10px;background:var(--surface3);border:1px solid var(--border);color:var(--muted);border-radius:8px;font-family:inherit;cursor:pointer;';
+  btnClose.textContent = 'Fechar';
+  btnClose.onclick = function(){ mod.remove(); };
+  box.appendChild(btnClose);
+
+  mod.appendChild(box);
+  document.body.appendChild(mod);
+  setTimeout(function(){ inp.focus(); }, 100);
+}
+
+function _salvarPessoaFechar(itemKey, nomePessoa){
+  if(!_fecharConta || !_fecharConta.id) return;
+  var atualizado = false;
+  var itens = (_fecharConta.itens||[]).map(function(it){
+    if(it.itemKey === itemKey){
+      atualizado = true;
+      return Object.assign({}, it, {pessoa: nomePessoa||''});
+    }
+    return it;
+  });
+  if(!atualizado){ showToast('⚠️ Item não encontrado','#f7a34f'); return; }
+  _fecharConta.itens = itens;
+  fbDb.collection('contas_mesa').doc(_fecharConta.id).update({itens: itens})
+    .then(function(){
+      showToast('👤 '+(nomePessoa?nomePessoa+' vinculado':'Removido'),'#4ade80');
+      renderFecharConta();
+    })
+    .catch(function(e){ showToast('Erro: '+e.message,'#f87171'); });
+}
+
 function vincularPessoaItem(pedidoId, itemIdx){
   var pedido = (_meusPedidos||[]).find(function(p){ return p.id===pedidoId; });
   if(!pedido) return;
@@ -15053,8 +15149,9 @@ function _renderItemFechar(it, c){
     checkboxHtml+
     '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
       esc((it.qtd||1)+'x '+it.nome)+
-      (it.pessoa ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.pessoa)+'</div>' :
+      (it.pessoa ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;cursor:pointer;" onclick="event.stopPropagation();vincularPessoaFechar(\''+it.itemKey+'\',\''+esc(it.nome)+'\')">👤 '+esc(it.pessoa)+' ✏️</div>' :
         it.nomeCliente ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>' :
+        (!pago && it.itemKey ? '<div style="font-size:0.68rem;color:var(--muted);margin-top:2px;cursor:pointer;" onclick="event.stopPropagation();vincularPessoaFechar(\''+it.itemKey+'\',\''+esc(it.nome)+'\')">👤 Tocar para vincular pessoa</div>' : '') +
         (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : ''))+
       (it.obs ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>' : '')+
       linhaAbatido+

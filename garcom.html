@@ -13628,6 +13628,9 @@ function _vincularPessoaItemSalvar(pedidoId, itemIdx, nome){
   var pedido = (_meusPedidos||[]).find(function(p){ return p.id===pedidoId; });
   if(!pedido || !pedido.itens || pedido.itens[itemIdx] === undefined) return;
   pedido.itens[itemIdx].pessoa = nome;
+  var itemKey = pedido.itens[itemIdx].itemKey;
+  var nomeItem = pedido.itens[itemIdx].nome;
+  var precoItem = pedido.itens[itemIdx].preco || 0;
 
   // Salva no pedido
   fbDb.collection('pedidos').doc(pedidoId).update({
@@ -13635,27 +13638,35 @@ function _vincularPessoaItemSalvar(pedidoId, itemIdx, nome){
   }).then(function(){
     showToast('👤 '+(nome?nome+' vinculado':'Pessoa removida'),'#4ade80');
     // Também atualiza a conta_mesa para que fechar conta veja a pessoa
-    _sincronizarPessoaNaConta(pedido.itens[itemIdx].nome, pedido.itens[itemIdx].preco||0, nome);
+    _sincronizarPessoaNaConta(itemKey, nomeItem, precoItem, nome);
   }).catch(function(){
     showToast('⚠️ Erro ao salvar','#f7a34f');
   });
 }
 
-function _sincronizarPessoaNaConta(nomeItem, precoItem, nomePessoa){
-  // Atualiza o campo pessoa nos itens da conta_mesa correspondente
+function _sincronizarPessoaNaConta(itemKey, nomeItem, precoItem, nomePessoa){
   var num = _verPedidosMesaNum || _mesaAtiva;
   if(!num) return;
   var conta = _contasMesaCache[String(num)] || _contasMesaCache[num];
   if(!conta || !conta.id) return;
-  var itensAtualizados = false;
+
+  var atualizado = false;
   var itens = (conta.itens||[]).map(function(it){
-    if(it.nome === nomeItem && Math.abs((it.preco||0) - precoItem) < 0.01 && !it.pessoa){
-      itensAtualizados = true;
+    if(atualizado) return it;
+    // Tenta por itemKey primeiro (mais exato)
+    if(itemKey && it.itemKey === itemKey){
+      atualizado = true;
+      return Object.assign({}, it, {pessoa: nomePessoa});
+    }
+    // Fallback: nome+preco sem pessoa ainda
+    if(!itemKey && it.nome === nomeItem && Math.abs((it.preco||0)-precoItem) < 0.01 && !it.pessoa){
+      atualizado = true;
       return Object.assign({}, it, {pessoa: nomePessoa});
     }
     return it;
   });
-  if(!itensAtualizados) return;
+
+  if(!atualizado) return;
   conta.itens = itens;
   fbDb.collection('contas_mesa').doc(conta.id).update({itens: itens}).catch(function(){});
 }
@@ -13674,18 +13685,16 @@ function abrirImprimirPorPessoaFechar(){
   if(!c) return;
   var taxaPct = _taxaServicoPct || 10;
 
-  // Monta mapa pessoa por chave única (nome+preco+qtd) cruzando com pedidos
+  // Monta mapa pessoa por itemKey (exato) cruzando com pedidos
   var mapaPessoa = {};
   (_meusPedidos||[]).forEach(function(p){
     (p.itens||[]).forEach(function(it){
-      if(it.pessoa){
-        // Chave mais específica: inclui qtd para diferenciar quantidades diferentes
-        var chave = (it.itemKey || it.nome) + '|' + (it.preco||0) + '|' + (it.qtd||1);
-        var chaveSimples = (it.itemKey || it.nome) + '|' + (it.preco||0);
-        // Só registra se a chave ainda não tem pessoa (não sobrescreve)
-        if(!mapaPessoa[chave]) mapaPessoa[chave] = it.pessoa;
-        if(!mapaPessoa[chaveSimples]) mapaPessoa[chaveSimples] = it.pessoa;
-      }
+      if(!it.pessoa) return;
+      // Chave exata por itemKey
+      if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
+      // Fallback por nome+preco — só registra se ainda não tem
+      var chaveSimp = it.nome+'|'+(it.preco||0);
+      if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
     });
   });
 
@@ -13695,10 +13704,13 @@ function abrirImprimirPorPessoaFechar(){
     // Tenta pegar pessoa do item direto (mais confiável)
     var pessoa = it.pessoa || it.nomeCliente;
     if(!pessoa){
-      var chave = (it.itemKey || it.nome) + '|' + (it.preco||0) + '|' + (it.qtd||1);
-      var chaveSimples = (it.itemKey || it.nome) + '|' + (it.preco||0);
-      // Busca pela chave mais específica primeiro
-      pessoa = mapaPessoa[chave] || mapaPessoa[chaveSimples];
+      // Tenta por itemKey exato primeiro
+      if(it.itemKey && mapaPessoa[it.itemKey]){
+        pessoa = mapaPessoa[it.itemKey];
+      } else {
+        var chaveSimp = it.nome+'|'+(it.preco||0);
+        pessoa = mapaPessoa[chaveSimp];
+      }
     }
     var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
@@ -13771,20 +13783,17 @@ function _executarImpPessoaFechar(modo){
   var mapaPessoa = {};
   (_meusPedidos||[]).forEach(function(p){
     (p.itens||[]).forEach(function(it){
-      if(it.pessoa){
-        var chave = it.itemKey || (it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1));
-        var chaveSimples = it.itemKey || (it.nome+'|'+(it.preco||0));
-        if(!mapaPessoa[chave]) mapaPessoa[chave] = it.pessoa;
-        if(!mapaPessoa[chaveSimples]) mapaPessoa[chaveSimples] = it.pessoa;
-      }
+      if(!it.pessoa) return;
+      if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
+      var chaveSimp = it.nome+'|'+(it.preco||0);
+      if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
     });
   });
   (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).forEach(function(it){
     var pessoa = it.pessoa || it.nomeCliente;
     if(!pessoa){
-      var chave = it.itemKey || (it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1));
-      var chaveSimples = it.itemKey || (it.nome+'|'+(it.preco||0));
-      pessoa = mapaPessoa[chave] || mapaPessoa[chaveSimples];
+      if(it.itemKey && mapaPessoa[it.itemKey]) pessoa = mapaPessoa[it.itemKey];
+      else pessoa = mapaPessoa[it.nome+'|'+(it.preco||0)];
     }
     var p = pessoa || '__sem__';
     if(!porPessoa[p]) porPessoa[p] = {itens:[], total:0};
@@ -13969,14 +13978,13 @@ function _carregarPessoasPedidos(num, contaId){
   var snapPedidos = {};
   function _cruzar(snap){
     snap.forEach(function(d){ snapPedidos[d.id] = d.data(); });
-    // Monta mapa: itemKey/nome+preco+qtd → pessoa (não sobrescreve)
+    // Monta mapa: itemKey → pessoa (exato)
     var mapaPessoa = {};
     Object.values(snapPedidos).forEach(function(p){
       (p.itens||[]).forEach(function(it){
         if(!it.pessoa) return;
-        var chaveEsp = it.itemKey || (it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1));
+        if(it.itemKey) mapaPessoa[it.itemKey] = it.pessoa;
         var chaveSimp = it.nome+'|'+(it.preco||0);
-        if(!mapaPessoa[chaveEsp]) mapaPessoa[chaveEsp] = it.pessoa;
         if(!mapaPessoa[chaveSimp]) mapaPessoa[chaveSimp] = it.pessoa;
       });
     });
@@ -13984,9 +13992,7 @@ function _carregarPessoasPedidos(num, contaId){
     if(_fecharConta){
       (_fecharConta.itens||[]).forEach(function(it){
         if(it.pessoa) return; // já tem
-        var chaveEsp = it.itemKey || (it.nome+'|'+(it.preco||0)+'|'+(it.qtd||1));
-        var chaveSimp = it.nome+'|'+(it.preco||0);
-        var p = mapaPessoa[chaveEsp] || mapaPessoa[chaveSimp];
+        var p = (it.itemKey && mapaPessoa[it.itemKey]) || mapaPessoa[it.nome+'|'+(it.preco||0)];
         if(p) it.pessoa = p;
       });
       renderFecharConta();

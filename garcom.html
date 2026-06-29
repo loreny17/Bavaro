@@ -1724,38 +1724,25 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    // Login anônimo — aguarda completar antes de iniciar listeners
+
+    // Auth anônimo em background — não bloqueia o app
     firebase.auth().signInAnonymously().then(function(){
       console.log('[Auth] Login anônimo OK');
-      window._firebaseAuthOK = true;
-      // Dispara callback se já estava esperando
-      if(window._onAuthOK) window._onAuthOK();
     }).catch(function(e){
-      console.warn('[GARCOM] auth anônimo falhou:', e.code);
-      // Tenta continuar mesmo sem auth
-      window._firebaseAuthOK = true;
-      if(window._onAuthOK) window._onAuthOK();
+      console.warn('[Auth] falhou:', e.code, '— continuando sem auth');
     });
+
+    // Marca auth como OK imediatamente — não espera
+    // O Firestore funciona mesmo sem auth quando as regras permitem
+    window._firebaseAuthOK = true;
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // Quando o app abre, dados são lidos do cache local INSTANTANEAMENTE,
     // depois sincronizados com servidor em background.
     // Isso elimina o gap de 1-2s onde mesas apareciam vazias no início.
     // enablePersistence retorna Promise; se falhar (ex: aba duplicada), só ignora
     // e o app funciona normal sem cache.
-    try{
-      // iOS Safari tem problema com synchronizeTabs:true — usa sem sincronização
-      var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      if(isIOS){
-        // No iOS não usa persistência — evita travamentos no Safari
-      // iOS Safari: não usa persistência para evitar travamentos
-      // cacheSizeBytes não precisa ser configurado separadamente
-      } else {
-        fbDb.enablePersistence({synchronizeTabs:true}).catch(function(err){
-          // failed-precondition = múltiplas abas abertas
-          // unimplemented = navegador antigo sem suporte
-        });
-      }
-    }catch(e){ /* navegador muito antigo, ignora */ }
+    // Persistência desabilitada — causava travamentos após sair/entrar
+    // O app funciona online sem cache offline
     // Não usa Firebase Auth — login só por nome
     // Re-aplica cor e fonte salvas (garante que os CSS vars estão corretos)
     try{
@@ -4753,23 +4740,6 @@ function renderAparenciaModal(){
 }
 
 function _iniciarListenersMesas(){
-  if(!window._firebaseAuthOK){
-    // Auth ainda não completou — aguarda
-    console.log('[Init] Aguardando auth Firebase...');
-    window._onAuthOK = function(){
-      window._onAuthOK = null;
-      _iniciarListenersMesas();
-    };
-    // Timeout de segurança — 5s sem auth, força continuar
-    setTimeout(function(){
-      if(!window._firebaseAuthOK){
-        console.warn('[Init] Auth timeout — continuando sem auth');
-        window._firebaseAuthOK = true;
-        _iniciarListenersMesas();
-      }
-    }, 5000);
-    return;
-  }
   escutarMesasOcupadas();
   escutarConfigMesas();
   escutarAvisosGarcom();

@@ -1724,10 +1724,17 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    // Login anônimo — necessário para as regras do Firestore funcionarem
-    // O garçom não tem email/senha Firebase, mas precisa de request.auth != null
-    firebase.auth().signInAnonymously().catch(function(e){
+    // Login anônimo — aguarda completar antes de iniciar listeners
+    firebase.auth().signInAnonymously().then(function(){
+      console.log('[Auth] Login anônimo OK');
+      window._firebaseAuthOK = true;
+      // Dispara callback se já estava esperando
+      if(window._onAuthOK) window._onAuthOK();
+    }).catch(function(e){
       console.warn('[GARCOM] auth anônimo falhou:', e.code);
+      // Tenta continuar mesmo sem auth
+      window._firebaseAuthOK = true;
+      if(window._onAuthOK) window._onAuthOK();
     });
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // Quando o app abre, dados são lidos do cache local INSTANTANEAMENTE,
@@ -4746,22 +4753,21 @@ function renderAparenciaModal(){
 }
 
 function _iniciarListenersMesas(){
-  // Se Firebase auth ainda não está pronto, aguarda
-  var user = firebase.auth().currentUser;
-  if(!user){
-    console.log('[Init] Aguardando auth Firebase antes de escutar mesas...');
-    var _unsubAuth = firebase.auth().onAuthStateChanged(function(u){
-      if(u){
-        _unsubAuth();
+  if(!window._firebaseAuthOK){
+    // Auth ainda não completou — aguarda
+    console.log('[Init] Aguardando auth Firebase...');
+    window._onAuthOK = function(){
+      window._onAuthOK = null;
+      _iniciarListenersMesas();
+    };
+    // Timeout de segurança — 5s sem auth, força continuar
+    setTimeout(function(){
+      if(!window._firebaseAuthOK){
+        console.warn('[Init] Auth timeout — continuando sem auth');
+        window._firebaseAuthOK = true;
         _iniciarListenersMesas();
       }
-    });
-    // Timeout de segurança — tenta auth anônimo se demorar
-    setTimeout(function(){
-      if(!firebase.auth().currentUser){
-        firebase.auth().signInAnonymously().catch(function(){});
-      }
-    }, 3000);
+    }, 5000);
     return;
   }
   escutarMesasOcupadas();

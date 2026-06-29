@@ -2008,6 +2008,14 @@ function efetuarLogin(){
     btn.disabled = false; btn.textContent = 'Entrar →';
     _nomeGarcom = nome;
     localStorage.setItem('garcom_nome', nome);
+    // Recupera restaurante/tenant do localStorage antes de entrar
+    try{
+      var _restSalvo = localStorage.getItem('garcom_restaurante_id');
+      var _tenantSalvo = localStorage.getItem('gestao_tenant_id') || localStorage.getItem('tenantId');
+      if(_restSalvo) _restauranteId = _restSalvo;
+      if(_tenantSalvo) _tenantId = _tenantSalvo;
+      console.log('[Login] Timeout recovery — rest='+_restauranteId+' tenant='+_tenantId);
+    }catch(e){}
     document.getElementById('login-screen').classList.add('hidden');
     mostrarMesas();
   }, 8000);
@@ -3369,8 +3377,101 @@ function atualizarBadgesCozinha(){
   });
 }
 
+// Baixa todos os itens pendentes há mais de 30 minutos de uma vez
+function baixarTudoAntigos(){
+  var LIMITE_MS = 30 * 60 * 1000; // 30 minutos
+  var agora = Date.now();
+  var atualizacoes = [];
+
+  _pedidosCozinha.forEach(function(p){
+    if(p.status === 'cancelado') return;
+    if(!_pedidoPertenceAContaAberta(p)) return;
+    var itensCoz = filtrarItensCozinha(p.itens || []);
+    itensCoz.forEach(function(it){
+      if(it.descido) return;
+      var tempo = it.cozinhaCriadoEm || p.criadoEm || 0;
+      if(agora - tempo >= LIMITE_MS){
+        atualizacoes.push({ pedidoId: p.id, idx: it._idx });
+        p.itens[it._idx].descido = true;
+        p.itens[it._idx].descidoEm = agora;
+        p.itens[it._idx].descidoPor = _nomeGarcom || 'Garçom';
+      }
+    });
+  });
+
+  if(!atualizacoes.length){
+    showToast('Nenhum item pendente há mais de 30min', '#f7a34f', 2500);
+    return;
+  }
+
+  try{ atualizarBadgesCozinha(); }catch(e){}
+  var el = document.getElementById('modal-cozinha-geral');
+  if(el) el.remove();
+  showToast('✅ ' + atualizacoes.length + ' iten' + (atualizacoes.length !== 1 ? 's' : '') + ' baixado' + (atualizacoes.length !== 1 ? 's' : '') + ' (+30min)', '#22c55e', 2500);
+  try{ if(navigator.vibrate) navigator.vibrate([40,60,40]); }catch(e){}
+
+  // Agrupa por pedido e salva no Firestore
+  var porPedido = {};
+  atualizacoes.forEach(function(a){
+    if(!porPedido[a.pedidoId]) porPedido[a.pedidoId] = [];
+    porPedido[a.pedidoId].push(a.idx);
+  });
+
+  Object.keys(porPedido).forEach(function(pedidoId){
+    var indices = porPedido[pedidoId];
+    fbDb.collection('pedidos').doc(pedidoId).get().then(function(doc){
+      if(!doc.exists) return;
+      var itens = doc.data().itens || [];
+      indices.forEach(function(idx){
+        if(!itens[idx]) return;
+        itens[idx].descido = true;
+        itens[idx].descidoEm = agora;
+        itens[idx].descidoPor = _nomeGarcom || 'Garçom';
+      });
+      return fbDb.collection('pedidos').doc(pedidoId).update({ itens: itens });
+    }).catch(function(e){ console.error('[COZINHA] erro baixar tudo:', e); });
+  });
+}
+
 // Modal de cozinha GERAL — lista TODAS as mesas com itens pendentes
 function abrirModalCozinhaGeral(){
+  var ex = document.getElementById('modal-cozinha-geral');
+  if(ex) ex.remove();
+
+  // Mostra loading enquanto busca
+  var modLoad = document.createElement('div');
+  modLoad.id = 'modal-cozinha-geral';
+  modLoad.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99998;display:flex;align-items:center;justify-content:center;';
+  modLoad.innerHTML = '<div style="color:var(--accent);font-size:0.9rem;display:flex;flex-direction:column;align-items:center;gap:10px;"><div class="ld-spin"></div>Carregando cozinha...</div>';
+  document.body.appendChild(modLoad);
+
+  // Busca pedidos sob demanda (get único, sem listener permanente)
+  var corte = Date.now() - (2 * 60 * 60 * 1000);
+  fbDb.collection('pedidos')
+    .where('restauranteId','==', _restauranteId)
+    .where('criadoEm','>=', corte)
+    .limit(200)
+    .get({source:'server'})
+    .then(function(snap){
+      _pedidosCozinha = [];
+      snap.forEach(function(d){
+        var p = Object.assign({id: d.id}, d.data());
+        var status = (p.status||'').toLowerCase();
+        if(status === 'cancelado' || status === 'cancelada') return;
+        _pedidosCozinha.push(p);
+      });
+      var el = document.getElementById('modal-cozinha-geral');
+      if(el) el.remove();
+      _renderModalCozinhaGeral();
+    })
+    .catch(function(e){
+      var el = document.getElementById('modal-cozinha-geral');
+      if(el) el.remove();
+      showToast('❌ Erro ao carregar cozinha: ' + (e.code||e.message), '#f87171', 3000);
+    });
+}
+
+function _renderModalCozinhaGeral(){
   var ex = document.getElementById('modal-cozinha-geral');
   if(ex) ex.remove();
 
@@ -3451,6 +3552,7 @@ function abrirModalCozinhaGeral(){
           '<div style="font-weight:700;font-size:1.05rem;">Cozinha</div>' +
           '<div style="font-size:0.72rem;color:var(--muted);">' + listaMesas.length + ' mesa' + (listaMesas.length !== 1 ? 's' : '') + ' • ' + totalItens + ' iten' + (totalItens !== 1 ? 's' : '') + ' pendente' + (totalItens !== 1 ? 's' : '') + '</div>' +
         '</div>' +
+        (listaMesas.length > 0 ? '<button onclick="baixarTudoAntigos()" style="background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);color:#f87171;border-radius:8px;padding:6px 10px;font-size:0.72rem;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;margin-right:4px;">⬇️ +30min</button>' : '') +
         '<button onclick="fecharModalCozinhaGeral()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
       '</div>' +
       '<div style="flex:1;overflow-y:auto;padding:12px;">' +
@@ -4825,7 +4927,6 @@ function escutarMesasOcupadas(){
 
   // Ignora cache local — sempre usa dados do servidor pra evitar cache corrompido
   _unsubMesas = ref.onSnapshot({includeMetadataChanges: false}, function(snap){
-    // Descarta snapshots vindos do cache local (fromCache=true); aguarda o do servidor
     if(snap.metadata && snap.metadata.fromCache) return;
     _primeiroUpdate = true;
     clearTimeout(_fbTimeout);
@@ -9035,52 +9136,16 @@ function iniciarListeners(){
       try{ if(typeof atualizarBadgesCozinha === 'function') atualizarBadgesCozinha(); }catch(e){}
     }, function(e){ console.warn('[COZINHA] erro modelos:', e.code); });
 
-  // Listener pra impressoras (pra identificar quais são da cozinha)
-  if(_unsubImpressorasCozinha) _unsubImpressorasCozinha();
-  _unsubImpressorasCozinha = fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteId)
-    .collection('impressao').doc('config').collection('impressoras')
-    .onSnapshot(function(snap){
-      _impressorasCozinha = [];
-      snap.forEach(function(d){
-        var v = d.data() || {};
-        _impressorasCozinha.push({
-          id: d.id,
-          nome: v.nome || '',
-          tipo: v.tipo || 'cozinha' // cozinha, bar, caixa, etc
-        });
-      });
-    }, function(e){ console.warn('[COZINHA] erro impressoras:', e.code); });
-
-  // Listener pra TODOS os pedidos abertos do restaurante (pra sininho de cozinha)
-  if(_unsubPedidosCozinha) _unsubPedidosCozinha();
-  _unsubPedidosCozinha = fbDb.collection('pedidos')
-    .where('restauranteId','==', _restauranteId)
-    .limit(200)
-    .onSnapshot(function(snap){
-      _pedidosCozinha = [];
-      snap.forEach(function(d){
-        var p = Object.assign({id: d.id}, d.data());
-        // Filtra em memória — só pedidos ativos (não cancelados/fechados)
-        var status = (p.status||'').toLowerCase();
-        if(status === 'cancelado' || status === 'cancelada') return;
-        // Pedidos "entregue" antigos podem entulhar — só pega dos últimos 8h
-        var idade = Date.now() - (p.criadoEm || 0);
-        if(idade > 8 * 60 * 60 * 1000) return; // mais de 8h
-        _pedidosCozinha.push(p);
-      });
-      // Conta quantos têm itens marcados pra sininho (debug)
-      var totalItensCoz = 0;
-      _pedidosCozinha.forEach(function(p){
-        var itensCoz = filtrarItensCozinha(p.itens || []);
-        itensCoz.forEach(function(it){
-          if(!it.descido) totalItensCoz += (it.qtd||1);
-        });
-      });
-      try{ atualizarBadgesCozinha(); }catch(e){}
-    }, function(e){
-      console.warn('[COZINHA] erro pedidos:', e.code, e.message);
-    });
+  // Sininho de cozinha — esconde para garçons normais, sem listeners permanentes
+  if(!_ehAdmin){
+    if(_unsubPedidosCozinha){ _unsubPedidosCozinha(); _unsubPedidosCozinha = null; }
+    if(_unsubModelosCozinha){ _unsubModelosCozinha(); _unsubModelosCozinha = null; }
+    if(_unsubImpressorasCozinha){ _unsubImpressorasCozinha(); _unsubImpressorasCozinha = null; }
+    var btnSininho = document.getElementById('btn-sininho-cozinha');
+    if(btnSininho) btnSininho.style.display = 'none';
+  }
+  // Admin: pedidos são carregados sob demanda ao abrir o sininho (abrirModalCozinhaGeral)
+  // Sem listener permanente — zero leituras em background
 
   // Só escuta pedidos se já entrou em alguma mesa (no pré-load não há mesa)
   if(_mesaAtiva !== null && _mesaAtiva !== undefined){

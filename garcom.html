@@ -2009,14 +2009,26 @@ function efetuarLogin(){
   if(!nome){ showToast('Digite seu nome para entrar'); return; }
   var btn = document.querySelector('.login-btn');
   btn.disabled = true; btn.textContent = 'Verificando...';
-  _tentarLoginGarcom(nome, false);
+
+  // Timeout de segurança — se demorar mais de 8s, entra mesmo assim
+  var _loginTimeout = setTimeout(function(){
+    console.warn('[Login] Timeout — entrando sem validação');
+    btn.disabled = false; btn.textContent = 'Entrar →';
+    _nomeGarcom = nome;
+    localStorage.setItem('garcom_nome', nome);
+    document.getElementById('login-screen').classList.add('hidden');
+    mostrarMesas();
+  }, 8000);
+
+  _tentarLoginGarcom(nome, false, _loginTimeout);
 }
 
 // tentativa: false = usa cache (rápido), true = força servidor (seguro)
-function _tentarLoginGarcom(nome, forcarServidor){
+function _tentarLoginGarcom(nome, forcarServidor, loginTimeout){
   var btn = document.querySelector('.login-btn');
   var opts = forcarServidor ? {source:'server'} : {};
   fbDb.collection('restaurantes_publicos').limit(20).get(opts).then(function(snap){
+    clearTimeout(loginTimeout);
     var nomeLower = nome.toLowerCase();
     var matches = [];
     var todosGarcons = [];
@@ -2051,9 +2063,9 @@ function _tentarLoginGarcom(nome, forcarServidor){
     // CASO 1: Nenhum match
     if(matches.length === 0){
       if(todosGarcons.length === 0 && !forcarServidor){
-        // Cache vazio — pode estar desatualizado. Tenta direto do servidor.
+        // Cache vazio — tenta servidor (sem novo timeout, o original ainda está ativo)
         btn.textContent = 'Verificando (servidor)...';
-        setTimeout(function(){ _tentarLoginGarcom(nome, true); }, 500);
+        setTimeout(function(){ _tentarLoginGarcom(nome, true, null); }, 500);
         return;
       }
       btn.disabled = false; btn.textContent = 'Entrar →';
@@ -2079,6 +2091,7 @@ function _tentarLoginGarcom(nome, forcarServidor){
     btn.disabled = false; btn.textContent = 'Entrar →';
     mostrarEscolhaRestaurante(matches, nome);
   }).catch(function(e){
+    clearTimeout(loginTimeout);
     btn.disabled = false; btn.textContent = 'Entrar →';
     console.warn('Erro validação:', e);
     _nomeGarcom = nome;
@@ -4793,8 +4806,33 @@ function escutarMesasOcupadas(){
   var ref = fbDb.collection('contas_mesa')
     .where('restauranteId','==',_restauranteId)
     .where('status','==','aberta');
+
+  // Timeout: se em 10s não receber nada, faz query direta como fallback
+  var _primeiroUpdate = false;
+  var _fbTimeout = setTimeout(function(){
+    if(_primeiroUpdate) return;
+    console.warn('[Mesas] onSnapshot nao respondeu em 10s — fallback get()');
+    ref.get().then(function(snap){
+      if(_primeiroUpdate) return;
+      registrarUpdateListener('mesas');
+      _processarSnapMesas(snap);
+    }).catch(function(){});
+  }, 10000);
+
   _unsubMesas = ref.onSnapshot(function(snap){
+    _primeiroUpdate = true;
+    clearTimeout(_fbTimeout);
     registrarUpdateListener('mesas');
+    _processarSnapMesas(snap);
+  }, function(e){
+    registrarErroListener('mesas');
+    var delay = calcularBackoff(_saudeListeners.mesas.erros);
+    console.warn('[Health] Erro listener mesas, retry em', delay+'ms:', e && e.code);
+    setTimeout(function(){ escutarMesasOcupadas(); }, delay);
+  });
+}
+
+function _processarSnapMesas(snap){
     _mesasOcupadas = {};
     _contasMesaCache = {};
     _comandasAvulsas = [];
@@ -4890,12 +4928,6 @@ function escutarMesasOcupadas(){
         escutarMeusPedidos();
       }
     }
-  }, function(e){
-    registrarErroListener('mesas');
-    var delay = calcularBackoff(_saudeListeners.mesas.erros);
-    console.warn('[Health] Erro listener mesas, retry em', delay+'ms:', e && e.code);
-    setTimeout(function(){ escutarMesasOcupadas(); }, delay);
-  });
 }
 
 // ⚡ Carrega itens completos de uma mesa sob demanda (lazy loading)

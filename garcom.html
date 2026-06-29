@@ -4738,6 +4738,7 @@ function renderAparenciaModal(){
 }
 
 function _iniciarListenersMesas(){
+  console.log('[Init] _iniciarListenersMesas chamado. tenant='+_tenantId+' rest='+_restauranteId);
   escutarMesasOcupadas();
   escutarConfigMesas();
   escutarAvisosGarcom();
@@ -4790,13 +4791,28 @@ function carregarTenantParaMesas(){
 }
 
 function escutarMesasOcupadas(){
+  console.log('[Mesas] escutarMesasOcupadas iniciado. rest='+_restauranteId);
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
   var ref = fbDb.collection('contas_mesa')
     .where('restauranteId','==',_restauranteId)
     .where('status','==','aberta');
 
-  // Timeout: se em 10s não receber nada, faz query direta como fallback
   var _primeiroUpdate = false;
+
+  // Tenta um get() imediato direto do servidor (mais confiável que esperar onSnapshot)
+  ref.get({source:'server'}).then(function(snap){
+    console.log('[Mesas] get(server) OK: '+snap.size+' mesas');
+    if(!_primeiroUpdate){
+      registrarUpdateListener('mesas');
+      _processarSnapMesas(snap);
+    }
+  }).catch(function(e){
+    console.warn('[Mesas] get(server) falhou: '+(e&&e.code||e));
+    ref.get().then(function(snap){
+      console.log('[Mesas] get(cache) OK: '+snap.size+' mesas');
+      if(!_primeiroUpdate){ registrarUpdateListener('mesas'); _processarSnapMesas(snap); }
+    }).catch(function(e2){ console.warn('[Mesas] get(cache) tb falhou: '+(e2&&e2.code||e2)); });
+  });
   var _fbTimeout = setTimeout(function(){
     if(_primeiroUpdate) return;
     console.warn('[Mesas] onSnapshot nao respondeu em 10s — fallback get()');

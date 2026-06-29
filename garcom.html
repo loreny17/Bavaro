@@ -4745,6 +4745,33 @@ function renderAparenciaModal(){
     '</div>';
 }
 
+function _iniciarListenersMesas(){
+  // Se Firebase auth ainda não está pronto, aguarda
+  var user = firebase.auth().currentUser;
+  if(!user){
+    console.log('[Init] Aguardando auth Firebase antes de escutar mesas...');
+    var _unsubAuth = firebase.auth().onAuthStateChanged(function(u){
+      if(u){
+        _unsubAuth();
+        _iniciarListenersMesas();
+      }
+    });
+    // Timeout de segurança — tenta auth anônimo se demorar
+    setTimeout(function(){
+      if(!firebase.auth().currentUser){
+        firebase.auth().signInAnonymously().catch(function(){});
+      }
+    }, 3000);
+    return;
+  }
+  escutarMesasOcupadas();
+  escutarConfigMesas();
+  escutarAvisosGarcom();
+  renderMesas();
+  _almCarregarConfig();
+  iniciarListeners();
+}
+
 function carregarTenantParaMesas(){
   // Tenta cache local
   var tenantSalvo = null;
@@ -4761,14 +4788,9 @@ function carregarTenantParaMesas(){
     try{ localStorage.setItem('garcom_restaurante_id', 'default'); }catch(e){}
   }
 
-  // Se tem ambos, escuta direto
+  // Se tem ambos, escuta direto — mas espera Firebase estar autenticado
   if(_tenantId && _restauranteId){
-    escutarMesasOcupadas();
-    escutarConfigMesas();
-    escutarAvisosGarcom();
-    renderMesas();
-    _almCarregarConfig(); // carrega categorias do almoço
-    iniciarListeners();
+    _iniciarListenersMesas();
     return;
   }
 
@@ -4784,20 +4806,12 @@ function carregarTenantParaMesas(){
         localStorage.setItem('garcom_restaurante_id', _restauranteId);
       }catch(e){}
     }
-    if(!_restauranteId) _restauranteId = 'default'; // fallback (mesmo id que o PDV usa)
-    escutarMesasOcupadas();
-    escutarConfigMesas();
-    escutarAvisosGarcom();
-    renderMesas();
-    // Pré-carrega cardápio em paralelo
-    iniciarListeners();
+    if(!_restauranteId) _restauranteId = 'default';
+    _iniciarListenersMesas();
   }).catch(function(e){
     if(!_restauranteId) _restauranteId = 'default';
     console.warn('Erro ao buscar restaurantes publicos (mesas):', e);
-    escutarMesasOcupadas();
-    escutarConfigMesas();
-    renderMesas();
-    iniciarListeners();
+    _iniciarListenersMesas();
   });
 }
 

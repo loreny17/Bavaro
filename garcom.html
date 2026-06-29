@@ -1907,8 +1907,9 @@ function revalidarConexaoFirestore(){
   _ultimaRevalidacao = agora;
   if(!fbDb || !_restauranteId) return;
 
-  // Toast discreto de reconectando
-  if(_mesaAtiva === null || _mesaAtiva === undefined){
+  // Mostra toast só quando mesas estão vazias (indica problema real)
+  var mesasVazias = Object.keys(_mesasOcupadas||{}).length === 0;
+  if(mesasVazias && (_mesaAtiva === null || _mesaAtiva === undefined)){
     var overlay = document.getElementById('mesas-reconect');
     if(!overlay){
       overlay = document.createElement('div');
@@ -1916,7 +1917,7 @@ function revalidarConexaoFirestore(){
       overlay.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:var(--accent);padding:8px 18px;border-radius:10px;font-size:0.78rem;z-index:999;pointer-events:none;';
       overlay.textContent = '🔄 Reconectando...';
       document.body.appendChild(overlay);
-      setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 3000);
+      setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 4000);
     }
   }
 
@@ -1931,18 +1932,32 @@ function revalidarConexaoFirestore(){
   }
 }
 
-// ── WATCHDOG: verifica a cada 30s se os listeners estão vivos ──
+// ── WATCHDOG: verifica a cada 20s se os listeners estão vivos ──
+var _appIniciadoEm = Date.now();
 setInterval(function(){
   if(document.hidden || !_restauranteId || !fbDb) return;
   var agora = Date.now();
   var ultimoUpdate = _saudeListeners.mesas ? (_saudeListeners.mesas.ultimoUpdate || 0) : 0;
-  // Se não recebeu update das mesas em mais de 90s, listener provavelmente morreu
-  if(ultimoUpdate > 0 && agora - ultimoUpdate > 90000){
-    console.warn('[Watchdog] Listener mesas sem update há '+ Math.round((agora-ultimoUpdate)/1000)+'s — reconectando');
+  var tempoSemUpdate = ultimoUpdate > 0 ? (agora - ultimoUpdate) : (agora - _appIniciadoEm);
+
+  // Se passou mais de 60s sem receber nenhum update de mesas — reconecta
+  if(tempoSemUpdate > 60000){
+    console.warn('[Watchdog] Listener mesas sem update há '+ Math.round(tempoSemUpdate/1000)+'s — reconectando');
     _ultimaRevalidacao = 0;
     revalidarConexaoFirestore();
   }
-}, 30000);
+}, 20000);
+
+// Timeout de segurança na inicialização — se após 15s não tiver dados, força retry
+setTimeout(function(){
+  if(!_restauranteId || !fbDb) return;
+  var ultimoUpdate = _saudeListeners.mesas ? (_saudeListeners.mesas.ultimoUpdate || 0) : 0;
+  if(ultimoUpdate === 0){
+    console.warn('[Init] Nenhum dado de mesas após 15s — forçando reconexão');
+    _ultimaRevalidacao = 0;
+    revalidarConexaoFirestore();
+  }
+}, 15000);
 
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;

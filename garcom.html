@@ -1835,27 +1835,7 @@ function calcularBackoff(erros){
   return Math.min(30000, Math.pow(2, Math.min(erros, 5)) * 1000);
 }
 var _heartbeatTimer = null;
-function iniciarHeartbeat(){
-  if(_heartbeatTimer) clearInterval(_heartbeatTimer);
-  _heartbeatTimer = setInterval(function(){
-    if(!fbDb || !_restauranteId) return;
-    var agora = Date.now();
-    var LIMITE = 60000; // 60s sem update = listener morto
-    if(agora - _saudeListeners.mesas.ultimoUpdate > LIMITE){
-      console.warn('[Health] Listener MESAS morto — recriando...');
-      registrarErroListener('mesas');
-      _ultimaRevalidacao = 0;
-      try{ escutarMesasOcupadas(); }catch(e){}
-    }
-    if(_mesaAtiva !== null && _mesaAtiva !== undefined){
-      if(agora - _saudeListeners.pedidos.ultimoUpdate > LIMITE){
-        console.warn('[Health] Listener PEDIDOS morto — recriando...');
-        registrarErroListener('pedidos');
-        try{ escutarMeusPedidos(); }catch(e){}
-      }
-    }
-  }, 30000);
-}
+// Heartbeat removido — Firebase SDK gerencia reconexão nativamente
 var _backgroundDesde = 0;
 document.addEventListener('visibilitychange', function(){
   if(document.hidden){
@@ -1924,32 +1904,7 @@ function revalidarConexaoFirestore(){
   }
 }
 
-// ── WATCHDOG: verifica a cada 20s se os listeners estão vivos ──
-var _appIniciadoEm = Date.now();
-setInterval(function(){
-  if(document.hidden || !_restauranteId || !fbDb) return;
-  var agora = Date.now();
-  var ultimoUpdate = _saudeListeners.mesas ? (_saudeListeners.mesas.ultimoUpdate || 0) : 0;
-  var tempoSemUpdate = ultimoUpdate > 0 ? (agora - ultimoUpdate) : (agora - _appIniciadoEm);
-
-  // Se passou mais de 60s sem receber nenhum update de mesas — reconecta
-  if(tempoSemUpdate > 60000){
-    console.warn('[Watchdog] Listener mesas sem update há '+ Math.round(tempoSemUpdate/1000)+'s — reconectando');
-    _ultimaRevalidacao = 0;
-    revalidarConexaoFirestore();
-  }
-}, 20000);
-
-// Timeout de segurança na inicialização — se após 15s não tiver dados, força retry
-setTimeout(function(){
-  if(!_restauranteId || !fbDb) return;
-  var ultimoUpdate = _saudeListeners.mesas ? (_saudeListeners.mesas.ultimoUpdate || 0) : 0;
-  if(ultimoUpdate === 0){
-    console.warn('[Init] Nenhum dado de mesas após 15s — forçando reconexão');
-    _ultimaRevalidacao = 0;
-    revalidarConexaoFirestore();
-  }
-}, 15000);
+// Watchdog removido — visibilitychange, window.online e window.focus já cobrem reconexão
 
 function mostrarLoginOuMesas(){
   _nomeGarcom = localStorage.getItem('garcom_nome') || null;
@@ -3799,7 +3754,6 @@ function mostrarMesas(){
   var _msEl = document.getElementById('mesa-screen');
   if(_msEl){ _msEl.style.display = ''; _msEl.classList.remove('hidden'); }
   document.getElementById('app').style.display = 'none';
-  iniciarHeartbeat(); // monitora listeners em background
   // Badge no header: nome + crown se admin
   var nomeSafe = (typeof esc === 'function') ? esc(_nomeGarcom) : (_nomeGarcom||'');
   var badgeHtml = '👤 ' + nomeSafe;

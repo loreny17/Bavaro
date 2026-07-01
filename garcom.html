@@ -2142,8 +2142,7 @@ function aplicarLoginGarcom(match, nomeDigitado){
   document.getElementById('login-screen').classList.add('hidden');
   mostrarMesas();
 
-  // Inicia escuta de avisos AGORA (depois do login)
-  try{ escutarAvisosGarcom(); }catch(e){ console.warn('Falhou ao iniciar avisos:', e); }
+  // Avisos: carregados sob demanda (sem listener permanente)
   try{ _carregarGestosAcoes(); }catch(e){}
   try{ atualizarBannerModoTeste(); atualizarMenuModoTeste(); }catch(e){}
   // Inicia o vigia da fila de pedidos offline
@@ -4925,13 +4924,18 @@ function escutarMesasOcupadas(){
     }).catch(function(){});
   }, 10000);
 
-  // Ignora cache local — sempre usa dados do servidor pra evitar cache corrompido
-  _unsubMesas = ref.onSnapshot({includeMetadataChanges: false}, function(snap){
-    if(snap.metadata && snap.metadata.fromCache) return;
-    _primeiroUpdate = true;
-    clearTimeout(_fbTimeout);
-    registrarUpdateListener('mesas');
-    _processarSnapMesas(snap);
+  // Aceita cache local para abertura rápida, mas sempre processa atualização do servidor
+  _unsubMesas = ref.onSnapshot({includeMetadataChanges: true}, function(snap){
+    // Aceita cache (velocidade) mas marca se veio do servidor (confiável)
+    var doServidor = snap.metadata && !snap.metadata.fromCache;
+    if(doServidor || !_primeiroUpdate){
+      // Primeira vez: aceita cache pra ser rápido
+      // Depois: só processa quando vier do servidor (evita regressão do bug)
+      _primeiroUpdate = true;
+      clearTimeout(_fbTimeout);
+      registrarUpdateListener('mesas');
+      _processarSnapMesas(snap);
+    }
   }, function(e){
     registrarErroListener('mesas');
     var delay = calcularBackoff(_saudeListeners.mesas.erros);
@@ -6718,17 +6722,18 @@ function salvarAvisosVistos(){
 }
 
 function escutarAvisosGarcom(){
-  if(!_tenantId || !_restauranteId || !_nomeGarcom){
-    console.warn('[AVISOS] Faltam dados — não vou escutar');
-    return;
-  }
-  if(_avisosUnsubGarcom){ _avisosUnsubGarcom(); _avisosUnsubGarcom = null; }
+  // Carrega avisos sob demanda (sem listener permanente — economiza leituras)
+  carregarAvisosGarcom();
+}
 
-  // Query SIMPLES — só filtra por restauranteId, resto é em memória
-  _avisosUnsubGarcom = fbDb.collection('tenants').doc(_tenantId)
+function carregarAvisosGarcom(){
+  if(!_tenantId || !_restauranteId || !_nomeGarcom) return;
+
+  fbDb.collection('tenants').doc(_tenantId)
     .collection('avisos')
     .where('restauranteId','==', _restauranteId)
-    .onSnapshot(function(snap){
+    .get({source:'server'})
+    .then(function(snap){
       var limite = Date.now() - (24 * 60 * 60 * 1000); // só últimas 24h
       _avisosNaoLidos = [];
       var respostasNovas = []; // pra admin: respostas que apareceram
@@ -6791,8 +6796,8 @@ function escutarAvisosGarcom(){
       }
 
       atualizarBannerAvisos();
-    }, function(err){
-      console.error('[AVISOS] Erro no listener:', err.code, err.message);
+    }).catch(function(err){
+      console.error('[AVISOS] Erro ao carregar:', err.code, err.message);
     });
 }
 

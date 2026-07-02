@@ -257,6 +257,28 @@
   }
   .btn-finalizar:active{transform:scale(0.96);}
 
+  /* ═══ FAB FLUTUANTE DO CARRINHO (fica por cima de modais/wizard) ═══ */
+  .fab-carrinho{
+    position:fixed;right:22px;bottom:22px;z-index:700;
+    width:62px;height:62px;border-radius:50%;
+    background:var(--accent);color:#000;
+    display:none;align-items:center;justify-content:center;
+    font-size:1.7rem;cursor:pointer;font-family:inherit;
+    box-shadow:0 6px 22px rgba(0,0,0,0.55);
+    border:none;animation:fabPop 0.25s ease;
+  }
+  .fab-carrinho.mostrar{display:flex;}
+  .fab-carrinho:active{transform:scale(0.94);}
+  .fab-carrinho-badge{
+    position:absolute;top:-4px;right:-4px;
+    background:#0e0e12;color:var(--accent);
+    border:2px solid var(--accent);
+    min-width:24px;height:24px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:0.76rem;font-weight:800;padding:0 4px;box-sizing:border-box;
+  }
+  @keyframes fabPop{from{transform:scale(0);}to{transform:scale(1);}}
+
   /* ═══ MODAL CARRINHO ═══ */
   .modal-bg{
     position:fixed;inset:0;z-index:200;
@@ -621,6 +643,12 @@
   </div>
   <button class="btn-finalizar" onclick="abrirCarrinho()">Finalizar Pedido</button>
 </div>
+
+<!-- FAB flutuante do carrinho — fica visível por cima de modais/wizard quando há itens -->
+<button class="fab-carrinho" id="fab-carrinho" onclick="abrirCarrinho()">
+  🛒
+  <span class="fab-carrinho-badge" id="fab-carrinho-badge">0</span>
+</button>
 
 <!-- Modal de personalização do item -->
 <div class="modal-bg" id="modal-item" onclick="if(event.target===this)fecharModalItem()">
@@ -2281,10 +2309,9 @@ function wizardAdicionar(){
   fecharWizard();
   resetTimerInatividade();
 
-  // Passa pelo fluxo de sugestões igual ao modal normal
-  _sugTelaIdx = 0;
-  _sugTelas = [];
-  _carregarTelasEAbrir(it);
+  // Itens no modo wizard vão direto pro carrinho — sem telas de sugestão/adicionais
+  _confirmarAdicionarPendente();
+  abrirCarrinho();
 }
 
 function renderModalItem(){
@@ -2423,15 +2450,36 @@ function atualizarBarra(){
     : (totalItens + (totalItens === 1 ? ' item — toque para ver' : ' itens — toque para ver'));
   document.getElementById('barra-resumo').textContent = resumo;
   document.getElementById('barra-total').textContent = 'R$ ' + totalValor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  atualizarFabCarrinho(totalItens);
+}
+
+// FAB flutuante — mostra a contagem do carrinho por cima de qualquer modal/wizard aberto
+function atualizarFabCarrinho(totalItens){
+  var fab = document.getElementById('fab-carrinho');
+  var badge = document.getElementById('fab-carrinho-badge');
+  if(!fab || !badge) return;
+  if(typeof totalItens !== 'number'){
+    totalItens = _carrinho.reduce(function(s,c){ return s + c.qtd; }, 0);
+  }
+  badge.textContent = totalItens;
+  var cartModal = document.getElementById('modal-carrinho');
+  var carrinhoModalAberto = cartModal && cartModal.classList.contains('aberto');
+  if(totalItens > 0 && !carrinhoModalAberto){
+    fab.classList.add('mostrar');
+  } else {
+    fab.classList.remove('mostrar');
+  }
 }
 
 function abrirCarrinho(){
   renderCarrinhoModal();
   document.getElementById('modal-carrinho').classList.add('aberto');
+  document.getElementById('fab-carrinho').classList.remove('mostrar');
   resetTimerInatividade();
 }
 function fecharCarrinho(){
   document.getElementById('modal-carrinho').classList.remove('aberto');
+  atualizarFabCarrinho();
 }
 
 function renderCarrinhoModal(){

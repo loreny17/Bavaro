@@ -1848,6 +1848,14 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
     // Remove duplicatas por id
     var vistos = {};
     _sugItens = _sugItens.filter(function(i){ if(vistos[i.id]) return false; vistos[i.id]=true; return true; });
+    // Respeita a mesma ordem configurada na aba "Itens" do editor do totem
+    // (as setinhas ▲▼ mexem no campo "ordem" de cada item)
+    _sugItens.sort(function(a,b){
+      var oa = (typeof a.ordem === 'number') ? a.ordem : 999999;
+      var ob = (typeof b.ordem === 'number') ? b.ordem : 999999;
+      if(oa !== ob) return oa - ob;
+      return (a.criadoEm||0) - (b.criadoEm||0);
+    });
     dbg('[SUGESTOES] Itens encontrados para cats '+JSON.stringify(catIds)+': '+_sugItens.length);
   } else {
     _sugItens = (window._cardapioItens || []).filter(function(i){
@@ -2147,9 +2155,13 @@ function renderWizardPasso(){
       if(o.pausado) return ''; // opção esgotada — some da tela do cliente
       var selecionado = selecaoAtual.indexOf(idx) >= 0;
       var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
+      var descHtml = o.descricao ? '<div style="font-size:0.82rem;color:var(--muted);margin-top:3px;line-height:1.3;">' + escapar(o.descricao) + '</div>' : '';
       return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:2px solid '+(selecionado?'var(--accent)':'var(--border)')+';border-radius:12px;padding:18px 20px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:14px;margin-bottom:10px;">' +
         '<div style="width:32px;height:32px;border-radius:50%;border:2px solid '+(selecionado?'var(--accent)':'var(--border)')+';background:'+(selecionado?'var(--accent)':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;color:'+(selecionado?'#000':'transparent')+';font-size:1rem;">✓</div>' +
-        '<div style="flex:1;font-size:1.15rem;font-weight:700;color:var(--text);">' + escapar(o.nome||'') + '</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:1.15rem;font-weight:700;color:var(--text);">' + escapar(o.nome||'') + '</div>' +
+          descHtml +
+        '</div>' +
         (precoTxt ? '<div style="color:var(--accent);font-weight:700;font-size:1rem;">'+precoTxt+'</div>' : '') +
       '</div>';
     }).join('');
@@ -2162,10 +2174,12 @@ function renderWizardPasso(){
       var foto = o.foto
         ? '<img src="'+o.foto+'" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">'
         : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:4rem;background:rgba(255,255,255,0.04);border-radius:14px;">🍽️</div>';
+      var descHtml = o.descricao ? '<div style="text-align:center;font-size:0.76rem;color:var(--muted);margin-top:3px;line-height:1.3;">' + escapar(o.descricao) + '</div>' : '';
       return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:3px solid '+(selecionado?'var(--accent)':'transparent')+';border-radius:16px;padding:10px;cursor:pointer;transition:all 0.2s;position:relative;">' +
         (selecionado ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent);color:#000;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;z-index:2;">✓</div>' : '') +
         '<div style="width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:14px;margin-bottom:10px;">' + foto + '</div>' +
         '<div style="font-weight:700;font-size:1.05rem;text-align:center;color:var(--text);line-height:1.2;">' + escapar(o.nome||'') + '</div>' +
+        descHtml +
         (precoTxt ? '<div style="text-align:center;color:var(--accent);font-weight:700;font-size:0.95rem;margin-top:4px;">'+precoTxt+'</div>' : '') +
       '</div>';
     }).join('');
@@ -2398,9 +2412,10 @@ function renderModalItem(){
         var icone = ehUnica
           ? '<div class="op-radio' + (marcado?' on':'') + '"></div>'
           : '<div class="op-check' + (marcado?' on':'') + '">' + (marcado?'✓':'') + '</div>';
+        var descHtml = op.descricao ? '<div style="font-size:0.78rem;color:var(--muted);margin-top:2px;line-height:1.3;font-weight:400;">' + escapar(op.descricao) + '</div>' : '';
         return '<div class="opcao' + (marcado?' selecionada':'') + '" onclick="selecionarOpcao(\'' + g.id + '\',' + idx + ')">' +
           icone +
-          '<div class="op-nome">' + escapar(op.nome||'') + '</div>' +
+          '<div class="op-nome">' + escapar(op.nome||'') + descHtml + '</div>' +
           precoTxt +
         '</div>';
       }).join('');

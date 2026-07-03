@@ -10810,6 +10810,7 @@ function totemAbrirModalGrupo(grupo){
       nome: o.nome || '',
       preco: o.preco || 0,
       foto: o.foto || '',
+      descricao: o.descricao || '',
       abreGrupos: (o.abreGrupos || []).slice(),
       pausado: o.pausado === true
     };
@@ -10927,6 +10928,12 @@ function totemRenderOpcoesNoModal(){
       '</div>' +
       // Linha extra: botão de remover foto se tiver
       (btnRemoveFoto ? '<div style="margin-top:4px;text-align:right;">' + btnRemoveFoto + '</div>' : '') +
+      // Linha 1.5: descrição (o que tem naquela opção, ex: ingredientes do molho)
+      '<div style="margin-top:6px;">' +
+        '<input type="text" placeholder="Descrição opcional (ex: manjericão, azeite, parmesão...)" value="' + escapeHtml(o.descricao||'') + '" ' +
+          'oninput="totemAtualizarDescricaoOpcao(' + idx + ',this.value)" ' +
+          'style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:0.76rem;font-family:inherit;box-sizing:border-box;">' +
+      '</div>' +
       // Linha 2: grupos que esta opção "abre"
       '<div style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;">' +
         '<span style="font-size:0.7rem;color:var(--muted);">Ao escolher, abre:</span>' +
@@ -10982,7 +10989,7 @@ function totemAddOpcao(){
   var preco = parseFloat(document.getElementById('tg-op-preco').value) || 0;
   if(!nome){ document.getElementById('tg-op-nome').focus(); return; }
   if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
-  window._totemOpcoesEditando.push({ nome:nome, preco:preco, foto:'', abreGrupos:[], pausado:false });
+  window._totemOpcoesEditando.push({ nome:nome, preco:preco, foto:'', descricao:'', abreGrupos:[], pausado:false });
   document.getElementById('tg-op-nome').value = '';
   document.getElementById('tg-op-preco').value = '';
   totemRenderOpcoesNoModal();
@@ -11001,6 +11008,13 @@ function totemTogglePausaOpcao(idx){
   if(!window._totemOpcoesEditando || !window._totemOpcoesEditando[idx]) return;
   window._totemOpcoesEditando[idx].pausado = !window._totemOpcoesEditando[idx].pausado;
   totemRenderOpcoesNoModal();
+}
+
+// Salva a descrição da opção (ex: ingredientes do molho) sem re-renderizar a
+// lista inteira — evita perder o foco/cursor enquanto a pessoa digita.
+function totemAtualizarDescricaoOpcao(idx, valor){
+  if(!window._totemOpcoesEditando || !window._totemOpcoesEditando[idx]) return;
+  window._totemOpcoesEditando[idx].descricao = valor;
 }
 
 // Move uma opção pra cima ou pra baixo na lista (afeta a ordem no totem)

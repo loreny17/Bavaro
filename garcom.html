@@ -1843,9 +1843,21 @@ document.addEventListener('visibilitychange', function(){
   } else {
     var tempoBack = _backgroundDesde ? (Date.now() - _backgroundDesde) : 0;
     _backgroundDesde = 0;
-    // Sempre reseta throttle ao voltar do background
+
+    // ⚡ Só reconecta de verdade (derruba + recria listeners + lê o servidor
+    // na força) se o app ficou fora por um tempo relevante. Telinha
+    // acendendo/apagando rápido (garçom pegando e largando o tablet) não
+    // precisa disso — o listener em tempo real do Firestore normalmente
+    // continua vivo por trás nesses intervalos curtos. Isso evita reler as
+    // mesas do zero dezenas/centenas de vezes por turno sem necessidade.
+    var _LIMIAR_RECONEXAO_MS = 30000;
+    if(tempoBack > 0 && tempoBack <= _LIMIAR_RECONEXAO_MS){
+      return; // saída rápida — não força reconexão
+    }
+
+    // Sempre reseta throttle ao voltar do background (quando vamos reconectar)
     _ultimaRevalidacao = 0;
-    if(tempoBack > 30000){
+    if(tempoBack > _LIMIAR_RECONEXAO_MS){
       // Ficou mais de 30s — reconexão completa
       Object.keys(_saudeListeners).forEach(function(k){ _saudeListeners[k].ultimoUpdate = 0; });
     }
@@ -1865,17 +1877,25 @@ document.addEventListener('visibilitychange', function(){
 });
 
 window.addEventListener('focus', function(){
-  _ultimaRevalidacao = 0;
+  // Não reseta _ultimaRevalidacao aqui de propósito — o evento 'focus' costuma
+  // disparar junto com o 'visibilitychange' toda vez que a tela do tablet
+  // acende, e resetar o cronômetro aqui furava o filtro de reconexão rápida
+  // lá de cima. Deixa o cooldown interno de revalidarConexaoFirestore() decidir.
   if(_restauranteId) revalidarConexaoFirestore();
 });
 window.addEventListener('online', function(){
+  // 'online' é um sinal raro e inequívoco (a rede caiu e voltou de verdade) —
+  // aqui vale forçar a reconexão mesmo que tenha tido uma tentativa recente.
   _ultimaRevalidacao = 0;
   if(_restauranteId) revalidarConexaoFirestore();
 });
 
 function revalidarConexaoFirestore(){
   var agora = Date.now();
-  if(agora - _ultimaRevalidacao < 2000) return;
+  // Cooldown mais generoso (era 2s) — evita que reconexões repetidas em
+  // sequência (ex: 'focus' logo após 'visibilitychange') façam mais de uma
+  // releitura completa das mesas em um curto intervalo.
+  if(agora - _ultimaRevalidacao < 25000) return;
   _ultimaRevalidacao = agora;
   if(!fbDb || !_restauranteId) return;
 
@@ -2834,6 +2854,7 @@ function _categoriasPermitidasAlmoco(){
 function escutarConfigMesas(){
   if(!fbDb || !_restauranteId) return;
   fbDb.collection('restaurantes_publicos').doc(_restauranteId).onSnapshot(function(doc){
+    _registrarLeitura('config-mesas', 1);
     if(!doc.exists) return;
     var d = doc.data();
     var novo = parseInt(d.totalMesas) || 99;
@@ -4899,6 +4920,7 @@ function escutarMesasOcupadas(){
 }
 
 function _processarSnapMesas(snap){
+    _registrarLeitura('mesas-abertas', (typeof snap.docChanges === 'function') ? snap.docChanges().length : snap.size);
     _mesasOcupadas = {};
     _contasMesaCache = {};
     _comandasAvulsas = [];
@@ -6019,6 +6041,46 @@ function logoutGarcom(){
 // ════════════════════════════════════════
 var _debugClickCount = 0;
 var _debugClickTimer = null;
+// ════════════════════════════════════════
+//  CONTADOR DE LEITURAS DO FIRESTORE (diagnóstico)
+//  Cada listener/consulta é "etiquetado" e registra quantos documentos
+//  aquele disparo custou. Isso é uma ESTIMATIVA (o cliente não tem acesso
+//  ao contador real de billing), mas segue a regra de ouro do Firestore:
+//  - onSnapshot: cada disparo cobra 1 leitura por doc que veio em
+//    docChanges() (a 1ª leitura reporta TODOS como 'added', então bate
+//    certo tanto na carga inicial quanto nas atualizações seguintes)
+//  - get(): cobra 1 leitura por doc retornado (snap.size)
+//  - doc único (onSnapshot em um documento, não coleção): 1 leitura por disparo
+// ════════════════════════════════════════
+var _leituraStats = {};
+function _chaveDiaLeituras(){
+  var d = new Date();
+  return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+}
+function _registrarLeitura(label, qtd){
+  try{
+    qtd = qtd || 0;
+    if(!_leituraStats[label]) _leituraStats[label] = {leituras:0, disparos:0};
+    _leituraStats[label].leituras += qtd;
+    _leituraStats[label].disparos += 1;
+    localStorage.setItem('garcom_leituras_' + _chaveDiaLeituras(), JSON.stringify(_leituraStats));
+  }catch(e){}
+}
+(function(){
+  // Recupera contagem de hoje (se a página foi recarregada no meio do dia)
+  try{
+    var raw = localStorage.getItem('garcom_leituras_' + _chaveDiaLeituras());
+    if(raw) _leituraStats = JSON.parse(raw);
+  }catch(e){}
+  // Limpa contadores de dias antigos pra não acumular lixo no localStorage
+  try{
+    var chaveHoje = 'garcom_leituras_' + _chaveDiaLeituras();
+    Object.keys(localStorage).forEach(function(k){
+      if(k.indexOf('garcom_leituras_') === 0 && k !== chaveHoje) localStorage.removeItem(k);
+    });
+  }catch(e){}
+})();
+
 var _debugLogs = [];
 
 // Intercepta console.log/error/warn pra capturar tudo
@@ -6153,6 +6215,19 @@ function abrirPainelDebug(){
   }).join('');
   if(!logsHtml) logsHtml = '<div style="color:#666;text-align:center;padding:20px;">Sem logs ainda</div>';
 
+  // Monta o ranking de leituras do Firestore (maior consumo primeiro)
+  var leituraLinhas = Object.keys(_leituraStats).map(function(label){
+    return {label: label, leituras: _leituraStats[label].leituras, disparos: _leituraStats[label].disparos};
+  }).sort(function(a,b){ return b.leituras - a.leituras; });
+  var totalLeituras = leituraLinhas.reduce(function(s,l){ return s + l.leituras; }, 0);
+  var leituraHtml = leituraLinhas.map(function(l){
+    return '<div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.05);padding:5px 0;font-family:monospace;font-size:0.74rem;">' +
+      '<span style="color:#e5e7eb;">' + esc(l.label) + '</span>' +
+      '<span style="color:#4ade80;font-weight:700;">' + l.leituras + '<span style="color:#666;font-weight:400;"> (' + l.disparos + 'x)</span></span>' +
+    '</div>';
+  }).join('');
+  if(!leituraHtml) leituraHtml = '<div style="color:#666;text-align:center;padding:14px;">Sem dados ainda</div>';
+
   var mod = document.createElement('div');
   mod.className = 'modal show';
   mod.id = 'modal-debug';
@@ -6174,12 +6249,15 @@ function abrirPainelDebug(){
           '<div>Contas em cache: <span style="color:#fff;">' + info.contasMesaCache.join(', ') + '</span></div>' +
           '<div>Online: <span style="color:#fff;">' + (info.online ? 'Sim' : 'NÃO ⚠️') + '</span></div>' +
         '</div>' +
+        '<div style="font-size:0.78rem;color:#999;margin:14px 0 8px;font-weight:700;">📊 LEITURAS DO FIRESTORE HOJE — total estimado: <span style="color:#4ade80;">' + totalLeituras + '</span></div>' +
+        '<div style="background:#000;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;margin-bottom:14px;">' + leituraHtml + '</div>' +
         '<div style="font-size:0.78rem;color:#999;margin-bottom:8px;font-weight:700;">LOGS (' + _debugLogs.length + ', mais recentes primeiro)</div>' +
         '<div style="background:#000;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;">' + logsHtml + '</div>' +
       '</div>' +
       '<div style="padding:12px;border-top:1px solid rgba(255,255,255,0.1);background:#1a1a1a;display:flex;gap:8px;">' +
         '<button onclick="copiarLogsDebug()" style="flex:1;padding:10px;background:#4ade80;color:#000;border:none;border-radius:8px;font-family:inherit;font-weight:700;cursor:pointer;">📋 Copiar Tudo</button>' +
         '<button onclick="_debugLogs=[];abrirPainelDebug();" style="flex:1;padding:10px;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">🗑️ Limpar</button>' +
+        '<button onclick="_leituraStats={};localStorage.removeItem(\'garcom_leituras_\'+_chaveDiaLeituras());abrirPainelDebug();" style="flex:1;padding:10px;background:rgba(247,163,79,0.15);color:#f7a34f;border:1px solid rgba(247,163,79,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">📊 Zerar leituras</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
@@ -6197,6 +6275,17 @@ function copiarLogsDebug(){
   };
   var texto = '=== DEBUG BÁVARO ===\n';
   texto += JSON.stringify(info, null, 2) + '\n\n';
+
+  // Ranking de leituras do Firestore (estimado) — o que mais consome hoje
+  var _leituraLinhasCopy = Object.keys(_leituraStats).map(function(label){
+    return {label: label, leituras: _leituraStats[label].leituras, disparos: _leituraStats[label].disparos};
+  }).sort(function(a,b){ return b.leituras - a.leituras; });
+  var _totalLeituraCopy = _leituraLinhasCopy.reduce(function(s,l){ return s + l.leituras; }, 0);
+  texto += '=== LEITURAS FIRESTORE HOJE (estimado, total: ' + _totalLeituraCopy + ') ===\n';
+  _leituraLinhasCopy.forEach(function(l){
+    texto += l.label + ': ' + l.leituras + ' leituras (' + l.disparos + ' disparos)\n';
+  });
+  texto += '\n';
 
   // Adiciona itens da conta atual com campo pessoa
   if(_fecharConta && _fecharConta.itens){
@@ -7449,6 +7538,7 @@ function renderMesasAbertas(){
     .where('restauranteId','==', _restauranteId)
     .where('status','==','aberta')
     .onSnapshot(function(snap){
+      _registrarLeitura('admin-mesas', snap.docChanges().length);
       _adminMesasCache = [];
       snap.forEach(function(d){ _adminMesasCache.push(Object.assign({id:d.id}, d.data())); });
       _renderMesasAbertasLista();
@@ -7680,6 +7770,7 @@ function renderAvisos(){
         .where('restauranteId','==', _restauranteId)
         .limit(30)
         .onSnapshot(function(snap2){
+          _registrarLeitura('admin-avisos', snap2.docChanges().length);
           _adminAvisosCache = [];
           var temNovaResposta = false;
           var novasInfo = [];
@@ -7845,6 +7936,7 @@ function renderPedidosAdminGarcom(){
     .orderBy('criadoEm', 'desc')
     .limit(50)
     .onSnapshot(function(snap){
+      _registrarLeitura('admin-pedidos', snap.docChanges().length);
       _adminPedidosCache = [];
       snap.forEach(function(d){ _adminPedidosCache.push(Object.assign({id:d.id}, d.data())); });
       _renderPedidosAdminGarcomLista();
@@ -7962,6 +8054,7 @@ function carregarLogsAdminGarcom(){
     .orderBy('quando', 'desc')
     .limit(100)
     .onSnapshot(function(snap){
+      _registrarLeitura('admin-logs', snap.docChanges().length);
       _adminGarcomLogsCache = [];
       snap.forEach(function(d){ _adminGarcomLogsCache.push(Object.assign({id:d.id}, d.data())); });
       renderLogsAdminGarcom();
@@ -8700,6 +8793,7 @@ function abrirVerPedidosComanda(comandaId){
     .where('restauranteId','==',_restauranteId)
     .where('contaId','==', comandaId)
     .onSnapshot(function(snap){
+      _registrarLeitura('ver-pedidos-comanda', snap.docChanges().length);
       var lista = [];
       snap.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
       lista.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
@@ -9013,6 +9107,7 @@ function iniciarListeners(){
     : 'cardapio_publico/'+_restauranteId;
 
   _unsubCats = fbColCardapio('categorias').onSnapshot(function(snap){
+    _registrarLeitura('cardapio-categorias', snap.docChanges().length);
     _categorias = [];
     snap.forEach(function(d){
       var v = d.data();
@@ -9032,6 +9127,7 @@ function iniciarListeners(){
   });
 
   _unsubItens = fbColCardapio('itens').onSnapshot(function(snap){
+    _registrarLeitura('cardapio-itens', snap.docChanges().length);
     _itens = [];
     snap.forEach(function(d){
       var v = d.data();
@@ -9058,6 +9154,7 @@ function iniciarListeners(){
   }, function(e){ console.error('Erro itens:', e); });
 
   _unsubGrupos = fbColCardapio('grupos_opcoes').onSnapshot(function(snap){
+    _registrarLeitura('cardapio-grupos', snap.docChanges().length);
     _grupos = [];
     snap.forEach(function(d){
       var v = d.data();
@@ -9075,6 +9172,7 @@ function iniciarListeners(){
     .collection('restaurantes').doc(_restauranteId)
     .collection('impressao').doc('config').collection('modelos')
     .onSnapshot(function(snap){
+      _registrarLeitura('modelos-cozinha', snap.docChanges().length);
       _modelosCozinha = [];
       snap.forEach(function(d){
         var v = d.data() || {};
@@ -9132,6 +9230,7 @@ function escutarMeusPedidos(){
     .where('restauranteId','==',_restauranteId)
     .where('contaId','==', contaIdAtual)
     .onSnapshot(function(snap){
+      _registrarLeitura('meus-pedidos', snap.docChanges().length);
       _meusPedidos = [];
       snap.forEach(function(d){
         var v = d.data();
@@ -15012,6 +15111,7 @@ function abrirFecharConta(num){
   if(_fecharUnsub) _fecharUnsub();
   _fecharUnsub = fbDb.collection('contas_mesa').doc(_fecharContaId)
     .onSnapshot(function(doc){
+      _registrarLeitura('fechar-conta', 1);
       if(doc.exists){
         var novasConta = Object.assign({id:doc.id}, doc.data());
         // Preserva campo pessoa que já estava em memória (por itemKey)
@@ -16760,6 +16860,7 @@ function abrirVerPedidosMesa(num){
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==', mesaInt)
     .onSnapshot(function(snap){
+      _registrarLeitura('ver-pedidos-mesa-int', snap.docChanges().length);
       snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
       filtrarERender();
     }, function(err){
@@ -16770,6 +16871,7 @@ function abrirVerPedidosMesa(num){
     .where('restauranteId','==',_restauranteId)
     .where('mesa','==', mesaStr)
     .onSnapshot(function(snap){
+      _registrarLeitura('ver-pedidos-mesa-str', snap.docChanges().length);
       snap.forEach(function(d){ pedidosCache[d.id] = d.data(); });
       filtrarERender();
     }, function(err){
@@ -16783,6 +16885,7 @@ function abrirVerPedidosMesa(num){
       .where('restauranteId','==',_restauranteId)
       .where('contaId','==', contaIdAtual)
       .onSnapshot(function(snap){
+        _registrarLeitura('ver-pedidos-mesa-contaid', snap.docChanges().length);
         console.log('[VER-PEDIDOS] query contaId (' + contaIdAtual.substring(0,8) + '...):', snap.size, 'pedidos');
         snap.forEach(function(d){
           // Log de cada pedido pra entender o que tem

@@ -2473,7 +2473,20 @@ setTimeout(_pdvIniciarWatchdog, 15000);
 var _tabAtual = 'cardapio';
 
 function showTab(tab) {
+  var _tabAnterior = _tabAtual;
   _tabAtual = tab;
+  // Desliga listeners em tempo real de abas que ficaram para trás — assim
+  // elas param de consumir leitura do Firestore enquanto ninguém as vê.
+  // (mesmo princípio já usado no fecharEstoque())
+  if(_tabAnterior === 'totem' && tab !== 'totem'){
+    if(_unsubTotemCats){ _unsubTotemCats(); _unsubTotemCats = null; }
+    if(_unsubTotemItens){ _unsubTotemItens(); _unsubTotemItens = null; }
+    if(_unsubTotemGrupos){ _unsubTotemGrupos(); _unsubTotemGrupos = null; }
+    if(_unsubTotemConfig){ _unsubTotemConfig(); _unsubTotemConfig = null; }
+  }
+  if(_tabAnterior === 'admin' && tab !== 'admin'){
+    if(_adminLogsUnsub){ _adminLogsUnsub(); _adminLogsUnsub = null; }
+  }
   var btnC = document.getElementById('tab-btn-cardapio');
   var btnGr = document.getElementById('tab-btn-grupos');
   var btnP = document.getElementById('tab-btn-pedidos');
@@ -6499,11 +6512,16 @@ function iniciarListenerComandosImpressao(){
   // conexão com a impressora ainda não esteja pronta (tenta imprimir na hora).
   if(_impCmdListenerAtivo || !_restauranteAtivo) return;
   _impCmdListenerAtivo = true;
+  // Filtra só comandos de hoje — sem isso, cada abertura do PDV lê o
+  // histórico inteiro da coleção (que cresce pra sempre com o tempo).
+  var _cmdImpHoje = new Date(); _cmdImpHoje.setHours(0,0,0,0);
+  var _cmdImpInicioDia = _cmdImpHoje.getTime();
   // Marca comandos antigos pra não processar de novo no início.
   // EXCEÇÃO: comandos de insumos pendentes — esses DEVEM ser impressos
   // mesmo que tenham sido criados antes do PDV abrir.
   fbDb.collection('comandos_impressao')
     .where('restauranteId','==', _restauranteAtivo.id)
+    .where('criadoEm','>=', _cmdImpInicioDia)
     .get().then(function(snap){
       snap.forEach(function(d){
         var c = d.data() || {};
@@ -6524,6 +6542,7 @@ function iniciarListenerComandosImpressao(){
     });
   fbDb.collection('comandos_impressao')
     .where('restauranteId','==', _restauranteAtivo.id)
+    .where('criadoEm','>=', _cmdImpInicioDia)
     .onSnapshot(function(snap){
       snap.docChanges().forEach(function(ch){
         if(ch.type !== 'added') return;

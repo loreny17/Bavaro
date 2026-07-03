@@ -10767,15 +10767,19 @@ function totemRenderGrupos(){
   box.innerHTML = _totemGrupos.map(function(g){
     var opcoes = (g.opcoes||[]).map(function(o){
       var precoTxt = o.preco ? ' (+R$ ' + (o.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) + ')' : '';
-      return '<span class="op">' + escapeHtml(o.nome||'') + precoTxt + '</span>';
+      var estiloOp = o.pausado ? ' style="text-decoration:line-through;opacity:0.55;"' : '';
+      return '<span class="op"' + estiloOp + '>' + escapeHtml(o.nome||'') + precoTxt + (o.pausado ? ' ⏸️' : '') + '</span>';
     }).join('');
     var tipoTxt = g.tipo === 'multipla' ? 'Múltipla escolha' : 'Escolha única';
     var badgeObr = g.obrigatorio
       ? '<span style="background:rgba(239,68,68,0.15);color:#f87171;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;margin-left:5px;">OBRIGATÓRIO</span>'
       : '';
-    return '<div class="totem-grupo-card">' +
+    var badgePausado = g.pausado
+      ? '<span style="background:rgba(248,113,113,0.18);color:#f87171;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;margin-left:5px;">⏸️ GRUPO PAUSADO</span>'
+      : '';
+    return '<div class="totem-grupo-card"' + (g.pausado ? ' style="opacity:0.7;"' : '') + '>' +
       '<div class="topo">' +
-        '<span class="nome">' + escapeHtml(g.nome||'') + badgeObr + '</span>' +
+        '<span class="nome">' + escapeHtml(g.nome||'') + badgeObr + badgePausado + '</span>' +
         '<span class="tipo">' + tipoTxt + '</span>' +
       '</div>' +
       '<div class="opcoes">' + (opcoes || '<span style="color:var(--muted);font-size:0.78rem;">sem opções</span>') + '</div>' +
@@ -10797,16 +10801,17 @@ function totemAbrirModalGrupo(grupo){
   var ex = document.getElementById('modal-totem-grupo');
   if(ex) ex.remove();
   var ehEdicao = !!grupo;
-  grupo = grupo || { nome:'', tipo:'unica', opcoes:[] };
+  grupo = grupo || { nome:'', tipo:'unica', opcoes:[], pausado:false };
   // Guardamos qual grupo está sendo editado (pra excluí-lo do select de "abrir grupos")
   window._totemGrupoEditandoId = ehEdicao ? grupo.id : null;
-  // Guardamos as opções num estado pra editar (com abreGrupos e foto garantidos)
+  // Guardamos as opções num estado pra editar (com abreGrupos, foto e pausado garantidos)
   window._totemOpcoesEditando = (grupo.opcoes||[]).map(function(o){
     return {
       nome: o.nome || '',
       preco: o.preco || 0,
       foto: o.foto || '',
-      abreGrupos: (o.abreGrupos || []).slice()
+      abreGrupos: (o.abreGrupos || []).slice(),
+      pausado: o.pausado === true
     };
   });
 
@@ -10833,6 +10838,13 @@ function totemAbrirModalGrupo(grupo){
           '<span style="flex:1;font-size:0.88rem;">' +
             '<b>Grupo obrigatório</b>' +
             '<div style="font-size:0.76rem;color:var(--muted);margin-top:2px;">Cliente precisa escolher pra adicionar ao carrinho</div>' +
+          '</span>' +
+        '</label>' +
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">' +
+          '<input type="checkbox" id="tg-pausado"' + (grupo.pausado ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
+          '<span style="flex:1;font-size:0.88rem;">' +
+            '<b>⏸️ Pausar grupo inteiro</b>' +
+            '<div style="font-size:0.76rem;color:var(--muted);margin-top:2px;">Some do totem temporariamente (sem excluir). Ex: acabou tudo do grupo.</div>' +
           '</span>' +
         '</label>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Como mostrar no totem (modo Wizard)</label>' +
@@ -10895,20 +10907,22 @@ function totemRenderOpcoesNoModal(){
       : '';
 
     var fotoMini = o.foto
-      ? '<img src="' + o.foto + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;" onclick="totemEscolherFotoOpcao(' + idx + ')">'
-      : '<div onclick="totemEscolherFotoOpcao(' + idx + ')" style="width:42px;height:42px;background:var(--surface2);border:1px dashed var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;" title="Adicionar foto">📷</div>';
+      ? '<img src="' + o.foto + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;' + (o.pausado ? 'opacity:0.4;' : '') + '" onclick="totemEscolherFotoOpcao(' + idx + ')">'
+      : '<div onclick="totemEscolherFotoOpcao(' + idx + ')" style="width:42px;height:42px;background:var(--surface2);border:1px dashed var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;' + (o.pausado ? 'opacity:0.4;' : '') + '" title="Adicionar foto">📷</div>';
     var btnRemoveFoto = o.foto ? '<button onclick="totemRemoverFotoOpcao(' + idx + ')" style="background:transparent;border:none;color:#f87171;font-size:0.7rem;cursor:pointer;padding:2px 4px;">remover foto</button>' : '';
+    var btnPausa = '<button onclick="totemTogglePausaOpcao(' + idx + ')" title="' + (o.pausado ? 'Reativar opção' : 'Pausar opção (esgotou)') + '" style="background:' + (o.pausado ? 'rgba(248,113,113,0.15)' : 'var(--surface2)') + ';border:1px solid ' + (o.pausado ? '#f87171' : 'var(--border)') + ';color:' + (o.pausado ? '#f87171' : 'var(--muted)') + ';width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:0.85rem;padding:0;flex-shrink:0;">' + (o.pausado ? '▶️' : '⏸️') + '</button>';
 
-    return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;">' +
-      // Linha 1: setinhas + foto + nome + preço + remover
+    return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;' + (o.pausado ? 'opacity:0.55;' : '') + '">' +
+      // Linha 1: setinhas + foto + nome + preço + pausar + remover
       '<div style="display:flex;align-items:center;gap:8px;">' +
         '<div style="display:flex;flex-direction:column;gap:2px;">' +
           '<button onclick="totemMoverOpcao(' + idx + ',-1)" ' + (idx===0?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===0?'opacity:0.3;cursor:not-allowed;':'') + '" title="Subir">▲</button>' +
           '<button onclick="totemMoverOpcao(' + idx + ',1)" ' + (idx===ops.length-1?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===ops.length-1?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
         '</div>' +
         fotoMini +
-        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(o.nome||'') + '</span>' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;' + (o.pausado ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(o.nome||'') + (o.pausado ? ' <span style="text-decoration:none;color:#f87171;font-size:0.7rem;font-weight:700;">(pausado)</span>' : '') + '</span>' +
         '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
+        btnPausa +
         '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
       '</div>' +
       // Linha extra: botão de remover foto se tiver
@@ -10968,7 +10982,7 @@ function totemAddOpcao(){
   var preco = parseFloat(document.getElementById('tg-op-preco').value) || 0;
   if(!nome){ document.getElementById('tg-op-nome').focus(); return; }
   if(!window._totemOpcoesEditando) window._totemOpcoesEditando = [];
-  window._totemOpcoesEditando.push({ nome:nome, preco:preco, foto:'', abreGrupos:[] });
+  window._totemOpcoesEditando.push({ nome:nome, preco:preco, foto:'', abreGrupos:[], pausado:false });
   document.getElementById('tg-op-nome').value = '';
   document.getElementById('tg-op-preco').value = '';
   totemRenderOpcoesNoModal();
@@ -10978,6 +10992,14 @@ function totemAddOpcao(){
 function totemRemoverOpcao(idx){
   if(!window._totemOpcoesEditando) return;
   window._totemOpcoesEditando.splice(idx, 1);
+  totemRenderOpcoesNoModal();
+}
+
+// Pausa/reativa uma opção individual (ex: acabou o estoque de "Penne")
+// sem precisar excluí-la e perder a configuração (foto, preço, grupos vinculados).
+function totemTogglePausaOpcao(idx){
+  if(!window._totemOpcoesEditando || !window._totemOpcoesEditando[idx]) return;
+  window._totemOpcoesEditando[idx].pausado = !window._totemOpcoesEditando[idx].pausado;
   totemRenderOpcoesNoModal();
 }
 
@@ -11014,6 +11036,7 @@ function totemSalvarGrupo(id){
   var nome = (document.getElementById('tg-nome').value||'').trim();
   var tipo = document.getElementById('tg-tipo').value;
   var obrigatorio = document.getElementById('tg-obrigatorio').checked;
+  var pausado = document.getElementById('tg-pausado').checked;
   var estiloEl = document.getElementById('tg-estilo');
   var estilo = estiloEl ? estiloEl.value : 'cards';
   if(!nome){ showToast('Digite o nome do grupo','#f7a34f'); return; }
@@ -11021,6 +11044,7 @@ function totemSalvarGrupo(id){
     nome: nome,
     tipo: tipo,
     obrigatorio: obrigatorio,
+    pausado: pausado,
     estilo: estilo,
     opcoes: window._totemOpcoesEditando || [],
     atualizadoEm: Date.now()

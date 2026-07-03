@@ -1486,7 +1486,7 @@ function _gruposDoItem(item){
   // 1. Grupos fixos do item (sempre aparecem) — vinculados via item.gruposIds
   (item.gruposIds || []).forEach(function(gid){
     var g = _grupos.find(function(x){ return x.id === gid; });
-    if(g && g.opcoes && g.opcoes.length && !jaIncluidos[gid]){
+    if(g && g.opcoes && g.opcoes.length && !g.pausado && !jaIncluidos[gid]){
       resultado.push(g);
       jaIncluidos[gid] = true;
     }
@@ -1500,6 +1500,7 @@ function _gruposDoItem(item){
       if(g.fonte !== 'principal') return;
       if(jaIncluidos[g.id]) return;
       if(!g.opcoes || !g.opcoes.length) return;
+      if(g.pausado) return;
       var aplica = g.aplicaEm || {};
       var bate = false;
       if(aplica.itens && aplica.itens.indexOf(item.id) >= 0) bate = true;
@@ -1524,7 +1525,7 @@ function _gruposDoItem(item){
         op.abreGrupos.forEach(function(gid){
           if(jaIncluidos[gid]) return;
           var g = _grupos.find(function(x){ return x.id === gid; });
-          if(g && g.opcoes && g.opcoes.length){
+          if(g && g.opcoes && g.opcoes.length && !g.pausado){
             resultado.push(g);
             jaIncluidos[gid] = true;
             mudou = true;
@@ -2136,6 +2137,7 @@ function renderWizardPasso(){
   if(estilo === 'lista'){
     // ── LISTA COMPACTA (sem fotos) ──
     opcoesHtml = (grupo.opcoes||[]).map(function(o, idx){
+      if(o.pausado) return ''; // opção esgotada — some da tela do cliente
       var selecionado = selecaoAtual.indexOf(idx) >= 0;
       var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
       return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:2px solid '+(selecionado?'var(--accent)':'var(--border)')+';border-radius:12px;padding:18px 20px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:14px;margin-bottom:10px;">' +
@@ -2147,6 +2149,7 @@ function renderWizardPasso(){
   } else {
     // ── CARDS COM FOTOS ──
     opcoesHtml = (grupo.opcoes||[]).map(function(o, idx){
+      if(o.pausado) return ''; // opção esgotada — some da tela do cliente
       var selecionado = selecaoAtual.indexOf(idx) >= 0;
       var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
       var foto = o.foto
@@ -2199,6 +2202,8 @@ function renderWizardPasso(){
 function wizardEscolher(idx){
   var grupo = _wizGrupos[_wizPassoAtual];
   if(!grupo) return;
+  var opEscolhida = (grupo.opcoes||[])[idx];
+  if(!opEscolhida || opEscolhida.pausado) return; // opção esgotada — ignora o toque
   if(grupo.tipo === 'multipla'){
     var atual = _selecoesTemp[grupo.id] || [];
     var pos = atual.indexOf(idx);
@@ -2377,6 +2382,7 @@ function renderModalItem(){
       var ehUnica = !_ehMultipla(g);
       var selDoGrupo = _selecoesTemp[g.id] || [];
       var opcoesHtml = (g.opcoes||[]).map(function(op, idx){
+        if(op.pausado) return ''; // opção esgotada — some da tela do cliente
         var marcado = selDoGrupo.indexOf(idx) >= 0;
         var precoOp = _precoOpcao(op);
         var precoTxt = precoOp
@@ -2435,6 +2441,8 @@ function atualizarTotalModal(){
 function selecionarOpcao(grupoId, idx){
   var g = _grupos.find(function(x){ return x.id === grupoId; });
   if(!g) return;
+  var opEscolhida = (g.opcoes||[])[idx];
+  if(!opEscolhida || opEscolhida.pausado) return; // opção esgotada — ignora o toque
   var ehUnica = !_ehMultipla(g);
   if(!_selecoesTemp[grupoId]) _selecoesTemp[grupoId] = [];
   var atual = _selecoesTemp[grupoId];

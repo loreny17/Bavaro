@@ -1851,8 +1851,12 @@ document.addEventListener('visibilitychange', function(){
     // continua vivo por trás nesses intervalos curtos. Isso evita reler as
     // mesas do zero dezenas/centenas de vezes por turno sem necessidade.
     var _LIMIAR_RECONEXAO_MS = 30000;
-    if(tempoBack > 0 && tempoBack <= _LIMIAR_RECONEXAO_MS){
-      return; // saída rápida — não força reconexão
+    if(tempoBack <= _LIMIAR_RECONEXAO_MS){
+      // Cobre tanto saídas rápidas (tempoBack pequeno) quanto o caso de um
+      // 'visibilitychange' disparar sem nunca ter passado por "hidden" antes
+      // (tempoBack fica 0) — comum logo que o app/PWA abre. Nenhum dos dois
+      // é motivo pra derrubar e recriar os listeners.
+      return;
     }
 
     // Sempre reseta throttle ao voltar do background (quando vamos reconectar)
@@ -4815,6 +4819,11 @@ function renderAparenciaModal(){
 
 function _iniciarListenersMesas(){
   console.log('[Init] _iniciarListenersMesas chamado. tenant='+_tenantId+' rest='+_restauranteId);
+  // "Liga o cronômetro" de reconexão agora — evita que um 'focus' ou
+  // 'visibilitychange' espúrio (comum logo que o app/PWA abre e ganha foco
+  // pela 1ª vez) dispare uma segunda reconstrução completa dos listeners
+  // por cima da que acabamos de fazer.
+  _ultimaRevalidacao = Date.now();
   escutarMesasOcupadas();
   escutarConfigMesas();
   escutarAvisosGarcom();

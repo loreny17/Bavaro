@@ -2397,6 +2397,7 @@ document.addEventListener('DOMContentLoaded', function(){
 // ═══════════════════════════════════════
 var _unsubPedidosPDV = null;
 var _pedidosPDV = [];
+var _impProntoParaAutoImprimir = false; // true depois que a marcação inicial de "já impressos" termina
 var _filtroStatus = 'todos';
 var _histFiltroInicio = null; // null = hoje por padrão
 var _histFiltroFim = null;
@@ -2593,6 +2594,21 @@ function iniciarListenerPedidos() {
     if(anterior.length > 0){
       var novos = _pedidosPDV.filter(function(p){ return anterior.indexOf(p.id) === -1 && p.status === 'aguardando'; });
       if(novos.length > 0) showToast('🔔 ' + novos.length + ' novo(s) pedido(s)!', '#f7a34f', 4000);
+    }
+
+    // ⚡ Impressão automática reaproveita ESTE MESMO listener/leitura, em vez de
+    // abrir uma segunda escuta redundante na coleção 'pedidos' (economiza leitura).
+    if(_impProntoParaAutoImprimir && typeof snap.docChanges === 'function'){
+      snap.docChanges().forEach(function(ch){
+        if(ch.type !== 'added') return;
+        var v = ch.doc.data();
+        if(!comFiltroData && v.criadoEm && v.criadoEm < inicioDia) return;
+        if(_tenantId && v.tenantId && v.tenantId !== _tenantId) return;
+        var pedido = Object.assign({id: ch.doc.id}, v);
+        if(_ultimosPedidosImpressos[pedido.id] || pedido.impresso) return;
+        _ultimosPedidosImpressos[pedido.id] = true;
+        imprimirPedidoAutomatico(pedido);
+      });
     }
   }
 
@@ -5981,7 +5997,10 @@ function iniciarListenerImpressao(){
   if(_impListenerAtivo) return;
   if(!_qzPronto || !_restauranteAtivo) return;
   _impListenerAtivo = true;
-  // Marca pedidos de hoje como já impressos (não reimprimir o que já estava lá)
+  // Marca pedidos de hoje como já impressos (não reimprimir o que já estava lá).
+  // A partir daqui, a detecção de pedidos NOVOS não abre um segundo listener —
+  // ela reaproveita o snapshot do listener de pedidos já ativo (iniciarListenerPedidos),
+  // via a flag _impProntoParaAutoImprimir. Isso evita ler a coleção 'pedidos' em dobro.
   var hoje = new Date(); hoje.setHours(0,0,0,0);
   var queryImp = fbDb.collection('pedidos')
     .where('restauranteId','==', _restauranteAtivo.id)
@@ -5989,49 +6008,21 @@ function iniciarListenerImpressao(){
   if(_tenantId) queryImp = queryImp.where('tenantId','==', _tenantId);
   queryImp.get().then(function(snap){
     snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
-    // Só inicia o listener APÓS marcar os existentes — evita reimprimir pedidos antigos
-    console.log('[PDV] Iniciando listener de pedidos para restaurante:', _restauranteAtivo.id);
-    var queryImpListen = fbDb.collection('pedidos')
-      .where('restauranteId','==', _restauranteAtivo.id)
-      .where('criadoEm','>=', hoje.getTime());
-    if(_tenantId) queryImpListen = queryImpListen.where('tenantId','==', _tenantId);
-    queryImpListen.onSnapshot(function(snap){
-        snap.docChanges().forEach(function(ch){
-          if(ch.type === 'added'){
-            var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
-            console.log('[PDV] Pedido recebido:', pedido.id, 'origemTotem:', !!pedido.origemTotem, 'cliente:', pedido.cliente);
-            if(_ultimosPedidosImpressos[pedido.id]) {
-              console.log('[PDV] já processado, ignorando');
-              return;
-            }
-            if(pedido.impresso) {
-              console.log('[PDV] já marcado como impresso, ignorando');
-              _ultimosPedidosImpressos[pedido.id] = true;
-              return;
-            }
-            _ultimosPedidosImpressos[pedido.id] = true;
-            console.log('[PDV] disparando imprimirPedidoAutomatico...');
-            imprimirPedidoAutomatico(pedido);
-          }
-        });
-      }, function(err){
-        console.error('[PDV] erro no listener:', err);
-      });
-  }).catch(function(e){
-    console.warn('[PDV] erro ao buscar pedidos iniciais:', e.code);
-    // Mesmo com erro, inicia o listener
-    var queryImpListen2 = fbDb.collection('pedidos').where('restauranteId','==', _restauranteAtivo.id);
-    if(_tenantId) queryImpListen2 = queryImpListen2.where('tenantId','==', _tenantId);
-    queryImpListen2.onSnapshot(function(snap){
-      snap.docChanges().forEach(function(ch){
-        if(ch.type === 'added'){
-          var pedido = Object.assign({id: ch.doc.id}, ch.doc.data());
-          if(_ultimosPedidosImpressos[pedido.id] || pedido.impresso) return;
-          _ultimosPedidosImpressos[pedido.id] = true;
-          imprimirPedidoAutomatico(pedido);
-        }
-      });
+    console.log('[PDV] Marcação inicial de impressão concluída para restaurante:', _restauranteAtivo.id);
+    _impProntoParaAutoImprimir = true;
+    // Rede de segurança: cobre pedidos que chegaram bem no instante entre a
+    // marcação inicial e a liberação da flag (o listener compartilhado já
+    // pode ter processado o 'added' deles antes da flag virar true).
+    _pedidosPDV.forEach(function(p){
+      if(_ultimosPedidosImpressos[p.id] || p.impresso) return;
+      _ultimosPedidosImpressos[p.id] = true;
+      imprimirPedidoAutomatico(p);
     });
+  }).catch(function(e){
+    console.warn('[PDV] erro ao buscar pedidos iniciais (marcação de impressão):', e.code);
+    // Mesmo com erro na marcação, libera a detecção de novos pedidos —
+    // pior caso é reimprimir algum pedido já existente, o que é raro.
+    _impProntoParaAutoImprimir = true;
   });
 }
 

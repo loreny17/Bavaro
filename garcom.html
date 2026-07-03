@@ -1881,11 +1881,13 @@ document.addEventListener('visibilitychange', function(){
 });
 
 window.addEventListener('focus', function(){
-  // Não reseta _ultimaRevalidacao aqui de propósito — o evento 'focus' costuma
-  // disparar junto com o 'visibilitychange' toda vez que a tela do tablet
-  // acende, e resetar o cronômetro aqui furava o filtro de reconexão rápida
-  // lá de cima. Deixa o cooldown interno de revalidarConexaoFirestore() decidir.
-  if(_restauranteId) revalidarConexaoFirestore();
+  // NÃO reconecta aqui. O 'focus' dispara toda vez que a tela do tablet
+  // acende — inclusive em bloqueios rapidíssimos (1-3s) — e não carrega
+  // nenhuma informação de quanto tempo o app ficou realmente em segundo
+  // plano. Usá-lo pra decidir reconexão ignorava o filtro de tempo real
+  // que o 'visibilitychange' já faz corretamente (via tempoBack), causando
+  // reconstrução completa do listener de mesas mesmo em piscadas de tela
+  // de poucos segundos. O 'visibilitychange' sozinho já cobre esse caso.
 });
 window.addEventListener('online', function(){
   // 'online' é um sinal raro e inequívoco (a rede caiu e voltou de verdade) —

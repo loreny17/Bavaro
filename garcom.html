@@ -4866,6 +4866,20 @@ function carregarTenantParaMesas(){
   });
 }
 
+// ⚡ Atualização rápida e barata: faz UMA leitura avulsa das mesas abertas
+// pra refletir na tela na hora (ex: logo depois de enviar um pedido), SEM
+// derrubar e recriar o listener em tempo real que já está rodando. Isso
+// evita pagar o custo de "escutarMesasOcupadas()" completo a cada pedido.
+function _refrescarMesasRapido(){
+  if(!fbDb || !_restauranteId) return;
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==',_restauranteId)
+    .where('status','==','aberta')
+    .get({source:'server'})
+    .then(function(snap){ _processarSnapMesas(snap); })
+    .catch(function(e){ console.warn('[Mesas] refresh rápido falhou:', e && e.code); });
+}
+
 function escutarMesasOcupadas(){
   console.log('[Mesas] escutarMesasOcupadas iniciado. rest='+_restauranteId);
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
@@ -12906,9 +12920,9 @@ function _enviarPedidoConfirmado(){
   // Toast otimista (sem número ainda — vamos atualizar quando vier)
   showToast('✓ Pedido enviado!', '#4ade80');
   voltarParaMesas();
-  // Força refresh imediato do listener de mesas — garante que aparece ocupada
-  // sem esperar o Firestore propagar (crítico em dias de movimento)
-  setTimeout(function(){ if(typeof escutarMesasOcupadas === 'function') escutarMesasOcupadas(); }, 800);
+  // Atualiza a lista de mesas na hora — sem esperar o Firestore propagar —
+  // mas com uma leitura avulsa (não derruba/recria o listener em tempo real)
+  setTimeout(function(){ if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido(); }, 800);
   // Decide se imprime: override do FAB tem prioridade, senão usa o checkbox do carrinho
   var _deveImprimir;
   if(_imprimirPedidoOverride !== null){

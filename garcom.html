@@ -1466,7 +1466,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
     <div class="modal-body">
       <div class="cart-mesa-row">
         <span class="cart-mesa-label">Mesa</span>
-        <span class="cart-mesa-val" id="cart-mesa-val">—</span>
+        <span class="cart-mesa-val" id="cart-mesa-val" onclick="abrirTrocaMesaCarrinho()" style="cursor:pointer;text-decoration:underline dotted;" title="Toque para mudar de mesa">—</span>
         <span class="cart-mesa-label" style="margin-left:14px;">Garçom</span>
         <span style="font-size:0.9rem;font-weight:600;color:var(--text);" id="cart-garcom-val">—</span>
       </div>
@@ -1685,6 +1685,71 @@ function carregarCarrinho(){
 function limparCarrinhoSalvo(){
   var k = chaveCarrinho();
   if(k){ try{ localStorage.removeItem(k); }catch(e){} }
+}
+
+// ═══════════════════════════════════════════════
+// 🔀 Trocar a mesa do pedido em andamento (sem perder o carrinho)
+// Útil quando o garçom entrou na mesa errada e só percebeu depois de montar o pedido.
+// ═══════════════════════════════════════════════
+function abrirTrocaMesaCarrinho(){
+  if(_comandaSelecionada) return; // comanda avulsa não tem "mesa" pra trocar
+  if(_mesaAtiva === null || _mesaAtiva === undefined) return;
+  var ex = document.getElementById('modal-trocar-mesa');
+  if(ex) ex.remove();
+
+  var botoesHtml = '';
+  for(var i = 1; i <= _TOTAL_MESAS; i++){
+    var num = String(i);
+    if(num === String(_mesaAtiva)) continue; // não mostra a mesa atual na lista
+    var ocupada = !!_mesasOcupadas[num];
+    botoesHtml +=
+      '<button onclick="confirmarTrocaMesaCarrinho(\'' + num + '\')" style="position:relative;padding:14px 0;border-radius:10px;' +
+        'border:1px solid ' + (ocupada ? 'rgba(248,113,113,0.4)' : 'var(--border)') + ';' +
+        'background:' + (ocupada ? 'rgba(248,113,113,0.12)' : 'var(--surface2)') + ';' +
+        'color:var(--text);font-weight:700;font-size:1rem;cursor:pointer;">' + num +
+        (ocupada ? '<div style="position:absolute;top:5px;right:7px;width:7px;height:7px;border-radius:50%;background:#f87171;"></div>' : '') +
+      '</button>';
+  }
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-trocar-mesa';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99995;display:flex;align-items:flex-end;justify-content:center;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface,#1a1a1a);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px;max-height:75vh;display:flex;flex-direction:column;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+        '<div style="font-weight:800;font-size:1.05rem;">Mudar pedido para qual mesa?</div>' +
+        '<button onclick="document.getElementById(\'modal-trocar-mesa\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;line-height:1;">×</button>' +
+      '</div>' +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">O pedido está montado na mesa ' + _mesaAtiva + '. Os itens do carrinho não serão perdidos — só o destino muda.</div>' +
+      '<div style="overflow-y:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding-bottom:4px;">' + botoesHtml + '</div>' +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function confirmarTrocaMesaCarrinho(novoNum){
+  var mesaAntiga = _mesaAtiva;
+  if(String(novoNum) === String(mesaAntiga)) { var m0=document.getElementById('modal-trocar-mesa'); if(m0) m0.remove(); return; }
+
+  // Move o carrinho salvo da mesa antiga pra mesa nova (sem perder nada)
+  try{ localStorage.removeItem('cart_mesa_' + mesaAntiga); }catch(e){}
+  _mesaAtiva = novoNum;
+  salvarCarrinho(); // grava já sob a chave da mesa nova
+
+  var modal = document.getElementById('modal-trocar-mesa');
+  if(modal) modal.remove();
+
+  // Atualiza os textos na tela sem recarregar itens nem disparar a animação de entrada
+  var elTitulo = document.getElementById('app-titulo');
+  var elMesaVal = document.getElementById('cart-mesa-val');
+  if(elTitulo) elTitulo.textContent = 'MESA ' + _mesaAtiva;
+  if(elMesaVal) elMesaVal.textContent = _mesaAtiva;
+
+  // Recomeça a escutar os pedidos já existentes da mesa nova (se houver)
+  try{ if(typeof escutarMeusPedidos === 'function') escutarMeusPedidos(); }catch(e){}
+
+  showToast('✓ Pedido agora vai para a mesa ' + novoNum, '#4ade80', 2500);
+  try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
 }
 var _modoCompacto = (function(){ try{ return localStorage.getItem('garcom_modo_compacto') === '1'; }catch(e){ return false; } })();
 

@@ -11747,7 +11747,8 @@ function abrirModalItem(it){
             pedidoId: pedidoId,
             motivo: 'Item adicionado: ' + it.nome,
             solicitadoPor: _nomeGarcom,
-            solicitadoEm: Date.now()
+            solicitadoEm: Date.now(),
+            criadoEm: Date.now()
           });
         })
         .then(function(){
@@ -13146,6 +13147,11 @@ renderMesas = function(){
 function _imprimirComRetry(comando, tentativas, delay){
   tentativas = tentativas || 0;
   delay = delay || 1000;
+  // Garante que TODO comando tenha 'criadoEm' — é o campo que o PDV usa pra
+  // filtrar "só de hoje" e economizar leitura. Sem isso, comandos que só
+  // tinham 'solicitadoEm' (como conta_pessoa) ficavam invisíveis pro PDV,
+  // mesmo sendo salvos corretamente no Firestore.
+  if(!comando.criadoEm) comando.criadoEm = Date.now();
   if(tentativas >= 4){
     console.warn('[IMPRESSAO] Falhou após 4 tentativas:', comando);
     showToast('⚠️ Impressão pode ter falhado — verifique a impressora', '#f59e0b', 5000);
@@ -14525,7 +14531,8 @@ function acaoRapidaImprimir(){
     contaId:contaId,
     mesa:mesa,
     solicitadoPor:_nomeGarcom,
-    solicitadoEm:Date.now()
+    solicitadoEm:Date.now(),
+    criadoEm:Date.now()
   }).then(function(){
     showToast('🖨️ Imprimindo conta...','#4ade80');
     fecharMenuMesa();

@@ -1809,6 +1809,7 @@ var _unsubImpressorasCozinha = null;
 var _unsubPedidosCozinha = null;
 var _modelosCozinha = [];
 var _impressorasCozinha = [];
+var _unsubImpressorasCozinha = null;
 var _pedidosCozinha = [];
 var _unsubMesas = null; // listener das mesas ocupadas
 var _listenersRestId = null; // Guarda qual restaurante está sendo escutado, evita reload
@@ -9326,6 +9327,19 @@ function iniciarListeners(){
       _cozinhaDebugLogado = false; // reset pra logar novamente
       try{ if(typeof atualizarBadgesCozinha === 'function') atualizarBadgesCozinha(); }catch(e){}
     }, function(e){ console.warn('[COZINHA] erro modelos:', e.code); });
+
+  // ─── Lista de impressoras cadastradas no PDV (pro seletor do "Item Avulso") ───
+  if(_unsubImpressorasCozinha) _unsubImpressorasCozinha();
+  _unsubImpressorasCozinha = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('impressao').doc('config').collection('impressoras')
+    .onSnapshot(function(snap){
+      _impressorasCozinha = [];
+      snap.forEach(function(d){
+        var v = d.data() || {};
+        _impressorasCozinha.push({ id: d.id, nome: v.nome || '(sem nome)' });
+      });
+    }, function(e){ console.warn('[IMPRESSORAS] erro ao carregar lista:', e.code); });
 
   // Sininho de cozinha — esconde para garçons normais, sem listeners permanentes
   if(!_ehAdmin){

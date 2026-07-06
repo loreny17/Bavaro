@@ -5695,8 +5695,9 @@ function anexarSwipe(el, id, tipo){
 }
 
 // Estado das quantidades no popup de pedido rápido
-var _qtdsRapidas = {}; // {itemId: qtd}
+var _qtdsRapidas = {}; // {pessoa: {itemChave: qtd}} — '__geral__' quando a mesa não é dividida
 var _mesaRapidaAtual = null;
+var _pessoaRapidaAtual = '__geral__';
 
 // Abre popup com itens distintos que a mesa já consumiu
 // ════════════════════════════════════════
@@ -8355,15 +8356,40 @@ function abrirPedidoRapido(numMesa){
       showToast('Mesa sem itens para repetir','#f7a34f');
       return;
     }
+    // Pessoas da mesa (se a conta estiver dividida por pessoa) — cada uma
+    // ganha sua própria "cesta" de quantidades, pra ficar claro quem pediu o quê.
+    var pessoas = _getPessoasMesa();
     _qtdsRapidas = {};
+    var todasChaves = ['__geral__'].concat(pessoas);
+    todasChaves.forEach(function(p){
+      _qtdsRapidas[p] = {};
+      lista.forEach(function(it){ _qtdsRapidas[p][it.chave] = 0; });
+    });
+    _pessoaRapidaAtual = pessoas.length ? pessoas[0] : '__geral__';
     _mesaRapidaAtual = numMesa;
-    lista.forEach(function(it){ _qtdsRapidas[it.chave] = 0; });
     var ex = document.getElementById('modal-pedido-rapido');
     if(ex) ex.remove();
     var mod = document.createElement('div');
     mod.className = 'modal modal-centro show';
     mod.id = 'modal-pedido-rapido';
     mod.dataset.lista = JSON.stringify(lista);
+    mod.dataset.pessoas = JSON.stringify(pessoas);
+
+    var pessoaSeletorHtml = '';
+    if(pessoas.length){
+      pessoaSeletorHtml =
+        '<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px;">' +
+          pessoas.map(function(p){
+            var ativa = p === _pessoaRapidaAtual;
+            return '<button onclick="selecionarPessoaRapida(\'' + p.replace(/'/g,"\\'") + '\')" style="flex-shrink:0;padding:8px 14px;border-radius:20px;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;white-space:nowrap;' +
+              'background:' + (ativa ? 'var(--accent)' : 'var(--surface2)') + ';' +
+              'color:' + (ativa ? '#000' : 'var(--text)') + ';' +
+              'border:1px solid ' + (ativa ? 'var(--accent)' : 'var(--border2)') + ';">👤 ' + esc(p) + '</button>';
+          }).join('') +
+        '</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">Adicionando itens para <b style="color:var(--accent);">' + esc(_pessoaRapidaAtual) + '</b> — toque em outro nome pra trocar</div>';
+    }
+
     mod.innerHTML =
       '<div class="modal-box" style="max-width:440px;border-radius:18px;background:rgba(12,10,8,0*0.55));;border:1px solid rgba(255,255,255,0*0.18));">'+
         '<div class="modal-header">'+
@@ -8372,7 +8398,9 @@ function abrirPedidoRapido(numMesa){
         '</div>'+
         '<div class="modal-body">'+
           '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque no card pra mandar +1. Use os botões pra escolher mais quantidades e "Enviar tudo".</div>'+
+          '<div id="pedido-rapido-pessoas">' + pessoaSeletorHtml + '</div>' +
           '<div id="pedido-rapido-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;"></div>'+
+          '<div id="pedido-rapido-resumo"></div>' +
         '</div>'+
         '<div class="modal-footer">'+
           '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">Fechar</button>'+
@@ -8387,19 +8415,46 @@ function abrirPedidoRapido(numMesa){
   _abrirComItens();
 }
 
+// Troca qual pessoa está recebendo os itens no Pedido Rápido
+function selecionarPessoaRapida(nome){
+  _pessoaRapidaAtual = nome;
+  var mod = document.getElementById('modal-pedido-rapido');
+  if(!mod) return;
+  var pessoas = JSON.parse(mod.dataset.pessoas || '[]');
+  var box = document.getElementById('pedido-rapido-pessoas');
+  if(box){
+    box.innerHTML =
+      '<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px;">' +
+        pessoas.map(function(p){
+          var ativa = p === _pessoaRapidaAtual;
+          return '<button onclick="selecionarPessoaRapida(\'' + p.replace(/'/g,"\\'") + '\')" style="flex-shrink:0;padding:8px 14px;border-radius:20px;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;white-space:nowrap;' +
+            'background:' + (ativa ? 'var(--accent)' : 'var(--surface2)') + ';' +
+            'color:' + (ativa ? '#000' : 'var(--text)') + ';' +
+            'border:1px solid ' + (ativa ? 'var(--accent)' : 'var(--border2)') + ';">👤 ' + esc(p) + '</button>';
+        }).join('') +
+      '</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">Adicionando itens para <b style="color:var(--accent);">' + esc(_pessoaRapidaAtual) + '</b> — toque em outro nome pra trocar</div>';
+  }
+  renderPedidoRapidoGrid();
+}
+
 // Renderiza os cards do popup (com controles de qtd)
 function renderPedidoRapidoGrid(){
   var grid = document.getElementById('pedido-rapido-grid');
   var mod = document.getElementById('modal-pedido-rapido');
   if(!grid || !mod) return;
   var lista = JSON.parse(mod.dataset.lista || '[]');
+  var pessoas = JSON.parse(mod.dataset.pessoas || '[]');
+  var cesta = _qtdsRapidas[_pessoaRapidaAtual] || {};
   var html = '';
-  // Conta quantos itens têm qtd > 0 (pra ativar/desativar o botão "Enviar tudo")
+  // Conta quantos itens têm qtd > 0 em QUALQUER pessoa (pra ativar/desativar "Enviar tudo")
   var algumComQtd = false;
+  Object.keys(_qtdsRapidas).forEach(function(p){
+    Object.keys(_qtdsRapidas[p]).forEach(function(k){ if(_qtdsRapidas[p][k] > 0) algumComQtd = true; });
+  });
   lista.forEach(function(it){
     var chave = it.chave || it.id; // chave de agrupamento (id ou nome+preco)
-    var qtd = _qtdsRapidas[chave] || 0;
-    if(qtd > 0) algumComQtd = true;
+    var qtd = cesta[chave] || 0;
     var itCardapio = it.id ? _itens.find(function(x){ return x.id === it.id; }) : null;
     var foto = itCardapio && itCardapio.foto ? itCardapio.foto : null;
     var emoji = '🍽️';
@@ -8430,6 +8485,28 @@ function renderPedidoRapidoGrid(){
     '</div>';
   });
   grid.innerHTML = html;
+
+  // Resumo por pessoa — mostra o que cada uma já tem selecionado, separado
+  var resumoEl = document.getElementById('pedido-rapido-resumo');
+  if(resumoEl){
+    var chavesPessoas = pessoas.length ? pessoas : ['__geral__'];
+    var resumoHtml = '';
+    chavesPessoas.forEach(function(p){
+      var cestaP = _qtdsRapidas[p] || {};
+      var itensP = lista.filter(function(it){ return (cestaP[it.chave || it.id] || 0) > 0; });
+      if(!itensP.length) return;
+      var nomeExibicao = p === '__geral__' ? 'Mesa toda' : p;
+      resumoHtml += '<div style="margin-top:4px;padding:10px 12px;background:var(--surface2);border-radius:10px;border:1px solid var(--border2);">' +
+        '<div style="font-weight:700;font-size:0.82rem;color:var(--accent);margin-bottom:4px;">👤 ' + esc(nomeExibicao) + '</div>' +
+        itensP.map(function(it){
+          var q = cestaP[it.chave || it.id];
+          return '<div style="font-size:0.8rem;color:var(--text);padding:2px 0;">' + q + 'x ' + esc(it.nome) + '</div>';
+        }).join('') +
+      '</div>';
+    });
+    resumoEl.innerHTML = resumoHtml ? '<div style="margin-top:10px;">' + resumoHtml + '</div>' : '';
+  }
+
   // Atualiza estado do botão "Enviar tudo"
   var btnEnviarTudo = document.getElementById('btn-enviar-tudo-rapido');
   if(btnEnviarTudo){
@@ -8448,22 +8525,24 @@ function cardRapidoTap(evt, chave){
   // Se o clique veio dos botões − + (que tem stopPropagation), nem chega aqui.
   // Se qtd estiver 0, manda 1 (atalho rápido pra "+ 1 desse").
   // Se qtd > 0, manda essa qtd.
-  var qtd = _qtdsRapidas[chave] || 0;
+  var cesta = _qtdsRapidas[_pessoaRapidaAtual] || {};
+  var qtd = cesta[chave] || 0;
   if(qtd === 0) qtd = 1;
-  enviarPedidoRapido(_mesaRapidaAtual, chave, qtd);
+  enviarPedidoRapido(_mesaRapidaAtual, chave, qtd, _pessoaRapidaAtual);
 }
 
-// Altera qtd de um item específico no popup
+// Altera qtd de um item específico no popup (dentro da cesta da pessoa atual)
 function qtdRapida(chave, delta){
-  var atual = _qtdsRapidas[chave] || 0;
+  if(!_qtdsRapidas[_pessoaRapidaAtual]) _qtdsRapidas[_pessoaRapidaAtual] = {};
+  var atual = _qtdsRapidas[_pessoaRapidaAtual][chave] || 0;
   var novo = Math.max(0, Math.min(99, atual + delta));
-  _qtdsRapidas[chave] = novo;
+  _qtdsRapidas[_pessoaRapidaAtual][chave] = novo;
   renderPedidoRapidoGrid();
   // Vibração leve
   if(navigator.vibrate) navigator.vibrate(15);
 }
 
-// Envia TODOS os itens (cada um com sua qtd) de uma vez só, em UM pedido único
+// Envia TODOS os itens (de TODAS as pessoas, cada um com sua qtd) de uma vez só, em UM pedido único
 function enviarTodosRapidos(){
   var mod = document.getElementById('modal-pedido-rapido');
   if(!mod) return;
@@ -8472,31 +8551,34 @@ function enviarTodosRapidos(){
   if(!numMesa) return;
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
   if(!conta || !conta.id){ showToast('❌ Mesa sem conta aberta','#f87171'); return; }
-  // Monta lista de itens com qtd > 0
+  // Monta lista de itens com qtd > 0, percorrendo a cesta de CADA pessoa
   var itensPedido = [];
   var totalPedido = 0;
-  lista.forEach(function(it){
-    var qtd = _qtdsRapidas[it.chave || it.id] || 0;
-    if(qtd <= 0) return;
-    // Tenta achar no cardápio (pra pegar preço/foto atualizados)
-    var itCard = it.id ? _itens.find(function(x){ return x.id === it.id; }) : null;
-    // Se não achou no cardápio (item antigo, removido, etc), usa os dados do próprio item da mesa
-    var nome = (itCard && itCard.nome) || it.nome;
-    var pBase = parseFloat((itCard && itCard.preco) || it.preco) || 0;
-    var foto = (itCard && itCard.foto) || '';
-    var idFinal = (itCard && itCard.id) || it.id || ('legado_'+nome.replace(/\s+/g,'_').toLowerCase());
-    itensPedido.push({
-      id: idFinal,
-      nome: nome,
-      preco: pBase,
-      precoBase: pBase,
-      extras: 0,
-      qtd: qtd,
-      obs: '',
-      foto: foto,
-      selecoes: []
+  Object.keys(_qtdsRapidas).forEach(function(pessoa){
+    var cesta = _qtdsRapidas[pessoa] || {};
+    lista.forEach(function(it){
+      var qtd = cesta[it.chave || it.id] || 0;
+      if(qtd <= 0) return;
+      // Tenta achar no cardápio (pra pegar preço/foto atualizados)
+      var itCard = it.id ? _itens.find(function(x){ return x.id === it.id; }) : null;
+      var nome = (itCard && itCard.nome) || it.nome;
+      var pBase = parseFloat((itCard && itCard.preco) || it.preco) || 0;
+      var foto = (itCard && itCard.foto) || '';
+      var idFinal = (itCard && itCard.id) || it.id || ('legado_'+nome.replace(/\s+/g,'_').toLowerCase());
+      itensPedido.push({
+        id: idFinal,
+        nome: nome,
+        preco: pBase,
+        precoBase: pBase,
+        extras: 0,
+        qtd: qtd,
+        obs: '',
+        foto: foto,
+        selecoes: [],
+        pessoa: pessoa === '__geral__' ? '' : pessoa
+      });
+      totalPedido += pBase * qtd;
     });
-    totalPedido += pBase * qtd;
   });
   if(!itensPedido.length){ showToast('Nada pra enviar','#f7a34f'); return; }
   // Fecha popup imediatamente + toast otimista + vibração
@@ -8555,8 +8637,8 @@ function enviarTodosRapidos(){
 }
 
 // Envia +N do item escolhido direto pra mesa (sem cardápio, sem confirmação)
-// qtd default é 1 se não passado
-function enviarPedidoRapido(numMesa, chave, qtd){
+// qtd default é 1 se não passado. pessoa é opcional (mesa dividida por pessoa)
+function enviarPedidoRapido(numMesa, chave, qtd, pessoa){
   qtd = qtd || 1;
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
   if(!conta || !conta.id){
@@ -8603,7 +8685,8 @@ function enviarPedidoRapido(numMesa, chave, qtd){
     qtd: qtd,
     obs: '',
     foto: foto,
-    selecoes: []
+    selecoes: [],
+    pessoa: (pessoa && pessoa !== '__geral__') ? pessoa : ''
   };
   var pedido = {
     garcom: _nomeGarcom,

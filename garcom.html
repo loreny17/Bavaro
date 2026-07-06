@@ -5517,7 +5517,8 @@ function anexarLongPress(el, numMesa){
 // Arrasta pra ESQUERDA → abre modal "Fechar Conta" 💰
 // Arrasta pra DIREITA  → vai direto pro cardápio (fazer pedido) 📝
 // Threshold: 80px. Mostra ícone aparecendo durante o arrasto.
-function anexarSwipe(el, numMesa){
+function anexarSwipe(el, id, tipo){
+  tipo = tipo || 'mesa'; // 'mesa' (padrão, usa os gestos personalizados) ou 'comanda'
   var startX = 0, startY = 0, currentX = 0;
   var swiping = false;
   var direcao = 0; // -1 = esquerda (fechar), 1 = direita (pedir)
@@ -5665,11 +5666,19 @@ function anexarSwipe(el, numMesa){
         setTimeout(function(){ _longPressDisparou = false; }, 300);
 
         if(dirFinal < 0){
-          // ESQUERDA: executa ação configurada
-          executarAcaoGesto(_gestosAcoes.swipeEsq, numMesa);
+          // ESQUERDA: fechar conta
+          if(tipo === 'comanda'){
+            if(typeof abrirFecharContaComanda === 'function') abrirFecharContaComanda(id);
+          } else {
+            executarAcaoGesto(_gestosAcoes.swipeEsq, id);
+          }
         } else {
-          // DIREITA: executa ação configurada
-          executarAcaoGesto(_gestosAcoes.swipeDir, numMesa);
+          // DIREITA: pedido rápido / repetir
+          if(tipo === 'comanda'){
+            if(typeof fazerNovoPedidoComanda === 'function') fazerNovoPedidoComanda(id);
+          } else {
+            executarAcaoGesto(_gestosAcoes.swipeDir, id);
+          }
         }
       }
     }, 180);
@@ -8667,7 +8676,7 @@ function renderComandas(){
   var html = '';
   filtradas.forEach(function(c){
     var hora = c.abertaEm ? new Date(c.abertaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-    html += '<div class="comanda-card aberta" onclick="abrirMenuComanda(\''+c.id+'\')">'+
+    html += '<div class="comanda-card aberta" data-comanda-id="'+c.id+'" onclick="abrirMenuComanda(\''+c.id+'\')">'+
       '<div class="comanda-card-icone">👤</div>'+
       '<div class="comanda-card-info">'+
         '<div class="comanda-card-nome">'+esc(c.cliente||'(sem nome)')+'</div>'+
@@ -8677,6 +8686,11 @@ function renderComandas(){
     '</div>';
   });
   lista.innerHTML = html;
+  // Liga o swipe (fechar conta / repetir pedido) em cada card de comanda,
+  // do mesmo jeito que já funciona nas mesas.
+  lista.querySelectorAll('.comanda-card[data-comanda-id]').forEach(function(el){
+    anexarSwipe(el, el.getAttribute('data-comanda-id'), 'comanda');
+  });
 }
 
 function abrirNovaComanda(){

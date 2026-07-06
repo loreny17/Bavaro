@@ -5673,9 +5673,9 @@ function anexarSwipe(el, id, tipo){
             executarAcaoGesto(_gestosAcoes.swipeEsq, id);
           }
         } else {
-          // DIREITA: pedido rápido / repetir
+          // DIREITA: pedido rápido
           if(tipo === 'comanda'){
-            if(typeof fazerNovoPedidoComanda === 'function') fazerNovoPedidoComanda(id);
+            if(typeof abrirPedidoRapidoComanda === 'function') abrirPedidoRapidoComanda(id);
           } else {
             executarAcaoGesto(_gestosAcoes.swipeDir, id);
           }
@@ -5696,8 +5696,9 @@ function anexarSwipe(el, id, tipo){
 
 // Estado das quantidades no popup de pedido rápido
 var _qtdsRapidas = {}; // {pessoa: {itemChave: qtd}} — '__geral__' quando a mesa não é dividida
-var _mesaRapidaAtual = null;
+var _mesaRapidaAtual = null; // guarda o "alvo" — número da mesa OU chave da comanda em cache
 var _pessoaRapidaAtual = '__geral__';
+var _tipoRapidoAtual = 'mesa'; // 'mesa' ou 'comanda' — define como o pedido final é montado
 
 // Abre popup com itens distintos que a mesa já consumiu
 // ════════════════════════════════════════
@@ -8334,8 +8335,22 @@ function abrirAvaliacao(){
 function abrirPedidoRapido(numMesa){
   var conta = _contasMesaCache[String(numMesa)] || _contasMesaCache[numMesa];
   if(!conta) return;
+  _tipoRapidoAtual = 'mesa';
+  _abrirPedidoRapidoComItens(conta, numMesa, 'MESA ' + numMesa);
+}
 
-  function _abrirComItens(){
+// Mesma tela do Pedido Rápido, só que pra uma comanda avulsa (por nome) —
+// usada pelo swipe direita na aba Comandas.
+function abrirPedidoRapidoComanda(comandaId){
+  var c = _comandasAvulsas.find(function(x){ return x.id === comandaId; });
+  if(!c) return;
+  var chaveTemp = 'avulsa_' + comandaId;
+  _contasMesaCache[chaveTemp] = c; // registra no mesmo formato que abrirFecharContaComanda já usa
+  _tipoRapidoAtual = 'comanda';
+  _abrirPedidoRapidoComItens(c, chaveTemp, '👤 ' + (c.cliente || 'Comanda'));
+}
+
+function _abrirPedidoRapidoComItens(conta, chaveAlvo, tituloExibicao){
     var distintos = {};
     (conta.itens||[]).forEach(function(it){
       if(it.status === 'cancelado') return;
@@ -8353,12 +8368,12 @@ function abrirPedidoRapido(numMesa){
     });
     var lista = Object.keys(distintos).map(function(k){ return distintos[k]; });
     if(!lista.length){
-      showToast('Mesa sem itens para repetir','#f7a34f');
+      showToast('Sem itens para repetir','#f7a34f');
       return;
     }
     // Pessoas da mesa (se a conta estiver dividida por pessoa) — cada uma
     // ganha sua própria "cesta" de quantidades, pra ficar claro quem pediu o quê.
-    var pessoas = _getPessoasMesa();
+    var pessoas = _tipoRapidoAtual === 'mesa' ? _getPessoasMesa() : [];
     _qtdsRapidas = {};
     var todasChaves = ['__geral__'].concat(pessoas);
     todasChaves.forEach(function(p){
@@ -8366,7 +8381,7 @@ function abrirPedidoRapido(numMesa){
       lista.forEach(function(it){ _qtdsRapidas[p][it.chave] = 0; });
     });
     _pessoaRapidaAtual = pessoas.length ? pessoas[0] : '__geral__';
-    _mesaRapidaAtual = numMesa;
+    _mesaRapidaAtual = chaveAlvo;
     var ex = document.getElementById('modal-pedido-rapido');
     if(ex) ex.remove();
     var mod = document.createElement('div');
@@ -8393,7 +8408,7 @@ function abrirPedidoRapido(numMesa){
     mod.innerHTML =
       '<div class="modal-box" style="max-width:440px;border-radius:18px;background:rgba(12,10,8,0*0.55));;border:1px solid rgba(255,255,255,0*0.18));">'+
         '<div class="modal-header">'+
-          '<div class="modal-titulo">⚡ MESA '+numMesa+' — PEDIDO RÁPIDO</div>'+
+          '<div class="modal-titulo">⚡ '+esc(tituloExibicao)+' — PEDIDO RÁPIDO</div>'+
           '<button class="modal-fechar" onclick="document.getElementById(\'modal-pedido-rapido\').remove()">×</button>'+
         '</div>'+
         '<div class="modal-body">'+
@@ -8409,10 +8424,6 @@ function abrirPedidoRapido(numMesa){
       '</div>';
     document.body.appendChild(mod);
     renderPedidoRapidoGrid();
-  }
-
-  // Itens sempre no cache agora — abre direto
-  _abrirComItens();
 }
 
 // Troca qual pessoa está recebendo os itens no Pedido Rápido
@@ -8585,15 +8596,17 @@ function enviarTodosRapidos(){
   mod.remove();
   if(navigator.vibrate) navigator.vibrate(40);
   var qtdTotalUnidades = itensPedido.reduce(function(a,i){ return a + i.qtd; }, 0);
-  showToast('✓ '+qtdTotalUnidades+' '+(qtdTotalUnidades===1?'item':'itens')+' → Mesa '+numMesa,'#4ade80');
+  var ehComandaRapida = _tipoRapidoAtual === 'comanda';
+  var destinoTxt = ehComandaRapida ? (conta.cliente || 'comanda') : ('Mesa ' + numMesa);
+  showToast('✓ '+qtdTotalUnidades+' '+(qtdTotalUnidades===1?'item':'itens')+' → '+destinoTxt,'#4ade80');
   var pedido = {
     garcom: _nomeGarcom,
-    mesa: parseInt(numMesa) || numMesa,
+    mesa: ehComandaRapida ? (conta.mesa ? (parseInt(conta.mesa)||conta.mesa) : null) : (parseInt(numMesa) || numMesa),
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: conta.id,
-    tipoConta: 'mesa',
-    cliente: null,
+    tipoConta: ehComandaRapida ? (conta.tipoConta === 'almoco' ? 'almoco' : 'avulsa') : 'mesa',
+    cliente: ehComandaRapida ? (conta.cliente || '') : null,
     status: 'preparo',
     criadoEm: Date.now(),
     itens: itensPedido,
@@ -8674,8 +8687,10 @@ function enviarPedidoRapido(numMesa, chave, qtd, pessoa){
   if(modal) modal.remove();
   // Vibração leve confirmando o toque
   if(navigator.vibrate) navigator.vibrate(30);
+  var ehComandaRapida = _tipoRapidoAtual === 'comanda';
+  var destinoTxt = ehComandaRapida ? (conta.cliente || 'comanda') : ('Mesa ' + numMesa);
   // Toast otimista — mostra antes mesmo do Firebase confirmar (sensação de instantâneo)
-  showToast('✓ +'+qtd+' '+nome+' → Mesa '+numMesa,'#4ade80');
+  showToast('✓ +'+qtd+' '+nome+' → '+destinoTxt,'#4ade80');
   var item = {
     id: idFinal,
     nome: nome,
@@ -8690,12 +8705,12 @@ function enviarPedidoRapido(numMesa, chave, qtd, pessoa){
   };
   var pedido = {
     garcom: _nomeGarcom,
-    mesa: parseInt(numMesa) || numMesa,
+    mesa: ehComandaRapida ? (conta.mesa ? (parseInt(conta.mesa)||conta.mesa) : null) : (parseInt(numMesa) || numMesa),
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     contaId: conta.id,
-    tipoConta: 'mesa',
-    cliente: null,
+    tipoConta: ehComandaRapida ? (conta.tipoConta === 'almoco' ? 'almoco' : 'avulsa') : 'mesa',
+    cliente: ehComandaRapida ? (conta.cliente || '') : null,
     status: 'preparo',
     criadoEm: Date.now(),
     itens: [item],

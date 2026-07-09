@@ -832,6 +832,19 @@ function dbg(msg, cor){
   log.scrollTop = log.scrollHeight;
 }
 
+// Salva os tamanhos de fonte no localStorage (junto com a config de layout,
+// sem apagar as outras chaves que já estiverem salvas lá)
+function _salvarTamanhosFonte(){
+  try{
+    var cfg = {};
+    var raw = localStorage.getItem(_CFG_KEY);
+    if(raw) cfg = JSON.parse(raw) || {};
+    cfg.tamanhoFonteWizard = _tamanhoFonteWizard;
+    cfg.tamanhoFonteItens = _tamanhoFonteItens;
+    localStorage.setItem(_CFG_KEY, JSON.stringify(cfg));
+  }catch(e){}
+}
+
 // Ajusta o tamanho da fonte dos nomes no wizard (em tempo real)
 // delta: incremento/decremento (ex: +0.1 ou -0.1)
 function alterarTamanhoFonteWizard(delta){
@@ -847,6 +860,8 @@ function alterarTamanhoFonteWizard(delta){
   if(document.getElementById('wizard-overlay') && document.getElementById('wizard-overlay').style.display !== 'none'){
     renderWizardPasso();
   }
+  // Salva no localStorage na hora
+  _salvarTamanhosFonte();
   // Log opcional
   dbg('📝 Tamanho fonte wizard: ' + Math.round(novo * 100 / 1.35) + '%');
 }
@@ -864,6 +879,8 @@ function alterarTamanhoFonteItens(delta){
   if(valor) valor.textContent = Math.round(novo * 100 / 1.05) + '%';
   // Re-renderiza os itens imediatamente
   renderItens();
+  // Salva no localStorage na hora
+  _salvarTamanhosFonte();
 }
 // inesperada em qualquer lugar) — funciona mesmo com o painel desativado,
 // porque dbg() sempre grava no buffer primeiro.
@@ -3036,6 +3053,9 @@ function aplicarCfg(cfg){
   r.setProperty('--colunas', cfg.colunas);
   r.setProperty('--foto-ratio', cfg.fotoRatio);
   r.setProperty('--item-radius', cfg.radius + 'px');
+  // Restaura os tamanhos de fonte salvos (se existirem na config)
+  if(typeof cfg.tamanhoFonteWizard === 'number') _tamanhoFonteWizard = cfg.tamanhoFonteWizard;
+  if(typeof cfg.tamanhoFonteItens === 'number') _tamanhoFonteItens = cfg.tamanhoFonteItens;
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
@@ -3207,7 +3227,9 @@ function _lerCfgDoModal(){
     lateral: lat,
     colunas: colBtn ? parseInt(colBtn.getAttribute('data-val')) : 2,
     fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
-    radius: rad
+    radius: rad,
+    tamanhoFonteWizard: _tamanhoFonteWizard,
+    tamanhoFonteItens: _tamanhoFonteItens
   };
 }
 
@@ -3231,6 +3253,9 @@ function salvarConfig(){
 function restaurarPadrao(){
   if(!confirm('Restaurar configuração padrão?')) return;
   try{ localStorage.removeItem(_CFG_KEY); }catch(e){}
+  _tamanhoFonteWizard = 1.35;
+  _tamanhoFonteItens = 1.05;
+  renderItens();
   aplicarCfg(_CFG_PADRAO);
   // Re-preenche o modal com padrão
   abrirConfig();

@@ -589,6 +589,17 @@
       style="background:#333;border:1px solid #555;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ fechar</button>
   </div>
   <div id="debug-log" style="white-space:pre-wrap;line-height:1.6;"></div>
+  <div style="margin:10px 0;padding:8px;background:rgba(255,255,255,0.1);border-radius:6px;">
+    <div style="margin-bottom:6px;color:#d4a843;">📝 Tamanho da fonte no Wizard (nomes das carnes):</div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button onclick="alterarTamanhoFonteWizard(-0.1)" style="background:#555;border:1px solid #777;color:#fff;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;flex:0;font-weight:700;">−</button>
+      <input type="range" id="slider-fonte-wizard" min="0.7" max="1.8" step="0.1" value="1" 
+        oninput="alterarTamanhoFonteWizard(parseFloat(this.value) - 1)"
+        style="flex:1;height:20px;cursor:pointer;">
+      <button onclick="alterarTamanhoFonteWizard(0.1)" style="background:#555;border:1px solid #777;color:#fff;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;flex:0;font-weight:700;">+</button>
+      <span id="valor-fonte-wizard" style="color:#a3e635;font-weight:bold;min-width:30px;text-align:right;">100%</span>
+    </div>
+  </div>
   <button onclick="
     var t=document.getElementById('debug-log').textContent;
     if(navigator.clipboard){navigator.clipboard.writeText(t);}
@@ -813,7 +824,27 @@ function dbg(msg, cor){
   log.textContent += line + '\n';
   log.scrollTop = log.scrollHeight;
 }
-// Captura QUALQUER erro não tratado (ex: script de CDN bloqueado, exceção
+
+// Ajusta o tamanho da fonte dos nomes no wizard (em tempo real)
+// delta: incremento/decremento (ex: +0.1 ou -0.1)
+function alterarTamanhoFonteWizard(delta){
+  var novo = Math.max(0.7, Math.min(1.8, _tamanhoFonteWizard + delta));
+  _tamanhoFonteWizard = novo;
+  // Atualiza o slider pra acompanhar
+  var slider = document.getElementById('slider-fonte-wizard');
+  if(slider) slider.value = novo;
+  // Mostra percentual
+  var valor = document.getElementById('valor-fonte-wizard');
+  if(valor) valor.textContent = Math.round(novo * 100 / 1.35) + '%';
+  // Se estiver no wizard, re-renderiza imediatamente
+  if(document.getElementById('wizard-overlay') && document.getElementById('wizard-overlay').style.display !== 'none'){
+    renderWizardPasso();
+  }
+  // Log opcional
+  dbg('📝 Tamanho fonte wizard: ' + Math.round(novo * 100 / 1.35) + '%');
+}
+
+// Ativa o slider ao abrir o debug
 // inesperada em qualquer lugar) — funciona mesmo com o painel desativado,
 // porque dbg() sempre grava no buffer primeiro.
 window.onerror = function(msg, url, linha, col, err){
@@ -912,6 +943,7 @@ var _busca = '';             // texto da busca atual
 var _timerInatividade = null;
 var _itemAberto = null;      // item aberto no modal de personalização
 var _selecoesTemp = {};      // {grupoId: [opcaoIdx, ...]} — escolhas no modal
+var _tamanhoFonteWizard = 1.35; // multiplicador de tamanho pra nomes no wizard (default: 1.35rem → legível)
 var _qtdTemp = 1;
 
 // ─── Inicialização ───
@@ -2159,7 +2191,7 @@ function renderWizardPasso(){
       return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:2px solid '+(selecionado?'var(--accent)':'var(--border)')+';border-radius:12px;padding:18px 20px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:14px;margin-bottom:10px;">' +
         '<div style="width:32px;height:32px;border-radius:50%;border:2px solid '+(selecionado?'var(--accent)':'var(--border)')+';background:'+(selecionado?'var(--accent)':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;color:'+(selecionado?'#000':'transparent')+';font-size:1rem;">✓</div>' +
         '<div style="flex:1;">' +
-          '<div style="font-size:1.15rem;font-weight:700;color:var(--text);">' + escapar(o.nome||'') + '</div>' +
+          '<div style="font-size:' + (1.35 * _tamanhoFonteWizard) + 'rem;font-weight:700;color:var(--text);">' + escapar(o.nome||'') + '</div>' +
           descHtml +
         '</div>' +
         (precoTxt ? '<div style="color:var(--accent);font-weight:700;font-size:1rem;">'+precoTxt+'</div>' : '') +
@@ -2178,7 +2210,7 @@ function renderWizardPasso(){
       return '<div onclick="wizardEscolher(' + idx + ')" style="background:'+(selecionado?'rgba(212,168,67,0.15)':'var(--surface)')+';border:3px solid '+(selecionado?'var(--accent)':'transparent')+';border-radius:16px;padding:10px;cursor:pointer;transition:all 0.2s;position:relative;">' +
         (selecionado ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent);color:#000;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;z-index:2;">✓</div>' : '') +
         '<div style="width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:14px;margin-bottom:10px;">' + foto + '</div>' +
-        '<div style="font-weight:700;font-size:1.05rem;text-align:center;color:var(--text);line-height:1.2;">' + escapar(o.nome||'') + '</div>' +
+        '<div style="font-weight:700;font-size:' + (1.35 * _tamanhoFonteWizard) + 'rem;text-align:center;color:var(--text);line-height:1.2;">' + escapar(o.nome||'') + '</div>' +
         descHtml +
         (precoTxt ? '<div style="text-align:center;color:var(--accent);font-weight:700;font-size:0.95rem;margin-top:4px;">'+precoTxt+'</div>' : '') +
       '</div>';
@@ -3099,6 +3131,13 @@ function abrirConfig(){
   document.getElementById('cfg-lateral-val').textContent = cfg.lateral;
   document.getElementById('cfg-radius').value = cfg.radius;
   document.getElementById('cfg-radius-val').textContent = cfg.radius;
+  // Atualiza o slider de tamanho da fonte (vem pronto do valor atual em _tamanhoFonteWizard)
+  var slider = document.getElementById('slider-fonte-wizard');
+  if(slider) {
+    slider.value = _tamanhoFonteWizard;
+    var valor = document.getElementById('valor-fonte-wizard');
+    if(valor) valor.textContent = Math.round(_tamanhoFonteWizard * 100 / 1.35) + '%';
+  }
   // Botões de colunas
   document.querySelectorAll('#cfg-colunas-grupo .cfg-op').forEach(function(b){
     b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === cfg.colunas);

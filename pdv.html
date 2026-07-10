@@ -1381,6 +1381,7 @@ function iniciarApp(){
   try { iniciarListenerPedidos(); } catch(e){ console.warn('Erro pedidos:', e); }
   // Listener de comandos de impressão (insumos, reimpressão) — independente da impressora
   try { iniciarListenerComandosImpressao(); } catch(e){ console.warn('Erro comandos imp:', e); }
+  try { iniciarListenerBalanca(); } catch(e){ console.warn('Erro listener balança:', e); }
   // ⚡ Conecta com a impressora JÁ no boot (não espera abrir a aba Impressoras)
   try { qzInicializar(); } catch(e){ console.warn('Erro init impressora:', e); }
   // ⚡ Carrega lista de impressoras, modelos e config NO BOOT (não espera abrir a aba)
@@ -4265,6 +4266,31 @@ function qzReconectar(){
 // Lê o peso pela porta serial via QZ Tray (mesmo programa da impressão),
 // ou aceita digitação manual. Tem modo simulação pra testar sem balança.
 // ═══════════════════════════════════════════════════════════════
+// Listener que atende pedidos de pesagem vindos do app garçom (tablet).
+// O tablet não alcança a balança; o PDV lê aqui e devolve pelo Firestore.
+var _unsubBalanca = null;
+var _balancaProcessados = {};
+function iniciarListenerBalanca(){
+  if(_unsubBalanca) _unsubBalanca();
+  _unsubBalanca = fbDb.collection('comandos_balanca')
+    .where('restauranteId','==',_restauranteAtivo.id)
+    .where('status','==','pendente')
+    .onSnapshot(function(snap){
+      snap.forEach(function(d){
+        if(_balancaProcessados[d.id]) return;
+        _balancaProcessados[d.id] = true;
+        // Ignora pedidos velhos (ex: PDV reaberto depois)
+        var v = d.data()||{};
+        if(Date.now() - (v.criadoEm||0) > 15000){ d.ref.delete().catch(function(){}); return; }
+        balancaLerPeso().then(function(g){
+          return d.ref.update({status:'ok', peso:g, respondidoEm:Date.now()});
+        }).catch(function(e){
+          return d.ref.update({status:'erro', erro:(e&&e.message)||'Falha na leitura', respondidoEm:Date.now()});
+        }).catch(function(){});
+      });
+    }, function(e){ console.warn('[BALANÇA] listener erro:', e.code||e.message); });
+}
+
 var _BAL_CFG_KEY = 'pdv_balanca_cfg';
 function _balCfg(){
   var padrao = { simulacao:true, porta:'COM3', baud:9600, protocolo:'toledo' };

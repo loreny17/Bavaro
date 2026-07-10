@@ -1437,6 +1437,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
             <input type="text" id="kg-valor" inputmode="numeric" placeholder="ex: 2582 = R$ 25,82" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
           </div>
         </div>
+        <button id="kg-btn-balanca" onclick="kgPesarNaBalanca()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:11px;font-weight:800;font-size:0.9rem;cursor:pointer;font-family:inherit;margin-bottom:10px;">📡 Pesar na balança</button>
         <!-- Nome do cliente (aparece na impressão de fechamento) -->
         <div style="margin-bottom:6px;">
           <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">👤 Nome do cliente (opcional)</label>
@@ -12022,6 +12023,59 @@ function abrirModalItem(it){
 
 // Conecta os 2 campos peso/valor pra sincronizarem
 var _kgSyncConectado = false;
+// ═══ Pesagem remota: pede o peso pro PDV (que está com a balança no PC) ═══
+// Fluxo: cria um comando no Firestore → o PDV lê a balança → devolve o peso
+// no mesmo documento → preenche o campo aqui no tablet. Demora ~1-2s.
+function kgPesarNaBalanca(){
+  var btn = document.getElementById('kg-btn-balanca');
+  if(!btn || btn.disabled) return;
+  btn.disabled = true; btn.textContent = '⏳ Pesando...';
+
+  function restaurar(){ btn.disabled = false; btn.textContent = '📡 Pesar na balança'; }
+
+  fbDb.collection('comandos_balanca').add({
+    restauranteId: _restauranteId,
+    status: 'pendente',
+    solicitadoPor: _nomeGarcom,
+    criadoEm: Date.now()
+  }).then(function(ref){
+    var unsub = null, resolvido = false;
+    var timeout = setTimeout(function(){
+      if(resolvido) return;
+      resolvido = true;
+      if(unsub) unsub();
+      ref.delete().catch(function(){});
+      restaurar();
+      showToast('❌ Balança não respondeu. O PDV está aberto no caixa?', '#f87171', 4500);
+    }, 8000);
+    unsub = ref.onSnapshot(function(doc){
+      if(resolvido || !doc.exists) return;
+      var d = doc.data() || {};
+      if(d.status === 'ok' && d.peso){
+        resolvido = true; clearTimeout(timeout); if(unsub) unsub();
+        var inp = document.getElementById('kg-peso');
+        if(inp){
+          inp.value = d.peso;
+          // Dispara o sync peso→valor que já existe
+          inp.dispatchEvent(new Event('input', {bubbles:true}));
+        }
+        ref.delete().catch(function(){});
+        restaurar();
+        if(navigator.vibrate) navigator.vibrate(30);
+        showToast('⚖️ ' + d.peso + 'g', '#4ade80');
+      } else if(d.status === 'erro'){
+        resolvido = true; clearTimeout(timeout); if(unsub) unsub();
+        ref.delete().catch(function(){});
+        restaurar();
+        showToast('❌ ' + (d.erro || 'Erro na balança'), '#f87171', 4500);
+      }
+    }, function(){ /* erro de listener: o timeout cuida */ });
+  }).catch(function(e){
+    restaurar();
+    showToast('❌ ' + e.message, '#f87171', 4000);
+  });
+}
+
 function _conectarSyncKgCampos(){
   if(_kgSyncConectado) return;
   _kgSyncConectado = true;

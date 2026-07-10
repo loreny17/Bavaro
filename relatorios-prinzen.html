@@ -612,11 +612,19 @@ function _montarSeletorRestaurante(){
   if(!wrap) return;
   if(_restaurantes.length < 1){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'flex';
-  wrap.innerHTML = _restaurantes.map(function(r){
+  var totalGeral = _restaurantes.reduce(function(s,r){ return s + r.count; }, 0);
+  var htmlBtns = '';
+  if(_restaurantes.length > 1){
+    var onTodos = _restauranteSel === '__todos__' ? ' active' : '';
+    htmlBtns += '<button class="rest-btn'+onTodos+'" onclick="selecionarRestaurante(\'__todos__\', this)">'+
+      '\ud83c\udfe0 Todos<span class="rest-count">'+totalGeral+'</span></button>';
+  }
+  htmlBtns += _restaurantes.map(function(r){
     var on = r.id === _restauranteSel ? ' active' : '';
     return '<button class="rest-btn'+on+'" onclick="selecionarRestaurante(\''+r.id+'\', this)">'+
              r.label+'<span class="rest-count">'+r.count+'</span></button>';
   }).join('');
+  wrap.innerHTML = htmlBtns;
 }
 
 function selecionarRestaurante(id, btn){
@@ -636,25 +644,26 @@ function alternarKpi(){
 function _aplicarFiltros(){
   if(!_todasContas) return;
   var ini = _dataInicio.getTime(), fim = _dataFim.getTime();
+  var todos = _restauranteSel === '__todos__';
   var contas = _todasContas.filter(function(c){
-    return c._rest === _restauranteSel && c.fechadaEm >= ini && c.fechadaEm <= fim;
+    return (todos || c._rest === _restauranteSel) && c.fechadaEm >= ini && c.fechadaEm <= fim;
   });
   // Soma do almoço manual (só o Bavaro/default usa) no período
   _almocoPeriodo = _almocos.filter(function(a){
-    return a.rest === _restauranteSel && a.ms >= ini && a.ms <= fim;
+    return (todos || a.rest === _restauranteSel) && a.ms >= ini && a.ms <= fim;
   }).reduce(function(s,a){ return s + (a.valor||0); }, 0);
 
   dlog('Filtro aplicado', {restaurante:_restauranteSel, periodo:_periodo, contas:contas.length, almoco:_almocoPeriodo});
 
   if(contas.length === 0 && _almocoPeriodo <= 0){
-    var doRest = _todasContas.filter(function(c){ return c._rest === _restauranteSel; });
+    var doRest = todos ? _todasContas.slice() : _todasContas.filter(function(c){ return c._rest === _restauranteSel; });
     var maxFe = doRest.reduce(function(m,c){ return c.fechadaEm > m ? c.fechadaEm : m; }, 0);
     document.getElementById('relatorio-content').innerHTML =
-      '<div class="loading">📭 Sem vendas neste período para '+labelRest(_restauranteSel)+'.<br>'+
+      '<div class="loading">📭 Sem vendas neste período para '+(todos ? 'nenhum restaurante' : labelRest(_restauranteSel))+'.<br>'+
       '<small style="color:var(--muted);">'+
       (doRest.length
         ? 'Última venda: '+(maxFe?new Date(maxFe).toLocaleDateString('pt-BR'):'—')+' · '+doRest.length+' conta(s) no histórico'
-        : 'Nenhuma venda registrada para este restaurante')+
+        : 'Nenhuma venda registrada')+
       '</small></div>';
     return;
   }
@@ -739,6 +748,15 @@ function renderRelatorio(contas){
 
   var ticketMedio = totalMesas > 0 ? totalVendas/totalMesas : 0;
 
+  // ── PARTICIPAÇÃO POR RESTAURANTE (modo "Todos") ──
+  var porRest = {};
+  contas.forEach(function(c){
+    var r = c._rest || '?';
+    if(!porRest[r]) porRest[r] = {valor:0, contas:0};
+    porRest[r].valor += (c.total || c.valorTotal || 0);
+    porRest[r].contas++;
+  });
+
   // ── TOP ITENS ──
   var topItens = Object.keys(itensMapa).map(function(k){ return {nome:k, qtd:itensMapa[k].qtd, valor:itensMapa[k].valor, cat:itensMapa[k].cat||''}; });
   topItens.sort(function(a,b){ return b.qtd-a.qtd; });
@@ -812,6 +830,31 @@ function renderRelatorio(contas){
           '</div>'+
           (pct <= 20 ? '<span class="bar-val outside" style="--w:'+pct+'%">'+fmtR(v)+'</span>' : '')+
         '</div>'+
+      '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Participação de cada restaurante no faturamento (só no modo "Todos")
+  if(_restauranteSel === '__todos__'){
+    var listaRest = Object.keys(porRest).map(function(r){
+      return {id:r, label:labelRest(r), valor:porRest[r].valor, contas:porRest[r].contas};
+    }).sort(function(a,b){ return b.valor - a.valor; });
+    var maxRest = listaRest.length ? (listaRest[0].valor || 1) : 1;
+    var somaRest = listaRest.reduce(function(s,r){ return s + r.valor; }, 0) || 1;
+    html += '<div class="secao"><div class="secao-titulo">🏠 Participação por restaurante</div><div class="bar-chart">';
+    listaRest.forEach(function(r){
+      var pct = Math.max(4, Math.round(r.valor/maxRest*100));
+      var share = Math.round(r.valor/somaRest*100);
+      html += '<div class="bar-row">'+
+        '<div class="bar-label wide" title="'+r.label+'">'+r.label+'</div>'+
+        '<div class="bar-track">'+
+          '<div class="bar-fill" style="width:'+pct+'%">'+
+            (pct > 25 ? '<span class="bar-val">'+fmtR(r.valor)+' · '+share+'%</span>' : '')+
+          '</div>'+
+          (pct <= 25 ? '<span class="bar-val outside" style="--w:'+pct+'%">'+fmtR(r.valor)+' · '+share+'%</span>' : '')+
+        '</div>'+
+        '<span style="font-size:0.68rem;color:var(--muted);flex-shrink:0;">'+r.contas+' vendas</span>'+
       '</div>';
     });
     html += '</div></div>';

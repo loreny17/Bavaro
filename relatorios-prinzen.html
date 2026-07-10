@@ -697,9 +697,11 @@ function renderRelatorio(contas){
       itensMapa[nome].qtd += qtd;
       itensMapa[nome].valor += vIt;
 
-      // Por categoria: usa a do item se veio salva; senão resolve pelo cardápio
+      // Por categoria: usa a do item se veio salva; senão resolve pelo cardápio;
+      // senão tenta pelo próprio nome do item (útil pra itens fora do cardápio)
       var cat = it.categoriaNome
         || (it.id && _mapaCatItem['id:'+it.id])
+        || (it.itemId && _mapaCatItem['id:'+it.itemId])
         || _mapaCatItem['nome:'+String(nome).toLowerCase()]
         || 'Sem categoria';
       itensMapa[nome].cat = cat;
@@ -708,17 +710,30 @@ function renderRelatorio(contas){
       catMapa[cat].valor += vIt;
 
       // Adicionais (seleções feitas no item: molhos, pontos da carne, extras...)
-      (it.selecoes||[]).forEach(function(s){
-        var nomeAdic = s.opcao || s.nome || '';
-        if(!nomeAdic) return;
-        var grupoAdic = s.grupo || '';
-        var chaveAdic = (grupoAdic ? grupoAdic + ' › ' : '') + nomeAdic;
-        var qtdAdic = (s.qtd || 1) * qtd; // ex: 2 lanches com bacon = 2 bacons
-        var valAdic = (parseFloat(s.precoExtra || s.preco) || 0) * qtdAdic;
-        if(!adicMapa[chaveAdic]) adicMapa[chaveAdic] = {qtd:0, valor:0};
-        adicMapa[chaveAdic].qtd += qtdAdic;
-        adicMapa[chaveAdic].valor += valAdic;
-      });
+      // ⚠️ Formatos diferentes por app: garçom salva ARRAY de {grupo, opcao, precoExtra};
+      // o totem salva um OBJETO {grupoId: [idx]} + um texto pronto em selecoesLabel.
+      // Tratar só como array quebrava o relatório inteiro pros pedidos do totem.
+      if(Array.isArray(it.selecoes)){
+        it.selecoes.forEach(function(s){
+          var nomeAdic = (s && (s.opcao || s.nome)) || '';
+          if(!nomeAdic) return;
+          var grupoAdic = s.grupo || '';
+          var chaveAdic = (grupoAdic ? grupoAdic + ' › ' : '') + nomeAdic;
+          var qtdAdic = (s.qtd || 1) * qtd; // ex: 2 lanches com bacon = 2 bacons
+          var valAdic = (parseFloat(s.precoExtra || s.preco) || 0) * qtdAdic;
+          if(!adicMapa[chaveAdic]) adicMapa[chaveAdic] = {qtd:0, valor:0};
+          adicMapa[chaveAdic].qtd += qtdAdic;
+          adicMapa[chaveAdic].valor += valAdic;
+        });
+      } else if(typeof it.selecoesLabel === 'string' && it.selecoesLabel){
+        it.selecoesLabel.split(' · ').forEach(function(nomeAdic){
+          nomeAdic = (nomeAdic||'').trim();
+          if(!nomeAdic) return;
+          if(!adicMapa[nomeAdic]) adicMapa[nomeAdic] = {qtd:0, valor:0};
+          adicMapa[nomeAdic].qtd += qtd;
+          // valor extra individual não vem discriminado no totem — fica só a contagem
+        });
+      }
     });
   });
 
@@ -891,8 +906,15 @@ function _ehCategoriaBebida(cat){
 
 function _filtrarTopItens(){
   if(_filtroTopItens === 'todos') return _topItensCache;
-  if(_filtroTopItens === 'bebidas') return _topItensCache.filter(function(it){ return _ehCategoriaBebida(it.cat); });
-  if(_filtroTopItens === 'pratos') return _topItensCache.filter(function(it){ return !_ehCategoriaBebida(it.cat); });
+  // Classifica pela categoria; se a categoria for desconhecida ("Sem categoria"),
+  // tenta pelo próprio nome do item — cobre restaurantes cujos itens não estão
+  // no cardápio cadastrado (ex: vendas por quilo / itens avulsos).
+  function ehBeb(it){
+    if(it.cat && it.cat !== 'Sem categoria') return _ehCategoriaBebida(it.cat);
+    return _ehCategoriaBebida(it.nome);
+  }
+  if(_filtroTopItens === 'bebidas') return _topItensCache.filter(ehBeb);
+  if(_filtroTopItens === 'pratos') return _topItensCache.filter(function(it){ return !ehBeb(it); });
   if(_filtroTopItens.indexOf('cat:') === 0){
     var cat = _filtroTopItens.slice(4);
     return _topItensCache.filter(function(it){ return it.cat === cat; });

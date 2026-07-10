@@ -472,6 +472,34 @@ function _buscarTudo(){
       .catch(function(e){ dlog('totem/'+rid+' falhou: '+(e.code||'')+' — '+e.message); return {tipo:'totem', rid:rid, snap:null}; });
   }
 
+  // Lê o cardápio (principal + totem) de cada restaurante só pra montar o mapa
+  // item → categoria. Os itens salvos nas contas não carregam a categoria junto,
+  // então sem isso o filtro Pratos/Bebidas não teria como saber o que é o quê.
+  function lerCardapio(rid){
+    var base = tref.collection('restaurantes').doc(rid);
+    function lerPar(colCard){
+      return Promise.all([
+        base.collection(colCard).doc('data').collection('categorias').get().catch(function(){ return null; }),
+        base.collection(colCard).doc('data').collection('itens').get().catch(function(){ return null; })
+      ]).then(function(r){
+        var catsSnap = r[0], itensSnap = r[1];
+        var catsPorId = {};
+        if(catsSnap) catsSnap.forEach(function(d){ catsPorId[d.id] = (d.data()||{}).nome || d.id; });
+        if(itensSnap) itensSnap.forEach(function(d){
+          var v = d.data()||{};
+          var catNome = catsPorId[v.categoriaId || v.categoria] || '';
+          if(catNome){
+            _mapaCatItem['id:'+d.id] = catNome;
+            if(v.nome) _mapaCatItem['nome:'+String(v.nome).toLowerCase()] = catNome;
+          }
+        });
+      });
+    }
+    return Promise.all([lerPar('cardapio'), lerPar('cardapio_totem')])
+      .then(function(){ return {tipo:'cardapio', rid:rid}; })
+      .catch(function(){ return {tipo:'cardapio', rid:rid}; });
+  }
+
   // Status que NÃO contam como venda (pedido não concluído)
   var STATUS_NAO_VENDA = {'cancelado':1,'cancelada':1,'aguardando_pagamento':1,'pendente':1,'aberto':1,'aberta':1,'rejeitado':1,'rejeitada':1};
 
@@ -517,7 +545,7 @@ function _buscarTudo(){
       if(rids.indexOf('default') < 0) rids.push('default');
       if(rids.indexOf('omar_cafe') < 0) rids.push('omar_cafe');
       dlog('Restaurantes do tenant: '+rids.join(', '));
-      var jobs = [ lerContas(), lerAlmocos() ].concat(rids.map(lerTotem));
+      var jobs = [ lerContas(), lerAlmocos() ].concat(rids.map(lerTotem)).concat(rids.map(lerCardapio));
       return Promise.all(jobs);
     })
     .then(function(resultados){
@@ -525,7 +553,7 @@ function _buscarTudo(){
 
       var byKey = {}, mapRest = {}, statusPorRest = {};
       resultados.forEach(function(r){
-        if(!r || r.tipo === 'almoco') return;
+        if(!r || r.tipo === 'almoco' || r.tipo === 'cardapio') return;
         var size = r.snap ? r.snap.size : 'erro';
         dlog('Fonte '+(r.tipo === 'contas' ? 'contas_fechadas' : 'totem/'+r.rid)+': '+size+' doc(s)');
         if(!r.snap) return;
@@ -648,7 +676,7 @@ function renderRelatorio(contas){
 
   // ── AGREGAR ──
   var totalVendas = 0, totalMesas = contas.length;
-  var vendasPorDia = {}, itensMapa = {}, catMapa = {};
+  var vendasPorDia = {}, itensMapa = {}, catMapa = {}, adicMapa = {};
 
   contas.forEach(function(c){
     var val = c.total || c.valorTotal || 0;
@@ -665,23 +693,41 @@ function renderRelatorio(contas){
       var nome = it.nome || 'Item';
       var qtd = it.qtd || 1;
       var vIt = (it.tipoVenda==='kg' ? (it.preco||0) : (it.preco||0)*qtd);
-      if(!itensMapa[nome]) itensMapa[nome] = {qtd:0, valor:0};
+      if(!itensMapa[nome]) itensMapa[nome] = {qtd:0, valor:0, cat:''};
       itensMapa[nome].qtd += qtd;
       itensMapa[nome].valor += vIt;
 
-      // Por categoria
-      var cat = it.categoriaNome || it.categoriaId || 'Sem categoria';
+      // Por categoria: usa a do item se veio salva; senão resolve pelo cardápio
+      var cat = it.categoriaNome
+        || (it.id && _mapaCatItem['id:'+it.id])
+        || _mapaCatItem['nome:'+String(nome).toLowerCase()]
+        || 'Sem categoria';
+      itensMapa[nome].cat = cat;
       if(!catMapa[cat]) catMapa[cat] = {qtd:0, valor:0};
       catMapa[cat].qtd += qtd;
       catMapa[cat].valor += vIt;
+
+      // Adicionais (seleções feitas no item: molhos, pontos da carne, extras...)
+      (it.selecoes||[]).forEach(function(s){
+        var nomeAdic = s.opcao || s.nome || '';
+        if(!nomeAdic) return;
+        var grupoAdic = s.grupo || '';
+        var chaveAdic = (grupoAdic ? grupoAdic + ' › ' : '') + nomeAdic;
+        var qtdAdic = (s.qtd || 1) * qtd; // ex: 2 lanches com bacon = 2 bacons
+        var valAdic = (parseFloat(s.precoExtra || s.preco) || 0) * qtdAdic;
+        if(!adicMapa[chaveAdic]) adicMapa[chaveAdic] = {qtd:0, valor:0};
+        adicMapa[chaveAdic].qtd += qtdAdic;
+        adicMapa[chaveAdic].valor += valAdic;
+      });
     });
   });
 
   var ticketMedio = totalMesas > 0 ? totalVendas/totalMesas : 0;
 
   // ── TOP ITENS ──
-  var topItens = Object.keys(itensMapa).map(function(k){ return {nome:k, qtd:itensMapa[k].qtd, valor:itensMapa[k].valor}; });
+  var topItens = Object.keys(itensMapa).map(function(k){ return {nome:k, qtd:itensMapa[k].qtd, valor:itensMapa[k].valor, cat:itensMapa[k].cat||''}; });
   topItens.sort(function(a,b){ return b.qtd-a.qtd; });
+  _topItensCache = topItens; // guarda pra re-filtrar sem recalcular tudo
 
   // ── TOP CATEGORIAS ──
   var topCats = Object.keys(catMapa).map(function(k){ return {nome:k, qtd:catMapa[k].qtd, valor:catMapa[k].valor}; });
@@ -756,15 +802,27 @@ function renderRelatorio(contas){
     html += '</div></div>';
   }
 
-  // Top itens mais vendidos
+  // Top itens mais vendidos — com filtro Todos / Pratos / Bebidas / por categoria
   html += '<div class="secao"><div class="secao-titulo">🏆 Itens mais vendidos</div>';
-  html += '<table class="tabela"><thead><tr><th>#</th><th>Item</th><th style="text-align:right;">Qtd</th><th style="text-align:right;">Total</th></tr></thead><tbody>';
-  topItens.slice(0,15).forEach(function(it, i){
-    html += '<tr><td class="rank">'+(i+1)+'</td><td>'+it.nome+'</td>'+
-      '<td class="num">'+it.qtd+'</td>'+
-      '<td class="num" style="font-size:0.85rem;color:var(--success);">'+fmtR(it.valor)+'</td></tr>';
-  });
-  html += '</tbody></table></div>';
+  html += '<div id="top-itens-filtros" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>';
+  html += '<div id="top-itens-tabela"></div>';
+  html += '</div>';
+
+  // Adicionais mais pedidos (molhos, pontos, extras...)
+  var topAdics = Object.keys(adicMapa).map(function(k){ return {nome:k, qtd:adicMapa[k].qtd, valor:adicMapa[k].valor}; });
+  topAdics.sort(function(a,b){ return b.qtd-a.qtd; });
+  if(topAdics.length){
+    html += '<div class="secao"><div class="secao-titulo">🧩 Adicionais mais pedidos</div>';
+    html += '<table class="tabela"><thead><tr><th>#</th><th>Adicional</th><th style="text-align:right;">Qtd</th><th style="text-align:right;">Receita extra</th></tr></thead><tbody>';
+    topAdics.slice(0,15).forEach(function(a, i){
+      html += '<tr><td class="rank">'+(i+1)+'</td><td>'+a.nome+'</td>'+
+        '<td class="num">'+a.qtd+'</td>'+
+        '<td class="num" style="font-size:0.85rem;color:var(--success);">'+(a.valor > 0 ? fmtR(a.valor) : '—')+'</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">"Receita extra" = valor cobrado a mais pelos adicionais pagos. Adicionais grátis (ponto da carne, etc) mostram —.</div>';
+    html += '</div>';
+  }
 
   // Vendas por categoria
   if(topCats.length > 0){
@@ -812,6 +870,80 @@ function renderRelatorio(contas){
   }
 
   document.getElementById('relatorio-content').innerHTML = html;
+  renderTopItensFiltros();
+  renderTopItensTabela();
+}
+
+// ── TOP ITENS: FILTRO PRATOS/BEBIDAS/CATEGORIA ──
+var _topItensCache = [];
+var _filtroTopItens = 'todos'; // 'todos' | 'pratos' | 'bebidas' | 'cat:NomeDaCategoria'
+var _mapaCatItem = {}; // 'id:xyz' ou 'nome:abc' → nome da categoria (montado ao carregar o cardápio)
+
+// Heurística: decide se uma categoria é de bebida pelo nome
+function _ehCategoriaBebida(cat){
+  var c = (cat||'').toLowerCase();
+  var palavras = ['bebida','chopp','chope','cerveja','refri','suco','drink','vinho','dose','long neck','longneck','água','agua','tônica','tonica','energétic','energetic','café','cafe','caipirinha','whisky','vodka','gin','coquetel','destilado','licor','champanhe','espumante','soda','guaraná','guarana','cola','mate','chá','cha'];
+  for(var i=0;i<palavras.length;i++){
+    if(c.indexOf(palavras[i]) >= 0) return true;
+  }
+  return false;
+}
+
+function _filtrarTopItens(){
+  if(_filtroTopItens === 'todos') return _topItensCache;
+  if(_filtroTopItens === 'bebidas') return _topItensCache.filter(function(it){ return _ehCategoriaBebida(it.cat); });
+  if(_filtroTopItens === 'pratos') return _topItensCache.filter(function(it){ return !_ehCategoriaBebida(it.cat); });
+  if(_filtroTopItens.indexOf('cat:') === 0){
+    var cat = _filtroTopItens.slice(4);
+    return _topItensCache.filter(function(it){ return it.cat === cat; });
+  }
+  return _topItensCache;
+}
+
+function setFiltroTopItens(f){
+  _filtroTopItens = f;
+  renderTopItensFiltros();
+  renderTopItensTabela();
+}
+
+function renderTopItensFiltros(){
+  var box = document.getElementById('top-itens-filtros');
+  if(!box) return;
+  function chip(valor, rotulo){
+    var ativo = _filtroTopItens === valor;
+    return '<button onclick="setFiltroTopItens(\''+valor.replace(/'/g,"\\'")+'\')" style="padding:6px 12px;border-radius:16px;font-size:0.74rem;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;'+
+      'background:'+(ativo?'var(--accent)':'var(--surface2)')+';color:'+(ativo?'#000':'var(--text)')+';border:1px solid '+(ativo?'var(--accent)':'var(--border)')+';">'+rotulo+'</button>';
+  }
+  var htmlChips = chip('todos','Todos') + chip('pratos','🍽️ Pratos') + chip('bebidas','🍺 Bebidas');
+  // Chips por categoria (só as que têm itens no período), ordenadas por nome
+  var cats = {};
+  _topItensCache.forEach(function(it){ if(it.cat) cats[it.cat] = true; });
+  Object.keys(cats).sort().forEach(function(c){
+    htmlChips += chip('cat:'+c, c);
+  });
+  box.innerHTML = htmlChips;
+}
+
+function renderTopItensTabela(){
+  var box = document.getElementById('top-itens-tabela');
+  if(!box) return;
+  var lista = _filtrarTopItens();
+  if(!lista.length){
+    box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:0.85rem;">Nenhum item nesse filtro no período.</div>';
+    return;
+  }
+  var totalQtd = lista.reduce(function(a,i){ return a+i.qtd; },0);
+  var totalVal = lista.reduce(function(a,i){ return a+i.valor; },0);
+  var t = '<table class="tabela"><thead><tr><th>#</th><th>Item</th><th style="text-align:right;">Qtd</th><th style="text-align:right;">Total</th></tr></thead><tbody>';
+  lista.slice(0,15).forEach(function(it, i){
+    t += '<tr><td class="rank">'+(i+1)+'</td><td>'+it.nome+
+      (_filtroTopItens==='todos' && it.cat ? ' <span style="font-size:0.62rem;color:var(--muted);">('+it.cat+')</span>' : '')+'</td>'+
+      '<td class="num">'+it.qtd+'</td>'+
+      '<td class="num" style="font-size:0.85rem;color:var(--success);">'+fmtR(it.valor)+'</td></tr>';
+  });
+  t += '</tbody></table>';
+  t += '<div style="text-align:right;font-size:0.72rem;color:var(--muted);margin-top:6px;">'+lista.length+' itens distintos · '+totalQtd+' unidades · '+fmtR(totalVal)+'</div>';
+  box.innerHTML = t;
 }
 
 // ── DEBUG PANEL ──

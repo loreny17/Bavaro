@@ -1169,15 +1169,28 @@ html[data-anim="off"] .g-ripple{display:none!important;}
         </div>
       </div>
 
+      <button id="alm-btn-balanca" onclick="almPesarNaBalanca()"
+        style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:11px;font-family:inherit;font-weight:800;font-size:0.9rem;cursor:pointer;margin-bottom:10px;">
+        📡 Pesar na balança
+      </button>
+
       <!-- Bebidas — mini grid estilo cardápio -->
       <div style="margin-bottom:14px;">
         <label style="font-size:0.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">🥤 Bebida <span style="font-weight:400;">(opcional)</span></label>
         <div id="alm-bebidas-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
       </div>
 
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input type="text" id="alm-mesa" inputmode="numeric" placeholder="Nº mesa"
+          style="flex:0 0 90px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px;text-align:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;box-sizing:border-box;">
+        <button onclick="criarComandaAlmoco('mesa')"
+          style="flex:1;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:10px;padding:11px;font-family:inherit;font-weight:800;cursor:pointer;font-size:0.9rem;">
+          🪑 Direto na mesa
+        </button>
+      </div>
       <button onclick="criarComandaAlmoco()"
         style="width:100%;background:linear-gradient(135deg,#fbbf24,#f59e0b);border:none;color:#000;border-radius:12px;padding:13px;font-family:inherit;font-weight:800;cursor:pointer;font-size:1rem;">
-        ⚖️ Registrar na fila
+        ⚖️ Registrar na fila (vincular depois)
       </button>
     </div>
 
@@ -2310,79 +2323,12 @@ var _abaAtual = 'mesas';
 // ═══════════════════════════════════════════════
 
 // Abre o fluxo de criar novo almoço: pede nome e mesa (opcionais)
+// A tela antiga de "Novo Almoço" (modal) foi aposentada: ela duplicava os IDs
+// dos campos do formulário da aba (alm-nome, alm-peso...), fazendo o app ler
+// valores do formulário errado — era a origem dos bugs intermitentes da aba.
+// Agora tudo acontece num lugar só: a própria aba ☀️ Almoço.
 function abrirNovoAlmoco(){
-  var ex = document.getElementById('modal-novo-almoco');
-  if(ex) ex.remove();
-  // Busca itens de buffet (kg) e bebidas do cardápio
-  var itensBuf = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda === 'kg'; });
-  var itensBeb = (_itens||[]).filter(function(i){ return i.disponivel && i.tipoVenda !== 'kg'; });
-  // Monta opções de buffet
-  var opsBuf = itensBuf.length
-    ? itensBuf.map(function(i){ return '<option value="'+i.id+'">'+esc(i.nome)+' — R$ '+fmtPreco(i.preco||0)+'/kg</option>'; }).join('')
-    : '<option value="">Nenhum item por kg cadastrado</option>';
-  // Monta opções de bebida (agrupadas por categoria)
-  var opsBeb = '<option value="">— Sem bebida —</option>';
-  var catsBeb = {};
-  itensBeb.forEach(function(i){
-    var cat = (_categorias||[]).find(function(c){ return c.id === i.categoriaId; });
-    var catNome = cat ? (cat.emoji ? cat.emoji+' '+cat.nome : cat.nome) : 'Outros';
-    if(!catsBeb[catNome]) catsBeb[catNome] = [];
-    catsBeb[catNome].push(i);
-  });
-  Object.keys(catsBeb).forEach(function(catNome){
-    opsBeb += '<optgroup label="'+esc(catNome)+'">';
-    catsBeb[catNome].forEach(function(i){ opsBeb += '<option value="'+i.id+'">'+esc(i.nome)+' — R$ '+fmtPreco(i.preco||0)+'</option>'; });
-    opsBeb += '</optgroup>';
-  });
-
-  var m = document.createElement('div');
-  m.id = 'modal-novo-almoco';
-  m.className = 'modal-bg aberto';
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:500;display:flex;align-items:flex-end;justify-content:center;padding:0;';
-  m.onclick = function(e){ if(e.target === m) m.remove(); };
-  m.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:18px 18px 0 0;max-width:480px;width:100%;padding:20px 18px 32px;max-height:90vh;overflow-y:auto;">'+
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">'+
-        '<span style="font-size:1.6rem;">⚖️</span>'+
-        '<div>'+
-          '<div style="font-weight:800;font-size:1.05rem;">Pesagem Rápida</div>'+
-          '<div style="font-size:0.74rem;color:var(--muted);">Mesa pode ser definida depois</div>'+
-        '</div>'+
-        '<button onclick="document.getElementById(\'modal-novo-almoco\').remove()" style="margin-left:auto;background:transparent;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;padding:4px;">×</button>'+
-      '</div>'+
-      // Nome
-      '<div style="margin-bottom:12px;">'+
-        '<label style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">👤 Nome do cliente <span style="font-weight:400;font-style:italic;">(opcional)</span></label>'+
-        '<input type="text" id="alm-nome" placeholder="Ex: João, Maria..." maxlength="50" style="width:100%;padding:12px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:inherit;font-size:1rem;box-sizing:border-box;" autofocus>'+
-      '</div>'+
-      // Item buffet
-      '<div style="margin-bottom:12px;">'+
-        '<label style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">🍽️ Item</label>'+
-        '<select id="alm-item-buf" style="width:100%;padding:12px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.95rem;box-sizing:border-box;" onchange="almAtualizarPrecoInfo()">'+opsBuf+'</select>'+
-      '</div>'+
-      // Peso e Valor
-      '<div style="display:flex;gap:10px;margin-bottom:12px;">'+
-        '<div style="flex:1;">'+
-          '<label style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">⚖️ Peso (g)</label>'+
-          '<input type="text" id="alm-peso" inputmode="numeric" placeholder="450" style="width:100%;padding:12px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;text-align:center;box-sizing:border-box;" oninput="almSyncPeso()">'+
-        '</div>'+
-        '<div style="flex:1;">'+
-          '<label style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">💰 Valor (R$)</label>'+
-          '<input type="text" id="alm-valor" inputmode="numeric" placeholder="2580 = 25,80" style="width:100%;padding:12px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;text-align:center;box-sizing:border-box;" oninput="almSyncValor()">'+
-        '</div>'+
-      '</div>'+
-      // Info preço/kg
-      '<div id="alm-preco-info" style="text-align:center;font-size:0.74rem;color:var(--muted);margin-bottom:14px;"></div>'+
-      // Bebida
-      '<div style="margin-bottom:20px;">'+
-        '<label style="font-size:0.74rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">🥤 Bebida <span style="font-weight:400;font-style:italic;">(opcional)</span></label>'+
-        '<select id="alm-bebida" style="width:100%;padding:12px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.95rem;box-sizing:border-box;">'+opsBeb+'</select>'+
-      '</div>'+
-      '<button onclick="criarComandaAlmoco()" style="width:100%;background:linear-gradient(135deg,#fbbf24,#f59e0b);border:none;color:#000;border-radius:12px;padding:14px;font-family:inherit;font-weight:800;cursor:pointer;font-size:1.05rem;">⚖️ Registrar na fila</button>'+
-    '</div>';
-  document.body.appendChild(m);
-  almAtualizarPrecoInfo();
-  setTimeout(function(){ var inp = document.getElementById('alm-nome'); if(inp) inp.focus(); }, 50);
+  trocarAba('almoco');
 }
 
 function almAtualizarPrecoInfo(){} // mantido por compatibilidade
@@ -2420,14 +2366,20 @@ function almSyncValor(){
   }
 }
 
-// Cria a comanda de almoço SEM mesa (vai pra fila pendente)
+// Cria a comanda de almoço — na fila (sem mesa) ou já vinculada a uma mesa,
 // e já lança o item de buffet + bebida opcionais
-function criarComandaAlmoco(){
+function criarComandaAlmoco(destino){
   var nome = (document.getElementById('alm-nome').value || '').trim();
-  var selBuf = document.getElementById('alm-item-buf');
-  var selBeb = document.getElementById('alm-bebida');
   var inpPeso = document.getElementById('alm-peso');
   var inpValor = document.getElementById('alm-valor');
+
+  // Destino: mesa direta (opcional) ou fila
+  var mesaDestino = null;
+  if(destino === 'mesa'){
+    mesaDestino = parseInt((document.getElementById('alm-mesa').value||'').replace(/\D/g,''),10) || 0;
+    if(!mesaDestino){ showToast('Digite o número da mesa','#f7a34f'); return; }
+    if(mesaDestino > _TOTAL_MESAS){ showToast('Mesa '+mesaDestino+' não existe (máx '+_TOTAL_MESAS+')','#f7a34f'); return; }
+  }
 
   // Item de buffet — usa item detectado automaticamente
   var itemBuf = _almItemBuffetAtivo;
@@ -2497,13 +2449,13 @@ function criarComandaAlmoco(){
 
   var totalConta = itensConta.reduce(function(a,i){ return a + (i.preco||0) * (i.tipoVenda==='kg' ? 1 : (i.qtd||1)); }, 0);
 
-  // Cria comanda SEM mesa — vai pro grupo "SEM MESA" na lista de almoços
+  // Cria comanda — com mesa (vinculada) ou sem (fila "SEM MESA")
   fbDb.collection('contas_mesa').add({
     restauranteId: _restauranteId,
     tenantId: _tenantId || null,
     tipoConta: 'almoco',
     cliente: nome,
-    mesa: null,           // sem mesa — vincula depois
+    mesa: mesaDestino || null,
     status: 'aberta',
     itens: itensConta,
     pagamentos: [],
@@ -2515,28 +2467,31 @@ function criarComandaAlmoco(){
     garcomPrincipal: _nomeGarcom,
     abertaEm: agora,
     abertaPor: _nomeGarcom,
-    pesagemRapida: true,   // flag: veio da pesagem rápida, aguardando mesa
+    pesagemRapida: !mesaDestino,   // flag: aguardando mesa (só quando vai pra fila)
     teste: _modoTeste ? true : false
   }).then(function(ref){
     // Limpa o formulário para próximo cliente
     var nomeInp = document.getElementById('alm-nome');
     var pesoInp = document.getElementById('alm-peso');
     var valInp  = document.getElementById('alm-valor');
+    var mesaInp = document.getElementById('alm-mesa');
     if(nomeInp) nomeInp.value = '';
     if(pesoInp) pesoInp.value = '';
     if(valInp)  valInp.value  = '';
+    if(mesaInp) mesaInp.value = '';
     _almSelecionarBebida(''); // volta pra "Nenhuma"
-    var msg = '⚖️ '+nome+' na fila';
+    var msg = mesaDestino ? ('⚖️ '+nome+' → Mesa '+mesaDestino) : ('⚖️ '+nome+' na fila');
     if(itemBeb) msg += ' + 🥤 '+itemBeb.nome;
     showToast(msg, '#fbbf24');
     renderAlmocos();
+    if(mesaDestino && typeof renderMesas === 'function') renderMesas();
     // Se a bebida precisar imprimir, cria pedido pra ela
     if(itemBeb){
       fbDb.collection('pedidos').add({
         restauranteId: _restauranteId,
         tenantId: _tenantId || null,
         garcom: _nomeGarcom,
-        mesa: null,
+        mesa: mesaDestino || null,
         contaId: ref.id,
         tipoConta: 'almoco',
         cliente: nome,
@@ -12026,55 +11981,62 @@ var _kgSyncConectado = false;
 // ═══ Pesagem remota: pede o peso pro PDV (que está com a balança no PC) ═══
 // Fluxo: cria um comando no Firestore → o PDV lê a balança → devolve o peso
 // no mesmo documento → preenche o campo aqui no tablet. Demora ~1-2s.
-function kgPesarNaBalanca(){
-  var btn = document.getElementById('kg-btn-balanca');
-  if(!btn || btn.disabled) return;
-  btn.disabled = true; btn.textContent = '⏳ Pesando...';
-
-  function restaurar(){ btn.disabled = false; btn.textContent = '📡 Pesar na balança'; }
-
-  fbDb.collection('comandos_balanca').add({
-    restauranteId: _restauranteId,
-    status: 'pendente',
-    solicitadoPor: _nomeGarcom,
-    criadoEm: Date.now()
-  }).then(function(ref){
-    var unsub = null, resolvido = false;
-    var timeout = setTimeout(function(){
-      if(resolvido) return;
-      resolvido = true;
-      if(unsub) unsub();
-      ref.delete().catch(function(){});
-      restaurar();
-      showToast('❌ Balança não respondeu. O PDV está aberto no caixa?', '#f87171', 4500);
-    }, 8000);
-    unsub = ref.onSnapshot(function(doc){
-      if(resolvido || !doc.exists) return;
-      var d = doc.data() || {};
-      if(d.status === 'ok' && d.peso){
-        resolvido = true; clearTimeout(timeout); if(unsub) unsub();
-        var inp = document.getElementById('kg-peso');
-        if(inp){
-          inp.value = d.peso;
-          // Dispara o sync peso→valor que já existe
-          inp.dispatchEvent(new Event('input', {bubbles:true}));
+function _pedirPesoBalanca(){
+  return new Promise(function(resolve, reject){
+    fbDb.collection('comandos_balanca').add({
+      restauranteId: _restauranteId,
+      status: 'pendente',
+      solicitadoPor: _nomeGarcom,
+      criadoEm: Date.now()
+    }).then(function(ref){
+      var unsub = null, resolvido = false;
+      var timeout = setTimeout(function(){
+        if(resolvido) return;
+        resolvido = true;
+        if(unsub) unsub();
+        ref.delete().catch(function(){});
+        reject(new Error('Balança não respondeu. O PDV está aberto no caixa?'));
+      }, 8000);
+      unsub = ref.onSnapshot(function(doc){
+        if(resolvido || !doc.exists) return;
+        var d = doc.data() || {};
+        if(d.status === 'ok' && d.peso){
+          resolvido = true; clearTimeout(timeout); if(unsub) unsub();
+          ref.delete().catch(function(){});
+          resolve(d.peso);
+        } else if(d.status === 'erro'){
+          resolvido = true; clearTimeout(timeout); if(unsub) unsub();
+          ref.delete().catch(function(){});
+          reject(new Error(d.erro || 'Erro na balança'));
         }
-        ref.delete().catch(function(){});
-        restaurar();
-        if(navigator.vibrate) navigator.vibrate(30);
-        showToast('⚖️ ' + d.peso + 'g', '#4ade80');
-      } else if(d.status === 'erro'){
-        resolvido = true; clearTimeout(timeout); if(unsub) unsub();
-        ref.delete().catch(function(){});
-        restaurar();
-        showToast('❌ ' + (d.erro || 'Erro na balança'), '#f87171', 4500);
-      }
-    }, function(){ /* erro de listener: o timeout cuida */ });
-  }).catch(function(e){
-    restaurar();
-    showToast('❌ ' + e.message, '#f87171', 4000);
+      }, function(){ /* erro de listener: o timeout cuida */ });
+    }).catch(reject);
   });
 }
+
+// Wrapper genérico: lê a balança e preenche um campo de peso, disparando o sync
+function _pesarPreencher(inputId, btnId){
+  var btn = document.getElementById(btnId);
+  if(!btn || btn.disabled) return;
+  var rotulo = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Pesando...';
+  _pedirPesoBalanca().then(function(g){
+    var inp = document.getElementById(inputId);
+    if(inp){
+      inp.value = g;
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    btn.disabled = false; btn.textContent = rotulo;
+    if(navigator.vibrate) navigator.vibrate(30);
+    showToast('⚖️ ' + g + 'g', '#4ade80');
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = rotulo;
+    showToast('❌ ' + e.message, '#f87171', 4500);
+  });
+}
+
+function kgPesarNaBalanca(){ _pesarPreencher('kg-peso', 'kg-btn-balanca'); }
+function almPesarNaBalanca(){ _pesarPreencher('alm-peso', 'alm-btn-balanca'); }
 
 function _conectarSyncKgCampos(){
   if(_kgSyncConectado) return;

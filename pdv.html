@@ -397,6 +397,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
     <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜<span class="tab-text"> Histórico</span></button>
     <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥<span class="tab-text"> Garçons</span></button>
     <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️<span class="tab-text"> Impressão</span></button>
+    <button class="tab" id="tab-btn-balanca" onclick="abrirBalanca()">⚖️<span class="tab-text"> Balança</span></button>
   </div>
 
   <!-- Painel Grupos -->
@@ -1588,14 +1589,19 @@ function renderItens(){
     grid.innerHTML = headerItensHtml + '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">🍽️</div><div class="empty-titulo">'+msg+'</div><div class="empty-sub">'+sub+'</div></div>';
     return;
   }
-  var itensHtml = lista.map(function(i){
+  var itensHtml = lista.map(function(i, idx){
     var fotoHtml = i.foto
       ? '<img src="'+i.foto+'" alt="" loading="lazy">'
       : '<span style="font-size:2.4rem;opacity:0.3;">🍽️</span>';
     var sufixoPreco = i.tipoVenda === 'kg' ? '<span style="font-size:0.72rem;color:var(--muted);font-family:\'Space Grotesk\',sans-serif;letter-spacing:0;font-weight:600;"> /kg</span>' : '';
     if(_modoReordenarItens){
+      var ehPrimeiroIt = idx === 0, ehUltimoIt = idx === lista.length - 1;
       return '<div class="item-card reordenavel-item" data-item-id="'+i.id+'" draggable="true" style="position:relative;">'
         +'<div class="item-drag-handle">⋮⋮</div>'
+        +'<div style="position:absolute;top:6px;right:6px;display:flex;flex-direction:column;gap:3px;z-index:3;" onclick="event.stopPropagation();">'
+          +'<button onclick="moverItemSeta(\''+i.id+'\',-1)" '+(ehPrimeiroIt?'disabled':'')+' style="background:var(--surface2,#222);border:1px solid var(--border,#444);color:var(--accent,#d4a843);width:26px;height:22px;border-radius:5px;cursor:pointer;font-size:0.7rem;line-height:1;padding:0;'+(ehPrimeiroIt?'opacity:0.3;cursor:not-allowed;':'')+'" title="Subir">▲</button>'
+          +'<button onclick="moverItemSeta(\''+i.id+'\',1)" '+(ehUltimoIt?'disabled':'')+' style="background:var(--surface2,#222);border:1px solid var(--border,#444);color:var(--accent,#d4a843);width:26px;height:22px;border-radius:5px;cursor:pointer;font-size:0.7rem;line-height:1;padding:0;'+(ehUltimoIt?'opacity:0.3;cursor:not-allowed;':'')+'" title="Descer">▼</button>'
+        +'</div>'
         +'<div class="item-foto">'+fotoHtml+'</div>'
         +'<div class="item-info">'
           +'<div class="item-nome">'+escapeHtml(i.nome)+'</div>'
@@ -4093,6 +4099,36 @@ function ativarTouchReorderItens(cards){
   });
 }
 
+// Reordena um item com um toque só (▲▼) — mais confiável que arrastar em telas touch
+function moverItemSeta(itemId, dir){
+  var itensCategoria = _itens
+    .filter(function(i){ return i.categoria === _catAtiva; })
+    .sort(function(a,b){
+      if(a.ordem !== b.ordem) return a.ordem - b.ordem;
+      return (b.criadoEm||0) - (a.criadoEm||0);
+    });
+  var idx = itensCategoria.findIndex(function(i){ return i.id === itemId; });
+  var novo = idx + dir;
+  if(idx < 0 || novo < 0 || novo >= itensCategoria.length) return;
+  var tmp = itensCategoria[idx];
+  itensCategoria[idx] = itensCategoria[novo];
+  itensCategoria[novo] = tmp;
+  var batch = fbDb.batch();
+  itensCategoria.forEach(function(it, i){
+    var ref = fbColCardapio('itens').doc(it.id);
+    batch.update(ref, {ordem: i});
+    it.ordem = i;
+  });
+  _itens.sort(function(a,b){
+    if(a.ordem !== b.ordem) return a.ordem - b.ordem;
+    return (b.criadoEm||0) - (a.criadoEm||0);
+  });
+  renderItens();
+  batch.commit().then(function(){
+    showToast('✓ Ordem atualizada','#4ade80');
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
+}
+
 function moverItem(idArrastado, idAlvo){
   // Encontra os itens da categoria atual
   var itensCategoria = _itens.filter(function(i){ return i.categoria === _catAtiva; });
@@ -4222,6 +4258,297 @@ function qzReconectar(){
   } else {
     qzConectar();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ⚖️ BALANÇA — pesagem de buffet por quilo direto no caixa
+// Lê o peso pela porta serial via QZ Tray (mesmo programa da impressão),
+// ou aceita digitação manual. Tem modo simulação pra testar sem balança.
+// ═══════════════════════════════════════════════════════════════
+var _BAL_CFG_KEY = 'pdv_balanca_cfg';
+function _balCfg(){
+  var padrao = { simulacao:true, porta:'COM3', baud:9600, protocolo:'toledo' };
+  try{
+    var raw = localStorage.getItem(_BAL_CFG_KEY);
+    if(raw) return Object.assign(padrao, JSON.parse(raw));
+  }catch(e){}
+  return padrao;
+}
+function _balSalvarCfg(cfg){
+  try{ localStorage.setItem(_BAL_CFG_KEY, JSON.stringify(cfg)); }catch(e){}
+}
+
+// Extrai o peso (em gramas) da resposta crua da balança.
+// Formatos comuns: "0.512" / "0,512" (kg com 3 casas) ou "00512" (gramas).
+function _balParsePeso(raw){
+  if(!raw) return null;
+  var m = String(raw).match(/(\d{1,2})[.,](\d{3})/);
+  if(m) return parseInt(m[1],10)*1000 + parseInt(m[2],10);
+  m = String(raw).match(/(\d{4,6})/);
+  if(m){
+    var g = parseInt(m[1],10);
+    if(g > 0 && g < 100000) return g;
+  }
+  return null;
+}
+
+// Lê o peso: simulação (aleatório) ou serial de verdade via QZ Tray
+function balancaLerPeso(){
+  var cfg = _balCfg();
+  if(cfg.simulacao){
+    return new Promise(function(resolve){
+      setTimeout(function(){ resolve(280 + Math.floor(Math.random()*520)); }, 500);
+    });
+  }
+  return new Promise(function(resolve, reject){
+    if(typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()){
+      reject(new Error('QZ Tray não conectado. Abra a aba Impressão e conecte primeiro.'));
+      return;
+    }
+    var port = cfg.porta, done = false, buf = '';
+    var to = setTimeout(function(){
+      if(done) return; done = true;
+      try{ qz.serial.closePort(port); }catch(e){}
+      reject(new Error('Balança não respondeu em 3s (porta '+port+'). Confira porta/cabo.'));
+    }, 3000);
+    try{
+      qz.serial.setSerialCallbacks(function(evt){
+        if(done || !evt || evt.portName !== port) return;
+        buf += (evt.output || '');
+        var g = _balParsePeso(buf);
+        if(g != null){
+          done = true; clearTimeout(to);
+          try{ qz.serial.closePort(port); }catch(e){}
+          resolve(g);
+        }
+      });
+    }catch(e){}
+    qz.serial.openPort(port, {baudRate: parseInt(cfg.baud)||9600, dataBits:8, stopBits:1, parity:'NONE', flowControl:'NONE'})
+      .then(function(){
+        // Toledo/Filizola respondem ao ENQ (0x05); modo contínuo só escuta
+        if(cfg.protocolo !== 'continuo'){ return qz.serial.sendData(port, '\u0005'); }
+      })
+      .catch(function(e){
+        if(done) return; done = true; clearTimeout(to);
+        reject(new Error('Não abriu a porta '+port+': '+(e && e.message ? e.message : e)));
+      });
+  });
+}
+
+var _balItemSel = null; // item kg selecionado no modal
+
+function abrirBalanca(){
+  var ex = document.getElementById('modal-balanca');
+  if(ex) ex.remove();
+  var itensKg = _itens.filter(function(i){ return i.tipoVenda === 'kg'; });
+  _balItemSel = itensKg.length === 1 ? itensKg[0] : null;
+  var cfg = _balCfg();
+
+  var itensHtml = itensKg.length
+    ? itensKg.map(function(i){
+        return '<button class="bal-item" data-id="'+i.id+'" onclick="balSelecionarItem(\''+i.id+'\')" style="padding:14px 10px;border-radius:12px;border:2px solid '+(_balItemSel&&_balItemSel.id===i.id?'var(--accent)':'var(--border)')+';background:var(--surface2);color:var(--text);font-family:inherit;font-weight:700;font-size:0.9rem;cursor:pointer;">'+
+          escapeHtml(i.nome)+'<div style="font-size:0.72rem;color:var(--accent);margin-top:4px;">R$ '+formatarPreco(i.preco)+'/kg</div></button>';
+      }).join('')
+    : '<div style="grid-column:1/-1;color:var(--muted);font-size:0.82rem;text-align:center;padding:10px;">Nenhum item "por kg" no cardápio ainda.<br>Crie um (ex: "Buffet") na aba Cardápio ativando a opção <b>por kg</b>.</div>';
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-balanca';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9000;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;padding:18px;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">'+
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:var(--accent);letter-spacing:0.06em;">⚖️ PESAGEM — BUFFET</div>'+
+        '<button onclick="document.getElementById(\'modal-balanca\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;">×</button>'+
+      '</div>'+
+      (cfg.simulacao ? '<div style="background:rgba(247,163,79,0.12);border:1px solid rgba(247,163,79,0.4);color:#f7a34f;font-size:0.74rem;padding:8px 10px;border-radius:8px;margin-bottom:12px;">🧪 <b>Modo simulação ativo</b> — o botão "Ler balança" gera um peso aleatório pra teste. Desative na engrenagem quando a balança chegar.</div>' : '')+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;">1. Escolha o item:</div>'+
+      '<div id="bal-itens" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;">'+itensHtml+'</div>'+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;">2. Peso (em gramas):</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:6px;">'+
+        '<input type="text" id="bal-peso" inputmode="numeric" placeholder="512" oninput="balAtualizarValor()" style="flex:1;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-size:1.4rem;font-family:\'Bebas Neue\',sans-serif;text-align:center;letter-spacing:0.05em;">'+
+        '<button onclick="balLerDaBalanca()" id="bal-btn-ler" style="flex:0 0 auto;background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 18px;font-weight:700;font-size:0.9rem;cursor:pointer;font-family:inherit;">📡 Ler balança</button>'+
+      '</div>'+
+      '<div style="font-size:0.68rem;color:var(--muted);margin-bottom:12px;">Dá pra digitar o peso na mão também, se precisar.</div>'+
+      '<div id="bal-valor" style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:2.4rem;color:var(--accent);margin-bottom:14px;">R$ 0,00</div>'+
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;">3. Destino:</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:10px;">'+
+        '<input type="text" id="bal-mesa" inputmode="numeric" placeholder="Nº mesa" style="flex:0 0 90px;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:10px;text-align:center;font-family:inherit;">'+
+        '<button onclick="balLancarNaMesa()" style="flex:1;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:10px;padding:10px;font-weight:700;cursor:pointer;font-family:inherit;">➕ Lançar na mesa</button>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;margin-bottom:8px;" id="bal-pgto">'+
+        ['Dinheiro','Débito','Crédito','Pix'].map(function(f,i){
+          return '<button data-forma="'+f+'" onclick="balSelPgto(this)" style="flex:1;padding:8px 4px;border-radius:8px;border:1.5px solid '+(i===3?'var(--accent)':'var(--border)')+';background:var(--surface2);color:'+(i===3?'var(--accent)':'var(--text)')+';font-size:0.76rem;font-weight:700;cursor:pointer;font-family:inherit;">'+f+'</button>';
+        }).join('')+
+      '</div>'+
+      '<button onclick="balVendaDireta()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:12px;padding:14px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;margin-bottom:12px;">✅ Venda direta (pagar agora)</button>'+
+      '<div style="border-top:1px solid var(--border);padding-top:10px;">'+
+        '<button onclick="var c=document.getElementById(\'bal-config\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';" style="background:none;border:none;color:var(--muted);font-size:0.76rem;cursor:pointer;font-family:inherit;">⚙️ Configuração da balança</button>'+
+        '<div id="bal-config" style="display:none;margin-top:8px;font-size:0.78rem;">'+
+          '<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="bal-cfg-sim" '+(cfg.simulacao?'checked':'')+' style="width:16px;height:16px;"> Modo simulação (teste sem balança)</label>'+
+          '<div style="display:flex;gap:8px;margin-bottom:8px;">'+
+            '<input type="text" id="bal-cfg-porta" value="'+escapeHtml(cfg.porta)+'" placeholder="COM3" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;">'+
+            '<select id="bal-cfg-baud" style="flex:0 0 90px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;">'+
+              [4800,9600,2400].map(function(b){ return '<option value="'+b+'"'+(cfg.baud==b?' selected':'')+'>'+b+'</option>'; }).join('')+
+            '</select>'+
+          '</div>'+
+          '<select id="bal-cfg-proto" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;margin-bottom:8px;">'+
+            '<option value="toledo"'+(cfg.protocolo==='toledo'?' selected':'')+'>Toledo Prix (pergunta o peso)</option>'+
+            '<option value="filizola"'+(cfg.protocolo==='filizola'?' selected':'')+'>Filizola (pergunta o peso)</option>'+
+            '<option value="continuo"'+(cfg.protocolo==='continuo'?' selected':'')+'>Contínuo (balança transmite sozinha)</option>'+
+          '</select>'+
+          '<div style="display:flex;gap:8px;">'+
+            '<button onclick="balSalvarConfig()" style="flex:1;background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px;font-weight:700;cursor:pointer;font-family:inherit;">Salvar config</button>'+
+            '<button onclick="balListarPortas()" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;cursor:pointer;font-family:inherit;">Listar portas</button>'+
+          '</div>'+
+          '<div id="bal-portas" style="margin-top:6px;color:var(--muted);"></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function balSelecionarItem(id){
+  _balItemSel = _itens.find(function(i){ return i.id === id; }) || null;
+  document.querySelectorAll('#bal-itens .bal-item').forEach(function(b){
+    b.style.borderColor = (b.getAttribute('data-id') === id) ? 'var(--accent)' : 'var(--border)';
+  });
+  balAtualizarValor();
+}
+
+function balAtualizarValor(){
+  var g = parseInt((document.getElementById('bal-peso').value||'').replace(/\D/g,''),10) || 0;
+  var v = (_balItemSel && g > 0) ? (g * (_balItemSel.preco||0) / 1000) : 0;
+  document.getElementById('bal-valor').textContent = 'R$ ' + formatarPreco(v);
+}
+
+function balLerDaBalanca(){
+  var btn = document.getElementById('bal-btn-ler');
+  btn.textContent = '⏳ Lendo...'; btn.disabled = true;
+  balancaLerPeso().then(function(g){
+    document.getElementById('bal-peso').value = g;
+    balAtualizarValor();
+    btn.textContent = '📡 Ler balança'; btn.disabled = false;
+  }).catch(function(e){
+    btn.textContent = '📡 Ler balança'; btn.disabled = false;
+    showToast('❌ '+e.message, '#f87171', 4500);
+  });
+}
+
+var _balFormaPgto = 'Pix';
+function balSelPgto(btn){
+  _balFormaPgto = btn.getAttribute('data-forma');
+  document.querySelectorAll('#bal-pgto button').forEach(function(b){
+    var on = b === btn;
+    b.style.borderColor = on ? 'var(--accent)' : 'var(--border)';
+    b.style.color = on ? 'var(--accent)' : 'var(--text)';
+  });
+}
+
+// Monta o item pesado no formato que o resto do sistema (conta/relatório) espera
+function _balMontarItem(){
+  var g = parseInt((document.getElementById('bal-peso').value||'').replace(/\D/g,''),10) || 0;
+  if(!_balItemSel){ showToast('Escolha o item primeiro','#f7a34f'); return null; }
+  if(g <= 0){ showToast('Informe o peso','#f7a34f'); return null; }
+  var valor = g * (_balItemSel.preco||0) / 1000;
+  return {
+    id: _balItemSel.id,
+    nome: _balItemSel.nome,
+    preco: Math.round(valor*100)/100,   // valor total da porção (padrão dos itens kg)
+    precoBase: _balItemSel.preco,        // preço do quilo
+    tipoVenda: 'kg',
+    peso: g,
+    qtd: 1,
+    obs: '',
+    selecoes: [],
+    criadoEm: Date.now()
+  };
+}
+
+function balLancarNaMesa(){
+  var item = _balMontarItem();
+  if(!item) return;
+  var mesa = parseInt((document.getElementById('bal-mesa').value||'').replace(/\D/g,''),10);
+  if(!mesa){ showToast('Informe o número da mesa','#f7a34f'); return; }
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==',_restauranteAtivo.id)
+    .where('mesa','==',mesa)
+    .where('status','==','aberta')
+    .limit(1).get()
+    .then(function(snap){
+      if(snap.empty){
+        // Mesa livre — abre a conta agora com o item já dentro
+        return fbDb.collection('contas_mesa').add({
+          restauranteId: _restauranteAtivo.id,
+          tenantId: _tenantId || null,
+          mesa: mesa, status: 'aberta',
+          itens: [item], pagamentos: [],
+          subtotal: item.preco, taxa10: 0, total: item.preco,
+          pagoTotal: 0, restante: item.preco,
+          garcomPrincipal: 'Caixa', abertaEm: Date.now(), abertaPor: 'Caixa PDV'
+        });
+      }
+      var d = snap.docs[0], c = d.data();
+      var itens = (c.itens||[]).concat([item]);
+      return d.ref.update({
+        itens: itens,
+        subtotal: (c.subtotal||0) + item.preco,
+        total: (c.total||0) + item.preco,
+        restante: (c.restante||0) + item.preco
+      });
+    })
+    .then(function(){
+      showToast('✓ '+item.peso+'g de '+item.nome+' → Mesa '+mesa,'#4ade80');
+      document.getElementById('bal-peso').value = '';
+      balAtualizarValor();
+    })
+    .catch(function(e){ showToast('❌ '+e.message,'#f87171',4500); });
+}
+
+function balVendaDireta(){
+  var item = _balMontarItem();
+  if(!item) return;
+  var agora = Date.now();
+  fbDb.collection('contas_fechadas').add({
+    tenantId: _tenantId || null,
+    restauranteId: _restauranteAtivo.id,
+    mesa: null,
+    tipoConta: 'balcao',
+    cliente: 'Balcão ⚖️',
+    status: 'fechada',
+    itens: [item],
+    subtotal: item.preco, taxa10: 0, total: item.preco,
+    pagamentos: [{forma: _balFormaPgto, valor: item.preco, em: agora}],
+    abertaEm: agora, fechadoEm: agora, fechadoPor: 'Caixa PDV'
+  }).then(function(){
+    showToast('✓ Venda: '+item.peso+'g — R$ '+formatarPreco(item.preco)+' ('+_balFormaPgto+')','#4ade80');
+    document.getElementById('bal-peso').value = '';
+    balAtualizarValor();
+  }).catch(function(e){ showToast('❌ '+e.message,'#f87171',4500); });
+}
+
+function balSalvarConfig(){
+  var cfg = {
+    simulacao: document.getElementById('bal-cfg-sim').checked,
+    porta: (document.getElementById('bal-cfg-porta').value||'COM3').trim(),
+    baud: parseInt(document.getElementById('bal-cfg-baud').value)||9600,
+    protocolo: document.getElementById('bal-cfg-proto').value
+  };
+  _balSalvarCfg(cfg);
+  showToast('✓ Configuração da balança salva','#4ade80');
+  abrirBalanca(); // reabre pra refletir (ex: aviso de simulação)
+}
+
+function balListarPortas(){
+  var box = document.getElementById('bal-portas');
+  if(typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()){
+    box.textContent = 'QZ Tray não conectado — conecte na aba Impressão primeiro.';
+    return;
+  }
+  box.textContent = 'Buscando portas...';
+  qz.serial.findPorts().then(function(ports){
+    box.textContent = ports && ports.length ? 'Portas: ' + ports.join(', ') : 'Nenhuma porta serial encontrada.';
+  }).catch(function(e){ box.textContent = 'Erro: '+e.message; });
 }
 
 function qzConectar(){

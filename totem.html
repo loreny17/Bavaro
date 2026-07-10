@@ -741,6 +741,15 @@
           <span id="valor-fonte-itens" style="color:var(--accent);font-weight:bold;min-width:45px;text-align:right;font-size:0.9rem;">100%</span>
         </div>
       </div>
+      <div class="cfg-grupo">
+        <div class="cfg-titulo">💰 Tamanho da fonte (valores/preços)</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button onclick="alterarTamanhoFonteValores(-0.1)" style="flex:0;width:40px;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;">−</button>
+          <input type="range" id="slider-fonte-valores" min="0.8" max="2.0" step="0.1" value="1.25" oninput="var delta = parseFloat(this.value) - _tamanhoFonteValores; alterarTamanhoFonteValores(delta)" style="flex:1;">
+          <button onclick="alterarTamanhoFonteValores(0.1)" style="flex:0;width:40px;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;">+</button>
+          <span id="valor-fonte-valores" style="color:var(--accent);font-weight:bold;min-width:45px;text-align:right;font-size:0.9rem;">100%</span>
+        </div>
+      </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
@@ -845,6 +854,7 @@ function _salvarTamanhosFonte(){
     if(raw) cfg = JSON.parse(raw) || {};
     cfg.tamanhoFonteWizard = _tamanhoFonteWizard;
     cfg.tamanhoFonteItens = _tamanhoFonteItens;
+    cfg.tamanhoFonteValores = _tamanhoFonteValores;
     localStorage.setItem(_CFG_KEY, JSON.stringify(cfg));
   }catch(e){}
 }
@@ -884,6 +894,18 @@ function alterarTamanhoFonteItens(delta){
   // Re-renderiza os itens imediatamente
   renderItens();
   // Salva no localStorage na hora
+  _salvarTamanhosFonte();
+}
+
+// Ajusta o tamanho da fonte dos VALORES/preços nos cards (em tempo real)
+function alterarTamanhoFonteValores(delta){
+  var novo = Math.max(0.8, Math.min(2.0, _tamanhoFonteValores + delta));
+  _tamanhoFonteValores = novo;
+  var slider = document.getElementById('slider-fonte-valores');
+  if(slider) slider.value = novo;
+  var valor = document.getElementById('valor-fonte-valores');
+  if(valor) valor.textContent = Math.round(novo * 100 / 1.25) + '%';
+  renderItens();
   _salvarTamanhosFonte();
 }
 // inesperada em qualquer lugar) — funciona mesmo com o painel desativado,
@@ -986,6 +1008,7 @@ var _itemAberto = null;      // item aberto no modal de personalização
 var _selecoesTemp = {};      // {grupoId: [opcaoIdx, ...]} — escolhas no modal
 var _tamanhoFonteWizard = 1.35; // multiplicador de tamanho pra nomes no wizard (default: 1.35rem → legível)
 var _tamanhoFonteItens = 1.05;  // multiplicador de tamanho pra nomes dos itens na grade (default: 1.05rem)
+var _tamanhoFonteValores = 1.25; // tamanho da fonte dos preços/valores nos cards (default: 1.25rem)
 var _qtdTemp = 1;
 
 // ─── Inicialização ───
@@ -1527,7 +1550,7 @@ function renderItens(){
       '<div class="info">' +
         '<div class="nome" style="font-size:' + (1.05 * _tamanhoFonteItens) + 'rem;">' + escapar(it.nome||'') + '</div>' +
         (it.descricao ? '<div class="desc">' + escapar(it.descricao) + '</div>' : '') +
-        '<div class="preco">R$ ' + preco + '</div>' +
+        '<div class="preco" style="font-size:' + _tamanhoFonteValores + 'rem;">R$ ' + preco + '</div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -3060,6 +3083,7 @@ function aplicarCfg(cfg){
   // Restaura os tamanhos de fonte salvos (se existirem na config)
   if(typeof cfg.tamanhoFonteWizard === 'number') _tamanhoFonteWizard = cfg.tamanhoFonteWizard;
   if(typeof cfg.tamanhoFonteItens === 'number') _tamanhoFonteItens = cfg.tamanhoFonteItens;
+  if(typeof cfg.tamanhoFonteValores === 'number') _tamanhoFonteValores = cfg.tamanhoFonteValores;
 }
 
 // Conta toques no logo BÁVARO — 5 em sequência abre o painel
@@ -3221,6 +3245,13 @@ function abrirConfig(){
     var valorItens = document.getElementById('valor-fonte-itens');
     if(valorItens) valorItens.textContent = Math.round(_tamanhoFonteItens * 100 / 1.05) + '%';
   }
+  // Atualiza o slider de tamanho da fonte dos valores
+  var sliderVal = document.getElementById('slider-fonte-valores');
+  if(sliderVal) {
+    sliderVal.value = _tamanhoFonteValores;
+    var valorVal = document.getElementById('valor-fonte-valores');
+    if(valorVal) valorVal.textContent = Math.round(_tamanhoFonteValores * 100 / 1.25) + '%';
+  }
   // Botões de colunas
   document.querySelectorAll('#cfg-colunas-grupo .cfg-op').forEach(function(b){
     b.classList.toggle('ativo', parseInt(b.getAttribute('data-val')) === cfg.colunas);
@@ -3264,7 +3295,8 @@ function _lerCfgDoModal(){
     fotoRatio: fotoBtn ? fotoBtn.getAttribute('data-val') : '16/10',
     radius: rad,
     tamanhoFonteWizard: _tamanhoFonteWizard,
-    tamanhoFonteItens: _tamanhoFonteItens
+    tamanhoFonteItens: _tamanhoFonteItens,
+    tamanhoFonteValores: _tamanhoFonteValores
   };
 }
 
@@ -3290,6 +3322,7 @@ function restaurarPadrao(){
   try{ localStorage.removeItem(_CFG_KEY); }catch(e){}
   _tamanhoFonteWizard = 1.35;
   _tamanhoFonteItens = 1.05;
+  _tamanhoFonteValores = 1.25;
   renderItens();
   aplicarCfg(_CFG_PADRAO);
   // Re-preenche o modal com padrão

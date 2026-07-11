@@ -1778,6 +1778,10 @@ function confirmarTrocaMesaCarrinho(novoNum){
     .where('status','==','aberta')
     .limit(1)
     .get().then(function(snap){
+      if(snap.empty && snap.metadata && snap.metadata.fromCache){
+        showToast('⚠️ Sem conexão com o servidor — não dá pra trocar de mesa agora','#f7a34f', 5000);
+        return;
+      }
       if(!snap.empty){
         var d = snap.docs[0];
         _contasMesaCache[String(novoNum)] = Object.assign({id:d.id}, d.data());
@@ -4958,6 +4962,43 @@ function _refrescarMesasRapido(){
     .catch(function(e){ console.warn('[Mesas] refresh rápido falhou:', e && e.code); });
 }
 
+// Recuperação de canal morto: quando o Firestore trava por completo (nem erro
+// devolve — tudo fica "pendurado"), a única saída é desligar e religar a rede
+// interna do SDK, que derruba o canal podre e abre um novo. Depois disso,
+// os listeners são recriados do zero.
+var _mesasRecuperando = false;
+var _mesasRecuperacoes = 0;
+function _mesasRecuperarConexao(motivo){
+  if(_mesasRecuperando) return;
+  _mesasRecuperando = true;
+  _mesasRecuperacoes++;
+  console.warn('[Mesas] 🔄 Reiniciando rede Firestore ('+motivo+') — tentativa '+_mesasRecuperacoes);
+  var atraso = Math.min(30000, 2000 * _mesasRecuperacoes); // backoff: 2s, 4s... até 30s
+  function religar(){
+    setTimeout(function(){
+      _mesasRecuperando = false;
+      escutarMesasOcupadas();
+    }, 800);
+  }
+  setTimeout(function(){
+    try{
+      fbDb.disableNetwork().then(function(){
+        return fbDb.enableNetwork();
+      }).then(function(){
+        console.log('[Mesas] ✓ Rede Firestore reiniciada');
+        _mesasRecuperacoes = 0;
+        religar();
+      }).catch(function(e){
+        console.warn('[Mesas] reset de rede falhou: '+(e&&e.message||e));
+        religar();
+      });
+    }catch(e){
+      console.warn('[Mesas] reset de rede exceção: '+(e&&e.message||e));
+      religar();
+    }
+  }, atraso);
+}
+
 function escutarMesasOcupadas(){
   console.log('[Mesas] escutarMesasOcupadas iniciado. rest='+_restauranteId);
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
@@ -4983,12 +5024,26 @@ function escutarMesasOcupadas(){
   });
   var _fbTimeout = setTimeout(function(){
     if(_primeiroUpdate) return;
-    console.warn('[Mesas] onSnapshot nao respondeu em 10s — fallback get()');
+    console.warn('[Mesas] onSnapshot nao respondeu em 10s — tentando get() e reset de rede');
+    // Tenta um get com prazo curto; se também ficar mudo, o canal do Firestore
+    // está morto (nem erro ele devolve) — aí só reiniciar a rede resolve.
+    var respondeu = false;
+    var goReset = setTimeout(function(){
+      if(respondeu || _primeiroUpdate) return;
+      respondeu = true;
+      _mesasRecuperarConexao('get do fallback também ficou mudo');
+    }, 5000);
     ref.get().then(function(snap){
+      if(respondeu) return; respondeu = true; clearTimeout(goReset);
       if(_primeiroUpdate) return;
+      console.log('[Mesas] fallback get OK: '+snap.size+' mesas');
       registrarUpdateListener('mesas');
       _processarSnapMesas(snap);
-    }).catch(function(){});
+    }).catch(function(e){
+      if(respondeu) return; respondeu = true; clearTimeout(goReset);
+      console.warn('[Mesas] fallback get falhou: '+(e&&e.code||e));
+      _mesasRecuperarConexao('fallback get com erro');
+    });
   }, 10000);
 
   // Aceita cache local para abertura rápida, mas sempre processa atualização do servidor
@@ -6343,9 +6398,107 @@ function abrirPainelDebug(){
         '<button onclick="copiarLogsDebug()" style="flex:1;padding:10px;background:#4ade80;color:#000;border:none;border-radius:8px;font-family:inherit;font-weight:700;cursor:pointer;">📋 Copiar Tudo</button>' +
         '<button onclick="_debugLogs=[];abrirPainelDebug();" style="flex:1;padding:10px;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">🗑️ Limpar</button>' +
         '<button onclick="_leituraStats={};localStorage.removeItem(\'garcom_leituras_\'+_chaveDiaLeituras());abrirPainelDebug();" style="flex:1;padding:10px;background:rgba(247,163,79,0.15);color:#f7a34f;border:1px solid rgba(247,163,79,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">📊 Zerar leituras</button>' +
+        '<button onclick="recuperarMesaDebug()" style="flex:1;padding:10px;background:rgba(96,165,250,0.15);color:#60a5fa;border:1px solid rgba(96,165,250,0.3);border-radius:8px;font-family:inherit;font-weight:600;cursor:pointer;">🔎 Recuperar mesa</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
+}
+
+// ═══ Recuperação de mesa: acha itens "perdidos" em contas duplicadas/fechadas ═══
+// Casos que atende: (a) duas contas abertas na mesma mesa (junta tudo na mais
+// antiga com conteúdo); (b) itens que caíram numa conta já fechada hoje por
+// causa de cache velho (copia de volta pra conta aberta da mesa).
+function recuperarMesaDebug(){
+  var num = prompt('Recuperar qual mesa? (número)');
+  if(!num) return;
+  var mesaInt = parseInt(num);
+  if(!mesaInt){ alert('Número inválido'); return; }
+  var inicioDia = new Date(); inicioDia.setHours(0,0,0,0);
+
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==',_restauranteId)
+    .where('mesa','==',mesaInt)
+    .get().then(function(snap){
+      var todas = [];
+      snap.forEach(function(d){ todas.push(Object.assign({id:d.id}, d.data())); });
+      var abertas = todas.filter(function(c){ return c.status === 'aberta'; });
+      var fechadasHoje = todas.filter(function(c){
+        return c.status !== 'aberta' && ((c.fechadoEm||c.fechadaEm||0) >= inicioDia.getTime() || (c.atualizadoEm||0) >= inicioDia.getTime());
+      });
+
+      var relato = 'MESA '+mesaInt+':\n';
+      todas.forEach(function(c){
+        var nAtivos = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length;
+        relato += '• conta '+c.id.slice(0,6)+'… ['+c.status+'] '+nAtivos+' itens · R$ '+fmtPreco(c.total||0)+'\n';
+      });
+      console.log('[RECUPERAR] '+relato);
+
+      if(!todas.length){ alert('Nenhuma conta encontrada pra mesa '+mesaInt+'.'); return; }
+
+      // Caso (a): contas abertas duplicadas → junta na mais antiga com conteúdo
+      if(abertas.length > 1){
+        abertas.sort(function(a,b){
+          var ca = (a.itens||[]).length ? 0 : 1, cb = (b.itens||[]).length ? 0 : 1;
+          if(ca !== cb) return ca - cb;
+          return (a.abertaEm||0) - (b.abertaEm||0);
+        });
+        var principal = abertas[0];
+        var extras = abertas.slice(1);
+        var totalExtras = extras.reduce(function(a,c){ return a + (c.itens||[]).length; }, 0);
+        if(!confirm(relato + '\nJuntar as '+abertas.length+' contas ABERTAS numa só ('+totalExtras+' itens serão movidos)?')) return;
+        var itensJuntos = (principal.itens||[]).slice();
+        var pgtosJuntos = (principal.pagamentos||[]).slice();
+        extras.forEach(function(c){
+          (c.itens||[]).forEach(function(it){ itensJuntos.push(Object.assign({}, it, {recuperadoDe:c.id, recuperadoEm:Date.now()})); });
+          (c.pagamentos||[]).forEach(function(p){ pgtosJuntos.push(p); });
+        });
+        var tot = calcularTotaisConta({itens:itensJuntos, pagamentos:pgtosJuntos});
+        fbDb.collection('contas_mesa').doc(principal.id).update({
+          itens:itensJuntos, subtotal:tot.subtotal, taxa10:tot.taxa10, total:tot.total,
+          pagoTotal:tot.pagoTotal, restante:tot.restante, atualizadoEm:Date.now()
+        }).then(function(){
+          var b = fbDb.batch();
+          extras.forEach(function(c){ b.delete(fbDb.collection('contas_mesa').doc(c.id)); });
+          return b.commit();
+        }).then(function(){
+          delete _contasMesaCache[String(mesaInt)];
+          showToast('✓ Mesa '+mesaInt+' recuperada: contas juntadas','#4ade80',5000);
+        }).catch(function(e){ alert('Erro: '+e.message); });
+        return;
+      }
+
+      // Caso (b): itens presos em conta fechada hoje
+      var presas = fechadasHoje.filter(function(c){
+        return (c.itens||[]).some(function(i){ return i.status !== 'cancelado' && i.status !== 'pago' && (i.transferidoEm||i.adicionadoEm||0) >= inicioDia.getTime(); });
+      });
+      if(presas.length){
+        var origem = presas[0];
+        var itensPresos = (origem.itens||[]).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago' && (i.transferidoEm||i.adicionadoEm||0) >= inicioDia.getTime(); });
+        if(!confirm(relato + '\nAchei '+itensPresos.length+' item(ns) de HOJE presos numa conta FECHADA.\nCopiar de volta pra conta aberta da mesa '+mesaInt+'?')) return;
+        var destino = abertas[0];
+        var prom;
+        var itensNovos = itensPresos.map(function(it){ return Object.assign({}, it, {recuperadoDe:origem.id, recuperadoEm:Date.now()}); });
+        if(destino){
+          var jn = (destino.itens||[]).concat(itensNovos);
+          var t2 = calcularTotaisConta({itens:jn, pagamentos:destino.pagamentos||[]});
+          prom = fbDb.collection('contas_mesa').doc(destino.id).update({itens:jn, subtotal:t2.subtotal, taxa10:t2.taxa10, total:t2.total, pagoTotal:t2.pagoTotal, restante:t2.restante, atualizadoEm:Date.now()});
+        } else {
+          var t3 = calcularTotaisConta({itens:itensNovos, pagamentos:[]});
+          prom = fbDb.collection('contas_mesa').add({
+            restauranteId:_restauranteId, tenantId:_tenantId||null, mesa:mesaInt, status:'aberta',
+            itens:itensNovos, pagamentos:[], subtotal:t3.subtotal, taxa10:t3.taxa10, total:t3.total,
+            pagoTotal:0, restante:t3.total, garcomPrincipal:_nomeGarcom, abertaEm:Date.now(), abertaPor:_nomeGarcom+' (recuperação)'
+          });
+        }
+        prom.then(function(){
+          delete _contasMesaCache[String(mesaInt)];
+          showToast('✓ '+itensPresos.length+' item(ns) recuperados pra mesa '+mesaInt,'#4ade80',5000);
+        }).catch(function(e){ alert('Erro: '+e.message); });
+        return;
+      }
+
+      alert(relato + '\nNão achei duplicadas nem itens presos. Se ainda falta algo, me mande esse texto.');
+    }).catch(function(e){ alert('Erro na busca: '+e.message); });
 }
 
 function copiarLogsDebug(){
@@ -13104,6 +13257,8 @@ function _enviarPedidoConfirmado(){
             var d = snap.docs[0];
             _contasMesaCache[String(_mesaAtiva)] = Object.assign({id:d.id}, d.data());
             showToast('✓ Conta encontrada, tente enviar novamente','#4ade80');
+          } else if(snap.metadata && snap.metadata.fromCache){
+            showToast('⚠️ Sem conexão com o servidor — aguarde e tente de novo (o pedido continua no carrinho)','#f7a34f', 5000);
           } else {
             showToast('❌ Mesa sem conta aberta','#f87171');
           }
@@ -13248,6 +13403,12 @@ function _enviarPedidoConfirmado(){
           throw new Error('Conta não encontrada');
         }
         var data = doc.data();
+        if(data.status !== 'aberta'){
+          // Conta do cache estava velha (já fechada). Abortamos em vez de
+          // despejar itens num documento invisível — e limpamos o cache.
+          delete _contasMesaCache[String(mesaAtivaCaptura)];
+          throw new Error('A conta desta mesa foi fechada em outro aparelho. Abra a mesa de novo e reenvie.');
+        }
         var itensExistentes = data.itens || [];
         var pagamentosExistentes = data.pagamentos || [];
         var todosItens = itensExistentes.concat(itensConta);
@@ -14852,6 +15013,13 @@ function abrirContaMesa(num){
     .where('mesa','==', mesaInt)
     .where('status','==','aberta')
     .get().then(function(snap){
+      // ⚠️ Se a resposta veio do CACHE local (sem conexão real com o servidor),
+      // um resultado vazio NÃO significa mesa livre — significa "não sei".
+      // Criar conta nesse estado gera contas duplicadas e pedidos "sumindo".
+      if(snap.metadata && snap.metadata.fromCache && snap.empty){
+        showToast('⚠️ Sem conexão com o servidor — aguarde as mesas carregarem e tente de novo','#f7a34f', 5000);
+        return;
+      }
       if(!snap.empty){
         // Achou conta(s) aberta(s) — escolhe a melhor pra usar
         var contas = [];
@@ -14911,18 +15079,10 @@ function abrirContaMesa(num){
         showToast('❌ Falha ao criar conta — verifique conexão','#f87171');
       });
     }).catch(function(e){
+      // NÃO cria conta às cegas quando a consulta falha — era assim que
+      // nasciam contas duplicadas em cima de mesas já ocupadas.
       console.error('Erro buscar conta existente:', e);
-      var conta = {
-        restauranteId: _restauranteId, tenantId: _tenantId || null,
-        mesa: mesaInt, status: 'aberta', itens: [], pagamentos: [],
-        subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
-        garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom,
-        teste: _modoTeste ? true : false
-      };
-      entrarNaMesa(null);
-      fbDb.collection('contas_mesa').add(conta).catch(function(e){
-        showToast('❌ '+e.message,'#f87171');
-      });
+      showToast('⚠️ Não deu pra verificar a mesa '+num+' (conexão). Tente de novo em instantes.','#f7a34f', 5000);
     });
 }
 
@@ -15132,9 +15292,13 @@ function confirmarTransferencia(numDestino, pularConfirmacao){
     if(!confirm('Transferir '+itensSelecionados.length+' item(s) (R$ '+fmtPreco(totalTransfer)+') da Mesa '+_transferirOrigemNum+' para a Mesa '+numDestino+'?\n\n⚠️ Esta ação não dispara reimpressão da comanda.')) return;
   }
 
-  var contaDestino = _contasMesaCache[String(numDestino)];
+  // ⚠️ NUNCA confiar no cache pra decidir o destino: se o cache estiver velho
+  // (conexão ruim, conta fechada em outro aparelho), os itens iriam parar num
+  // documento errado/fechado — invisível em todas as telas. Busca no servidor.
+  var contaDestino = null;
   var promiseDestino;
 
+  function _executarTransferencia(){
   if(contaDestino){
     // Adiciona itens à conta destino existente
     var novosItensDestino = (contaDestino.itens||[]).concat(itensSelecionados.map(function(it){
@@ -15317,6 +15481,56 @@ function confirmarTransferencia(numDestino, pularConfirmacao){
     fecharModalTransferir();
   }).catch(function(e){
     showToast('❌ '+e.message,'#f87171', 5000);
+  });
+  } // fim _executarTransferencia
+
+  // Resolve a conta de destino no SERVIDOR (só contas realmente abertas),
+  // e revalida que a origem ainda existe e está aberta.
+  var mesaDestinoInt = parseInt(numDestino) || numDestino;
+  Promise.all([
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==',_restauranteId)
+      .where('mesa','==', mesaDestinoInt)
+      .where('status','==','aberta')
+      .get(),
+    fbDb.collection('contas_mesa').doc(conta.id).get()
+  ]).then(function(res){
+    var snapDest = res[0], docOrig = res[1];
+    if(snapDest.metadata && snapDest.metadata.fromCache && snapDest.empty){
+      showToast('⚠️ Sem conexão com o servidor — não dá pra transferir agora','#f7a34f', 5000);
+      return;
+    }
+    if(!docOrig.exists || (docOrig.data()||{}).status !== 'aberta'){
+      showToast('❌ A conta da Mesa '+_transferirOrigemNum+' não está mais aberta. Atualize e tente de novo.','#f87171',5000);
+      return;
+    }
+    // Usa os itens FRESCOS da origem (não os do cache)
+    conta = Object.assign({id: docOrig.id}, docOrig.data());
+    _contasMesaCache[String(_transferirOrigemNum)] = conta;
+    if(!snapDest.empty){
+      // Se houver mais de uma aberta, prefere a que tem conteúdo; senão a mais antiga
+      var lista = [];
+      snapDest.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
+      lista.sort(function(a,b){
+        var ca = (a.itens||[]).length ? 0 : 1, cb = (b.itens||[]).length ? 0 : 1;
+        if(ca !== cb) return ca - cb;
+        return (a.abertaEm||0) - (b.abertaEm||0);
+      });
+      contaDestino = lista[0];
+    }
+    // Recalcula itens selecionados sobre os dados frescos
+    if(_transferirModo === 'mesa'){
+      itensSelecionados = (conta.itens||[]).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago'; });
+    } else {
+      var keysFrescas = Object.keys(_transferirItensSel).filter(function(k){ return _transferirItensSel[k]; });
+      itensSelecionados = (conta.itens||[]).filter(function(i){ return keysFrescas.indexOf(i.itemKey) >= 0; });
+    }
+    if(!itensSelecionados.length){ showToast('Nenhum item pra transferir (a conta mudou?)','#f7a34f',4000); return; }
+    var keysSel2 = itensSelecionados.map(function(i){ return i.itemKey; });
+    itensRestantes = (conta.itens||[]).filter(function(i){ return keysSel2.indexOf(i.itemKey) < 0; });
+    _executarTransferencia();
+  }).catch(function(e){
+    showToast('❌ Erro ao verificar contas: '+e.message,'#f87171',5000);
   });
 }
 

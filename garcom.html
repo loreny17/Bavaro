@@ -5884,6 +5884,30 @@ function formatarDataMD(d){
   return dd+'/'+mm+'/'+d.getFullYear();
 }
 
+// Quando o Firestore pede um índice, a mensagem traz um link gigante que é
+// impossível de digitar no celular. Este helper mostra o link CLICÁVEL.
+function mostrarErroIndice(e){
+  var msg = (e && e.message) || String(e);
+  var m = msg.match(/https:\/\/console\.firebase\.google\.com[^\s"']+/);
+  if(!m) return false;
+  var url = m[0];
+  var ex = document.getElementById('modal-erro-indice');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-erro-indice';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(ev){ if(ev.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface,#1a1a1a);border:1px solid var(--border,#333);border-radius:16px;padding:20px;max-width:420px;width:100%;">'+
+      '<div style="font-weight:800;font-size:1rem;margin-bottom:10px;">📇 Falta um índice no Firestore</div>'+
+      '<div style="font-size:0.82rem;color:var(--muted,#999);line-height:1.5;margin-bottom:14px;">O banco precisa de um índice pra essa consulta. Toque no botão abaixo — ele abre o Firebase já com tudo preenchido, é só confirmar "Criar" e aguardar alguns minutos.</div>'+
+      '<a href="'+url+'" target="_blank" rel="noopener" style="display:block;text-align:center;background:var(--accent,#d4a843);color:#000;border-radius:10px;padding:13px;font-weight:800;text-decoration:none;margin-bottom:8px;">🔗 Abrir e criar índice</a>'+
+      '<button onclick="document.getElementById(\'modal-erro-indice\').remove()" style="width:100%;background:transparent;border:1px solid var(--border,#333);color:var(--muted,#999);border-radius:10px;padding:10px;cursor:pointer;font-family:inherit;">Fechar</button>'+
+    '</div>';
+  document.body.appendChild(mod);
+  return true;
+}
+
 function carregarMeuDia(){
   if(!fbDb || !_nomeGarcom){ return; }
   var faixa = calcularFaixaMD();
@@ -5933,7 +5957,7 @@ function carregarMeuDia(){
     })
     .catch(function(e){
       console.error('Erro Meu Dia:', e);
-      if(typeof showToast === 'function') showToast('❌ ' + e.message, '#f87171');
+      if(!mostrarErroIndice(e) && typeof showToast === 'function') showToast('❌ ' + e.message, '#f87171');
     })
     .finally(function(){
       document.getElementById('md-loading').style.display = 'none';

@@ -5918,14 +5918,34 @@ function carregarMeuDia(){
   var rest = (window._restauranteAtivo && _restauranteAtivo.id) || _restauranteId || 'default';
   
   // Promise 1: contas fechadas no período
-  var promContasFechadas = fbDb.collection('contas_fechadas')
-    .where('restauranteId','==', rest)
-    .where('fechadaEm', '>=', faixa.ini)
-    .where('fechadaEm', '<=', faixa.fim)
-    .get()
-    .then(function(snap){
+  // ⚠️ Histórico: contas antigas só têm 'fechadoEm'; as novas têm os dois nomes.
+  // Buscamos pelos DOIS campos e juntamos (sem duplicar), senão as vendas
+  // fechadas antes da padronização somem da tela.
+  function _qContas(campo){
+    return fbDb.collection('contas_fechadas')
+      .where('restauranteId','==', rest)
+      .where(campo, '>=', faixa.ini)
+      .where(campo, '<=', faixa.fim)
+      .get()
+      .catch(function(e){
+        // Se faltar índice de um dos campos, não derruba a tela — usa só o outro
+        console.warn('[MeuDia] consulta por '+campo+' falhou:', e.code||e.message);
+        mostrarErroIndice(e);
+        return null;
+      });
+  }
+  var promContasFechadas = Promise.all([_qContas('fechadaEm'), _qContas('fechadoEm')])
+    .then(function(snaps){
+      var vistos = {};
       var contas = [];
-      snap.forEach(function(d){ contas.push(Object.assign({id:d.id}, d.data())); });
+      snaps.forEach(function(snap){
+        if(!snap) return;
+        snap.forEach(function(d){
+          if(vistos[d.id]) return;
+          vistos[d.id] = true;
+          contas.push(Object.assign({id:d.id}, d.data()));
+        });
+      });
       return contas.filter(function(c){
         return (c.garcomPrincipal === _nomeGarcom) ||
                (c.garcons && c.garcons.indexOf(_nomeGarcom) !== -1);

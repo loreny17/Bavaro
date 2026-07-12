@@ -4318,7 +4318,7 @@ function _balParsePeso(raw){
   return null;
 }
 
-// Lê o peso: simulação (aleatório) ou serial de verdade via QZ Tray
+// Lê o peso: simulação (aleatório), app desktop (Electron) ou QZ Tray (navegador)
 function balancaLerPeso(){
   var cfg = _balCfg();
   if(cfg.simulacao){
@@ -4326,6 +4326,24 @@ function balancaLerPeso(){
       setTimeout(function(){ resolve(280 + Math.floor(Math.random()*520)); }, 500);
     });
   }
+  // ── Modo app desktop (Bávaro PDV Desktop): pede o peso pro serviço local ──
+  if(_modoImpressao === 'electron' && window.__BAVARO_DESKTOP__){
+    var urlBal = window.__BAVARO_DESKTOP__.printerApiUrl + '/balanca'
+      + '?porta=' + encodeURIComponent(cfg.porta)
+      + '&baud=' + encodeURIComponent(cfg.baud)
+      + '&protocolo=' + encodeURIComponent(cfg.protocolo);
+    return fetch(urlBal).then(function(r){
+      if(r.status === 404){
+        throw new Error('O app desktop ainda não tem o leitor de balança. É preciso atualizar o Bávaro PDV Desktop.');
+      }
+      if(!r.ok){ return r.json().then(function(e){ throw new Error(e.error||'Falha na balança'); }); }
+      return r.json();
+    }).then(function(data){
+      if(data && data.ok && data.peso > 0) return data.peso;
+      throw new Error((data && data.error) || 'Balança não devolveu peso válido');
+    });
+  }
+  // ── Modo navegador: QZ Tray ──
   return new Promise(function(resolve, reject){
     if(typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()){
       reject(new Error('QZ Tray não conectado. Abra a aba Impressão e conecte primeiro.'));
@@ -4545,7 +4563,7 @@ function balVendaDireta(){
     itens: [item],
     subtotal: item.preco, taxa10: 0, total: item.preco,
     pagamentos: [{forma: _balFormaPgto, valor: item.preco, em: agora}],
-    abertaEm: agora, fechadoEm: agora, fechadoPor: 'Caixa PDV'
+    abertaEm: agora, fechadoEm: agora, fechadaEm: agora, fechadoPor: 'Caixa PDV'
   }).then(function(){
     showToast('✓ Venda: '+item.peso+'g — R$ '+formatarPreco(item.preco)+' ('+_balFormaPgto+')','#4ade80');
     document.getElementById('bal-peso').value = '';
@@ -4567,6 +4585,17 @@ function balSalvarConfig(){
 
 function balListarPortas(){
   var box = document.getElementById('bal-portas');
+  // Modo app desktop: pergunta ao serviço local
+  if(_modoImpressao === 'electron' && window.__BAVARO_DESKTOP__){
+    box.textContent = 'Buscando portas...';
+    fetch(window.__BAVARO_DESKTOP__.printerApiUrl + '/balanca/portas').then(function(r){
+      if(r.status === 404) throw new Error('App desktop precisa ser atualizado (sem leitor de balança ainda).');
+      return r.json();
+    }).then(function(d){
+      box.textContent = (d && d.portas && d.portas.length) ? 'Portas: ' + d.portas.join(', ') : 'Nenhuma porta serial encontrada.';
+    }).catch(function(e){ box.textContent = 'Erro: ' + e.message; });
+    return;
+  }
   if(typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()){
     box.textContent = 'QZ Tray não conectado — conecte na aba Impressão primeiro.';
     return;

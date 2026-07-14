@@ -4889,6 +4889,7 @@ function renderAparenciaModal(){
 }
 
 function _iniciarListenersMesas(){
+  _hidratarFotoMesas(); // pinta o mapa na hora com a última foto conhecida
   console.log('[Init] _iniciarListenersMesas chamado. tenant='+_tenantId+' rest='+_restauranteId);
   // "Liga o cronômetro" de reconexão agora — evita que um 'focus' ou
   // 'visibilitychange' espúrio (comum logo que o app/PWA abre e ganha foco
@@ -5000,6 +5001,50 @@ function _mesasRecuperarConexao(motivo){
   }, atraso);
 }
 
+// ═══ FOTO LOCAL DAS MESAS — abre o mapa em <0,5s ═══
+// Guardamos no aparelho a última visão confirmada das mesas. Ao abrir o app,
+// pintamos a tela com ela NA HORA (com a faixa "Atualizando...") enquanto o
+// servidor responde — quando os dados frescos chegam, substituem por cima.
+function _chaveFotoMesas(){ return 'garcom_foto_mesas_' + (_restauranteId||'x'); }
+function _salvarFotoMesas(){
+  try{
+    var pacote = JSON.stringify({
+      t: Date.now(),
+      ocupadas: _mesasOcupadas,
+      contas: _contasMesaCache,
+      comandas: _comandasAvulsas
+    });
+    if(pacote.length > 2000000) return; // não salva se passar de ~2MB
+    localStorage.setItem(_chaveFotoMesas(), pacote);
+  }catch(e){}
+}
+function _hidratarFotoMesas(){
+  try{
+    var raw = localStorage.getItem(_chaveFotoMesas());
+    if(!raw) return false;
+    var foto = JSON.parse(raw);
+    // Foto muito velha (>12h) não ajuda — provavelmente é de outro dia
+    if(!foto || !foto.t || Date.now() - foto.t > 12*3600e3) return false;
+    _mesasOcupadas = foto.ocupadas || {};
+    _contasMesaCache = foto.contas || {};
+    _comandasAvulsas = foto.comandas || [];
+    renderMesas();
+    if(typeof atualizarBadgeAlmoco === 'function') atualizarBadgeAlmoco();
+    // Faixa de aviso: estes dados são a última foto — somem quando o fresco chegar
+    var overlay = document.getElementById('mesas-reconect');
+    if(!overlay){
+      overlay = document.createElement('div');
+      overlay.id = 'mesas-reconect';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(212,168,67,0.95);color:#000;padding:8px 14px;font-size:0.8rem;font-weight:700;text-align:center;z-index:99990;pointer-events:none;';
+      overlay.textContent = '🔄 Atualizando mesas... confira antes de confirmar';
+      document.body.appendChild(overlay);
+      setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 8000);
+    }
+    console.log('[Mesas] ⚡ mapa pintado da foto local ('+Object.keys(_mesasOcupadas).length+' mesas, '+Math.round((Date.now()-foto.t)/1000)+'s atrás)');
+    return true;
+  }catch(e){ return false; }
+}
+
 function escutarMesasOcupadas(){
   console.log('[Mesas] escutarMesasOcupadas iniciado. rest='+_restauranteId);
   if(_unsubMesas) { try{ _unsubMesas(); }catch(e){} _unsubMesas = null; }
@@ -5020,6 +5065,13 @@ function escutarMesasOcupadas(){
     console.warn('[Mesas] get(server) falhou: '+(e&&e.code||e));
     ref.get().then(function(snap){
       console.log('[Mesas] get(cache) OK: '+snap.size+' mesas');
+      // ⚠️ Cache VAZIO com servidor fora do ar não é verdade — é "não sei".
+      // Processar isso apagava as mesas da tela e o garçom ficava às cegas.
+      // Mantemos as últimas mesas conhecidas até o servidor voltar.
+      if(snap.metadata && snap.metadata.fromCache && snap.empty){
+        console.warn('[Mesas] cache vazio + offline — mantendo mesas atuais na tela');
+        return;
+      }
       if(!_primeiroUpdate){ registrarUpdateListener('mesas'); _processarSnapMesas(snap); }
     }).catch(function(e2){ console.warn('[Mesas] get(cache) tb falhou: '+(e2&&e2.code||e2)); });
   });
@@ -5038,6 +5090,10 @@ function escutarMesasOcupadas(){
       if(respondeu) return; respondeu = true; clearTimeout(goReset);
       if(_primeiroUpdate) return;
       console.log('[Mesas] fallback get OK: '+snap.size+' mesas');
+      if(snap.metadata && snap.metadata.fromCache && snap.empty){
+        console.warn('[Mesas] fallback veio do cache vazio — ignorado');
+        return;
+      }
       registrarUpdateListener('mesas');
       _processarSnapMesas(snap);
     }).catch(function(e){
@@ -5067,8 +5123,26 @@ function escutarMesasOcupadas(){
   });
 }
 
+// Alerta (1x por mesa a cada 5 min) quando detectamos DUAS contas abertas com
+// conteúdo na mesma mesa — sintoma de duplicação entre aparelhos. O conserto é
+// um toque: painel de debug (5 toques) → "🔎 Recuperar mesa" → junta as contas.
+var _avisosMesaDup = {};
+function _alertarMesaDuplicada(mesa){
+  var agora = Date.now();
+  if(_avisosMesaDup[mesa] && agora - _avisosMesaDup[mesa] < 5*60*1000) return;
+  _avisosMesaDup[mesa] = agora;
+  console.warn('[Mesas] ⚠️ DUPLICATA: mesa '+mesa+' tem 2+ contas abertas com conteúdo');
+  showToast('⚠️ Mesa '+mesa+' tem 2 contas abertas! Use 🔎 Recuperar mesa (painel de debug) pra juntar', '#f87171', 8000);
+}
+
 function _processarSnapMesas(snap){
     _registrarLeitura('mesas-abertas', (typeof snap.docChanges === 'function') ? snap.docChanges().length : snap.size);
+    // Snapshot vazio vindo só do cache (servidor inacessível) = "não sei",
+    // não "não há mesas". Preserva o mapa atual em vez de zerar a tela.
+    if(snap.empty && snap.metadata && snap.metadata.fromCache && Object.keys(_mesasOcupadas||{}).length > 0){
+      console.warn('[Mesas] snapshot cache-vazio ignorado (mantendo '+Object.keys(_mesasOcupadas).length+' mesas na tela)');
+      return;
+    }
     // Dados novos chegaram — some com o aviso de "atualizando" na hora, em vez
     // de esperar o teto de segurança de 8s.
     var _bannerReconect = document.getElementById('mesas-reconect');
@@ -5136,8 +5210,26 @@ function _processarSnapMesas(snap){
 
       var temPagamento = meta._temPagamento;
       var temItem = meta._itensAbertosCount > 0;
+      var temConteudo = temItem || temPagamento;
 
-      if(!temItem && !temPagamento){
+      // ── Proteção contra CONTAS DUPLICADAS na mesma mesa ──
+      // Regra: a conta com conteúdo sempre vence a vazia no cache; entre duas
+      // com conteúdo, vence a mais antiga — e disparamos um alerta bem visível,
+      // porque isso significa que os garçons estão vendo coisas diferentes.
+      var jaTem = _contasMesaCache[mesa];
+      if(jaTem){
+        var jaTemConteudo = (jaTem._itensAbertosCount||0) > 0 || jaTem._temPagamento;
+        if(jaTemConteudo && temConteudo){
+          _alertarMesaDuplicada(mesa);
+          // Fica com a mais antiga (a original); a outra é a duplicata
+          if((jaTem.abertaEm||0) <= (d.abertaEm||0)) return;
+        } else if(jaTemConteudo && !temConteudo){
+          return; // vazia nunca sobrescreve a cheia
+        }
+        // (se a nova tem conteúdo e a guardada era vazia, segue e sobrescreve)
+      }
+
+      if(!temConteudo){
         // Mesa sem itens — guarda meta mas não marca ocupada
         _contasMesaCache[mesa] = meta;
         return;
@@ -5155,6 +5247,7 @@ function _processarSnapMesas(snap){
     });
 
     _comandasAvulsas.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
+    _salvarFotoMesas(); // guarda a "última foto" pro próximo boot abrir instantâneo
     renderMesas();
     atualizarBadgeAlmoco();
     if(_abaAtual === 'comandas') renderComandas();
@@ -9524,6 +9617,7 @@ function iniciarListeners(){
         palavrasVoz: v.palavrasVoz || '',
         // ⚡ Campos de pausa/estoque (escutam mudanças do PDV em tempo real)
         pausado: v.pausado === true,
+        pausadoAte: v.pausadoAte || null,
         controlarEstoque: v.controlarEstoque === true,
         estoque: (typeof v.estoque === 'number') ? v.estoque : null
       });
@@ -10663,6 +10757,12 @@ function _adicionarItensVoz(itens){
   }
 }
 
+// Pausa com prazo (mesma regra do PDV/totem): vencido o prazo, volta sozinho
+function pausaAtiva(o){
+  if(!o || o.pausado !== true) return false;
+  if(o.pausadoAte && o.pausadoAte <= Date.now()) return false;
+  return true;
+}
 function renderItens(){
   var grid = document.getElementById('itens-grid');
   if(!grid) return;
@@ -10764,7 +10864,7 @@ function renderItens(){
 function _renderCardItem(it, grid){
   var qtdNoCarrinho = _carrinho.filter(function(c){ return c.id===it.id; }).reduce(function(acc,c){ return acc+c.qtd; },0);
   // Detecta status (pausado / estoque esgotado)
-  var pausado = it.pausado === true;
+  var pausado = pausaAtiva(it);
   var ctrlEstoque = it.controlarEstoque === true;
   var qtdEstoque = (typeof it.estoque === 'number') ? it.estoque : null;
   var esgotadoEstoque = ctrlEstoque && qtdEstoque !== null && qtdEstoque <= 0;

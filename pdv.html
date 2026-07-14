@@ -829,6 +829,12 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         <div id="item-grupos-lista" style="display:flex;flex-direction:column;gap:6px;"></div>
         <div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">Marque os grupos que aparecerão para este item. Crie grupos na aba "🎛️ Grupos".</div>
       </div>
+      <div class="f-grupo" style="background:rgba(96,165,250,0.04);border:1px solid rgba(96,165,250,0.2);border-radius:10px;padding:12px;">
+        <label class="f-label" style="color:#60a5fa;">🧩 Combo — impressão dividida (opcional)</label>
+        <div style="font-size:0.72rem;color:var(--muted);margin:4px 0 8px;line-height:1.4;">Pra combos tipo "lanche + bebida": cada componente imprime na impressora da SUA categoria (lanche → cozinha, Coca → bar). Deixe vazio se não for combo.</div>
+        <div id="item-combo-lista" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <button type="button" onclick="comboAddComponente()" style="margin-top:8px;background:var(--surface2);border:1px dashed rgba(96,165,250,0.5);color:#60a5fa;border-radius:8px;padding:8px;font-size:0.78rem;cursor:pointer;font-family:inherit;width:100%;">+ Adicionar componente</button>
+      </div>
       <div class="f-grupo">
         <div class="f-toggle active" id="item-disponivel-toggle" onclick="this.classList.toggle('active')">
           <span class="f-toggle-label">Disponível</span>
@@ -1435,6 +1441,7 @@ function iniciarListeners(){
         sugerido: d.sugerido === true,
         ordemSugerido: d.ordemSugerido || 99,
         pausado: d.pausado === true,
+        combo: d.combo || [],
         controlarEstoque: d.controlarEstoque === true,
         estoque: d.estoque || 0
       });
@@ -1611,7 +1618,7 @@ function renderItens(){
       +'</div>';
     }
     // Status do item (só pra deixar opacidade quando indisponível, sem badges/botões)
-    var pausado = i.pausado === true;
+    var pausado = pausaAtiva(i);
     var ctrlEstoque = i.controlarEstoque === true;
     var qtdEstoque = (typeof i.estoque === 'number') ? i.estoque : null;
     var esgotadoEstoque = ctrlEstoque && qtdEstoque !== null && qtdEstoque <= 0;
@@ -1636,6 +1643,29 @@ function alternarReordenarItens(){
 }
 
 // ═══ MODAL ITEM ═══
+// ── COMBO: componentes de impressão dividida ──
+var _itemCombo = []; // [{nome, categoriaId, qtd}]
+function comboRender(){
+  var box = document.getElementById('item-combo-lista');
+  if(!box) return;
+  var catsOpts = _categorias.map(function(c){ return {id:c.id, nome:c.nome}; });
+  box.innerHTML = _itemCombo.map(function(c, i){
+    var opts = catsOpts.map(function(ct){
+      return '<option value="'+ct.id+'"'+(c.categoriaId===ct.id?' selected':'')+'>'+escapeHtml(ct.nome)+'</option>';
+    }).join('');
+    return '<div style="display:flex;gap:6px;align-items:center;">'+
+      '<input type="text" value="'+escapeHtml(c.nome||'')+'" placeholder="Ex: Coca Lata" oninput="_itemCombo['+i+'].nome=this.value" style="flex:2;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-size:0.8rem;font-family:inherit;min-width:0;">'+
+      '<input type="number" value="'+(c.qtd||1)+'" min="1" max="20" oninput="_itemCombo['+i+'].qtd=parseInt(this.value)||1" style="flex:0 0 52px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-size:0.8rem;font-family:inherit;text-align:center;" title="Quantidade">'+
+      '<select onchange="_itemCombo['+i+'].categoriaId=this.value" style="flex:1.6;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-size:0.78rem;font-family:inherit;min-width:0;">'+opts+'</select>'+
+      '<span onclick="_itemCombo.splice('+i+',1);comboRender();" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 4px;">×</span>'+
+    '</div>';
+  }).join('');
+}
+function comboAddComponente(){
+  _itemCombo.push({nome:'', categoriaId: (_categorias[0]||{}).id || '', qtd:1});
+  comboRender();
+}
+
 function abrirModalItem(){
   if(_categorias.length === 0){
     showToast('💡 Crie uma categoria primeiro','#f7a34f');
@@ -1643,6 +1673,8 @@ function abrirModalItem(){
     return;
   }
   _itemEditando = null;
+  _itemCombo = [];
+  comboRender();
   document.getElementById('modal-item-titulo').textContent = 'NOVO ITEM';
   document.getElementById('item-nome').value = '';
   var pvNovo = document.getElementById('item-palavras-voz');
@@ -1671,6 +1703,8 @@ function editarItem(id){
   var i = _itens.find(function(x){ return x.id === id; });
   if(!i) return;
   _itemEditando = i;
+  _itemCombo = (i.combo||[]).map(function(c){ return {nome:c.nome||'', categoriaId:c.categoriaId||'', qtd:c.qtd||1}; });
+  comboRender();
   document.getElementById('modal-item-titulo').textContent = 'EDITAR ITEM';
   document.getElementById('item-nome').value = i.nome;
   var pvEd = document.getElementById('item-palavras-voz');
@@ -1958,7 +1992,7 @@ function renderEstoqueLista(){
   }
   // Filtros por status
   if(_estoqueFiltro === 'pausados'){
-    todos = todos.filter(function(it){ return it.pausado === true; });
+    todos = todos.filter(function(it){ return pausaAtiva(it); });
   } else if(_estoqueFiltro === 'esgotados'){
     todos = todos.filter(function(it){ return it.controlarEstoque === true && (it.estoque||0) <= 0; });
   } else if(_estoqueFiltro === 'baixo'){
@@ -1979,7 +2013,7 @@ function renderEstoqueLista(){
     return;
   }
   lista.innerHTML = todos.map(function(it){
-    var pausado = it.pausado === true;
+    var pausado = pausaAtiva(it);
     var ctrlEst = it.controlarEstoque === true;
     var qtd = (typeof it.estoque === 'number') ? it.estoque : null;
     var esgotado = ctrlEst && qtd !== null && qtd <= 0;
@@ -2007,7 +2041,7 @@ function renderEstoqueLista(){
           '<span>•</span>' +
           '<span>R$ ' + formatarPreco(it.preco||0) + '</span>' +
           (ctrlEst ? '<span>•</span><span><b>' + estoqueLbl + '</b></span>' : '') +
-          (pausado ? '<span>•</span><span style="color:#fbbf24;font-weight:700;">⏸️ PAUSADO</span>' : '') +
+          (pausado ? '<span>•</span><span style="color:#fbbf24;font-weight:700;">⏸️ PAUSADO'+(it.pausadoAte?' '+_rotuloPausaAte(it.pausadoAte):'')+'</span>' : '') +
         '</div>' +
       '</div>' +
       '<div class="est-row-acoes">' +
@@ -2019,23 +2053,79 @@ function renderEstoqueLista(){
 }
 
 function _estoquePrioridade(it){
-  if(it.pausado === true) return 0;
+  if(pausaAtiva(it)) return 0;
   if(it.controlarEstoque === true && (it.estoque||0) <= 0) return 1;
   if(it.controlarEstoque === true && (it.estoque||0) <= 3) return 2;
   return 3;
 }
 
 // Liga/desliga pausa do item (cardápio principal OU totem)
+function pausaAtiva(o){
+  if(!o || o.pausado !== true) return false;
+  if(o.pausadoAte && o.pausadoAte <= Date.now()) return false;
+  return true;
+}
+function _rotuloPausaAte(ts){
+  if(!ts) return '';
+  var d = new Date(ts);
+  var hoje = new Date(); hoje.setHours(23,59,59,999);
+  var hm = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  return d <= hoje ? ('até '+hm) : ('até '+d.getDate()+'/'+(d.getMonth()+1)+' '+hm);
+}
+function escolherDuracaoPausa(titulo, cb){
+  var ex = document.getElementById('modal-duracao-pausa');
+  if(ex) ex.remove();
+  var agora = Date.now();
+  var fimDia = new Date(); fimDia.setHours(23,59,59,0);
+  var opcoes = [
+    {rot:'1 hora', ts: agora + 1*3600e3},
+    {rot:'4 horas', ts: agora + 4*3600e3},
+    {rot:'Só hoje (até '+String(fimDia.getHours()).padStart(2,'0')+':'+String(fimDia.getMinutes()).padStart(2,'0')+')', ts: fimDia.getTime()},
+    {rot:'24 horas', ts: agora + 24*3600e3},
+    {rot:'⏸️ Até eu reativar', ts: null}
+  ];
+  var mod = document.createElement('div');
+  mod.id = 'modal-duracao-pausa';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9500;display:flex;align-items:center;justify-content:center;padding:20px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;max-width:340px;width:100%;">'+
+    '<div style="font-weight:800;margin-bottom:4px;">⏸️ Pausar: '+escapeHtml(titulo)+'</div>'+
+    '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:12px;">Por quanto tempo? Ao vencer o prazo, volta sozinho.</div>'+
+    opcoes.map(function(o,i){
+      return '<button data-i="'+i+'" style="display:block;width:100%;text-align:left;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:12px;margin-bottom:6px;cursor:pointer;font-family:inherit;font-weight:600;">'+o.rot+'</button>';
+    }).join('')+
+    '</div>';
+  document.body.appendChild(mod);
+  mod.querySelectorAll('button[data-i]').forEach(function(b){
+    b.onclick = function(){
+      var o = opcoes[parseInt(b.getAttribute('data-i'))];
+      mod.remove();
+      cb(o.ts);
+    };
+  });
+}
+
 function estoqueTogglePausa(itemId, fonte, novoEstado){
   var ref = _estoqueRef(itemId, fonte);
-  ref.update({
-    pausado: novoEstado,
-    atualizadoEm: Date.now()
-  }).then(function(){
-    showToast(novoEstado ? '⏸️ Item pausado' : '▶️ Item disponível', novoEstado ? '#fbbf24' : '#4ade80');
-  }).catch(function(e){
-    showToast('Erro: ' + e.message, '#f87171');
-  });
+  function gravar(pausadoAte){
+    ref.update({
+      pausado: novoEstado,
+      pausadoAte: novoEstado ? (pausadoAte || null) : null,
+      atualizadoEm: Date.now()
+    }).then(function(){
+      var extra = (novoEstado && pausadoAte) ? ' '+_rotuloPausaAte(pausadoAte) : '';
+      showToast(novoEstado ? ('⏸️ Item pausado'+extra) : '▶️ Item disponível', novoEstado ? '#fbbf24' : '#4ade80');
+    }).catch(function(e){
+      showToast('Erro: ' + e.message, '#f87171');
+    });
+  }
+  if(novoEstado){
+    var lista = _estoqueItensP.concat(_estoqueItensT);
+    var item = lista.find(function(x){ return x.id === itemId && x._fonte === fonte; });
+    escolherDuracaoPausa(item ? item.nome : 'item', gravar);
+  } else {
+    gravar(null);
+  }
 }
 
 // Ajusta estoque (modal próprio — funciona em qualquer navegador/PWA)
@@ -2227,6 +2317,8 @@ function salvarItem(){
     sugerido: sugerido,
     ordemSugerido: sugerido ? ordemSugerido : 99,
     palavrasVoz: (function(){ var p = document.getElementById('item-palavras-voz'); return p ? p.value.trim() : ''; })(),
+    combo: (_itemCombo||[]).filter(function(c){ return (c.nome||'').trim() && c.categoriaId; })
+      .map(function(c){ return {nome:c.nome.trim(), categoriaId:c.categoriaId, qtd:Math.max(1, parseInt(c.qtd)||1)}; }),
     atualizadoEm:Date.now()
   };
   var col = fbColCardapio('itens');
@@ -6196,8 +6288,37 @@ function gerarCupomTeste(imp){
   return s;
 }
 
+// ─── EXPANDIR COMBOS PARA IMPRESSÃO ───
+// Um item "combo" (ex: Combo Bacon = lanche + Coca) vira, só na hora de
+// imprimir, um item por componente — cada um com a categoria do componente,
+// pra cair na impressora certa (lanche → cozinha, Coca → bar).
+// Na conta e pro cliente, o combo continua sendo UM item só.
+function expandirCombosParaImpressao(itens){
+  var out = [];
+  (itens||[]).forEach(function(it){
+    var def = _itens.find(function(i){ return i.id === it.id; });
+    var combo = def && def.combo && def.combo.length ? def.combo : null;
+    if(!combo){ out.push(it); return; }
+    combo.forEach(function(comp, idx){
+      out.push({
+        id: it.id + '_combo' + idx,          // id sintético: não bate com _itens,
+        nome: comp.nome,                      // então a categoria vem do campo abaixo
+        categoriaPrincipalId: comp.categoriaId,
+        qtd: (comp.qtd||1) * (it.qtd||1),
+        preco: idx === 0 ? it.preco : 0,
+        obs: idx === 0 ? (it.obs||'') : '',
+        selecoes: idx === 0 ? (it.selecoes||[]) : [],
+        pessoa: it.pessoa || '',
+        _comboDe: def.nome
+      });
+    });
+  });
+  return out;
+}
+
 // ─── FILTRAR ITENS POR MODELO ───
 function filtrarItensPorModelo(itens, modelo){
+  itens = expandirCombosParaImpressao(itens);
   if(modelo.filtro === 'item'){
     var ids = modelo.itens || [];
     return itens.filter(function(it){ return ids.indexOf(it.id) >= 0; });
@@ -11149,8 +11270,8 @@ function totemRenderGrupos(){
   box.innerHTML = _totemGrupos.map(function(g){
     var opcoes = (g.opcoes||[]).map(function(o){
       var precoTxt = o.preco ? ' (+R$ ' + (o.preco).toLocaleString('pt-BR',{minimumFractionDigits:2}) + ')' : '';
-      var estiloOp = o.pausado ? ' style="text-decoration:line-through;opacity:0.55;"' : '';
-      return '<span class="op"' + estiloOp + '>' + escapeHtml(o.nome||'') + precoTxt + (o.pausado ? ' ⏸️' : '') + '</span>';
+      var estiloOp = pausaAtiva(o) ? ' style="text-decoration:line-through;opacity:0.55;"' : '';
+      return '<span class="op"' + estiloOp + '>' + escapeHtml(o.nome||'') + precoTxt + (pausaAtiva(o) ? ' ⏸️' : '') + '</span>';
     }).join('');
     var tipoTxt = g.tipo === 'multipla' ? 'Múltipla escolha' : 'Escolha única';
     var badgeObr = g.obrigatorio
@@ -11194,7 +11315,8 @@ function totemAbrirModalGrupo(grupo){
       foto: o.foto || '',
       descricao: o.descricao || '',
       abreGrupos: (o.abreGrupos || []).slice(),
-      pausado: o.pausado === true
+      pausado: o.pausado === true,
+      pausadoAte: o.pausadoAte || null
     };
   });
 
@@ -11290,12 +11412,12 @@ function totemRenderOpcoesNoModal(){
       : '';
 
     var fotoMini = o.foto
-      ? '<img src="' + o.foto + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;' + (o.pausado ? 'opacity:0.4;' : '') + '" onclick="totemEscolherFotoOpcao(' + idx + ')">'
-      : '<div onclick="totemEscolherFotoOpcao(' + idx + ')" style="width:42px;height:42px;background:var(--surface2);border:1px dashed var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;' + (o.pausado ? 'opacity:0.4;' : '') + '" title="Adicionar foto">📷</div>';
+      ? '<img src="' + o.foto + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;' + (pausaAtiva(o) ? 'opacity:0.4;' : '') + '" onclick="totemEscolherFotoOpcao(' + idx + ')">'
+      : '<div onclick="totemEscolherFotoOpcao(' + idx + ')" style="width:42px;height:42px;background:var(--surface2);border:1px dashed var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;' + (pausaAtiva(o) ? 'opacity:0.4;' : '') + '" title="Adicionar foto">📷</div>';
     var btnRemoveFoto = o.foto ? '<button onclick="totemRemoverFotoOpcao(' + idx + ')" style="background:transparent;border:none;color:#f87171;font-size:0.7rem;cursor:pointer;padding:2px 4px;">remover foto</button>' : '';
-    var btnPausa = '<button onclick="totemTogglePausaOpcao(' + idx + ')" title="' + (o.pausado ? 'Reativar opção' : 'Pausar opção (esgotou)') + '" style="background:' + (o.pausado ? 'rgba(248,113,113,0.15)' : 'var(--surface2)') + ';border:1px solid ' + (o.pausado ? '#f87171' : 'var(--border)') + ';color:' + (o.pausado ? '#f87171' : 'var(--muted)') + ';width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:0.85rem;padding:0;flex-shrink:0;">' + (o.pausado ? '▶️' : '⏸️') + '</button>';
+    var btnPausa = '<button onclick="totemTogglePausaOpcao(' + idx + ')" title="' + (pausaAtiva(o) ? 'Reativar opção' : 'Pausar opção (esgotou)') + '" style="background:' + (pausaAtiva(o) ? 'rgba(248,113,113,0.15)' : 'var(--surface2)') + ';border:1px solid ' + (pausaAtiva(o) ? '#f87171' : 'var(--border)') + ';color:' + (pausaAtiva(o) ? '#f87171' : 'var(--muted)') + ';width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:0.85rem;padding:0;flex-shrink:0;">' + (pausaAtiva(o) ? '▶️' : '⏸️') + '</button>';
 
-    return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;' + (o.pausado ? 'opacity:0.55;' : '') + '">' +
+    return '<div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;' + (pausaAtiva(o) ? 'opacity:0.55;' : '') + '">' +
       // Linha 1: setinhas + foto + nome + preço + pausar + remover
       '<div style="display:flex;align-items:center;gap:8px;">' +
         '<div style="display:flex;flex-direction:column;gap:2px;">' +
@@ -11303,7 +11425,7 @@ function totemRenderOpcoesNoModal(){
           '<button onclick="totemMoverOpcao(' + idx + ',1)" ' + (idx===ops.length-1?'disabled':'') + ' style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:22px;height:18px;border-radius:4px;cursor:pointer;font-size:0.6rem;line-height:1;padding:0;' + (idx===ops.length-1?'opacity:0.3;cursor:not-allowed;':'') + '" title="Descer">▼</button>' +
         '</div>' +
         fotoMini +
-        '<span style="flex:1;font-size:0.88rem;font-weight:600;' + (o.pausado ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(o.nome||'') + (o.pausado ? ' <span style="text-decoration:none;color:#f87171;font-size:0.7rem;font-weight:700;">(pausado)</span>' : '') + '</span>' +
+        '<span style="flex:1;font-size:0.88rem;font-weight:600;' + (pausaAtiva(o) ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(o.nome||'') + (pausaAtiva(o) ? ' <span style="text-decoration:none;color:#f87171;font-size:0.7rem;font-weight:700;">(pausado)</span>' : '') + '</span>' +
         '<span style="color:var(--accent);font-size:0.78rem;font-weight:600;">' + precoTxt + '</span>' +
         btnPausa +
         '<span onclick="totemRemoverOpcao(' + idx + ')" style="cursor:pointer;color:#f87171;font-weight:800;padding:0 6px;">×</span>' +
@@ -11388,8 +11510,18 @@ function totemRemoverOpcao(idx){
 // sem precisar excluí-la e perder a configuração (foto, preço, grupos vinculados).
 function totemTogglePausaOpcao(idx){
   if(!window._totemOpcoesEditando || !window._totemOpcoesEditando[idx]) return;
-  window._totemOpcoesEditando[idx].pausado = !window._totemOpcoesEditando[idx].pausado;
-  totemRenderOpcoesNoModal();
+  var op = window._totemOpcoesEditando[idx];
+  if(pausaAtiva(op)){
+    op.pausado = false;
+    op.pausadoAte = null;
+    totemRenderOpcoesNoModal();
+  } else {
+    escolherDuracaoPausa(op.nome || 'opção', function(ts){
+      op.pausado = true;
+      op.pausadoAte = ts || null;
+      totemRenderOpcoesNoModal();
+    });
+  }
 }
 
 // Salva a descrição da opção (ex: ingredientes do molho) sem re-renderizar a

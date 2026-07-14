@@ -1850,6 +1850,20 @@ window.addEventListener('load', function(){
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
 
+    // ═══ COMPATIBILIDADE COM APARELHOS ANTIGOS ═══
+    // Alguns celulares antigos não sustentam o canal moderno do Firestore
+    // (WebChannel) e ficam eternamente em "unavailable". Esta configuração
+    // faz o SDK DETECTAR isso e trocar sozinho pra um modo de conexão mais
+    // simples (long-polling), que funciona em praticamente qualquer aparelho.
+    // Nos celulares modernos nada muda — a detecção só age quando precisa.
+    try{
+      fbDb.settings({
+        experimentalAutoDetectLongPolling: true,
+        useFetchStreams: false,
+        merge: true
+      });
+    }catch(e){ console.warn('[Init] settings long-polling falhou:', e.message); }
+
     // Conexão padrão WebSocket
 
     // Auth anônimo em background
@@ -1984,26 +1998,62 @@ document.addEventListener('visibilitychange', function(){
       return;
     }
 
-    // Sempre reseta throttle ao voltar do background (quando vamos reconectar)
-    _ultimaRevalidacao = 0;
-    if(tempoBack > _LIMIAR_RECONEXAO_MS){
-      // Ficou mais de 30s — reconexão completa
-      Object.keys(_saudeListeners).forEach(function(k){ _saudeListeners[k].ultimoUpdate = 0; });
-    }
-    // Aguarda Firebase estar pronto antes de reconectar
+    // ── Volta do background: verificação LEVE, sem derrubar nada ──
+    // Antes: >30s fora = derrubar e reconstruir todos os listeners. Só que em
+    // aparelhos antigos é justamente a RECONSTRUÇÃO da conexão que falha —
+    // a conexão já estabelecida funciona bem (descoberto na prática: com a
+    // tela sempre ligada, tudo funcionava). Então agora, ao voltar, mantemos
+    // os listeners vivos (o Firestore retoma sozinho) e só fazemos uma
+    // consulta leve pra atualizar os dados e confirmar que o canal está vivo.
+    // A reconstrução pesada fica reservada pra quando o canal estiver MORTO.
     if(_restauranteId){
-      revalidarConexaoFirestore();
+      _verificarConexaoLeve();
     } else {
-      // _restauranteId ainda null — tenta em breve
       var _tentativas = 0;
       var _wId = setInterval(function(){
         _tentativas++;
-        if(_restauranteId){ clearInterval(_wId); revalidarConexaoFirestore(); }
+        if(_restauranteId){ clearInterval(_wId); _verificarConexaoLeve(); }
         else if(_tentativas > 10) clearInterval(_wId);
       }, 500);
     }
   }
 });
+
+// Checagem leve de saúde ao voltar do background: um get(server) com prazo.
+// Sucesso → dados atualizados, listeners intactos. Falha/mudo → canal morto
+// de verdade → aí sim reset de rede + reconstrução (o caminho pesado).
+var _verificandoConexao = false;
+function _verificarConexaoLeve(){
+  if(_verificandoConexao) return;
+  _verificandoConexao = true;
+  var respondeu = false;
+  var prazo = setTimeout(function(){
+    if(respondeu) return;
+    respondeu = true;
+    _verificandoConexao = false;
+    console.warn('[Mesas] checagem leve ficou muda — canal morto, indo pro reset pesado');
+    _mesasRecuperarConexao('checagem leve pós-background sem resposta');
+  }, 7000);
+  fbDb.collection('contas_mesa')
+    .where('restauranteId','==',_restauranteId)
+    .where('status','==','aberta')
+    .get({source:'server'})
+    .then(function(snap){
+      if(respondeu) return;
+      respondeu = true; clearTimeout(prazo);
+      _verificandoConexao = false;
+      console.log('[Mesas] checagem leve OK: '+snap.size+' mesas (listeners preservados)');
+      _registrarLeitura('mesas-abertas', snap.size);
+      _processarSnapMesas(snap);
+    })
+    .catch(function(e){
+      if(respondeu) return;
+      respondeu = true; clearTimeout(prazo);
+      _verificandoConexao = false;
+      console.warn('[Mesas] checagem leve falhou ('+(e&&e.code||e)+') — indo pro reset pesado');
+      _mesasRecuperarConexao('checagem leve pós-background falhou');
+    });
+}
 
 window.addEventListener('focus', function(){
   // NÃO reconecta aqui. O 'focus' dispara toda vez que a tela do tablet

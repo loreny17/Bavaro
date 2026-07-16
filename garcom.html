@@ -5024,15 +5024,45 @@ function _mesasRecuperarConexao(motivo){
   if(_mesasRecuperando) return;
   _mesasRecuperando = true;
   _mesasRecuperacoes++;
+
+  // ── Última cartada: se 3 ciclos de reset não resolveram, o SDK está
+  // irrecuperável — recarrega a página inteira (com a foto local, o mapa
+  // volta pintado na hora). Guarda de 3 min pra nunca entrar em loop de
+  // reload quando a internet estiver realmente fora do ar.
+  if(_mesasRecuperacoes >= 3){
+    var ultimoReload = 0;
+    try{ ultimoReload = parseInt(sessionStorage.getItem('garcom_auto_reload')||'0'); }catch(e){}
+    if(Date.now() - ultimoReload > 3*60*1000){
+      try{ sessionStorage.setItem('garcom_auto_reload', String(Date.now())); }catch(e){}
+      console.warn('[Mesas] 🔁 SDK irrecuperável após '+_mesasRecuperacoes+' tentativas — recarregando o app');
+      showToast('🔄 Reconectando o app...', '#f7a34f', 3000);
+      setTimeout(function(){ location.reload(); }, 800);
+      return;
+    }
+    console.warn('[Mesas] reload automático já usado há pouco — seguindo nos ciclos de reset');
+  }
+
   console.warn('[Mesas] 🔄 Reiniciando rede Firestore ('+motivo+') — tentativa '+_mesasRecuperacoes);
   var atraso = Math.min(30000, 2000 * _mesasRecuperacoes); // backoff: 2s, 4s... até 30s
+  var terminou = false;
   function religar(){
+    if(terminou) return;
+    terminou = true;
     setTimeout(function(){
       _mesasRecuperando = false;
       escutarMesasOcupadas();
     }, 800);
   }
   setTimeout(function(){
+    // ⏱️ Prazo máximo do ciclo: se o disable/enable ficar MUDO (SDK travado
+    // fundo — nem erro devolve), destrava na marra e segue em frente.
+    // Sem isso, a trava _mesasRecuperando ficava presa pra sempre e TODAS
+    // as recuperações futuras eram bloqueadas em silêncio.
+    setTimeout(function(){
+      if(terminou) return;
+      console.warn('[Mesas] reset de rede ficou mudo em 8s — destravando na marra');
+      religar();
+    }, 8000);
     try{
       fbDb.disableNetwork().then(function(){
         return fbDb.enableNetwork();

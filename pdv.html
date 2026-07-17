@@ -2086,7 +2086,9 @@ function escolherDuracaoPausa(titulo, cb){
   ];
   var mod = document.createElement('div');
   mod.id = 'modal-duracao-pausa';
-  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9500;display:flex;align-items:center;justify-content:center;padding:20px;';
+  // z-index acima de TODOS os modais (o editor de grupos do totem usa 10000 —
+  // com 9500 o seletor abria ATRÁS dele e parecia que nada acontecia)
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
   mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
   mod.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;max-width:340px;width:100%;">'+
     '<div style="font-weight:800;margin-bottom:4px;">⏸️ Pausar: '+escapeHtml(titulo)+'</div>'+
@@ -2106,6 +2108,7 @@ function escolherDuracaoPausa(titulo, cb){
 }
 
 function estoqueTogglePausa(itemId, fonte, novoEstado){
+  try{
   var ref = _estoqueRef(itemId, fonte);
   function gravar(pausadoAte){
     ref.update({
@@ -2125,6 +2128,12 @@ function estoqueTogglePausa(itemId, fonte, novoEstado){
     escolherDuracaoPausa(item ? item.nome : 'item', gravar);
   } else {
     gravar(null);
+  }
+  }catch(erroPausa){
+    // Se qualquer coisa estourar aqui, mostra na tela em vez de falhar mudo
+    console.error('[Pausa] erro:', erroPausa);
+    try{ showToast('❌ Pausa: '+(erroPausa && erroPausa.message || erroPausa), '#f87171', 6000); }
+    catch(e2){ alert('Erro ao pausar: '+(erroPausa && erroPausa.message || erroPausa)); }
   }
 }
 

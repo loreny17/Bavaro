@@ -2155,6 +2155,19 @@ function renderEstoqueLista(){
   var grupoTotem = todos.filter(function(it){ return it._fonte === 'totem'; });
 
   var html = '';
+
+  // ── Aviso de itens ÓRFÃOS ──
+  // Item cuja categoria não existe neste restaurante: some da aba Cardápio
+  // (nenhuma categoria o reivindica) mas continua no banco, atrapalhando o
+  // controle de estoque. Assinatura típica de cópia de cardápio entre lojas.
+  var orfaos = _estoqueOrfaos();
+  if(orfaos.length && (_estoqueFiltro === 'todos' || _estoqueFiltro === 'cardapio' || _estoqueFiltro === 'totem')){
+    html += '<div style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.35);border-radius:10px;padding:12px;margin:8px 0;">' +
+      '<div style="font-weight:800;color:#f87171;font-size:0.86rem;margin-bottom:4px;">⚠️ ' + orfaos.length + ' item(ns) sem categoria válida</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);line-height:1.4;margin-bottom:8px;">Apontam para categorias que não existem neste restaurante — não aparecem na aba Cardápio, mas continuam no banco e atrapalham o estoque. Costuma acontecer depois de copiar cardápio de outra loja.</div>' +
+      '<button onclick="abrirLimpezaOrfaos()" style="background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:8px 14px;font-weight:700;font-size:0.8rem;cursor:pointer;font-family:inherit;">🧹 Revisar e limpar</button>' +
+    '</div>';
+  }
   if(grupoCard.length){
     html += _cabecalho('📋', 'CARDÁPIO PRINCIPAL', grupoCard);
     _porCategoria(grupoCard, 'cardapio').forEach(function(sec){
@@ -2207,6 +2220,82 @@ function renderEstoqueLista(){
   }
 
   lista.innerHTML = html || '<div style="text-align:center;color:var(--muted);padding:40px 20px;">Nenhum item nesse filtro</div>';
+}
+
+// Lista itens cuja categoria não existe no restaurante ativo (itens "órfãos")
+function _estoqueOrfaos(){
+  var res = [];
+  // Só avalia depois que as categorias carregaram (senão acusaria falso positivo)
+  if(_estoqueCatsPrinc.length){
+    _estoqueItensP.forEach(function(it){
+      var raw = it.categoria || it.categoriaId || '';
+      if(!raw) return; // sem categoria definida — não é órfão, é item solto legítimo
+      var achou = _estoqueCatsPrinc.some(function(c){ return c.id === raw || c.nome === raw; });
+      if(!achou) res.push(it);
+    });
+  }
+  if(_estoqueCatsTotem.length){
+    _estoqueItensT.forEach(function(it){
+      var raw = it.categoriaId || it.categoria || '';
+      if(!raw) return;
+      var achou = _estoqueCatsTotem.some(function(c){ return c.id === raw || c.nome === raw; });
+      if(!achou) res.push(it);
+    });
+  }
+  return res;
+}
+
+// Modal de revisão: mostra os órfãos e permite excluir em lote (com confirmação)
+function abrirLimpezaOrfaos(){
+  var orfaos = _estoqueOrfaos();
+  if(!orfaos.length){ showToast('Nenhum item órfão encontrado','#4ade80'); return; }
+  var ex = document.getElementById('modal-orfaos');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-orfaos';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:18px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.25rem;color:#f87171;letter-spacing:0.05em;">🧹 ITENS SEM CATEGORIA VÁLIDA</div>' +
+      '<button onclick="document.getElementById(\'modal-orfaos\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.5rem;cursor:pointer;">×</button>' +
+    '</div>' +
+    '<div style="font-size:0.76rem;color:var(--muted);line-height:1.5;margin-bottom:10px;">Estes ' + orfaos.length + ' itens estão no banco de <b>' + escapeHtml(_restauranteAtivo.nome||'') + '</b> mas apontam para categorias inexistentes aqui. Excluir NÃO afeta os outros restaurantes.</div>' +
+    '<div style="flex:1;overflow-y:auto;background:var(--bg);border-radius:8px;padding:8px;margin-bottom:12px;">' +
+      orfaos.map(function(it){
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--border);font-size:0.82rem;">' +
+          '<span style="flex:1;">' + escapeHtml(it.nome||'(sem nome)') + '</span>' +
+          '<span style="color:var(--muted);font-size:0.72rem;">' + (it._fonte === 'totem' ? '📱' : '📋') + ' R$ ' + formatarPreco(it.preco||0) + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px;">' +
+      '<button onclick="document.getElementById(\'modal-orfaos\').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+      '<button onclick="confirmarLimpezaOrfaos()" style="flex:1.4;background:#f87171;border:none;color:#fff;border-radius:10px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">🗑️ Excluir os ' + orfaos.length + '</button>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(mod);
+}
+
+function confirmarLimpezaOrfaos(){
+  var orfaos = _estoqueOrfaos();
+  if(!orfaos.length) return;
+  if(!confirm('Excluir definitivamente ' + orfaos.length + ' item(ns) de ' + (_restauranteAtivo.nome||'') + '?\n\nEsta ação não pode ser desfeita.')) return;
+  var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id);
+  var batch = fbDb.batch();
+  orfaos.forEach(function(it){
+    var col = it._fonte === 'totem'
+      ? base.collection('cardapio_totem').doc('data').collection('itens')
+      : base.collection('cardapio').doc('data').collection('itens');
+    batch.delete(col.doc(it.id));
+  });
+  batch.commit().then(function(){
+    var m = document.getElementById('modal-orfaos');
+    if(m) m.remove();
+    showToast('✓ ' + orfaos.length + ' item(ns) removidos', '#4ade80', 4000);
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171', 5000);
+  });
 }
 
 // Pausa/reativa uma opção de adicional direto pela aba Estoque

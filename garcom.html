@@ -1099,9 +1099,6 @@ html[data-anim="off"] .g-ripple{display:none!important;}
     <button class="aba-btn" id="aba-comandas-btn" onclick="trocarAba('comandas')">
       <span style="font-size:1.05rem;">📝</span> Comandas
     </button>
-    <button class="aba-btn" id="aba-almoco-btn" onclick="trocarAba('almoco')">
-      <span style="font-size:1.05rem;">☀️</span> Almoço
-    </button>
   </div>
   <div class="mesa-search" id="mesa-search-bar">
     <div style="display:flex;gap:8px;align-items:center;">
@@ -1864,6 +1861,22 @@ window.addEventListener('load', function(){
       });
     }catch(e){ console.warn('[Init] settings long-polling falhou:', e.message); }
 
+    // ═══ MEMÓRIA LOCAL DO FIRESTORE (persistência em disco) ═══
+    // Faz o app lembrar do cardápio/dados entre aberturas: em vez de baixar
+    // ~250 documentos toda vez que abre, baixa só o que MUDOU desde a última
+    // visita — corta o grosso das leituras e deixa a abertura mais rápida.
+    // Nota: uma versão antiga disso causou travamentos por briga entre abas;
+    // o synchronizeTabs resolve exatamente isso (abas coordenam o acesso).
+    // Se ainda assim falhar (navegador sem suporte etc), o app segue normal
+    // sem a memória — só volta a ler tudo a cada abertura, como antes.
+    try{
+      fbDb.enablePersistence({ synchronizeTabs: true }).then(function(){
+        console.log('[Init] 💾 persistência local ativa (leituras só do que mudou)');
+      }).catch(function(e){
+        console.warn('[Init] persistência indisponível ('+(e.code||e.message)+') — seguindo sem ela');
+      });
+    }catch(e){ console.warn('[Init] persistência exceção:', e.message); }
+
     // Conexão padrão WebSocket
 
     // Auth anônimo em background
@@ -2382,7 +2395,9 @@ var _abaAtual = 'mesas';
 // valores do formulário errado — era a origem dos bugs intermitentes da aba.
 // Agora tudo acontece num lugar só: a própria aba ☀️ Almoço.
 function abrirNovoAlmoco(){
-  trocarAba('almoco');
+  // Aba ☀️ Almoço removida da interface. As comandas de almoço que já existem
+  // continuam funcionando (as vinculadas a mesa aparecem no mapa de mesas).
+  trocarAba('comandas');
 }
 
 function almAtualizarPrecoInfo(){} // mantido por compatibilidade
@@ -3001,6 +3016,7 @@ function escutarConfigMesas(){
 }
 
 function trocarAba(aba){
+  if(aba === 'almoco') aba = 'comandas'; // aba de almoço removida da interface
   _abaAtual = aba;
   document.getElementById('aba-mesas-btn').classList.toggle('active', aba==='mesas');
   document.getElementById('aba-comandas-btn').classList.toggle('active', aba==='comandas');
@@ -5018,6 +5034,38 @@ function _refrescarMesasRapido(){
 // devolve — tudo fica "pendurado"), a única saída é desligar e religar a rede
 // interna do SDK, que derruba o canal podre e abre um novo. Depois disso,
 // os listeners são recriados do zero.
+// Sonda de internet: um toque leve num servidor neutro do Google com prazo
+// curto. Distingue "internet do restaurante caída" (sonda falha) de
+// "só o canal do app travado" (sonda OK) — e avisa na tela.
+var _diagInternetUltimo = 0;
+function _diagnosticarInternet(){
+  if(Date.now() - _diagInternetUltimo < 30000) return; // no máx a cada 30s
+  _diagInternetUltimo = Date.now();
+  var ok = false;
+  var prazo = setTimeout(function(){ if(!ok) _bannerInternet(false); }, 5000);
+  try{
+    fetch('https://www.gstatic.com/generate_204', {mode:'no-cors', cache:'no-store'})
+      .then(function(){ ok = true; clearTimeout(prazo); _bannerInternet(true); })
+      .catch(function(){ clearTimeout(prazo); _bannerInternet(false); });
+  }catch(e){ clearTimeout(prazo); _bannerInternet(false); }
+}
+function _bannerInternet(internetOk){
+  console.warn('[Diag] internet geral: ' + (internetOk ? 'OK (problema é só o canal do app)' : 'SEM RESPOSTA (Wi-Fi/roteador do restaurante)'));
+  var ex = document.getElementById('banner-diag-internet');
+  if(ex) ex.remove();
+  var b = document.createElement('div');
+  b.id = 'banner-diag-internet';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:9px 14px;font-size:0.8rem;font-weight:700;text-align:center;z-index:99991;pointer-events:none;'
+    + (internetOk
+        ? 'background:rgba(212,168,67,0.95);color:#000;'
+        : 'background:rgba(248,113,113,0.95);color:#fff;');
+  b.textContent = internetOk
+    ? '⚠️ Internet OK, mas o servidor não responde — o app segue tentando sozinho'
+    : '📶 SEM INTERNET no aparelho/Wi-Fi — verifique o roteador do restaurante';
+  document.body.appendChild(b);
+  setTimeout(function(){ if(b.parentNode) b.remove(); }, 12000);
+}
+
 var _mesasRecuperando = false;
 var _mesasRecuperacoes = 0;
 function _mesasRecuperarConexao(motivo){
@@ -5043,6 +5091,12 @@ function _mesasRecuperarConexao(motivo){
   }
 
   console.warn('[Mesas] 🔄 Reiniciando rede Firestore ('+motivo+') — tentativa '+_mesasRecuperacoes);
+
+  // A partir da 2ª tentativa, testa a internet em geral (fora do Firebase)
+  // pra dizer NA TELA se o problema é o Wi-Fi/roteador do restaurante ou não.
+  if(_mesasRecuperacoes >= 2){
+    _diagnosticarInternet();
+  }
   var atraso = Math.min(30000, 2000 * _mesasRecuperacoes); // backoff: 2s, 4s... até 30s
   var terminou = false;
   function religar(){
@@ -5279,7 +5333,15 @@ function _processarSnapMesas(snap){
               tipoConta: 'almoco'
             };
           }
-          _contasMesaCache[mesaAlm] = contaCompleta;
+          // ⚠️ A comanda de almoço só assume o cache da mesa se NÃO houver
+          // uma conta NORMAL lá. Antes ela sobrescrevia incondicionalmente —
+          // era isso que "sumia" os itens da mesa quando um almoço era
+          // lançado numa mesa já ocupada. (As comandas de almoço continuam
+          // acessíveis pela aba ☀️ Almoço, agrupadas por mesa.)
+          var jaNaMesa = _contasMesaCache[mesaAlm];
+          if(!jaNaMesa || jaNaMesa.tipoConta === 'almoco'){
+            _contasMesaCache[mesaAlm] = contaCompleta;
+          }
         }
         return;
       }
@@ -5297,6 +5359,10 @@ function _processarSnapMesas(snap){
       // com conteúdo, vence a mais antiga — e disparamos um alerta bem visível,
       // porque isso significa que os garçons estão vendo coisas diferentes.
       var jaTem = _contasMesaCache[mesa];
+      // Se o que está no cache é uma comanda de ALMOÇO, a conta normal assume
+      // o lugar sem alarde — almoço + conta normal na mesma mesa é situação
+      // legítima (o almoço vive na aba ☀️), não duplicata.
+      if(jaTem && jaTem.tipoConta === 'almoco') jaTem = null;
       if(jaTem){
         var jaTemConteudo = (jaTem._itensAbertosCount||0) > 0 || jaTem._temPagamento;
         if(jaTemConteudo && temConteudo){

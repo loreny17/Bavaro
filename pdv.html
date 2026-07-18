@@ -1920,6 +1920,9 @@ var _estoqueUnsubP = null;  // principal
 var _estoqueUnsubT = null;  // totem
 var _estoqueItensP = [];    // cardápio principal
 var _estoqueItensT = [];    // totem
+var _estoqueCatsTotem = [];  // categorias do totem (pra nomear seções)
+var _estoqueGrupos = [];     // grupos de adicionais (opções pausáveis)
+var _estoqueUnsubG = null;
 
 function abrirEstoque(){
   var modal = document.getElementById('modal-estoque');
@@ -1941,6 +1944,7 @@ function fecharEstoque(){
   var modal = document.getElementById('modal-estoque');
   if(modal) modal.style.display = 'none';
   if(_estoqueUnsubP){ _estoqueUnsubP(); _estoqueUnsubP = null; }
+  if(_estoqueUnsubG){ _estoqueUnsubG(); _estoqueUnsubG = null; }
   if(_estoqueUnsubT){ _estoqueUnsubT(); _estoqueUnsubT = null; }
 }
 
@@ -1973,6 +1977,27 @@ function escutarEstoqueItens(){
       });
       renderEstoqueLista();
     }, function(e){ console.warn('[ESTOQUE-T]', e); });
+
+  // Categorias do totem (pra nomear as seções) — get simples, sem listener
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio_totem').doc('data').collection('categorias')
+    .get().then(function(snap){
+      _estoqueCatsTotem = [];
+      snap.forEach(function(d){ _estoqueCatsTotem.push(Object.assign({id:d.id}, d.data())); });
+      renderEstoqueLista();
+    }).catch(function(e){ console.warn('[ESTOQUE-CATS-T]', e.code||e); });
+
+  // Grupos de adicionais (opções pausáveis) — seção própria na lista
+  if(_estoqueUnsubG){ _estoqueUnsubG(); }
+  _estoqueUnsubG = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio_totem').doc('data').collection('grupos_opcoes')
+    .onSnapshot(function(snap){
+      _estoqueGrupos = [];
+      snap.forEach(function(d){ _estoqueGrupos.push(Object.assign({id:d.id}, d.data())); });
+      renderEstoqueLista();
+    }, function(e){ console.warn('[ESTOQUE-G]', e.code||e); });
 }
 
 function setEstoqueFiltro(filtro){
@@ -2007,6 +2032,8 @@ function renderEstoqueLista(){
     todos = todos.filter(function(it){ return it._fonte === 'cardapio'; });
   } else if(_estoqueFiltro === 'totem'){
     todos = todos.filter(function(it){ return it._fonte === 'totem'; });
+  } else if(_estoqueFiltro === 'adicionais'){
+    todos = []; // só as opções dos grupos aparecem nesse filtro
   }
   // Ordena: pausados primeiro, depois esgotados, depois baixo, depois normais
   todos.sort(function(a,b){
@@ -2014,11 +2041,7 @@ function renderEstoqueLista(){
     if(oa !== ob) return oa - ob;
     return (a.nome||'').localeCompare(b.nome||'');
   });
-  if(!todos.length){
-    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px 20px;">Nenhum item nesse filtro</div>';
-    return;
-  }
-  // Monta o HTML de UMA linha (usado nos dois grupos abaixo)
+  // Monta o HTML de UMA linha (usado nas seções abaixo)
   function _linhaEstoque(it){
     var pausado = pausaAtiva(it);
     var ctrlEst = it.controlarEstoque === true;
@@ -2054,32 +2077,133 @@ function renderEstoqueLista(){
     '</div>';
   }
 
-  // ── Agrupa por origem: 📋 Cardápio e 📱 Totem em seções separadas ──
-  // Antes vinha tudo embaralhado numa lista só, impossível de achar as coisas.
-  var grupoCard = todos.filter(function(it){ return it._fonte !== 'totem'; });
-  var grupoTotem = todos.filter(function(it){ return it._fonte === 'totem'; });
-
-  function _cabecalho(icone, titulo, itens){
+  // ── Cabeçalho de seção (com contagem e alertas do grupo) ──
+  function _cabecalho(icone, titulo, itens, nivel){
     var nPausados = itens.filter(function(i){ return pausaAtiva(i); }).length;
     var nEsgotados = itens.filter(function(i){ return i.controlarEstoque === true && (i.estoque||0) <= 0; }).length;
     var alertas = [];
     if(nPausados) alertas.push('<span style="color:#fbbf24;">⏸️ '+nPausados+'</span>');
     if(nEsgotados) alertas.push('<span style="color:#f87171;">✕ '+nEsgotados+'</span>');
-    return '<div style="position:sticky;top:0;z-index:5;background:var(--bg);display:flex;align-items:center;gap:8px;padding:10px 4px 8px;margin-top:6px;border-bottom:1px solid var(--border);">' +
-      '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:1.05rem;letter-spacing:0.06em;color:var(--accent);">' + icone + ' ' + titulo + '</span>' +
-      '<span style="font-size:0.72rem;color:var(--muted);">' + itens.length + ' ' + (itens.length === 1 ? 'item' : 'itens') + '</span>' +
+    var principal = nivel !== 'sub';
+    return '<div style="' + (principal ? 'position:sticky;top:0;z-index:6;background:var(--bg);border-bottom:2px solid var(--accent);margin-top:14px;padding:10px 4px 8px;' : 'background:var(--surface2);border-radius:8px;margin-top:10px;padding:7px 10px;') + 'display:flex;align-items:center;gap:8px;">' +
+      '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:' + (principal ? '1.05rem' : '0.92rem') + ';letter-spacing:0.06em;color:' + (principal ? 'var(--accent)' : 'var(--text)') + ';">' + icone + ' ' + escapeHtml(titulo) + '</span>' +
+      '<span style="font-size:0.7rem;color:var(--muted);">' + itens.length + '</span>' +
       (alertas.length ? '<span style="margin-left:auto;font-size:0.72rem;font-weight:700;display:flex;gap:8px;">' + alertas.join('') + '</span>' : '') +
     '</div>';
   }
 
+  // ── Agrupa uma lista de itens por CATEGORIA ──
+  // Cardápio principal guarda o nome da categoria no item; o totem guarda o id
+  // (resolvido pela lista de categorias carregada junto).
+  function _porCategoria(itens, fonte){
+    var mapa = {};
+    itens.forEach(function(it){
+      var nome;
+      if(fonte === 'totem'){
+        var cid = it.categoriaId || it.categoria || '';
+        var cat = _estoqueCatsTotem.find(function(c){ return c.id === cid; });
+        nome = cat ? ((cat.emoji ? cat.emoji + ' ' : '') + (cat.nome||'')) : (cid ? 'Outros' : 'Sem categoria');
+      } else {
+        var raw = it.categoria || it.categoriaId || '';
+        var catP = _categorias.find(function(c){ return c.nome === raw || c.id === raw; });
+        nome = catP ? ((catP.emoji ? catP.emoji + ' ' : '') + (catP.nome||'')) : (raw || 'Sem categoria');
+      }
+      if(!mapa[nome]) mapa[nome] = [];
+      mapa[nome].push(it);
+    });
+    return Object.keys(mapa).sort(function(a,b){
+      // "Sem categoria" sempre por último
+      if(a.indexOf('Sem categoria') === 0) return 1;
+      if(b.indexOf('Sem categoria') === 0) return -1;
+      return a.localeCompare(b);
+    }).map(function(k){ return {nome:k, itens:mapa[k]}; });
+  }
+
+  var grupoCard = todos.filter(function(it){ return it._fonte !== 'totem'; });
+  var grupoTotem = todos.filter(function(it){ return it._fonte === 'totem'; });
+
   var html = '';
   if(grupoCard.length){
-    html += _cabecalho('📋', 'CARDÁPIO PRINCIPAL', grupoCard) + grupoCard.map(_linhaEstoque).join('');
+    html += _cabecalho('📋', 'CARDÁPIO PRINCIPAL', grupoCard);
+    _porCategoria(grupoCard, 'cardapio').forEach(function(sec){
+      html += _cabecalho('', sec.nome, sec.itens, 'sub') + sec.itens.map(_linhaEstoque).join('');
+    });
   }
   if(grupoTotem.length){
-    html += _cabecalho('📱', 'TOTEM', grupoTotem) + grupoTotem.map(_linhaEstoque).join('');
+    html += _cabecalho('📱', 'TOTEM', grupoTotem);
+    _porCategoria(grupoTotem, 'totem').forEach(function(sec){
+      html += _cabecalho('', sec.nome, sec.itens, 'sub') + sec.itens.map(_linhaEstoque).join('');
+    });
   }
-  lista.innerHTML = html;
+
+  // ── Seção dos ADICIONAIS (opções dos grupos) ──
+  // Não têm estoque, só pausa — mas ficam aqui pra você pausar sem precisar
+  // entrar no editor de grupos.
+  var mostraAdicionais = ['todos','pausados','adicionais'].indexOf(_estoqueFiltro) >= 0;
+  if(mostraAdicionais && _estoqueGrupos.length){
+    var htmlAdic = '';
+    var todasOpcoes = [];
+    _estoqueGrupos.slice().sort(function(a,b){ return (a.nome||'').localeCompare(b.nome||''); }).forEach(function(g){
+      var ops = (g.opcoes||[]).map(function(o, idx){ return Object.assign({}, o, {_idx: idx}); });
+      if(busca) ops = ops.filter(function(o){ return (o.nome||'').toLowerCase().indexOf(busca) >= 0; });
+      if(_estoqueFiltro === 'pausados') ops = ops.filter(function(o){ return pausaAtiva(o); });
+      if(!ops.length) return;
+      todasOpcoes = todasOpcoes.concat(ops);
+      htmlAdic += _cabecalho('', g.nome || '(grupo sem nome)', ops, 'sub');
+      htmlAdic += ops.map(function(o){
+        var pausada = pausaAtiva(o);
+        var precoTxt = o.preco ? 'R$ ' + formatarPreco(o.preco) : 'grátis';
+        return '<div class="est-row ' + (pausada ? 'pausado' : 'normal') + '">' +
+          '<div class="est-row-foto">' + (o.foto ? '<img src="'+o.foto+'" alt="">' : '🧩') + '</div>' +
+          '<div class="est-row-info">' +
+            '<div class="est-row-nome">' + escapeHtml(o.nome||'') + '</div>' +
+            '<div class="est-row-meta">' +
+              '<span>' + precoTxt + '</span>' +
+              (pausada ? '<span>•</span><span style="color:#fbbf24;font-weight:700;">⏸️ PAUSADO'+(o.pausadoAte?' '+_rotuloPausaAte(o.pausadoAte):'')+'</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="est-row-acoes">' +
+            '<button class="est-toggle ' + (pausada?'':'ligado') + '" onclick="estoqueToggleOpcao(\'' + g.id + '\',' + o._idx + ',' + (pausada?'false':'true') + ')" title="' + (pausada?'Pausado — toque pra ativar':'Disponível — toque pra pausar') + '"></button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    });
+    if(htmlAdic){
+      html += _cabecalho('🧩', 'ADICIONAIS', todasOpcoes);
+      html += htmlAdic;
+    }
+  }
+
+  lista.innerHTML = html || '<div style="text-align:center;color:var(--muted);padding:40px 20px;">Nenhum item nesse filtro</div>';
+}
+
+// Pausa/reativa uma opção de adicional direto pela aba Estoque
+function estoqueToggleOpcao(grupoId, idx, novoEstado){
+  var ref = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('cardapio_totem').doc('data').collection('grupos_opcoes').doc(grupoId);
+  function gravar(pausadoAte){
+    ref.get().then(function(d){
+      if(!d.exists) throw new Error('Grupo não encontrado');
+      var ops = (d.data().opcoes||[]).slice();
+      if(!ops[idx]) throw new Error('Opção não encontrada');
+      ops[idx] = Object.assign({}, ops[idx], {
+        pausado: novoEstado,
+        pausadoAte: novoEstado ? (pausadoAte || null) : null
+      });
+      return ref.update({opcoes: ops, atualizadoEm: Date.now()});
+    }).then(function(){
+      var extra = (novoEstado && pausadoAte) ? ' ' + _rotuloPausaAte(pausadoAte) : '';
+      showToast(novoEstado ? ('⏸️ Adicional pausado' + extra) : '▶️ Adicional disponível', novoEstado ? '#fbbf24' : '#4ade80');
+    }).catch(function(e){ showToast('❌ ' + e.message, '#f87171', 5000); });
+  }
+  if(novoEstado){
+    var g = _estoqueGrupos.find(function(x){ return x.id === grupoId; });
+    var nomeOp = (g && g.opcoes && g.opcoes[idx]) ? g.opcoes[idx].nome : 'adicional';
+    escolherDuracaoPausa(nomeOp, gravar);
+  } else {
+    gravar(null);
+  }
 }
 
 function _estoquePrioridade(it){
@@ -14175,6 +14299,7 @@ function toggleAdminUsuario(garcomId, novoValor){
       <button class="est-filtro ativo" data-filtro="todos" onclick="setEstoqueFiltro('todos')">Todos</button>
       <button class="est-filtro" data-filtro="cardapio" onclick="setEstoqueFiltro('cardapio')">📋 Cardápio</button>
       <button class="est-filtro" data-filtro="totem" onclick="setEstoqueFiltro('totem')">📱 Totem</button>
+      <button class="est-filtro" data-filtro="adicionais" onclick="setEstoqueFiltro('adicionais')">🧩 Adicionais</button>
       <button class="est-filtro" data-filtro="pausados" onclick="setEstoqueFiltro('pausados')">⏸️ Pausados</button>
       <button class="est-filtro" data-filtro="esgotados" onclick="setEstoqueFiltro('esgotados')">✕ Esgotados</button>
       <button class="est-filtro" data-filtro="baixo" onclick="setEstoqueFiltro('baixo')">⚠️ Estoque baixo</button>

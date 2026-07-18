@@ -1921,6 +1921,8 @@ var _estoqueUnsubT = null;  // totem
 var _estoqueItensP = [];    // cardápio principal
 var _estoqueItensT = [];    // totem
 var _estoqueCatsTotem = [];  // categorias do totem (pra nomear seções)
+var _estoqueCatsPrinc = [];  // categorias do cardápio principal do restaurante ativo
+var _estoqueRestCarregado = null; // trava: qual restaurante os dados atuais pertencem
 var _estoqueGrupos = [];     // grupos de adicionais (opções pausáveis)
 var _estoqueUnsubG = null;
 
@@ -1953,12 +1955,36 @@ function escutarEstoqueItens(){
     document.getElementById('estoque-lista').innerHTML = '<div style="text-align:center;color:#f87171;padding:30px;">Restaurante não carregado</div>';
     return;
   }
+  // ⚠️ Zera tudo ANTES de carregar: sem isso, ao trocar de restaurante os
+  // itens do anterior ficavam na tela (e no controle de estoque) até o novo
+  // listener responder — ou pra sempre, se o novo restaurante tiver menos itens.
+  var restAlvo = _restauranteAtivo.id;
+  _estoqueRestCarregado = restAlvo;
+  _estoqueItensP = [];
+  _estoqueItensT = [];
+  _estoqueCatsTotem = [];
+  _estoqueCatsPrinc = [];
+  _estoqueGrupos = [];
+  renderEstoqueLista();
+
+  // Categorias do cardápio principal DESTE restaurante (pra nomear as seções)
+  fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(restAlvo)
+    .collection('cardapio').doc('data').collection('categorias')
+    .get().then(function(snap){
+      if(_estoqueRestCarregado !== restAlvo) return;
+      _estoqueCatsPrinc = [];
+      snap.forEach(function(d){ _estoqueCatsPrinc.push(Object.assign({id:d.id}, d.data())); });
+      renderEstoqueLista();
+    }).catch(function(e){ console.warn('[ESTOQUE-CATS-P]', e.code||e); });
+
   // Listener cardápio principal
   if(_estoqueUnsubP){ _estoqueUnsubP(); }
   _estoqueUnsubP = fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('restaurantes').doc(restAlvo)
     .collection('cardapio').doc('data').collection('itens')
     .onSnapshot(function(snap){
+      if(_estoqueRestCarregado !== restAlvo) return; // resposta atrasada de outro restaurante
       _estoqueItensP = [];
       snap.forEach(function(d){
         _estoqueItensP.push(Object.assign({id:d.id, _fonte:'cardapio'}, d.data()));
@@ -1968,9 +1994,10 @@ function escutarEstoqueItens(){
   // Listener cardápio do totem
   if(_estoqueUnsubT){ _estoqueUnsubT(); }
   _estoqueUnsubT = fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('restaurantes').doc(restAlvo)
     .collection('cardapio_totem').doc('data').collection('itens')
     .onSnapshot(function(snap){
+      if(_estoqueRestCarregado !== restAlvo) return;
       _estoqueItensT = [];
       snap.forEach(function(d){
         _estoqueItensT.push(Object.assign({id:d.id, _fonte:'totem'}, d.data()));
@@ -1980,9 +2007,10 @@ function escutarEstoqueItens(){
 
   // Categorias do totem (pra nomear as seções) — get simples, sem listener
   fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('restaurantes').doc(restAlvo)
     .collection('cardapio_totem').doc('data').collection('categorias')
     .get().then(function(snap){
+      if(_estoqueRestCarregado !== restAlvo) return;
       _estoqueCatsTotem = [];
       snap.forEach(function(d){ _estoqueCatsTotem.push(Object.assign({id:d.id}, d.data())); });
       renderEstoqueLista();
@@ -1991,9 +2019,10 @@ function escutarEstoqueItens(){
   // Grupos de adicionais (opções pausáveis) — seção própria na lista
   if(_estoqueUnsubG){ _estoqueUnsubG(); }
   _estoqueUnsubG = fbDb.collection('tenants').doc(_tenantId)
-    .collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('restaurantes').doc(restAlvo)
     .collection('cardapio_totem').doc('data').collection('grupos_opcoes')
     .onSnapshot(function(snap){
+      if(_estoqueRestCarregado !== restAlvo) return;
       _estoqueGrupos = [];
       snap.forEach(function(d){ _estoqueGrupos.push(Object.assign({id:d.id}, d.data())); });
       renderEstoqueLista();
@@ -2102,11 +2131,14 @@ function renderEstoqueLista(){
       if(fonte === 'totem'){
         var cid = it.categoriaId || it.categoria || '';
         var cat = _estoqueCatsTotem.find(function(c){ return c.id === cid; });
-        nome = cat ? ((cat.emoji ? cat.emoji + ' ' : '') + (cat.nome||'')) : (cid ? 'Outros' : 'Sem categoria');
+        nome = cat ? ((cat.emoji ? cat.emoji + ' ' : '') + (cat.nome||'')) : 'Sem categoria';
       } else {
         var raw = it.categoria || it.categoriaId || '';
-        var catP = _categorias.find(function(c){ return c.nome === raw || c.id === raw; });
-        nome = catP ? ((catP.emoji ? catP.emoji + ' ' : '') + (catP.nome||'')) : (raw || 'Sem categoria');
+        // Procura na lista do restaurante ATIVO (por id ou por nome). Se não
+        // achar, cai em "Sem categoria" — nunca mostra o código cru na tela.
+        var catP = _estoqueCatsPrinc.find(function(c){ return c.id === raw || c.nome === raw; })
+                || _categorias.find(function(c){ return c.id === raw || c.nome === raw; });
+        nome = catP ? ((catP.emoji ? catP.emoji + ' ' : '') + (catP.nome||'')) : 'Sem categoria';
       }
       if(!mapa[nome]) mapa[nome] = [];
       mapa[nome].push(it);

@@ -2018,7 +2018,8 @@ function renderEstoqueLista(){
     lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px 20px;">Nenhum item nesse filtro</div>';
     return;
   }
-  lista.innerHTML = todos.map(function(it){
+  // Monta o HTML de UMA linha (usado nos dois grupos abaixo)
+  function _linhaEstoque(it){
     var pausado = pausaAtiva(it);
     var ctrlEst = it.controlarEstoque === true;
     var qtd = (typeof it.estoque === 'number') ? it.estoque : null;
@@ -2028,8 +2029,6 @@ function renderEstoqueLista(){
     if(pausado) classe = 'pausado';
     else if(esgotado) classe = 'esgotado';
     else if(baixo) classe = 'baixo';
-    var fonteIcon = it._fonte === 'totem' ? '📱' : '📋';
-    var fonteLbl = it._fonte === 'totem' ? 'Totem' : 'Cardápio';
     var fotoHtml = it.foto
       ? '<img src="'+it.foto+'" alt="">'
       : '🍽️';
@@ -2043,8 +2042,6 @@ function renderEstoqueLista(){
       '<div class="est-row-info">' +
         '<div class="est-row-nome">' + escapeHtml(it.nome||'') + '</div>' +
         '<div class="est-row-meta">' +
-          '<span>' + fonteIcon + ' ' + fonteLbl + '</span>' +
-          '<span>•</span>' +
           '<span>R$ ' + formatarPreco(it.preco||0) + '</span>' +
           (ctrlEst ? '<span>•</span><span><b>' + estoqueLbl + '</b></span>' : '') +
           (pausado ? '<span>•</span><span style="color:#fbbf24;font-weight:700;">⏸️ PAUSADO'+(it.pausadoAte?' '+_rotuloPausaAte(it.pausadoAte):'')+'</span>' : '') +
@@ -2055,7 +2052,34 @@ function renderEstoqueLista(){
         '<button class="est-toggle ' + (togLigado?'ligado':'') + '" onclick="estoqueTogglePausa(\'' + it.id + '\',\'' + it._fonte + '\',' + (pausado?'false':'true') + ')" title="' + (togLigado?'Disponível — toque pra pausar':'Pausado — toque pra ativar') + '"></button>' +
       '</div>' +
     '</div>';
-  }).join('');
+  }
+
+  // ── Agrupa por origem: 📋 Cardápio e 📱 Totem em seções separadas ──
+  // Antes vinha tudo embaralhado numa lista só, impossível de achar as coisas.
+  var grupoCard = todos.filter(function(it){ return it._fonte !== 'totem'; });
+  var grupoTotem = todos.filter(function(it){ return it._fonte === 'totem'; });
+
+  function _cabecalho(icone, titulo, itens){
+    var nPausados = itens.filter(function(i){ return pausaAtiva(i); }).length;
+    var nEsgotados = itens.filter(function(i){ return i.controlarEstoque === true && (i.estoque||0) <= 0; }).length;
+    var alertas = [];
+    if(nPausados) alertas.push('<span style="color:#fbbf24;">⏸️ '+nPausados+'</span>');
+    if(nEsgotados) alertas.push('<span style="color:#f87171;">✕ '+nEsgotados+'</span>');
+    return '<div style="position:sticky;top:0;z-index:5;background:var(--bg);display:flex;align-items:center;gap:8px;padding:10px 4px 8px;margin-top:6px;border-bottom:1px solid var(--border);">' +
+      '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:1.05rem;letter-spacing:0.06em;color:var(--accent);">' + icone + ' ' + titulo + '</span>' +
+      '<span style="font-size:0.72rem;color:var(--muted);">' + itens.length + ' ' + (itens.length === 1 ? 'item' : 'itens') + '</span>' +
+      (alertas.length ? '<span style="margin-left:auto;font-size:0.72rem;font-weight:700;display:flex;gap:8px;">' + alertas.join('') + '</span>' : '') +
+    '</div>';
+  }
+
+  var html = '';
+  if(grupoCard.length){
+    html += _cabecalho('📋', 'CARDÁPIO PRINCIPAL', grupoCard) + grupoCard.map(_linhaEstoque).join('');
+  }
+  if(grupoTotem.length){
+    html += _cabecalho('📱', 'TOTEM', grupoTotem) + grupoTotem.map(_linhaEstoque).join('');
+  }
+  lista.innerHTML = html;
 }
 
 function _estoquePrioridade(it){
@@ -14149,11 +14173,11 @@ function toggleAdminUsuario(garcomId, novoValor){
     <input type="text" id="estoque-busca" placeholder="🔍 Buscar item..." oninput="renderEstoqueLista()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:11px 14px;font-family:inherit;font-size:0.95rem;box-sizing:border-box;margin-bottom:10px;">
     <div style="display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;">
       <button class="est-filtro ativo" data-filtro="todos" onclick="setEstoqueFiltro('todos')">Todos</button>
+      <button class="est-filtro" data-filtro="cardapio" onclick="setEstoqueFiltro('cardapio')">📋 Cardápio</button>
+      <button class="est-filtro" data-filtro="totem" onclick="setEstoqueFiltro('totem')">📱 Totem</button>
       <button class="est-filtro" data-filtro="pausados" onclick="setEstoqueFiltro('pausados')">⏸️ Pausados</button>
       <button class="est-filtro" data-filtro="esgotados" onclick="setEstoqueFiltro('esgotados')">✕ Esgotados</button>
       <button class="est-filtro" data-filtro="baixo" onclick="setEstoqueFiltro('baixo')">⚠️ Estoque baixo</button>
-      <button class="est-filtro" data-filtro="cardapio" onclick="setEstoqueFiltro('cardapio')">📋 Cardápio</button>
-      <button class="est-filtro" data-filtro="totem" onclick="setEstoqueFiltro('totem')">📱 Totem</button>
     </div>
   </div>
   <!-- Lista -->

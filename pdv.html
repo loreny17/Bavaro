@@ -2781,6 +2781,7 @@ document.addEventListener('DOMContentLoaded', function(){
 var _unsubPedidosPDV = null;
 var _pedidosPDV = [];
 var _impProntoParaAutoImprimir = false; // true depois que a marcação inicial de "já impressos" termina
+var _impTentativasMarcacao = 0;
 var _filtroStatus = 'todos';
 var _histFiltroInicio = null; // null = hoje por padrão
 var _histFiltroFim = null;
@@ -6921,13 +6922,22 @@ function iniciarListenerImpressao(){
   // ela reaproveita o snapshot do listener de pedidos já ativo (iniciarListenerPedidos),
   // via a flag _impProntoParaAutoImprimir. Isso evita ler a coleção 'pedidos' em dobro.
   var hoje = new Date(); hoje.setHours(0,0,0,0);
+  // ⚠️ Consulta SEM o filtro de tenant: com 3 filtros (restauranteId + tenantId
+  // + criadoEm) o Firestore exigiria um índice composto extra que não existe —
+  // falhava sempre, e o retry ficava reaparecendo a cada 8s. Aqui usamos o
+  // índice que já existe (restauranteId + criadoEm) e conferimos o tenant na
+  // memória, que dá no mesmo e nunca falha por falta de índice.
   var queryImp = fbDb.collection('pedidos')
     .where('restauranteId','==', _restauranteAtivo.id)
     .where('criadoEm','>=', hoje.getTime());
-  if(_tenantId) queryImp = queryImp.where('tenantId','==', _tenantId);
   queryImp.get().then(function(snap){
-    snap.forEach(function(d){ _ultimosPedidosImpressos[d.id] = true; });
+    snap.forEach(function(d){
+      var dv = d.data() || {};
+      if(_tenantId && dv.tenantId && dv.tenantId !== _tenantId) return;
+      _ultimosPedidosImpressos[d.id] = true;
+    });
     console.log('[PDV] Marcação inicial de impressão concluída para restaurante:', _restauranteAtivo.id);
+    _impTentativasMarcacao = 0;
     _impProntoParaAutoImprimir = true;
     // Rede de segurança: cobre pedidos que chegaram bem no instante entre a
     // marcação inicial e a liberação da flag (o listener compartilhado já
@@ -6939,14 +6949,14 @@ function iniciarListenerImpressao(){
       imprimirPedidoAutomatico(p);
     });
   }).catch(function(e){
-    console.warn('[PDV] erro ao buscar pedidos iniciais (marcação de impressão):', e.code);
-    // ⚠️ NÃO libera a impressão sem a marcação — era isso que causava a
-    // "tempestade de reimpressão": marcação falhava (conexão ruim) e todos
-    // os pedidos do dia sem etiqueta saíam de novo. Agora: tenta a marcação
-    // de novo a cada 8s até conseguir; só então libera a automática.
+    // NÃO libera a impressão sem a marcação (era o que causava a tempestade
+    // de reimpressão). Tenta de novo em silêncio, com espera crescente —
+    // sem encher a tela de avisos. O log fica no console pra diagnóstico.
+    _impTentativasMarcacao = (_impTentativasMarcacao || 0) + 1;
+    var espera = Math.min(60000, 8000 * _impTentativasMarcacao);
+    console.warn('[PDV] marcação de impressão falhou ('+(e.code||e.message)+') — nova tentativa em '+(espera/1000)+'s (tentativa '+_impTentativasMarcacao+')');
     _impListenerAtivo = false;
-    showToast('⚠️ Impressão automática aguardando conexão...', '#f59e0b', 4000);
-    setTimeout(function(){ iniciarListenerImpressao(); }, 8000);
+    setTimeout(function(){ iniciarListenerImpressao(); }, espera);
   });
 }
 

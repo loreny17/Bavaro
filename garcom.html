@@ -16217,20 +16217,13 @@ function _normSelecoesAgrup(it){
   return String(it.selecoesLabel || '').trim().toLowerCase();
 }
 
-// Itens só se agrupam se forem realmente idênticos em tudo que importa.
-// Tudo normalizado (texto sem espaços/maiúsculas, preço com 2 casas) pra que
-// diferenças invisíveis não impeçam o agrupamento.
+// Agrupa TUDO que tem o mesmo NOME — observação, adicionais e preço diferentes
+// não separam mais. Só o status fica de fora do agrupamento: item já PAGO nunca
+// entra na mesma linha de um a pagar (senão o valor devido sairia errado).
 function _chaveAgrupIgual(it){
   if(it.divisao && it.divisao.total > 1) return null;   // dividido nunca agrupa
   if(it.tipoVenda === 'kg') return null;                // cada pesagem é única
-  return [
-    String(it.nome||'').trim().toLowerCase(),
-    Number(it.preco||0).toFixed(2),
-    String(it.obs||'').trim().toLowerCase(),
-    String(it.pessoa||it.nomeCliente||'').trim().toLowerCase(),
-    String(it.status||''),
-    _normSelecoesAgrup(it)
-  ].join('|#|');
+  return String(it.nome||'').trim().toLowerCase() + '|#|' + (it.status === 'pago' ? 'pago' : 'aberto');
 }
 
 function alternarAgruparIguais(){
@@ -16250,7 +16243,21 @@ function _renderGrupoFechar(g){
   var valorTotal = g.itens.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
   var pago = it0.status === 'pago';
   var aberto = !!_fecharGruposAbertos[_idGrupoFechar(g.chave)];
-  var pessoaTxt = (it0.pessoa || it0.nomeCliente || '');
+  // Como agora agrupa só pelo nome, o conteúdo interno pode variar — avisa disso
+  var precos = {}, obsList = {}, pessoas = {};
+  g.itens.forEach(function(i){
+    precos[Number(i.preco||0).toFixed(2)] = 1;
+    if(i.obs) obsList[String(i.obs).trim()] = 1;
+    var p = i.pessoa || i.nomeCliente || '';
+    if(p) pessoas[p] = 1;
+  });
+  var variados = [];
+  if(Object.keys(precos).length > 1) variados.push('preços diferentes');
+  var obsKeys = Object.keys(obsList);
+  if(obsKeys.length) variados.push(obsKeys.length === 1 ? ('obs: ' + obsKeys[0]) : (obsKeys.length + ' observações'));
+  var pessoaKeys = Object.keys(pessoas);
+  var pessoaTxt = pessoaKeys.length === 1 ? pessoaKeys[0] : '';
+  if(pessoaKeys.length > 1) variados.push(pessoaKeys.length + ' pessoas');
   var gid = _idGrupoFechar(g.chave);
   return '<div onclick="alternarGrupoFechar(\''+gid+'\')" ' +
     'style="display:flex;align-items:center;gap:10px;padding:11px 12px;margin-bottom:8px;border-radius:10px;cursor:pointer;' +
@@ -16258,7 +16265,7 @@ function _renderGrupoFechar(g){
     '<span style="background:var(--accent);color:#000;font-weight:800;font-size:0.8rem;padding:3px 9px;border-radius:20px;flex-shrink:0;">' + qtdTotal + 'x</span>' +
     '<div style="flex:1;min-width:0;">' +
       '<div style="font-size:0.88rem;font-weight:600;' + (pago ? 'text-decoration:line-through;' : '') + '">' + esc(it0.nome||'') + '</div>' +
-      (it0.obs ? '<div style="font-size:0.7rem;color:var(--muted);">' + esc(it0.obs) + '</div>' : '') +
+      (variados.length ? '<div style="font-size:0.7rem;color:var(--muted);">' + esc(variados.join(' · ')) + '</div>' : '') +
       (pessoaTxt ? '<div style="font-size:0.7rem;color:var(--accent);font-weight:600;">👤 ' + esc(pessoaTxt) + '</div>' : '') +
       '<div style="font-size:0.66rem;color:var(--muted);margin-top:2px;">' + (aberto ? '▲ tocar pra recolher' : '▼ tocar pra ver separado') + '</div>' +
     '</div>' +
@@ -16557,7 +16564,20 @@ function renderFecharConta(){
           }
         });
       } else {
-        itensVisiveis.forEach(function(it){ html += _renderItemFechar(it, c); });
+        // Desagrupado: separa UNIDADE por unidade (um "2x Pilsen" vira duas
+        // linhas de 1x). No modo "Por itens" mantemos a linha original, senão
+        // a seleção pra pagamento agiria no item inteiro e confundiria.
+        var podeSepararUnidades = (_fecharModo !== 'itens');
+        itensVisiveis.forEach(function(it){
+          var q = it.qtd || 1;
+          if(!podeSepararUnidades || q <= 1 || (it.divisao && it.divisao.total > 1) || it.tipoVenda === 'kg'){
+            html += _renderItemFechar(it, c);
+            return;
+          }
+          for(var u = 0; u < q; u++){
+            html += _renderItemFechar(Object.assign({}, it, {qtd: 1}), c);
+          }
+        });
       }
     }
     html += '</div>';

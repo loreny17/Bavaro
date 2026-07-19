@@ -13129,10 +13129,29 @@ function _numPedidoById(pedidoId){
 
 // Reseta todo dia às 02:00 da manhã. Usa transação atômica pra evitar números duplicados.
 // Retorna uma Promise com o número sequencial gerado.
+// ═══ NUMERAÇÃO SEQUENCIAL DOS PEDIDOS (1, 2, 3...) ═══
+// A cozinha precisa saber a ORDEM de chegada pra não furar fila. Cada pedido
+// recebe o próximo número do dia, por restaurante. O contador zera todo dia.
+// ⚠️ Regra de ouro: se a numeração falhar por qualquer motivo, o pedido é
+// enviado MESMO ASSIM (sem número) — nunca travar o serviço por causa disso.
 function gerarNumeroSequencial(){
-  // DESATIVADO: a numeração sequencial não estava em uso e causava erros de permissão
-  // que travavam o envio de pedidos. Retorna null direto (sem ir no Firestore).
-  return Promise.resolve(null);
+  if(!_tenantId || !_restauranteId) return Promise.resolve(null);
+  var d = new Date();
+  var chaveDia = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  var ref = fbDb.collection('tenants').doc(_tenantId)
+    .collection('restaurantes').doc(_restauranteId)
+    .collection('contadores').doc('pedidos_' + chaveDia);
+  return fbDb.runTransaction(function(tx){
+    return tx.get(ref).then(function(doc){
+      var proximo = (doc.exists ? (doc.data().ultimo || 0) : 0) + 1;
+      if(doc.exists) tx.update(ref, {ultimo: proximo, atualizadoEm: Date.now()});
+      else tx.set(ref, {ultimo: proximo, dia: chaveDia, criadoEm: Date.now(), atualizadoEm: Date.now()});
+      return proximo;
+    });
+  }).catch(function(e){
+    console.warn('[NUM] numeração indisponível ('+(e.code||e.message)+') — pedido segue sem número');
+    return null;
+  });
 }
 
 // ═══ FAB (Floating Action Button) — Enviar pedido sem entrar no carrinho ═══
@@ -16155,6 +16174,66 @@ function _onDragEnd(e){
   _dragZonaAtual = null;
 }
 
+// ═══ AGRUPAR ITENS IGUAIS NO FECHAR CONTA ═══
+// Sem isso, 3 Pilsens pedidas em momentos diferentes viram 3 linhas soltas na
+// conferência com o cliente. Agrupado vira "3x Pilsen". Ligado por padrão;
+// dá pra desligar no botão, ou expandir só um grupo pra agir num item.
+var _fecharAgruparIguais = true;
+var _fecharGruposAbertos = {};
+
+// Converte a chave (que tem aspas, pipes etc) num id seguro pro onclick
+function _idGrupoFechar(chave){
+  var h = 0;
+  for(var i = 0; i < chave.length; i++){
+    h = ((h << 5) - h) + chave.charCodeAt(i);
+    h |= 0;
+  }
+  return 'g' + Math.abs(h).toString(36);
+}
+
+// Itens só se agrupam se forem realmente idênticos em tudo que importa
+function _chaveAgrupIgual(it){
+  if(it.divisao && it.divisao.total > 1) return null; // dividido nunca agrupa
+  return [
+    it.nome||'', it.preco||0, it.obs||'',
+    it.pessoa||it.nomeCliente||'', it.status||'',
+    JSON.stringify(it.selecoes||it.selecoesLabel||'')
+  ].join('|#|');
+}
+
+function alternarAgruparIguais(){
+  _fecharAgruparIguais = !_fecharAgruparIguais;
+  _fecharGruposAbertos = {};
+  renderFecharConta();
+}
+function alternarGrupoFechar(chave){
+  _fecharGruposAbertos[chave] = !_fecharGruposAbertos[chave];
+  renderFecharConta();
+}
+
+// Linha consolidada: "3x Pilsen ....... R$ 44,70"
+function _renderGrupoFechar(g){
+  var it0 = g.itens[0];
+  var qtdTotal = g.itens.reduce(function(a,i){ return a + (i.qtd||1); }, 0);
+  var valorTotal = g.itens.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
+  var pago = it0.status === 'pago';
+  var aberto = !!_fecharGruposAbertos[_idGrupoFechar(g.chave)];
+  var pessoaTxt = (it0.pessoa || it0.nomeCliente || '');
+  var gid = _idGrupoFechar(g.chave);
+  return '<div onclick="alternarGrupoFechar(\''+gid+'\')" ' +
+    'style="display:flex;align-items:center;gap:10px;padding:11px 12px;margin-bottom:8px;border-radius:10px;cursor:pointer;' +
+    'background:' + (aberto ? 'rgba(212,168,67,0.07)' : 'var(--surface2)') + ';border:1px solid ' + (aberto ? 'rgba(212,168,67,0.35)' : 'var(--border)') + ';' + (pago ? 'opacity:0.55;' : '') + '">' +
+    '<span style="background:var(--accent);color:#000;font-weight:800;font-size:0.8rem;padding:3px 9px;border-radius:20px;flex-shrink:0;">' + qtdTotal + 'x</span>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="font-size:0.88rem;font-weight:600;' + (pago ? 'text-decoration:line-through;' : '') + '">' + esc(it0.nome||'') + '</div>' +
+      (it0.obs ? '<div style="font-size:0.7rem;color:var(--muted);">' + esc(it0.obs) + '</div>' : '') +
+      (pessoaTxt ? '<div style="font-size:0.7rem;color:var(--accent);font-weight:600;">👤 ' + esc(pessoaTxt) + '</div>' : '') +
+      '<div style="font-size:0.66rem;color:var(--muted);margin-top:2px;">' + (aberto ? '▲ tocar pra recolher' : '▼ tocar pra ver separado') + '</div>' +
+    '</div>' +
+    '<div style="font-weight:700;font-size:0.9rem;flex-shrink:0;">R$ ' + fmtPreco(valorTotal) + '</div>' +
+  '</div>';
+}
+
 function _renderItemFechar(it, c){
   var h = '';
   var pago = it.status === 'pago';
@@ -16355,6 +16434,7 @@ function renderFecharConta(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">'+
         '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Itens</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+          '<button onclick="alternarAgruparIguais()" style="background:'+(_fecharAgruparIguais?'rgba(212,168,67,0.15)':'transparent')+';border:1px solid '+(_fecharAgruparIguais?'var(--accent)':'var(--border2)')+';color:'+(_fecharAgruparIguais?'var(--accent)':'var(--muted)')+';font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:700;">'+(_fecharAgruparIguais?'🔗 Agrupados':'🔓 Separados')+'</button>'+
           (qtdPagos>0?'<button onclick="alternarOcultarPagos()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;">'+(_fecharOcultarPagos?'👁️ Mostrar pagos':'🙈 Ocultar pagos')+' ('+qtdPagos+')</button>':'')+
         '</div>'+
       '</div>';
@@ -16422,7 +16502,27 @@ function renderFecharConta(){
         html += '</div>';
       }
     } else {
-      itensVisiveis.forEach(function(it){ html += _renderItemFechar(it, c); });
+      if(_fecharAgruparIguais){
+        var gruposIg = [], mapaIg = {};
+        itensVisiveis.forEach(function(it){
+          var k = _chaveAgrupIgual(it);
+          if(!k){ gruposIg.push({solto: it}); return; }
+          if(!mapaIg[k]){ mapaIg[k] = {chave:k, itens:[]}; gruposIg.push(mapaIg[k]); }
+          mapaIg[k].itens.push(it);
+        });
+        gruposIg.forEach(function(g){
+          if(g.solto){ html += _renderItemFechar(g.solto, c); return; }
+          if(g.itens.length === 1){ html += _renderItemFechar(g.itens[0], c); return; }
+          html += _renderGrupoFechar(g);
+          if(_fecharGruposAbertos[_idGrupoFechar(g.chave)]){
+            html += '<div style="margin-left:10px;padding-left:8px;border-left:2px solid rgba(212,168,67,0.3);">';
+            g.itens.forEach(function(it){ html += _renderItemFechar(it, c); });
+            html += '</div>';
+          }
+        });
+      } else {
+        itensVisiveis.forEach(function(it){ html += _renderItemFechar(it, c); });
+      }
     }
     html += '</div>';
   }

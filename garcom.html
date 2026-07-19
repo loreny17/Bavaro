@@ -16191,13 +16191,45 @@ function _idGrupoFechar(chave){
   return 'g' + Math.abs(h).toString(36);
 }
 
-// Itens só se agrupam se forem realmente idênticos em tudo que importa
+// Normaliza os adicionais numa string comparável. Sem isso, um item com
+// selecoes:[] e outro sem o campo geravam chaves diferentes e NÃO agrupavam,
+// mesmo sendo idênticos na tela.
+function _normSelecoesAgrup(it){
+  var sel = it.selecoes;
+  if(Array.isArray(sel)){
+    if(!sel.length) return '';
+    return sel.map(function(x){
+      if(x == null) return '';
+      if(typeof x === 'string') return x.trim().toLowerCase();
+      return ((x.nome||x.label||'') + '~' + (x.preco||0)).trim().toLowerCase();
+    }).sort().join(',');
+  }
+  if(sel && typeof sel === 'object'){
+    try{
+      var partes = [];
+      Object.keys(sel).sort().forEach(function(k){
+        var v = sel[k];
+        partes.push(k + '~' + (Array.isArray(v) ? v.slice().sort().join('+') : String(v)));
+      });
+      return partes.join(',').toLowerCase();
+    }catch(e){ return ''; }
+  }
+  return String(it.selecoesLabel || '').trim().toLowerCase();
+}
+
+// Itens só se agrupam se forem realmente idênticos em tudo que importa.
+// Tudo normalizado (texto sem espaços/maiúsculas, preço com 2 casas) pra que
+// diferenças invisíveis não impeçam o agrupamento.
 function _chaveAgrupIgual(it){
-  if(it.divisao && it.divisao.total > 1) return null; // dividido nunca agrupa
+  if(it.divisao && it.divisao.total > 1) return null;   // dividido nunca agrupa
+  if(it.tipoVenda === 'kg') return null;                // cada pesagem é única
   return [
-    it.nome||'', it.preco||0, it.obs||'',
-    it.pessoa||it.nomeCliente||'', it.status||'',
-    JSON.stringify(it.selecoes||it.selecoesLabel||'')
+    String(it.nome||'').trim().toLowerCase(),
+    Number(it.preco||0).toFixed(2),
+    String(it.obs||'').trim().toLowerCase(),
+    String(it.pessoa||it.nomeCliente||'').trim().toLowerCase(),
+    String(it.status||''),
+    _normSelecoesAgrup(it)
   ].join('|#|');
 }
 
@@ -16399,7 +16431,11 @@ function renderFecharConta(){
 
   // LOG: mostra campo pessoa de cada item (para debug)
   var logItens = (_fecharConta.itens||[]).map(function(it,i){
-    return i+': '+it.nome+' | pessoa='+( it.pessoa||'(vazio)')+' | itemKey='+(it.itemKey||'(sem key)');
+    // Inclui a chave de agrupamento: itens que deveriam juntar e não juntaram
+    // terão chaves diferentes aqui, mostrando exatamente qual campo divergiu.
+    var ck;
+    try{ ck = _chaveAgrupIgual(it); }catch(e){ ck = 'ERRO:'+e.message; }
+    return i+': '+it.nome+' | pessoa='+( it.pessoa||'(vazio)')+' | itemKey='+(it.itemKey||'(sem key)')+'\n     chaveAgrup='+(ck===null?'(nunca agrupa)':ck);
   }).join('\n');
   console.log('[FECHAR CONTA] Itens:\n'+logItens);
   console.log('[FECHAR CONTA] _meusPedidos pessoa:', (_meusPedidos||[]).map(function(p){

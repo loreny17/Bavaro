@@ -6509,28 +6509,9 @@ function gerarCupomPedido(pedido, modelo){
     s += 'MESA ' + pedido.mesa + '\n';
     s += _resetarEstilo();
   }
-  // ─── NÚMERO DO PEDIDO (configurável por modelo, com fallback no global) ───
-  // Cada modelo pode ter sua própria config (estiloNumeroPedido).
-  // Se o modelo não tem campos definidos, usa as configs globais (c.imprimirNumeroPedido / c.tamanhoNumeroPedido).
-  if(pedido.numeroSequencial){
-    var enp = (modelo && modelo.estiloNumeroPedido) || {};
-    // Prioridade: modelo > global. Se o modelo tem mostrar=false explicitamente, não imprime.
-    var devoMostrar;
-    if(enp.mostrar !== undefined) devoMostrar = !!enp.mostrar;
-    else devoMostrar = (c.imprimirNumeroPedido !== false);
-    if(devoMostrar){
-      var tamNum = enp.tamanho || c.tamanhoNumeroPedido || 'grande';
-      var alinNum = enp.alinhamento || 'centro';
-      var negNum = enp.negrito !== false;
-      // Aplica
-      if(alinNum === 'centro') s += escposCenter();
-      else s += escposLeft();
-      if(negNum) s += escposBold(true);
-      s += escposSize(tamNum);
-      s += '# ' + pedido.numeroSequencial + '\n';
-      s += _resetarEstilo();
-    }
-  }
+  // ─── NÚMERO DO PEDIDO ───
+  // Fica no RODAPÉ (montado mais abaixo): no porta-comandas o topo do papel
+  // some atrás do trilho, e o número precisa estar visível pra respeitar a fila.
   // Garçom (sempre estilo normal)
   if(c.imprimirGarcom && pedido.garcom){
     s += 'Garcom: ' + pedido.garcom + '\n';
@@ -6645,6 +6626,27 @@ function gerarCupomPedido(pedido, modelo){
     s += _resetarEstilo();
   }
   s += linha('=', L) + '\n';
+
+  // ─── NÚMERO DO PEDIDO NO RODAPÉ ───
+  // Config por modelo (estiloNumeroPedido) com fallback nas configs globais.
+  if(pedido.numeroSequencial){
+    var enp = (modelo && modelo.estiloNumeroPedido) || {};
+    var devoMostrar;
+    if(enp.mostrar !== undefined) devoMostrar = !!enp.mostrar;
+    else devoMostrar = (c.imprimirNumeroPedido !== false);
+    if(devoMostrar){
+      var tamNum = enp.tamanho || c.tamanhoNumeroPedido || 'grande';
+      var alinNum = enp.alinhamento || 'centro';
+      var negNum = enp.negrito !== false;
+      s += '\n';
+      if(alinNum === 'centro') s += escposCenter();
+      else s += escposLeft();
+      if(negNum) s += escposBold(true);
+      s += escposSize(tamNum);
+      s += '# ' + pedido.numeroSequencial + '\n';
+      s += _resetarEstilo();
+    }
+  }
 
   s += '\n';
   if(c.beep) s += escposBeep();
@@ -7194,17 +7196,9 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   }
   s += linhaDeco('=');
 
-  // ── SENHA (tamanho configurável) ──
-  s += '\n';
-  s += escposBold(true);
-  s += escposSize(tamanhoSenha);
-  s += 'SENHA\n';
-  s += '#' + senha + '\n';
-  s += escposSize('normal');
-  s += escposBold(false);
-  s += '\n';
-
-  s += linhaDeco('-');
+  // ── SENHA ──
+  // Impressa no RODAPÉ (montada no fim desta função): no porta-comandas o topo
+  // do papel fica escondido atrás do trilho e a senha some.
 
   // ── Instrução pro cliente (configurável) ──
   if(negritoInstrucao) s += escposBold(true);
@@ -7258,6 +7252,16 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   if(negritoRodape) s += escposBold(true);
   s += 'Obrigado pela preferencia!\n';
   if(negritoRodape) s += escposBold(false);
+
+  // ── SENHA NO RODAPÉ (fica visível no porta-comandas) ──
+  s += linhaDeco('=');
+  s += escposCenter();
+  s += escposBold(true);
+  s += escposSize(tamanhoSenha);
+  s += 'SENHA\n';
+  s += '#' + senha + '\n';
+  s += escposSize('normal');
+  s += escposBold(false);
 
   s += '\n\n\n';
   if(_configImp && _configImp.cortePapel) s += escposCut();

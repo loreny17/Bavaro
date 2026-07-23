@@ -16239,40 +16239,41 @@ function alternarGrupoFechar(chave){
 
 // Linha consolidada: "3x Pilsen ....... R$ 44,70"
 function _renderGrupoFechar(g){
+  // Linha do grupo com o MESMO visual dos itens normais — nada de card
+  // destacado nem "submenuzinho": só o "4x" no lugar do "1x". Tocar na linha
+  // expande/recolhe em silêncio (pra agir num item específico); o desagrupar
+  // geral continua no botão 🔗/🔓 do topo.
   var it0 = g.itens[0];
   var qtdTotal = g.itens.reduce(function(a,i){ return a + (i.qtd||1); }, 0);
   var valorTotal = g.itens.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
   var pago = it0.status === 'pago';
-  var aberto = !!_fecharGruposAbertos[_idGrupoFechar(g.chave)];
-  // Como agora agrupa só pelo nome, o conteúdo interno pode variar — avisa disso
-  var precos = {}, obsList = {}, pessoas = {};
-  g.itens.forEach(function(i){
-    precos[Number(i.preco||0).toFixed(2)] = 1;
-    if(i.obs) obsList[String(i.obs).trim()] = 1;
-    var p = i.pessoa || i.nomeCliente || '';
-    if(p) pessoas[p] = 1;
-  });
-  var variados = [];
-  if(Object.keys(precos).length > 1) variados.push('preços diferentes');
-  var obsKeys = Object.keys(obsList);
-  if(obsKeys.length) variados.push(obsKeys.length === 1 ? ('obs: ' + obsKeys[0]) : (obsKeys.length + ' observações'));
-  var pessoaKeys = Object.keys(pessoas);
-  var pessoaTxt = pessoaKeys.length === 1 ? pessoaKeys[0] : '';
-  if(pessoaKeys.length > 1) variados.push(pessoaKeys.length + ' pessoas');
+  var nomeStyle = pago ? 'text-decoration:line-through;opacity:0.55;' : '';
   var gid = _idGrupoFechar(g.chave);
-  return '<div onclick="alternarGrupoFechar(\''+gid+'\')" ' +
-    'style="display:flex;align-items:center;gap:10px;padding:11px 12px;margin-bottom:8px;border-radius:10px;cursor:pointer;' +
-    'background:' + (aberto ? 'rgba(212,168,67,0.07)' : 'var(--surface2)') + ';border:1px solid ' + (aberto ? 'rgba(212,168,67,0.35)' : 'var(--border)') + ';' + (pago ? 'opacity:0.55;' : '') + '">' +
-    '<span style="background:var(--accent);color:#000;font-weight:800;font-size:0.8rem;padding:3px 9px;border-radius:20px;flex-shrink:0;">' + qtdTotal + 'x</span>' +
-    '<div style="flex:1;min-width:0;">' +
-      '<div style="font-size:0.88rem;font-weight:600;' + (pago ? 'text-decoration:line-through;' : '') + '">' + esc(it0.nome||'') + '</div>' +
-      (variados.length ? '<div style="font-size:0.7rem;color:var(--muted);">' + esc(variados.join(' · ')) + '</div>' : '') +
-      (pessoaTxt ? '<div style="font-size:0.7rem;color:var(--accent);font-weight:600;">👤 ' + esc(pessoaTxt) + '</div>' : '') +
-      '<div style="font-size:0.66rem;color:var(--muted);margin-top:2px;">' + (aberto ? '▲ tocar pra recolher' : '▼ tocar pra ver separado') + '</div>' +
-    '</div>' +
-    '<div style="font-weight:700;font-size:0.9rem;flex-shrink:0;">R$ ' + fmtPreco(valorTotal) + '</div>' +
+
+  // Observações/pessoas do grupo (informativo, mesmo estilo das linhas normais)
+  var obsSet = {}, pessoasSet = {};
+  g.itens.forEach(function(i){
+    if(i.obs) obsSet[String(i.obs).trim()] = 1;
+    var p = i.pessoa || i.nomeCliente || '';
+    if(p) pessoasSet[p] = 1;
+  });
+  var obsKeys = Object.keys(obsSet);
+  var pessoaKeys = Object.keys(pessoasSet);
+  var sublinha = '';
+  if(pessoaKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(pessoaKeys[0])+'</div>';
+  else if(pessoaKeys.length > 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">👤 '+pessoaKeys.length+' pessoas</div>';
+  if(obsKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(obsKeys[0])+'</div>';
+  else if(obsKeys.length > 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+obsKeys.length+' observações</div>';
+
+  return '<div class="item-pgto" style="cursor:pointer;" onclick="alternarGrupoFechar(\''+gid+'\')">'+
+    '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
+      esc(qtdTotal+'x '+(it0.nome||''))+
+      sublinha+
+    '</div>'+
+    '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>'+
   '</div>';
 }
+
 
 function _renderItemFechar(it, c){
   var h = '';

@@ -16348,11 +16348,8 @@ function _renderItemFechar(it, c){
   var clickable = (_fecharModo === 'itens' && !pago);
   var checkboxHtml = clickable ? '<div class="item-pgto-check '+(marcado?'checked':'')+'" style="margin-right:8px;">'+(marcado?'✓':'')+'</div>' : (pago ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>' : '<span style="width:30px;display:inline-block;"></span>');
   var btnDividir = (clickable && (it.preco||0) > 0) ? '<button onclick="event.stopPropagation();abrirModalDividirItem(\''+it.itemKey+'\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px;">÷</button>' : '';
-  // ✂️ Separar unidades: "2x Chopp" numa linha só não deixa pagar 1 de cada vez.
-  // Este botão desmembra a linha em unidades independentes (2 linhas de 1x),
-  // aí cada uma pode ser selecionada, paga, vinculada ou cancelada sozinha.
-  var btnSeparar = (clickable && (it.qtd||1) > 1 && !(it.divisao && it.divisao.total > 1) && it.tipoVenda !== 'kg' && it.itemKey)
-    ? '<button onclick="event.stopPropagation();separarUnidadesItem(\''+it.itemKey+'\')" title="Separar em unidades" style="background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">✂️</button>' : '';
+  // (a separação em unidades agora é automática ao entrar no modo Por itens)
+  var btnSeparar = '';
   var btnAbater = (clickable && (it.preco||0) > 0 && !(it.divisao && it.divisao.total > 1)) ? '<button onclick="event.stopPropagation();abrirAbatimentoItem(\''+it.itemKey+'\')" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">$</button>' : '';
   var btnCancelarConta = (clickable && !(it.divisao && it.divisao.total > 1)) ? '<button onclick="event.stopPropagation();cancelarItemNaConta(\''+it.itemKey+'\')" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">✕</button>' : '';
   var btnPessoa = (clickable && it.itemKey && !it.pessoa) ? '<button onclick="event.stopPropagation();vincularPessoaFechar(\''+it.itemKey+'\',\''+esc(it.nome)+'\')" title="Vincular pessoa" style="background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">👤</button>' : '';
@@ -16759,7 +16756,70 @@ function renderFecharConta(){
   footer.innerHTML = btnsHtml;
 }
 
-function setFecharModo(m){ _fecharModo = m; renderFecharConta(); }
+function setFecharModo(m){
+  _fecharModo = m;
+  renderFecharConta();
+  // Por itens = pagamento unidade por unidade. Então, ao entrar nesse modo,
+  // TODAS as linhas de quantidade >1 são desmembradas automaticamente em
+  // unidades (sem botão, sem passo extra). O total não muda um centavo — e
+  // nos outros modos o agrupamento visual continua juntando ("4x Chopp"),
+  // então a conta não fica "espalhada" na conferência.
+  if(m === 'itens') _separarTodasUnidades();
+}
+
+// Desmembra de uma vez todos os itens qtd>1 da conta (transação única).
+var _separandoUnidades = false;
+function _separarTodasUnidades(){
+  var conta = _fecharConta;
+  if(!conta || !conta.id || _separandoUnidades) return;
+  // Só roda se houver o que separar (evita transação à toa)
+  var temMultiplos = (conta.itens||[]).some(function(i){
+    return (i.qtd||1) > 1 && !(i.divisao && i.divisao.total > 1) && i.tipoVenda !== 'kg' && i.status !== 'pago' && i.status !== 'cancelado';
+  });
+  if(!temMultiplos) return;
+  _separandoUnidades = true;
+  fbDb.runTransaction(function(tx){
+    var ref = fbDb.collection('contas_mesa').doc(conta.id);
+    return tx.get(ref).then(function(doc){
+      if(!doc.exists) throw new Error('Conta não encontrada');
+      var d = doc.data();
+      if(d.status !== 'aberta') throw new Error('A conta já foi fechada em outro aparelho');
+      var novos = [];
+      var mudou = false;
+      (d.itens||[]).forEach(function(it){
+        var q = it.qtd || 1;
+        var podeSeparar = q > 1 && !(it.divisao && it.divisao.total > 1) && it.tipoVenda !== 'kg' && it.status !== 'pago' && it.status !== 'cancelado' && it.itemKey;
+        if(!podeSeparar){ novos.push(it); return; }
+        mudou = true;
+        for(var u = 0; u < q; u++){
+          var copia = Object.assign({}, it, {qtd: 1});
+          if(u > 0){
+            copia.itemKey = it.itemKey + '_u' + u;
+            copia.separadoDe = it.itemKey;
+            copia.separadoEm = Date.now();
+          }
+          novos.push(copia);
+        }
+      });
+      if(mudou) tx.update(ref, {itens: novos, atualizadoEm: Date.now()});
+      return mudou;
+    });
+  }).then(function(mudou){
+    _separandoUnidades = false;
+    if(!mudou) return;
+    return fbDb.collection('contas_mesa').doc(conta.id).get().then(function(doc){
+      if(doc.exists){
+        _fecharConta = Object.assign({id: doc.id}, doc.data());
+        _contasMesaCache[String(_fecharConta.mesa)] = _fecharConta;
+        renderFecharConta();
+      }
+    });
+  }).catch(function(e){
+    _separandoUnidades = false;
+    console.warn('[Separar] falhou:', e.message);
+    showToast('⚠️ Não deu pra separar as unidades agora: ' + e.message, '#f7a34f', 5000);
+  });
+}
 function alternarOcultarPagos(){ _fecharOcultarPagos = !_fecharOcultarPagos; renderFecharConta(); }
 function toggleItemSelecao(itemKey){
   if(_fecharSelecaoItens[itemKey]) delete _fecharSelecaoItens[itemKey];

@@ -1630,6 +1630,13 @@ var firebaseConfig = {
 // ════════════════════════════════════════
 //  ESTADO GLOBAL
 // ════════════════════════════════════════
+// ═══ VERSÃO DO APP ═══
+// Atualize a cada publicação. Aparece no painel de debug e no console —
+// é como confirmamos que o celular está rodando a versão certa (o PWA
+// às vezes segura versão velha em cache mesmo depois de publicar).
+var APP_VERSAO = 'v23.07-1 (sem persistência)';
+try{ console.log('%c[Bávaro Garçom] ' + APP_VERSAO, 'color:#d4a843;font-weight:bold;'); }catch(e){}
+
 var fbDb = null;
 var _nomeGarcom = null;    // nome salvo
 var _ehAdmin = false;       // se o garçom é admin (definido no login)
@@ -1861,21 +1868,14 @@ window.addEventListener('load', function(){
       });
     }catch(e){ console.warn('[Init] settings long-polling falhou:', e.message); }
 
-    // ═══ MEMÓRIA LOCAL DO FIRESTORE (persistência em disco) ═══
-    // Faz o app lembrar do cardápio/dados entre aberturas: em vez de baixar
-    // ~250 documentos toda vez que abre, baixa só o que MUDOU desde a última
-    // visita — corta o grosso das leituras e deixa a abertura mais rápida.
-    // Nota: uma versão antiga disso causou travamentos por briga entre abas;
-    // o synchronizeTabs resolve exatamente isso (abas coordenam o acesso).
-    // Se ainda assim falhar (navegador sem suporte etc), o app segue normal
-    // sem a memória — só volta a ler tudo a cada abertura, como antes.
-    try{
-      fbDb.enablePersistence({ synchronizeTabs: true }).then(function(){
-        console.log('[Init] 💾 persistência local ativa (leituras só do que mudou)');
-      }).catch(function(e){
-        console.warn('[Init] persistência indisponível ('+(e.code||e.message)+') — seguindo sem ela');
-      });
-    }catch(e){ console.warn('[Init] persistência exceção:', e.message); }
+    // ═══ PERSISTÊNCIA DO FIRESTORE: REMOVIDA (de novo) ═══
+    // Tentamos reativar com synchronizeTabs, mas em celular (PWA) ela volta a
+    // travar o app na abertura quando o banco local dela corrompe/tranca —
+    // tudo fica "mudo": onSnapshot, get, até o reset de rede. O histórico já
+    // tinha avisado (foi removida no passado pelo MESMO motivo). A economia de
+    // leituras não paga o risco de garçom travado no meio do serviço.
+    // ⚠️ NÃO REATIVAR sem resolver a raiz. A abertura instantânea continua
+    // garantida pela "foto local" das mesas (mecanismo nosso, sem esse risco).
 
     // Conexão padrão WebSocket
 
@@ -6665,6 +6665,7 @@ function abrirPainelDebug(){
       '<div style="flex:1;overflow-y:auto;padding:14px;">' +
         '<div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:8px;padding:10px;margin-bottom:14px;font-family:monospace;font-size:0.74rem;line-height:1.6;color:#9ca3af;">' +
           '<div><strong style="color:#4ade80;">ESTADO ATUAL:</strong></div>' +
+          '<div>Versão: <strong style="color:#d4a843;">' + (typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '(antiga — sem marcador)') + '</strong></div>' +
           '<div>Garçom: <span style="color:#fff;">' + esc(info.nomeGarcom || '—') + '</span></div>' +
           '<div>Restaurante: <span style="color:#fff;">' + esc(info.restauranteId || '—') + '</span></div>' +
           '<div>Tenant: <span style="color:#fff;">' + esc((info.tenantId || '—').substring(0,30)) + '</span></div>' +

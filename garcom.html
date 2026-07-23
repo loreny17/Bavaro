@@ -16179,6 +16179,9 @@ function _onDragEnd(e){
 // Sem isso, 3 Pilsens pedidas em momentos diferentes viram 3 linhas soltas na
 // conferência com o cliente. Agrupado vira "3x Pilsen". Ligado por padrão;
 // dá pra desligar no botão, ou expandir só um grupo pra agir num item.
+// Regra fixa (sem botão): Pagar tudo / Valor parcial = agrupado (conferência);
+// Por itens = sempre separado unidade a unidade (pagamento). O usuário validou
+// que assim cobre todos os casos — o toggle manual só confundia.
 var _fecharAgruparIguais = true;
 var _fecharGruposAbertos = {};
 
@@ -16307,7 +16310,18 @@ function _renderGrupoFechar(g){
   if(obsKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(obsKeys[0])+'</div>';
   else if(obsKeys.length > 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+obsKeys.length+' observações</div>';
 
-  return '<div class="item-pgto">'+
+  // Deslizar funciona no grupo também: age sobre UMA unidade (a última linha
+  // não paga do grupo) — direita adiciona +1, esquerda remove 1 (com confirmação).
+  var alvoSwipe = null;
+  for(var ai = g.itens.length - 1; ai >= 0; ai--){
+    var cand = g.itens[ai];
+    if(cand.status !== 'pago' && cand.itemKey && cand.tipoVenda !== 'kg'){ alvoSwipe = cand; break; }
+  }
+  var swipeAttrsG = alvoSwipe
+    ? ' ontouchstart="_swipeFecharStart(event,\''+alvoSwipe.itemKey+'\')" ontouchmove="_swipeFecharMove(event)" ontouchend="_swipeFecharEnd(event)"'
+    : '';
+
+  return '<div class="item-pgto"'+(alvoSwipe?' id="fitem-'+alvoSwipe.itemKey+'"':'')+' style="position:relative;overflow:hidden;"'+swipeAttrsG+'>'+
     '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
       esc(qtdTotal+'x '+(it0.nome||''))+
       sublinha+
@@ -16453,15 +16467,18 @@ function _swipeFecharEnd(e){
 function _alterarQtdItemConta(itemKey, delta){
   if(!_fecharConta) return;
 
-  // Swipe esquerda: confirma antes de remover/diminuir
+  // Confirmação nos DOIS sentidos — o deslizar é fácil de acionar sem querer,
+  // e tanto remover quanto ADICIONAR item mudam a conta do cliente.
+  var it = (_fecharConta.itens||[]).find(function(i){ return i.itemKey === itemKey; });
+  if(!it) return;
   if(delta < 0){
-    var it = (_fecharConta.itens||[]).find(function(i){ return i.itemKey === itemKey; });
-    if(!it) return;
     var novaQtd = (it.qtd||1) + delta;
     var msg = novaQtd <= 0
       ? 'Remover "'+it.nome+'" da conta?'
       : 'Diminuir "'+it.nome+'" para '+novaQtd+'x?';
     if(!confirm(msg)) return;
+  } else if(delta > 0){
+    if(!confirm('Adicionar mais 1x "'+it.nome+'" na conta?')) return;
   }
 
   var itens = (_fecharConta.itens||[]).map(function(it){
@@ -16523,7 +16540,6 @@ function renderFecharConta(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">'+
         '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Itens</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
-          '<button onclick="alternarAgruparIguais()" style="background:'+(_fecharAgruparIguais?'rgba(212,168,67,0.15)':'transparent')+';border:1px solid '+(_fecharAgruparIguais?'var(--accent)':'var(--border2)')+';color:'+(_fecharAgruparIguais?'var(--accent)':'var(--muted)')+';font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:700;">'+(_fecharAgruparIguais?'🔗 Agrupados':'🔓 Separados')+'</button>'+
           (qtdPagos>0?'<button onclick="alternarOcultarPagos()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;">'+(_fecharOcultarPagos?'👁️ Mostrar pagos':'🙈 Ocultar pagos')+' ('+qtdPagos+')</button>':'')+
         '</div>'+
       '</div>';

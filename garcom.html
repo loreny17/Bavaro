@@ -16232,24 +16232,66 @@ function alternarAgruparIguais(){
   _fecharGruposAbertos = {};
   renderFecharConta();
 }
-function alternarGrupoFechar(chave){
-  _fecharGruposAbertos[chave] = !_fecharGruposAbertos[chave];
-  renderFecharConta();
-}
 
 // Linha consolidada: "3x Pilsen ....... R$ 44,70"
+// Desmembra um item de quantidade N em N itens de 1 unidade, direto no
+// documento da conta (transação — seguro com vários aparelhos). O primeiro
+// herda o itemKey original (preserva o vínculo com o pedido da cozinha).
+function separarUnidadesItem(itemKey){
+  var conta = _fecharConta;
+  if(!conta || !conta.id) return;
+  fbDb.runTransaction(function(tx){
+    var ref = fbDb.collection('contas_mesa').doc(conta.id);
+    return tx.get(ref).then(function(doc){
+      if(!doc.exists) throw new Error('Conta não encontrada');
+      var d = doc.data();
+      if(d.status !== 'aberta') throw new Error('A conta já foi fechada em outro aparelho');
+      var itens = (d.itens||[]).slice();
+      var idx = itens.findIndex(function(i){ return i.itemKey === itemKey; });
+      if(idx < 0) throw new Error('Item não encontrado (a conta mudou?)');
+      var it = itens[idx];
+      var q = it.qtd || 1;
+      if(q <= 1) return 0;
+      var unidades = [];
+      for(var u = 0; u < q; u++){
+        var copia = Object.assign({}, it, {
+          qtd: 1,
+          itemKey: u === 0 ? it.itemKey : (it.itemKey + '_u' + u),
+          separadoDe: u === 0 ? null : it.itemKey,
+          separadoEm: u === 0 ? null : Date.now()
+        });
+        if(copia.separadoDe === null){ delete copia.separadoDe; delete copia.separadoEm; }
+        unidades.push(copia);
+      }
+      itens.splice.apply(itens, [idx, 1].concat(unidades));
+      tx.update(ref, {itens: itens, atualizadoEm: Date.now()});
+      return q;
+    });
+  }).then(function(q){
+    if(!q) return;
+    showToast('✂️ Separado em ' + q + ' unidades', '#60a5fa', 3000);
+    // Recarrega a conta fresca pra tela refletir na hora
+    fbDb.collection('contas_mesa').doc(conta.id).get().then(function(doc){
+      if(doc.exists){
+        _fecharConta = Object.assign({id: doc.id}, doc.data());
+        _contasMesaCache[String(_fecharConta.mesa)] = _fecharConta;
+        renderFecharConta();
+      }
+    });
+  }).catch(function(e){
+    showToast('❌ ' + e.message, '#f87171', 5000);
+  });
+}
+
 function _renderGrupoFechar(g){
-  // Linha do grupo com o MESMO visual dos itens normais — nada de card
-  // destacado nem "submenuzinho": só o "4x" no lugar do "1x". Tocar na linha
-  // expande/recolhe em silêncio (pra agir num item específico); o desagrupar
-  // geral continua no botão 🔗/🔓 do topo.
+  // Linha do grupo com o MESMO visual dos itens normais — só o "4x" no lugar
+  // do "1x". Sem clique, sem expansão: pra pagar/agir em separado, usa o modo
+  // "Por itens" (sempre desagrupado) ou o botão 🔗/🔓 do topo.
   var it0 = g.itens[0];
   var qtdTotal = g.itens.reduce(function(a,i){ return a + (i.qtd||1); }, 0);
   var valorTotal = g.itens.reduce(function(a,i){ return a + (i.preco||0)*(i.qtd||1); }, 0);
   var pago = it0.status === 'pago';
   var nomeStyle = pago ? 'text-decoration:line-through;opacity:0.55;' : '';
-  var gid = _idGrupoFechar(g.chave);
-
   // Observações/pessoas do grupo (informativo, mesmo estilo das linhas normais)
   var obsSet = {}, pessoasSet = {};
   g.itens.forEach(function(i){
@@ -16265,7 +16307,7 @@ function _renderGrupoFechar(g){
   if(obsKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(obsKeys[0])+'</div>';
   else if(obsKeys.length > 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+obsKeys.length+' observações</div>';
 
-  return '<div class="item-pgto" style="cursor:pointer;" onclick="alternarGrupoFechar(\''+gid+'\')">'+
+  return '<div class="item-pgto">'+
     '<div style="flex:1;font-size:0.84rem;'+nomeStyle+'">'+
       esc(qtdTotal+'x '+(it0.nome||''))+
       sublinha+
@@ -16306,6 +16348,11 @@ function _renderItemFechar(it, c){
   var clickable = (_fecharModo === 'itens' && !pago);
   var checkboxHtml = clickable ? '<div class="item-pgto-check '+(marcado?'checked':'')+'" style="margin-right:8px;">'+(marcado?'✓':'')+'</div>' : (pago ? '<span style="color:var(--success);font-size:1.1rem;margin-right:8px;">✓</span>' : '<span style="width:30px;display:inline-block;"></span>');
   var btnDividir = (clickable && (it.preco||0) > 0) ? '<button onclick="event.stopPropagation();abrirModalDividirItem(\''+it.itemKey+'\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.3);color:var(--accent);padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px;">÷</button>' : '';
+  // ✂️ Separar unidades: "2x Chopp" numa linha só não deixa pagar 1 de cada vez.
+  // Este botão desmembra a linha em unidades independentes (2 linhas de 1x),
+  // aí cada uma pode ser selecionada, paga, vinculada ou cancelada sozinha.
+  var btnSeparar = (clickable && (it.qtd||1) > 1 && !(it.divisao && it.divisao.total > 1) && it.tipoVenda !== 'kg' && it.itemKey)
+    ? '<button onclick="event.stopPropagation();separarUnidadesItem(\''+it.itemKey+'\')" title="Separar em unidades" style="background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">✂️</button>' : '';
   var btnAbater = (clickable && (it.preco||0) > 0 && !(it.divisao && it.divisao.total > 1)) ? '<button onclick="event.stopPropagation();abrirAbatimentoItem(\''+it.itemKey+'\')" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">$</button>' : '';
   var btnCancelarConta = (clickable && !(it.divisao && it.divisao.total > 1)) ? '<button onclick="event.stopPropagation();cancelarItemNaConta(\''+it.itemKey+'\')" style="background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">✕</button>' : '';
   var btnPessoa = (clickable && it.itemKey && !it.pessoa) ? '<button onclick="event.stopPropagation();vincularPessoaFechar(\''+it.itemKey+'\',\''+esc(it.nome)+'\')" title="Vincular pessoa" style="background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;padding:4px 9px;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;margin-left:4px;">👤</button>' : '';
@@ -16327,7 +16374,7 @@ function _renderItemFechar(it, c){
     '</div>'+
     (temAbatimento ? '<div style="display:flex;flex-direction:column;align-items:flex-end;'+nomeStyle+'"><div style="font-size:0.7rem;color:var(--muted);text-decoration:line-through;">R$ '+fmtPreco(valorTotal)+'</div><div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1rem;">R$ '+fmtPreco(valorRestante)+'</div></div>' :
       '<div style="font-family:Bebas Neue,sans-serif;color:'+(pago?'var(--muted)':'var(--accent)')+';'+nomeStyle+'">R$ '+fmtPreco(valorTotal)+'</div>')+
-    btnDividir+btnAbater+btnPessoa+btnCancelarConta+
+    btnDividir+btnSeparar+btnAbater+btnPessoa+btnCancelarConta+
   '</div>';
   return h;
 }
@@ -16547,7 +16594,9 @@ function renderFecharConta(){
         html += '</div>';
       }
     } else {
-      if(_fecharAgruparIguais){
+      if(_fecharAgruparIguais && _fecharModo !== 'itens'){
+        // No "Por itens" o agrupamento é sempre ignorado: a seleção pra
+        // pagamento é item a item, então lá a lista vem sempre separada.
         var gruposIg = [], mapaIg = {};
         itensVisiveis.forEach(function(it){
           var k = _chaveAgrupIgual(it);
@@ -16559,11 +16608,6 @@ function renderFecharConta(){
           if(g.solto){ html += _renderItemFechar(g.solto, c); return; }
           if(g.itens.length === 1){ html += _renderItemFechar(g.itens[0], c); return; }
           html += _renderGrupoFechar(g);
-          if(_fecharGruposAbertos[_idGrupoFechar(g.chave)]){
-            html += '<div style="margin-left:10px;padding-left:8px;border-left:2px solid rgba(212,168,67,0.3);">';
-            g.itens.forEach(function(it){ html += _renderItemFechar(it, c); });
-            html += '</div>';
-          }
         });
       } else {
         // Desagrupado: separa UNIDADE por unidade (um "2x Pilsen" vira duas

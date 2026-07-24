@@ -16025,11 +16025,11 @@ function cancelarItemNaConta(itemKey){
 function _renderItemFecharDrag(it, c){
   var h = _renderItemFechar(it, c);
   if(it.itemKey && it.status !== 'pago'){
-    // Adiciona id ao item e handle no final da linha antes do último </div>
-    h = h.replace(
-      '<div class="item-pgto"',
-      '<div class="item-pgto" id="drag-item-'+it.itemKey+'"'
-    );
+    // ⚠️ NÃO adicionar um segundo id aqui: a linha já vem com id="fitem-KEY"
+    // do _renderItemFechar. Quando este código injetava id="drag-item-KEY"
+    // na frente, o navegador ficava com o primeiro id e o DESLIZAR (que
+    // procura 'fitem-KEY') não achava o elemento — morria em silêncio.
+    // O drag passa a usar o mesmo id fitem- (ajustado em iniciarDragItem).
     // Insere handle antes do fechamento do item-pgto
     var handle = '<div ontouchstart="iniciarDragItem(event,\''+it.itemKey+'\')" '+
       'style="padding:4px 0 4px 10px;color:var(--muted);font-size:1.2rem;cursor:grab;touch-action:none;flex-shrink:0;user-select:none;">⠿</div>';
@@ -16086,7 +16086,7 @@ function iniciarDragItem(e, itemKey){
   var touch = e.touches[0];
 
   // Cria ghost visual
-  var origem = document.getElementById('drag-item-'+itemKey);
+  var origem = (document.getElementById('fitem-'+itemKey) || document.getElementById('drag-item-'+itemKey));
   if(!origem) return;
   var rect = origem.getBoundingClientRect();
 
@@ -16161,7 +16161,7 @@ function _onDragEnd(e){
   });
 
   // Restaura opacidade do item
-  var origem = document.getElementById('drag-item-'+_dragItemKey);
+  var origem = (document.getElementById('fitem-'+_dragItemKey) || document.getElementById('drag-item-'+_dragItemKey));
   if(origem) origem.style.opacity = '';
 
   // Executa troca se soltou numa zona

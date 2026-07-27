@@ -1656,7 +1656,13 @@ var _nomeGarcom = null;    // nome salvo
 var _ehAdmin = false;       // se o garçom é admin (definido no login)
 var _podeInsumos = false;   // se o garçom pode pedir insumos ao Central
 var _nomeRestauranteG = ''; // nome do restaurante (pro pedido de insumos)
-var _mesaAtiva = null;     // número da mesa (ex: "3")
+var _mesaAtiva = null;
+// Handshake da entrada otimista: enquanto a checagem da mesa não termina,
+// o envio de pedido espera por ela (sem travar a montagem do carrinho).
+var _mesaVerificacaoPendente = null;
+// Escudo anti-toque-fantasma: toques dados ANTES da tela abrir ficavam na
+// fila do navegador e disparavam depois em cima das categorias.
+var _telaMesaAbertaEm = 0;     // número da mesa (ex: "3")
 var _tenantId = null;
 var _restauranteId = null;
 // Config de taxa de serviço (carregada de restaurantes_publicos)
@@ -13459,6 +13465,26 @@ function devolverEstoque(itemId, qtd){
 function enviarPedido(){
   if(!_carrinho.length){ showToast('Carrinho vazio!'); return; }
 
+  // Entrada otimista: se entramos na mesa antes da checagem do servidor
+  // terminar, o envio ESPERA ela concluir (até 8s) — assim o pedido sempre
+  // cai na conta certa (a existente da mesa, se houver) e nada se perde.
+  var vp = _mesaVerificacaoPendente;
+  var mesaStr = String(_mesaAtiva);
+  var temContaCache = _contasMesaCache[mesaStr] && _contasMesaCache[mesaStr].id;
+  if(vp && vp.mesa === mesaStr && !vp.concluida && !temContaCache){
+    if(!enviarPedido._esperandoDesde) enviarPedido._esperandoDesde = Date.now();
+    var esperou = Date.now() - enviarPedido._esperandoDesde;
+    if(esperou < 8000){
+      showToast('🔄 Confirmando a mesa no servidor... o pedido sai em instantes', '#f7a34f', 2000);
+      setTimeout(enviarPedido, 900);
+      return;
+    }
+    // 8s sem resposta: segue pro fluxo normal, que tem os próprios guards
+    enviarPedido._esperandoDesde = null;
+  } else {
+    enviarPedido._esperandoDesde = null;
+  }
+
   // Se mesa tem nomes e algum item do carrinho não tem pessoa vinculada,
   // pergunta para quem é antes de enviar
   var pessoas = _getPessoasMesa();
@@ -14313,6 +14339,9 @@ function renderCatNav(){
 }
 
 function selecionarCat(catId){
+  // Toque chegando logo após a tela da mesa abrir = clique fantasma da fila
+  // do navegador (garçom tocou 2-3x na mesa enquanto esperava). Ignora.
+  if(Date.now() - _telaMesaAbertaEm < 450) return;
   _catAtiva = catId;
   renderItens();
   renderCatNav();
@@ -15309,6 +15338,7 @@ function abrirContaMesa(num){
     if(bEl) bEl.value = '';
     carregarCarrinho();
     document.getElementById('mesa-screen').classList.add('hidden');
+    _telaMesaAbertaEm = Date.now();
     iniciarApp();
   }
 
@@ -15336,17 +15366,30 @@ function abrirContaMesa(num){
     return;
   }
 
-  // SEGUNDO: busca direto no Firestore
+  // SEGUNDO: mesa sem cache → ENTRA NA HORA (otimista) e verifica por trás.
+  // Antes, a tela ficava travada esperando o servidor responder — e os toques
+  // extras do garçom iam pra fila e disparavam depois em cima das categorias.
+  // Agora: entra já (pode até começar a montar o carrinho); a checagem chega
+  // em 1-3s e adota a conta existente da mesa, se houver. O envio do pedido
+  // aguarda a checagem terminar (handshake abaixo), então nada se perde.
+  entrarNaMesa(null);
+  showToast('Mesa ' + num + ' — verificando...', '#f7a34f', 2000);
+  _mesaVerificacaoPendente = {mesa: String(num), concluida: false};
+
   fbDb.collection('contas_mesa')
     .where('restauranteId','==', _restauranteId)
     .where('mesa','==', mesaInt)
     .where('status','==','aberta')
     .get().then(function(snap){
+      if(_mesaVerificacaoPendente && _mesaVerificacaoPendente.mesa === String(num)) _mesaVerificacaoPendente.concluida = true;
       // ⚠️ Se a resposta veio do CACHE local (sem conexão real com o servidor),
       // um resultado vazio NÃO significa mesa livre — significa "não sei".
       // Criar conta nesse estado gera contas duplicadas e pedidos "sumindo".
       if(snap.metadata && snap.metadata.fromCache && snap.empty){
-        showToast('⚠️ Sem conexão com o servidor — aguarde as mesas carregarem e tente de novo','#f7a34f', 5000);
+        // Sem conexão real: seguimos na mesa (carrinho funciona), mas o envio
+        // vai aguardar a conexão voltar — o handshake do enviarPedido cuida.
+        if(_mesaVerificacaoPendente) _mesaVerificacaoPendente.concluida = false;
+        showToast('⚠️ Sem conexão — dá pra montar o pedido; o envio espera reconectar','#f7a34f', 5000);
         return;
       }
       if(!snap.empty){
@@ -15365,7 +15408,7 @@ function abrirContaMesa(num){
           if(snap.size > 1){
             showToast('⚠️ ' + snap.size + ' contas detectadas — use "Liberar mesa" pra limpar','#f7a34f', 4000);
           }
-          entrarNaMesa('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
+          if(String(_mesaAtiva) === String(num)) showToast('✓ Mesa ' + num + ' (continuando conta)', '#4ade80');
           // Limpa contas vazias órfãs em background
           if(vazias.length > 0){
             vazias.forEach(function(c){

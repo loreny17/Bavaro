@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" id="meta-theme-color" content="#0d0d0d">
+<!-- Preconnect: abre DNS+TLS com os servidores em paralelo com o carregamento
+     da página, em vez de na hora da primeira consulta — corta 0,3-0,8s do boot -->
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <script>
   // Aplica tema salvo IMEDIATAMENTE (antes de qualquer CSS) pra evitar flash branco/preto
   (function(){
@@ -1634,7 +1639,16 @@ var firebaseConfig = {
 // Atualize a cada publicação. Aparece no painel de debug e no console —
 // é como confirmamos que o celular está rodando a versão certa (o PWA
 // às vezes segura versão velha em cache mesmo depois de publicar).
-var APP_VERSAO = 'v23.07-1 (sem persistência)';
+var APP_VERSAO = 'v24.07-1 (boot medido)';
+// Cronômetro do boot: marca quanto tempo cada etapa levou desde a abertura.
+// Aparece no painel de debug — é como sabemos ONDE os segundos estão indo.
+var _bootT0 = Date.now();
+var _bootMarcas = {};
+function _bootMarca(nome){
+  if(_bootMarcas[nome]) return; // só a primeira ocorrência interessa
+  _bootMarcas[nome] = Date.now() - _bootT0;
+  console.log('[Boot] ' + nome + ': ' + _bootMarcas[nome] + 'ms');
+}
 try{ console.log('%c[Bávaro Garçom] ' + APP_VERSAO, 'color:#d4a843;font-weight:bold;'); }catch(e){}
 
 var fbDb = null;
@@ -1881,6 +1895,7 @@ window.addEventListener('load', function(){
 
     // Auth anônimo em background
     firebase.auth().signInAnonymously().then(function(){
+      _bootMarca('auth_ok');
       console.log('[Auth] OK');
     }).catch(function(e){
       console.warn('[Auth] falhou:', e.code);
@@ -5174,6 +5189,7 @@ function _hidratarFotoMesas(){
       document.body.appendChild(overlay);
       setTimeout(function(){ if(overlay.parentNode) overlay.remove(); }, 8000);
     }
+    _bootMarca('foto_local_pintada');
     console.log('[Mesas] ⚡ mapa pintado da foto local ('+Object.keys(_mesasOcupadas).length+' mesas, '+Math.round((Date.now()-foto.t)/1000)+'s atrás)');
     return true;
   }catch(e){ return false; }
@@ -5190,6 +5206,7 @@ function escutarMesasOcupadas(){
 
   // Tenta um get() imediato direto do servidor (mais confiável que esperar onSnapshot)
   ref.get({source:'server'}).then(function(snap){
+    _bootMarca('servidor_respondeu');
     console.log('[Mesas] get(server) OK: '+snap.size+' mesas');
     if(!_primeiroUpdate){
       registrarUpdateListener('mesas');
@@ -6666,6 +6683,7 @@ function abrirPainelDebug(){
         '<div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:8px;padding:10px;margin-bottom:14px;font-family:monospace;font-size:0.74rem;line-height:1.6;color:#9ca3af;">' +
           '<div><strong style="color:#4ade80;">ESTADO ATUAL:</strong></div>' +
           '<div>Versão: <strong style="color:#d4a843;">' + (typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '(antiga — sem marcador)') + '</strong></div>' +
+          '<div>Boot: <strong style="color:#60a5fa;">' + (typeof _bootMarcas !== 'undefined' ? (Object.keys(_bootMarcas).map(function(k){ return k+'='+(_bootMarcas[k]/1000).toFixed(1)+'s'; }).join(' · ') || '(sem marcas)') : '-') + '</strong></div>' +
           '<div>Garçom: <span style="color:#fff;">' + esc(info.nomeGarcom || '—') + '</span></div>' +
           '<div>Restaurante: <span style="color:#fff;">' + esc(info.restauranteId || '—') + '</span></div>' +
           '<div>Tenant: <span style="color:#fff;">' + esc((info.tenantId || '—').substring(0,30)) + '</span></div>' +

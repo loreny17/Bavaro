@@ -1490,7 +1490,7 @@ function renderItens(){
   }
   // Filtro base: remove itens pausados e itens com estoque esgotado
   var _filtroDisponivel = function(it){
-    if(it.pausado === true) return false; // pausado: some do totem
+    if(pausaAtiva(it)) return false; // pausado: some do totem
     if(it.controlarEstoque === true && typeof it.estoque === 'number' && it.estoque <= 0) return false; // esgotado: some
     if(it.ativo === false) return false; // ativo: campo antigo
     return true;
@@ -1582,6 +1582,12 @@ function _grupoValido(grupoId){
 }
 
 // Pega os grupos vinculados a um item — FIXOS (do item) + CONDICIONAIS (das opções escolhidas)
+// Pausa com prazo: pausado "de verdade" só se indefinido ou com validade futura
+function pausaAtiva(o){
+  if(!o || o.pausado !== true) return false;
+  if(o.pausadoAte && o.pausadoAte <= Date.now()) return false;
+  return true;
+}
 function _gruposDoItem(item){
   if(!item) return [];
   var resultado = [];
@@ -1590,7 +1596,7 @@ function _gruposDoItem(item){
   // 1. Grupos fixos do item (sempre aparecem) — vinculados via item.gruposIds
   (item.gruposIds || []).forEach(function(gid){
     var g = _grupos.find(function(x){ return x.id === gid; });
-    if(g && g.opcoes && g.opcoes.length && !g.pausado && !jaIncluidos[gid]){
+    if(g && g.opcoes && g.opcoes.length && !pausaAtiva(g) && !jaIncluidos[gid]){
       resultado.push(g);
       jaIncluidos[gid] = true;
     }
@@ -1604,7 +1610,7 @@ function _gruposDoItem(item){
       if(g.fonte !== 'principal') return;
       if(jaIncluidos[g.id]) return;
       if(!g.opcoes || !g.opcoes.length) return;
-      if(g.pausado) return;
+      if(pausaAtiva(g)) return;
       var aplica = g.aplicaEm || {};
       var bate = false;
       if(aplica.itens && aplica.itens.indexOf(item.id) >= 0) bate = true;
@@ -1629,7 +1635,7 @@ function _gruposDoItem(item){
         op.abreGrupos.forEach(function(gid){
           if(jaIncluidos[gid]) return;
           var g = _grupos.find(function(x){ return x.id === gid; });
-          if(g && g.opcoes && g.opcoes.length && !g.pausado){
+          if(g && g.opcoes && g.opcoes.length && !pausaAtiva(g)){
             resultado.push(g);
             jaIncluidos[gid] = true;
             mudou = true;
@@ -1938,7 +1944,7 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
     // Busca em todos os itens disponíveis (totem + principal)
     var todosItens = (window._cardapioItens || []).concat(window._itensPrincipal || []);
     _sugItens = todosItens.filter(function(i){
-      if(!i.disponivel || i.pausado || i.id === (itemAdicionado||{}).id) return false;
+      if(!i.disponivel || pausaAtiva(i) || i.id === (itemAdicionado||{}).id) return false;
       var catId = i.categoriaId || i.categoria;
       return catIds.indexOf(catId) >= 0;
     });
@@ -1956,7 +1962,7 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
     dbg('[SUGESTOES] Itens encontrados para cats '+JSON.stringify(catIds)+': '+_sugItens.length);
   } else {
     _sugItens = (window._cardapioItens || []).filter(function(i){
-      return i.disponivel && !i.pausado && i.sugerido === true && i.id !== (itemAdicionado||{}).id;
+      return i.disponivel && !pausaAtiva(i) && i.sugerido === true && i.id !== (itemAdicionado||{}).id;
     }).sort(function(a,b){ return (a.ordemSugerido||99)-(b.ordemSugerido||99); });
   }
   if(!_sugItens.length){
@@ -2249,7 +2255,7 @@ function renderWizardPasso(){
   if(estilo === 'lista'){
     // ── LISTA COMPACTA (sem fotos) ──
     opcoesHtml = (grupo.opcoes||[]).map(function(o, idx){
-      if(o.pausado) return ''; // opção esgotada — some da tela do cliente
+      if(pausaAtiva(o)) return ''; // opção esgotada — some da tela do cliente
       var selecionado = selecaoAtual.indexOf(idx) >= 0;
       var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
       var descHtml = o.descricao ? '<div style="font-size:0.82rem;color:var(--muted);margin-top:3px;line-height:1.3;">' + escapar(o.descricao) + '</div>' : '';
@@ -2265,7 +2271,7 @@ function renderWizardPasso(){
   } else {
     // ── CARDS COM FOTOS ──
     opcoesHtml = (grupo.opcoes||[]).map(function(o, idx){
-      if(o.pausado) return ''; // opção esgotada — some da tela do cliente
+      if(pausaAtiva(o)) return ''; // opção esgotada — some da tela do cliente
       var selecionado = selecaoAtual.indexOf(idx) >= 0;
       var precoTxt = o.preco ? '+R$ ' + o.preco.toLocaleString('pt-BR', {minimumFractionDigits:2}) : '';
       var foto = o.foto
@@ -2321,8 +2327,27 @@ function wizardEscolher(idx){
   var grupo = _wizGrupos[_wizPassoAtual];
   if(!grupo) return;
   var opEscolhida = (grupo.opcoes||[])[idx];
-  if(!opEscolhida || opEscolhida.pausado) return; // opção esgotada — ignora o toque
+  if(!opEscolhida || pausaAtiva(opEscolhida)) return; // opção esgotada — ignora o toque
   if(grupo.tipo === 'multipla'){
+    // ── Opção "nenhuma/negativa" avança DIRETO ──
+    // "Nenhuma delas", "Não, obrigado", "Sem observação" etc. são o jeito do
+    // cliente dizer "próxima tela" — exigir mais um toque no botão de baixo só
+    // atrasa. Detecção pelo nome da opção; as demais seguem em múltipla escolha.
+    var nomeNorm = String(opEscolhida.nome||'').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,''); // tira acentos
+    var ehNegativa = /^(nenhum|nenhuma|nao |nao,|nao$|sem observacao|nada|pular)/.test(nomeNorm)
+      || nomeNorm.indexOf('nenhuma delas') >= 0 || nomeNorm.indexOf('nenhum deles') >= 0;
+    if(ehNegativa){
+      _selecoesTemp[grupo.id] = []; // "nenhuma" = zera qualquer marcação anterior
+      try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
+      var ov2 = document.getElementById('wizard-overlay');
+      if(ov2){
+        var cards2 = ov2.querySelectorAll('[onclick*="wizardEscolher"]');
+        if(cards2[idx]) cards2[idx].classList.add('wiz-card-confirmado');
+      }
+      setTimeout(wizardAvancar, 280);
+      return;
+    }
     var atual = _selecoesTemp[grupo.id] || [];
     var pos = atual.indexOf(idx);
     if(pos >= 0) atual.splice(pos, 1); else atual.push(idx);
@@ -2500,7 +2525,7 @@ function renderModalItem(){
       var ehUnica = !_ehMultipla(g);
       var selDoGrupo = _selecoesTemp[g.id] || [];
       var opcoesHtml = (g.opcoes||[]).map(function(op, idx){
-        if(op.pausado) return ''; // opção esgotada — some da tela do cliente
+        if(pausaAtiva(op)) return ''; // opção esgotada — some da tela do cliente
         var marcado = selDoGrupo.indexOf(idx) >= 0;
         var precoOp = _precoOpcao(op);
         var precoTxt = precoOp
@@ -2561,7 +2586,7 @@ function selecionarOpcao(grupoId, idx){
   var g = _grupos.find(function(x){ return x.id === grupoId; });
   if(!g) return;
   var opEscolhida = (g.opcoes||[])[idx];
-  if(!opEscolhida || opEscolhida.pausado) return; // opção esgotada — ignora o toque
+  if(!opEscolhida || pausaAtiva(opEscolhida)) return; // opção esgotada — ignora o toque
   var ehUnica = !_ehMultipla(g);
   if(!_selecoesTemp[grupoId]) _selecoesTemp[grupoId] = [];
   var atual = _selecoesTemp[grupoId];
@@ -3154,7 +3179,7 @@ function debugSugestoes(){
         out.textContent += 'Tela '+i+' "'+t.titulo+'":\n';
         t.categorias.forEach(function(catId){
           var count = (window._cardapioItens||[]).filter(function(it){
-            return (it.categoriaId||it.categoria) === catId && it.disponivel && !it.pausado;
+            return (it.categoriaId||it.categoria) === catId && it.disponivel && !pausaAtiva(it);
           }).length;
           var catNome = (window._cardapioCats||[]).find(function(c){return c.id===catId;});
           out.textContent += '  '+catId.slice(0,12)+'... ('+( catNome?catNome.nome:'?')+') = '+count+' itens\n';

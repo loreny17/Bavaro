@@ -12718,8 +12718,10 @@ function atualizarBtnAdd(){
       btn.style.opacity = '1';
     }
   } else {
-    var precoUnit = (_itemAberto.preco||0) + calcularPrecoExtras();
-    var total = precoUnit * _qtdTemp;
+    // ⚠️ Adicionais com quantidade são ABSOLUTOS: "3x Palito" = 3 palitos no
+    // pedido, não 3 por lanche. Antes: (base+extras)×qtd → 3 burgers com 3
+    // palitos cobrava 9 palitos (o bug dos R$154,80 em vez de R$125,40).
+    var total = (_itemAberto.preco||0) * _qtdTemp + calcularPrecoExtras();
     btn.textContent = 'Adicionar — R$ ' + fmtPreco(total);
     btn.style.opacity = '1';
   }
@@ -12800,14 +12802,20 @@ function adicionarAoCarrinho(){
       pessoa: ''
     };
   } else {
+    // Total da linha = base×qtd + extras (extras são ABSOLUTOS — ver nota no
+    // atualizarBtnAdd). O modelo da conta multiplica preco×qtd, então o preço
+    // unitário gravado embute os extras diluídos: total/qtd. A multiplicação
+    // reconstrói o total exato ao centavo.
+    var qtdFinal = Math.max(1, _qtdTemp||1);
+    var totalLinha = (_itemAberto.preco||0) * qtdFinal + extras;
     itemCarrinho = {
       id: _itemAberto.id,
       nome: _itemAberto.nome,
       tipoVenda: 'unidade',
-      preco: (_itemAberto.preco||0) + extras,
+      preco: totalLinha / qtdFinal,
       precoBase: _itemAberto.preco||0,
       extras: extras,
-      qtd: _qtdTemp,
+      qtd: qtdFinal,
       obs: obs,
       foto: _itemAberto.foto||'',
       selecoes: selecoes

@@ -14626,20 +14626,35 @@ function _salvarPessoasMesa(){
 function _getPessoasMesa(){
   var num = _mesaAtiva;
   if(!num) return _pessoasMesa;
-  // Extrai pessoas dos itens já vinculados nos pedidos em memória (desta sessão)
+  // ⚠️ Só pedidos DESTA mesa: sem o filtro, os nomes lançados na mesa 21
+  // "vazavam" pro pedido da mesa 25 (o app perguntava "pra quem?" com nomes
+  // de outra mesa). O mesmo vale pra conta em cache — fonte mais confiável.
   var pessoasItens = [];
+  // 1ª fonte: itens da CONTA desta mesa (cache) — pega nomes de qualquer garçom
+  var contaMesa = _contasMesaCache[String(num)];
+  if(contaMesa && contaMesa.itens){
+    contaMesa.itens.forEach(function(it){
+      if(it.status === 'cancelado') return;
+      if(it.pessoa && pessoasItens.indexOf(it.pessoa) < 0) pessoasItens.push(it.pessoa);
+    });
+  }
+  if(contaMesa && Array.isArray(contaMesa.pessoas)){
+    contaMesa.pessoas.forEach(function(p){
+      if(p && pessoasItens.indexOf(p) < 0) pessoasItens.push(p);
+    });
+  }
+  // 2ª fonte: pedidos desta sessão — FILTRADOS pela mesa ativa
   (_meusPedidos||[]).forEach(function(p){
+    var mesaP = String(p.mesa != null ? p.mesa : '');
+    if(mesaP !== String(num)) return;
     (p.itens||[]).forEach(function(it){
       if(it.pessoa && pessoasItens.indexOf(it.pessoa) < 0){
         pessoasItens.push(it.pessoa);
       }
     });
   });
-  // Adiciona nomes já em _pessoasMesa que não vieram dos pedidos
-  _pessoasMesa.forEach(function(p){
-    if(pessoasItens.indexOf(p) < 0) pessoasItens.push(p);
-  });
-  if(pessoasItens.length) _pessoasMesa = pessoasItens;
+  // Nunca acumula de mesas anteriores: substitui em vez de mesclar
+  _pessoasMesa = pessoasItens;
   return _pessoasMesa;
 }
 

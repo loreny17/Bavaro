@@ -9190,10 +9190,22 @@ function renderComandas(){
     return;
   }
   var html = '';
+
+  // Botão do modo "somar comandas" (mesão: um paga tudo)
+  html += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;">'+
+    '<button onclick="alternarModoSomarComandas()" style="background:'+(_modoSomarComandas?'var(--accent)':'transparent')+';color:'+(_modoSomarComandas?'#000':'var(--muted)')+';border:1px solid '+(_modoSomarComandas?'var(--accent)':'var(--border2)')+';border-radius:8px;padding:7px 13px;font-family:inherit;font-weight:700;font-size:0.78rem;cursor:pointer;">'+
+      (_modoSomarComandas ? '✕ Cancelar seleção' : '🧮 Juntar comandas')+
+    '</button>'+
+  '</div>';
+
   filtradas.forEach(function(c){
     var hora = c.abertaEm ? new Date(c.abertaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-    html += '<div class="comanda-card aberta" data-comanda-id="'+c.id+'" onclick="abrirMenuComanda(\''+c.id+'\')">'+
-      '<div class="comanda-card-icone">👤</div>'+
+    var sel = _modoSomarComandas && _comandasSelecionadas[c.id];
+    var clique = _modoSomarComandas
+      ? 'toggleComandaSelecionada(\''+c.id+'\')'
+      : 'abrirMenuComanda(\''+c.id+'\')';
+    html += '<div class="comanda-card aberta" data-comanda-id="'+c.id+'" onclick="'+clique+'" style="'+(sel?'border-color:var(--accent);background:rgba(212,168,67,0.08);':'')+'">'+
+      '<div class="comanda-card-icone">'+(_modoSomarComandas ? (sel?'✅':'⬜') : '👤')+'</div>'+
       '<div class="comanda-card-info">'+
         '<div class="comanda-card-nome">'+esc(c.cliente||'(sem nome)')+'</div>'+
         '<div class="comanda-card-sub">'+(c._itensAbertosCount||0)+' itens • '+esc(c.garcomPrincipal||'—')+' • '+hora+'</div>'+
@@ -9202,10 +9214,118 @@ function renderComandas(){
     '</div>';
   });
   lista.innerHTML = html;
-  // Liga o swipe (fechar conta / repetir pedido) em cada card de comanda,
-  // do mesmo jeito que já funciona nas mesas.
-  lista.querySelectorAll('.comanda-card[data-comanda-id]').forEach(function(el){
-    anexarSwipe(el, el.getAttribute('data-comanda-id'), 'comanda');
+
+  // Barra flutuante com o total das selecionadas
+  var barra = document.getElementById('barra-somar-comandas');
+  if(barra) barra.remove();
+  if(_modoSomarComandas){
+    var ids = Object.keys(_comandasSelecionadas).filter(function(k){ return _comandasSelecionadas[k]; });
+    var selecionadas = _comandasAvulsas.filter(function(c){ return ids.indexOf(c.id) >= 0; });
+    var soma = selecionadas.reduce(function(a,c){ return a + (c.total||0); }, 0);
+    barra = document.createElement('div');
+    barra.id = 'barra-somar-comandas';
+    barra.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:2px solid var(--accent);padding:12px 16px calc(12px + env(safe-area-inset-bottom));z-index:60;display:flex;align-items:center;gap:12px;';
+    barra.innerHTML =
+      '<div style="flex:1;">'+
+        '<div style="font-size:0.72rem;color:var(--muted);">'+selecionadas.length+' comanda'+(selecionadas.length===1?'':'s')+' selecionada'+(selecionadas.length===1?'':'s')+'</div>'+
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.5rem;color:var(--accent);">R$ '+fmtPreco(soma)+'</div>'+
+      '</div>'+
+      '<button onclick="juntarComandasSelecionadas()" '+(selecionadas.length<2?'disabled style="opacity:0.4;':'style="')+'background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px 20px;font-family:inherit;font-weight:800;font-size:0.9rem;cursor:pointer;">💰 Juntar e fechar</button>';
+    document.body.appendChild(barra);
+  }
+
+  // Swipe só no modo normal (no modo seleção o toque é pra marcar)
+  if(!_modoSomarComandas){
+    lista.querySelectorAll('.comanda-card[data-comanda-id]').forEach(function(el){
+      anexarSwipe(el, el.getAttribute('data-comanda-id'), 'comanda');
+    });
+  }
+}
+
+// ═══ SOMAR/JUNTAR COMANDAS (mesão: um paga tudo) ═══
+var _modoSomarComandas = false;
+var _comandasSelecionadas = {};
+
+function alternarModoSomarComandas(){
+  _modoSomarComandas = !_modoSomarComandas;
+  _comandasSelecionadas = {};
+  renderComandas();
+}
+function toggleComandaSelecionada(id){
+  _comandasSelecionadas[id] = !_comandasSelecionadas[id];
+  renderComandas();
+}
+
+// Funde as comandas selecionadas numa só (a mais antiga vira a principal):
+// itens levam o NOME da pessoa (aparecem agrupados por pessoa no fechar conta),
+// pagamentos parciais são preservados, e as outras comandas são removidas.
+// Depois abre o Fechar Conta normal da comanda unificada.
+function juntarComandasSelecionadas(){
+  var ids = Object.keys(_comandasSelecionadas).filter(function(k){ return _comandasSelecionadas[k]; });
+  if(ids.length < 2){ showToast('Selecione pelo menos 2 comandas','#f7a34f'); return; }
+  var nomes = _comandasAvulsas.filter(function(c){ return ids.indexOf(c.id) >= 0; })
+    .map(function(c){ return c.cliente||'(sem nome)'; });
+  if(!confirm('Juntar as comandas de:\n• '+nomes.join('\n• ')+'\n\nnuma conta só pra fechar junto?')) return;
+
+  // Busca as comandas FRESCAS no servidor (não confia no cache pra dinheiro)
+  Promise.all(ids.map(function(id){
+    return fbDb.collection('contas_mesa').doc(id).get();
+  })).then(function(docs){
+    var vivas = [];
+    docs.forEach(function(d){
+      if(d.exists && (d.data()||{}).status === 'aberta'){
+        vivas.push(Object.assign({id:d.id}, d.data()));
+      }
+    });
+    if(vivas.length < 2) throw new Error('Alguma comanda já foi fechada em outro aparelho. Atualize e tente de novo.');
+    vivas.sort(function(a,b){ return (a.abertaEm||0) - (b.abertaEm||0); });
+    var principal = vivas[0];
+    var extras = vivas.slice(1);
+
+    var itensJuntos = (principal.itens||[]).map(function(it){
+      return it.pessoa ? it : Object.assign({}, it, {pessoa: principal.cliente||''});
+    });
+    var pgtosJuntos = (principal.pagamentos||[]).slice();
+    extras.forEach(function(c){
+      (c.itens||[]).forEach(function(it){
+        itensJuntos.push(Object.assign({}, it, {
+          pessoa: it.pessoa || c.cliente || '',
+          juntadoDe: c.id,
+          juntadoEm: Date.now()
+        }));
+      });
+      (c.pagamentos||[]).forEach(function(p){ pgtosJuntos.push(p); });
+    });
+
+    var tot = calcularTotaisConta({itens: itensJuntos, pagamentos: pgtosJuntos});
+    var batch = fbDb.batch();
+    batch.update(fbDb.collection('contas_mesa').doc(principal.id), {
+      itens: itensJuntos,
+      pagamentos: pgtosJuntos,
+      cliente: (principal.cliente||'') + ' +' + extras.length,
+      pessoas: vivas.map(function(c){ return c.cliente||''; }).filter(Boolean),
+      subtotal: tot.subtotal, taxa10: tot.taxa10, total: tot.total,
+      pagoTotal: tot.pagoTotal, restante: tot.restante,
+      atualizadoEm: Date.now()
+    });
+    extras.forEach(function(c){
+      batch.delete(fbDb.collection('contas_mesa').doc(c.id));
+    });
+    return batch.commit().then(function(){ return principal.id; });
+  }).then(function(principalId){
+    _modoSomarComandas = false;
+    _comandasSelecionadas = {};
+    var barra = document.getElementById('barra-somar-comandas');
+    if(barra) barra.remove();
+    showToast('✓ Comandas juntadas — abrindo pra fechar','#4ade80', 3000);
+    // Abre o fechar conta da unificada assim que o listener refletir
+    setTimeout(function(){
+      var c = _comandasAvulsas.find(function(x){ return x.id === principalId; });
+      if(c) abrirFecharContaComanda(principalId);
+      else renderComandas();
+    }, 900);
+  }).catch(function(e){
+    showToast('❌ '+e.message,'#f87171', 5000);
   });
 }
 

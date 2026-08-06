@@ -16004,16 +16004,27 @@ function confirmarTransferencia(numDestino, pularConfirmacao){
 
   // Resolve a conta de destino no SERVIDOR (só contas realmente abertas),
   // e revalida que a origem ainda existe e está aberta.
+  // ⚠️ O número da mesa às vezes está gravado como TEXTO ("26") e às vezes como
+  // NÚMERO (26), dependendo de onde a conta foi criada. Consultando só por um
+  // tipo, a conta existente não era encontrada e uma SEGUNDA conta era criada
+  // na mesma mesa — o item transferido sumia da tela (ficava na conta paralela).
+  // Agora consulta os DOIS tipos e junta os resultados.
   var mesaDestinoInt = parseInt(numDestino) || numDestino;
+  var mesaDestinoStr = String(numDestino);
   Promise.all([
     fbDb.collection('contas_mesa')
       .where('restauranteId','==',_restauranteId)
       .where('mesa','==', mesaDestinoInt)
       .where('status','==','aberta')
       .get(),
-    fbDb.collection('contas_mesa').doc(conta.id).get()
+    fbDb.collection('contas_mesa').doc(conta.id).get(),
+    fbDb.collection('contas_mesa')
+      .where('restauranteId','==',_restauranteId)
+      .where('mesa','==', mesaDestinoStr)
+      .where('status','==','aberta')
+      .get().catch(function(){ return {empty:true, forEach:function(){}, metadata:{}}; })
   ]).then(function(res){
-    var snapDest = res[0], docOrig = res[1];
+    var snapDest = res[0], docOrig = res[1], snapDestStr = res[2];
     if(snapDest.metadata && snapDest.metadata.fromCache && snapDest.empty){
       showToast('⚠️ Sem conexão com o servidor — não dá pra transferir agora','#f7a34f', 5000);
       return;
@@ -16025,10 +16036,15 @@ function confirmarTransferencia(numDestino, pularConfirmacao){
     // Usa os itens FRESCOS da origem (não os do cache)
     conta = Object.assign({id: docOrig.id}, docOrig.data());
     _contasMesaCache[String(_transferirOrigemNum)] = conta;
-    if(!snapDest.empty){
+    var lista = [];
+    snapDest.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
+    if(snapDestStr && snapDestStr.forEach){
+      snapDestStr.forEach(function(d){
+        if(!lista.some(function(x){ return x.id === d.id; })) lista.push(Object.assign({id:d.id}, d.data()));
+      });
+    }
+    if(lista.length){
       // Se houver mais de uma aberta, prefere a que tem conteúdo; senão a mais antiga
-      var lista = [];
-      snapDest.forEach(function(d){ lista.push(Object.assign({id:d.id}, d.data())); });
       lista.sort(function(a,b){
         var ca = (a.itens||[]).length ? 0 : 1, cb = (b.itens||[]).length ? 0 : 1;
         if(ca !== cb) return ca - cb;

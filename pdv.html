@@ -7192,12 +7192,18 @@ function _aplicarDialeto(imp){
 function _traduzirDialeto(imp, conteudo){
   if(!imp || imp.dialeto !== 'bematech') return conteudo;
   if(typeof conteudo !== 'string') return conteudo;
-  return conteudo.replace(/\x1D\x21([\s\S])/g, function(_m, b){
+  // Tamanho: GS "!" n → ESC W (largura dupla) + ESC d (altura dupla)
+  conteudo = conteudo.replace(/\x1D\x21([\s\S])/g, function(_m, b){
     var n = b.charCodeAt(0);
     var larg = ((n >> 4) & 0x0F) > 0 ? 1 : 0;  // nibble alto = largura
     var alt  = (n & 0x0F) > 0 ? 1 : 0;         // nibble baixo = altura
     return '\x1BW' + String.fromCharCode(larg) + '\x1Bd' + String.fromCharCode(alt);
   });
+  // Corte: GS "V" m [n] → ESC "m" (corte parcial no dialeto Bematech).
+  // Parcial deixa uma pontinha presa: o papel não cai no chão e o próximo
+  // pedido já sai destacando o anterior — melhor pra cozinha que o corte total.
+  conteudo = conteudo.replace(/\x1DV(?:[\x41\x42][\s\S]|[\x00\x01])/g, '\x1Bm');
+  return conteudo;
 }
 
 function enviarParaImpressora(imp, conteudo){

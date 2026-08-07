@@ -16527,7 +16527,19 @@ function _renderGrupoFechar(g){
   });
   var obsKeys = Object.keys(obsSet);
   var pessoaKeys = Object.keys(pessoasSet);
+  // Adicionais das unidades do grupo: como o agrupamento é por NOME, unidades
+  // podem ter adicionais diferentes — mostra cada um com quantas vezes aparece.
+  var adSet = {};
+  g.itens.forEach(function(i){
+    var ad = _textoAdicionais(i);
+    if(ad) adSet[ad] = (adSet[ad]||0) + (i.qtd||1);
+  });
+  var adKeys = Object.keys(adSet);
   var sublinha = '';
+  if(adKeys.length){
+    var adTxt = adKeys.map(function(k){ return (adSet[k] > 1 ? adSet[k]+'x ' : '') + k; }).join(' | ');
+    sublinha += '<div style="font-size:0.7rem;color:#60a5fa;margin-top:2px;">➕ '+esc(adTxt)+'</div>';
+  }
   if(pessoaKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(pessoaKeys[0])+'</div>';
   else if(pessoaKeys.length > 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">👤 '+pessoaKeys.length+' pessoas</div>';
   if(obsKeys.length === 1) sublinha += '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(obsKeys[0])+'</div>';
@@ -16560,6 +16572,55 @@ function _renderGrupoFechar(g){
   '</div>';
 }
 
+
+// Monta o texto dos adicionais/opções escolhidas de um item. O app grava isso
+// em formatos diferentes conforme a origem (garçom, totem, versões antigas):
+// lista de objetos, lista de textos, objeto {grupo: valor}, ou string pronta.
+// Aqui normalizamos todos pra mostrar na conta — o cliente precisa ver PELO QUE
+// está pagando, não só um valor maior que o do cardápio.
+function _textoAdicionais(it){
+  var partes = [];
+  // Só entram os adicionais que CUSTAM dinheiro. Escolhas sem preço ("Ao ponto",
+  // "Sem cebola") não precisam aparecer aqui — o que interessa na conferência é
+  // justificar por que o valor ficou acima do preço de cardápio.
+  function _push(nome, precoExtra){
+    if(!nome) return;
+    var pe = parseFloat(precoExtra);
+    if(isNaN(pe) || pe <= 0) return;
+    var txt = String(nome).trim();
+    if(!txt) return;
+    partes.push(txt + ' (+R$ ' + fmtPreco(pe) + ')');
+  }
+  var sel = it.selecoes;
+  if(Array.isArray(sel)){
+    sel.forEach(function(x){
+      if(x == null) return;
+      if(typeof x === 'string'){ _push(x); return; }
+      var q = x.qtd || x.quantidade || 1;
+      var nome = x.opcao || x.nome || x.label || x.valor || '';
+      if(q > 1) nome = q + 'x ' + nome;
+      _push(nome, (x.precoExtra != null ? x.precoExtra : x.preco));
+    });
+  } else if(sel && typeof sel === 'object'){
+    Object.keys(sel).forEach(function(k){
+      var v = sel[k];
+      if(v == null || v === '' || v === false) return;
+      if(Array.isArray(v)){
+        v.forEach(function(x){
+          if(typeof x === 'string') _push(x);
+          else if(x) _push((x.qtd>1?x.qtd+'x ':'')+(x.opcao||x.nome||x.label||''), (x.precoExtra!=null?x.precoExtra:x.preco));
+        });
+      } else if(typeof v === 'object'){
+        _push((v.qtd>1?v.qtd+'x ':'')+(v.opcao||v.nome||v.label||''), (v.precoExtra!=null?v.precoExtra:v.preco));
+      } else if(v !== true){
+        _push(v);
+      } else {
+        _push(k);
+      }
+    });
+  }
+  return partes.join(' · ');
+}
 
 function _renderItemFechar(it, c){
   var h = '';
@@ -16610,6 +16671,7 @@ function _renderItemFechar(it, c){
       (it.pessoa ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;cursor:pointer;" onclick="event.stopPropagation();vincularPessoaFechar(\''+it.itemKey+'\',\''+esc(it.nome)+'\')">👤 '+esc(it.pessoa)+' ✏️</div>' :
         it.nomeCliente ? '<div style="font-size:0.7rem;color:var(--accent);margin-top:2px;font-weight:600;">👤 '+esc(it.nomeCliente)+'</div>' :
         (it.tipoVenda === 'kg' && it.peso ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">⚖️ '+it.peso+'g</div>' : ''))+
+      (function(){ var ad = _textoAdicionais(it); return ad ? '<div style="font-size:0.7rem;color:#60a5fa;margin-top:2px;">➕ '+esc(ad)+'</div>' : ''; })()+
       (it.obs ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">📝 '+esc(it.obs)+'</div>' : '')+
       linhaAbatido+
     '</div>'+

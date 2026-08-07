@@ -7821,6 +7821,9 @@ var _impUltimoSinal = 0;
 var _impCanalVivo = true;
 var _impServicoVivo = true;
 var _impVigiaLigado = false;
+// Guarda o código do último erro de conexão — é o que diferencia cota estourada
+// ("resource-exhausted") de rede caindo ("unavailable") de permissão negada.
+var _impUltimoErro = '';
 
 function _impAtualizarStatusVisual(){
   var el = document.getElementById('imp-status-banner');
@@ -7833,9 +7836,10 @@ function _impAtualizarStatusVisual(){
     el.onclick = function(){ _impVerificarAgora(true); };
     document.body.appendChild(el);
   }
-  el.textContent = !_impServicoVivo
-    ? '🖨️ App de impressão não responde — verifique se está aberto no PC (toque pra testar)'
-    : '📡 Conexão de impressão instável — reconectando... (toque pra testar)';
+  el.textContent = (!_impCanalVivo
+    ? '📡 PDV perdeu a conexão — reconectando sozinho (toque pra testar)'
+    : '🖨️ App de impressão não responde — verifique se está aberto no PC (toque pra testar)')
+    + (_impUltimoErro ? '  [' + _impUltimoErro + ']' : '');
 }
 
 // Confere se o app de impressão do PC está de pé
@@ -7845,21 +7849,52 @@ function _impVerificarServico(){
   // serviço local pra vigiar e consideramos "ok" pra não dar alarme falso.
   var d = window.__BAVARO_DESKTOP__;
   if(!d || !d.printerApiUrl) return Promise.resolve(true);
-  return fetch(d.printerApiUrl + '/health', {method:'GET'})
-    .then(function(r){ return r.ok; })
-    .catch(function(){ return false; });
+  // Timeout curto: sem isso a checagem pode ficar pendurada e parecer falha.
+  var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var t = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, 3500);
+  return fetch(d.printerApiUrl + '/health', {method:'GET', signal: ctrl ? ctrl.signal : undefined})
+    .then(function(r){ clearTimeout(t); return r.ok; })
+    .catch(function(){ clearTimeout(t); return false; });
 }
+
+var _impFalhasSeguidas = 0;
+var _impReligadas = 0;
 
 function _impVerificarAgora(manual){
   _impVerificarServico().then(function(vivo){
-    _impServicoVivo = vivo;
-    // Canal considerado morto se ficou muito tempo sem qualquer sinal
-    var mudo = (Date.now() - _impUltimoSinal) > 6*60*1000;
+    // Só acusa o app do PC depois de 2 falhas seguidas — uma falha isolada
+    // costuma ser a própria conexão do PDV oscilando, não o app caído.
+    if(vivo){ _impFalhasSeguidas = 0; _impServicoVivo = true; }
+    else { _impFalhasSeguidas++; _impServicoVivo = (_impFalhasSeguidas < 2); }
+
+    // Canal mudo = o PDV perdeu a conexão com o servidor e não recebe mais
+    // comandos. É a causa real do "para de imprimir" (recarregar resolvia).
+    var mudo = (Date.now() - _impUltimoSinal) > 150*1000; // ~3 batidas falhas
     if(mudo){
       _impCanalVivo = false;
-      console.warn('[IMP] canal mudo há mais de 6min — religando escutador');
+      _impReligadas++;
+      console.warn('[IMP] canal mudo — religando escutador (tentativa '+_impReligadas+')');
       iniciarListenerComandosImpressao();
+
+      // ⚠️ Último recurso: se religar não resolveu 3 vezes seguidas, recarrega
+      // a página sozinho — é exatamente o que o Daniel fazia na mão, e devolve
+      // a impressão sem ninguém precisar perceber o problema.
+      if(_impReligadas >= 3){
+        var ultimo = 0;
+        try{ ultimo = parseInt(sessionStorage.getItem('pdv_auto_reload')||'0',10)||0; }catch(e){}
+        if(Date.now() - ultimo > 5*60*1000){
+          try{ sessionStorage.setItem('pdv_auto_reload', String(Date.now())); }catch(e){}
+          console.warn('[IMP] recarregando o PDV pra restabelecer a impressão');
+          showToast('🔄 Restabelecendo a impressão...', '#f7a34f', 2500);
+          setTimeout(function(){ location.reload(); }, 1500);
+          return;
+        }
+      }
+    } else if(_impCanalVivo === false && !mudo){
+      _impCanalVivo = true;
+      _impReligadas = 0;
     }
+
     _impAtualizarStatusVisual();
     if(manual){
       showToast(vivo ? '✓ App de impressão respondendo' : '❌ App de impressão não responde',
@@ -7871,8 +7906,25 @@ function _impVerificarAgora(manual){
 function _impIniciarVigia(){
   if(_impVigiaLigado) return;
   _impVigiaLigado = true;
-  // Checagem periódica (2 min) — leve, só um ping local
-  setInterval(function(){ _impVerificarAgora(false); }, 120000);
+
+  // ═══ BATIDA DE CORAÇÃO ═══
+  // Sem isso, só descobríamos que o canal morreu quando um pedido real não
+  // chegava — no meio do almoço, tarde demais. Aqui fazemos uma leitura leve
+  // a cada 45s: se ela responde, o canal está vivo; se falha, marcamos mudo.
+  setInterval(function(){
+    if(!_restauranteAtivo || !fbDb) return;
+    fbDb.collection('comandos_impressao')
+      .where('restauranteId','==', _restauranteAtivo.id)
+      .limit(1).get({source:'server'})
+      .then(function(){ _impUltimoSinal = Date.now(); if(!_impCanalVivo){ _impCanalVivo = true; _impReligadas = 0; _impAtualizarStatusVisual(); } })
+      .catch(function(e){
+        console.warn('[IMP] batida falhou:', e.code||e.message);
+        _impUltimoErro = (e.code || e.message || '?') + ' @ ' + new Date().toLocaleTimeString('pt-BR');
+      });
+  }, 45000);
+
+  // Checagem periódica (1 min) — leve, só um ping local
+  setInterval(function(){ _impVerificarAgora(false); }, 60000);
   // Ao voltar de tela bloqueada/minimizado, confere na hora: é o momento
   // clássico em que o canal já morreu sem avisar.
   document.addEventListener('visibilitychange', function(){
@@ -7938,6 +7990,7 @@ function iniciarListenerComandosImpressao(){
       });
     }, function(err){
       console.warn('[IMP] escutador de comandos caiu:', err.code||err.message);
+      _impUltimoErro = (err.code || err.message || '?') + ' @ ' + new Date().toLocaleTimeString('pt-BR');
       _impCanalVivo = false;
       _impAtualizarStatusVisual();
       setTimeout(function(){ iniciarListenerComandosImpressao(); }, 4000);

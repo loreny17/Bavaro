@@ -7811,7 +7811,80 @@ function reimprimirPedido(pedidoId){
 // ════════════════════════════════════════
 var _comandosImpProcessados = {};
 var _impCmdListenerAtivo = false;
+// ═══ VIGILÂNCIA DA IMPRESSÃO ═══
+// Dois problemas silenciosos que faziam "parar de imprimir depois de um tempo":
+//  (a) o canal com o servidor morre e ninguém percebe;
+//  (b) o app de impressão do PC fecha/trava e os comandos viram fila perdida.
+// Aqui vigiamos os dois e avisamos NA TELA, além de religar sozinho.
+var _unsubCmdImp = null;
+var _impUltimoSinal = 0;
+var _impCanalVivo = true;
+var _impServicoVivo = true;
+var _impVigiaLigado = false;
+
+function _impAtualizarStatusVisual(){
+  var el = document.getElementById('imp-status-banner');
+  var ok = _impCanalVivo && _impServicoVivo;
+  if(ok){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'imp-status-banner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:linear-gradient(90deg,#f59e0b,#d97706);color:#000;padding:9px 14px;font-size:0.82rem;font-weight:700;text-align:center;cursor:pointer;';
+    el.onclick = function(){ _impVerificarAgora(true); };
+    document.body.appendChild(el);
+  }
+  el.textContent = !_impServicoVivo
+    ? '🖨️ App de impressão não responde — verifique se está aberto no PC (toque pra testar)'
+    : '📡 Conexão de impressão instável — reconectando... (toque pra testar)';
+}
+
+// Confere se o app de impressão do PC está de pé
+function _impVerificarServico(){
+  // Mesma origem que o PDV já usa pra imprimir (definida pelo app desktop).
+  // Se não existir, é porque está rodando no navegador comum — aí não há
+  // serviço local pra vigiar e consideramos "ok" pra não dar alarme falso.
+  var d = window.__BAVARO_DESKTOP__;
+  if(!d || !d.printerApiUrl) return Promise.resolve(true);
+  return fetch(d.printerApiUrl + '/health', {method:'GET'})
+    .then(function(r){ return r.ok; })
+    .catch(function(){ return false; });
+}
+
+function _impVerificarAgora(manual){
+  _impVerificarServico().then(function(vivo){
+    _impServicoVivo = vivo;
+    // Canal considerado morto se ficou muito tempo sem qualquer sinal
+    var mudo = (Date.now() - _impUltimoSinal) > 6*60*1000;
+    if(mudo){
+      _impCanalVivo = false;
+      console.warn('[IMP] canal mudo há mais de 6min — religando escutador');
+      iniciarListenerComandosImpressao();
+    }
+    _impAtualizarStatusVisual();
+    if(manual){
+      showToast(vivo ? '✓ App de impressão respondendo' : '❌ App de impressão não responde',
+                vivo ? '#4ade80' : '#f87171', 4000);
+    }
+  });
+}
+
+function _impIniciarVigia(){
+  if(_impVigiaLigado) return;
+  _impVigiaLigado = true;
+  // Checagem periódica (2 min) — leve, só um ping local
+  setInterval(function(){ _impVerificarAgora(false); }, 120000);
+  // Ao voltar de tela bloqueada/minimizado, confere na hora: é o momento
+  // clássico em que o canal já morreu sem avisar.
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden) setTimeout(function(){ _impVerificarAgora(false); }, 1200);
+  });
+  window.addEventListener('online', function(){
+    setTimeout(function(){ iniciarListenerComandosImpressao(); _impVerificarAgora(false); }, 1500);
+  });
+}
+
 function iniciarListenerComandosImpressao(){
+  _impIniciarVigia();
   // NÃO depende mais do _qzPronto — o listener deve rodar sempre que houver
   // restaurante ativo. Assim os pedidos de insumos chegam mesmo que a
   // conexão com a impressora ainda não esteja pronta (tenta imprimir na hora).
@@ -7845,10 +7918,16 @@ function iniciarListenerComandosImpressao(){
         }
       });
     });
-  fbDb.collection('comandos_impressao')
+  // ⚠️ O escutador de comandos precisa de tratamento de erro E de vigilância:
+  // sem isso, quando a conexão caía (PC dorme, Wi-Fi oscila, sessão expira),
+  // ele morria em SILÊNCIO e o sistema simplesmente parava de imprimir, sem
+  // aviso nenhum — o clássico "depois de um tempo para de imprimir".
+  if(_unsubCmdImp){ try{ _unsubCmdImp(); }catch(e){} _unsubCmdImp = null; }
+  _unsubCmdImp = fbDb.collection('comandos_impressao')
     .where('restauranteId','==', _restauranteAtivo.id)
     .where('criadoEm','>=', _cmdImpInicioDia)
     .onSnapshot(function(snap){
+      _impUltimoSinal = Date.now(); // prova de vida do canal
       snap.docChanges().forEach(function(ch){
         if(ch.type !== 'added') return;
         var id = ch.doc.id;
@@ -7857,7 +7936,15 @@ function iniciarListenerComandosImpressao(){
         var cmd = ch.doc.data();
         processarComandoImpressao(id, cmd);
       });
+    }, function(err){
+      console.warn('[IMP] escutador de comandos caiu:', err.code||err.message);
+      _impCanalVivo = false;
+      _impAtualizarStatusVisual();
+      setTimeout(function(){ iniciarListenerComandosImpressao(); }, 4000);
     });
+  _impUltimoSinal = Date.now();
+  _impCanalVivo = true;
+  _impAtualizarStatusVisual();
 }
 
 // Mostra um aviso visível na tela do PDV com o pedido de insumos recebido

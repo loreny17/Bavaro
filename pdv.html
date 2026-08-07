@@ -572,15 +572,6 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         </label>
       </div>
 
-      <div style="margin-top:10px;">
-        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
-          <input type="checkbox" id="cfg-bematech" onchange="setModoBematech(this.checked)">
-          <span>Modo Bematech (use se sair <b>!</b> no lugar do texto grande)</span>
-        </label>
-        <div style="font-size:0.72rem;color:var(--muted);margin-left:28px;margin-top:3px;">
-          Para impressoras Bematech (MP-4200 TH) que estão no dialeto nativo em vez de ESC/POS.
-        </div>
-      </div>
 
       <!-- ═══ ESTILO DO CABEÇALHO (MESA / COMANDA) ═══ -->
       <div class="cfg-bloco">
@@ -5618,6 +5609,11 @@ function abrirNovaImpressora(){
   if(_qzPronto) detectarImpressorasUSB();
 }
 
+function abrirNovaImpressoraReset(){
+  var d = document.getElementById('imp-dialeto');
+  if(d) d.value = 'escpos';
+}
+
 function abrirEditarImpressora(imp){
   _impEditandoId = imp.id;
   document.getElementById('modal-impressora-titulo').textContent = 'EDITAR IMPRESSORA';
@@ -5626,6 +5622,7 @@ function abrirEditarImpressora(imp){
   document.getElementById('imp-ip').value = imp.ip || '';
   document.getElementById('imp-porta').value = imp.porta || '9100';
   document.getElementById('imp-largura').value = imp.largura || '48';
+  document.getElementById('imp-dialeto').value = imp.dialeto || 'escpos';
   document.getElementById('btn-excluir-imp').style.display = 'inline-flex';
   atualizarCamposImpressora();
   if(imp.tipo === 'usb' && imp.nomeWindows){
@@ -5670,6 +5667,7 @@ function salvarImpressora(){
   var dados = {
     nome: nome, tipo: tipo,
     largura: parseInt(document.getElementById('imp-largura').value) || 48,
+    dialeto: document.getElementById('imp-dialeto').value || 'escpos',
     atualizadoEm: Date.now()
   };
   if(tipo === 'usb'){
@@ -5716,13 +5714,13 @@ function testarImpressora(){
     ip: document.getElementById('imp-ip').value.trim(),
     porta: parseInt(document.getElementById('imp-porta').value) || 9100
   };
-  enviarParaImpressora(imp, gerarCupomTeste(imp));
+  _aplicarDialeto(imp); enviarParaImpressora(imp, gerarCupomTeste(imp));
 }
 
 function testarImpressaoTodas(){
   if(!_impressoras.length){ showToast('Cadastre uma impressora primeiro','#f7a34f'); return; }
   _impressoras.forEach(function(imp){
-    enviarParaImpressora(imp, gerarCupomTeste(imp));
+    _aplicarDialeto(imp); enviarParaImpressora(imp, gerarCupomTeste(imp));
   });
 }
 
@@ -6523,10 +6521,7 @@ function aplicarConfigImpNaTela(){
   v('cfg-tamanho-numero-pedido', c.tamanhoNumeroPedido || 'grande');
   v('cfg-corte-papel', c.cortePapel);
   v('cfg-beep', c.beep);
-  // Modo Bematech fica salvo NESTE computador (é característica da impressora
-  // física ligada aqui, não da conta) — por isso vem do armazenamento local.
-  var elBema = document.getElementById('cfg-bematech');
-  if(elBema) elBema.checked = _modoBematech;
+
   var selImp = document.getElementById('cfg-cancel-impressora');
   if(selImp && c.cancelImpressora) selImp.value = c.cancelImpressora;
   var senhaWrap = document.getElementById('cfg-senha-wrap');
@@ -6645,15 +6640,6 @@ function setModoBematech(on){
 }
 
 function escposSize(modo){
-  if(_modoBematech){
-    var larg = (modo === 'largo' || modo === 'grande' || modo === 'extra' || modo === 'gigante') ? 1 : 0;
-    var alt  = (modo === 'alto'  || modo === 'grande' || modo === 'extra' || modo === 'gigante') ? 1 : 0;
-    return ESC + 'W' + String.fromCharCode(larg) + ESC + 'd' + String.fromCharCode(alt);
-  }
-  return _escposSizeOriginal(modo);
-}
-
-function _escposSizeOriginal(modo){
   // modo: 'normal' | 'alto' | 'largo' | 'grande' | 'extra'
   // GS '!' n: bits 0-3 width, bits 4-7 height
   var byte = 0;
@@ -7193,7 +7179,29 @@ function _sanitizarConteudoImpressao(conteudo){
   return resultado;
 }
 
+// Ativa o dialeto correto da impressora antes de gerar/enviar o conteúdo dela.
+// Cada impressora tem o seu (uma pode ser ESC/POS e outra Bematech no mesmo PC).
+function _aplicarDialeto(imp){
+  _modoBematech = !!(imp && imp.dialeto === 'bematech');
+}
+
+// Traduz o conteúdo ESC/POS pro dialeto nativo Bematech, quando a impressora
+// estiver configurada assim. Feito NO ENVIO (e não na geração) pra valer em
+// todos os cupons — comanda, cliente, fechamento, cancelamento e teste.
+// Troca: GS "!" n  →  ESC W (largura dupla) + ESC d (altura dupla)
+function _traduzirDialeto(imp, conteudo){
+  if(!imp || imp.dialeto !== 'bematech') return conteudo;
+  if(typeof conteudo !== 'string') return conteudo;
+  return conteudo.replace(/\x1D\x21([\s\S])/g, function(_m, b){
+    var n = b.charCodeAt(0);
+    var larg = ((n >> 4) & 0x0F) > 0 ? 1 : 0;  // nibble alto = largura
+    var alt  = (n & 0x0F) > 0 ? 1 : 0;         // nibble baixo = altura
+    return '\x1BW' + String.fromCharCode(larg) + '\x1Bd' + String.fromCharCode(alt);
+  });
+}
+
 function enviarParaImpressora(imp, conteudo){
+  conteudo = _traduzirDialeto(imp, conteudo);
   if(!_qzPronto){
     showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
     return Promise.reject('desconectado');
@@ -7726,7 +7734,7 @@ function imprimirPedidoAutomatico(pedido){
           console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome, 'id:', modelo.impressoraId);
           return;
         }
-        var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
+        _aplicarDialeto(imp); var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
         console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
         if(cupom) enviarParaImpressora(imp, cupom);
       });
@@ -8003,7 +8011,7 @@ function processarComandoImpressao(cmdId, cmd){
         criadoEm: cmd.canceladoEm,
         itens: [cmd.item]
       };
-      var cupom = gerarCupomCancelamento(pedidoStub, cmd.motivo + '\nCancelado por: ' + (cmd.canceladoPor||'?'));
+      _aplicarDialeto(imp); var cupom = gerarCupomCancelamento(pedidoStub, cmd.motivo + '\nCancelado por: ' + (cmd.canceladoPor||'?'));
       // Decide em qual impressora imprimir
       var imps = _impressoras;
       if(_configImp.cancelImpressora === 'origem'){
@@ -13658,6 +13666,16 @@ function toggleAdminUsuario(garcomId, novoValor){
           <option value="48">80mm (48 colunas) — padrão</option>
           <option value="32">58mm (32 colunas)</option>
         </select>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Dialeto de comandos</label>
+        <select class="f-select" id="imp-dialeto">
+          <option value="escpos">ESC/POS — padrão (funciona na maioria)</option>
+          <option value="bematech">Bematech nativo — use se imprimir "!" no lugar do texto grande</option>
+        </select>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">
+          É por impressora: uma pode estar em ESC/POS e outra em Bematech no mesmo computador.
+        </div>
       </div>
     </div>
     <div class="modal-footer">

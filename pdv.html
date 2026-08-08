@@ -4774,16 +4774,38 @@ function verificarServicoElectron(){
   fetch(url).then(function(r){ return r.json(); }).then(function(data){
     if(data.ok){
       _qzPronto = true;
+      _electronFalhas = 0;
       atualizarStatusQZ('online', '✓ App Desktop conectado', 'Impressão automática habilitada (sem popups)');
       iniciarListenerImpressao();
       iniciarListenerComandosImpressao();
     } else {
+      _qzPronto = false;
       atualizarStatusQZ('erro', 'Serviço de impressão indisponível', 'Reinicie o app Bávaro PDV');
+      _agendarNovaVerificacaoElectron();
     }
   }).catch(function(e){
-    atualizarStatusQZ('erro', 'Serviço de impressão não responde', 'Reinicie o app Bávaro PDV');
+    // ⚠️ AQUI ESTAVA O BURACO: se esta ÚNICA verificação falhasse (app ainda
+    // abrindo, oscilação, bloqueio momentâneo), _qzPronto ficava FALSO PARA
+    // SEMPRE — e daí toda impressão, inclusive a reimpressão manual, era
+    // abortada logo na primeira linha. Nada mais tentava reconectar.
+    // Isso explica "parou e nem reimprimir funciona": não era a impressora,
+    // era o PDV se declarando desconectado e nunca mais revendo essa decisão.
+    _qzPronto = false;
+    atualizarStatusQZ('erro', 'Serviço de impressão não responde', 'Tentando reconectar sozinho...');
     console.error('Servico Electron:', e);
+    _agendarNovaVerificacaoElectron();
   });
+}
+
+// Reverifica o app local com espera crescente até voltar (nunca desiste).
+var _electronFalhas = 0;
+var _electronTimer = null;
+function _agendarNovaVerificacaoElectron(){
+  _electronFalhas++;
+  if(_electronTimer) clearTimeout(_electronTimer);
+  var espera = Math.min(30000, 3000 * _electronFalhas); // 3s, 6s, 9s... até 30s
+  console.warn('[IMP] app local indisponível — nova verificação em ' + (espera/1000) + 's');
+  _electronTimer = setTimeout(verificarServicoElectron, espera);
 }
 
 function qzReconectar(){
@@ -7210,7 +7232,9 @@ function _traduzirDialeto(imp, conteudo){
 function enviarParaImpressora(imp, conteudo){
   conteudo = _traduzirDialeto(imp, conteudo);
   if(!_qzPronto){
-    showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
+    // Não desiste caladamente: força uma reverificação imediata do app local.
+    showToast('⚠️ Serviço de impressão desconectado — reconectando...','#f7a34f', 4000);
+    if(_modoImpressao === 'electron') verificarServicoElectron();
     return Promise.reject('desconectado');
   }
   if(!conteudo){ return Promise.reject('Sem conteúdo'); }
@@ -7645,20 +7669,27 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   return s;
 }
 
-function imprimirPedidoAutomatico(pedido){
+function imprimirPedidoAutomatico(pedido, opts){
+  opts = opts || {};
+  // Avisa na tela quando a impressão desiste (só na ação manual, pra não
+  // encher o operador de mensagens durante a impressão automática).
+  function _aviso(msg){
+    console.warn('[IMPRIMIR] ' + msg);
+    if(opts.manual) showToast('⚠️ ' + msg, '#f7a34f', 6000);
+  }
   console.log('[IMPRIMIR] início — modelos:', _modelos.length, 'impressoras:', _impressoras.length);
   // MODO TESTE: pedidos marcados como teste NÃO imprimem
   if(pedido && pedido.teste === true){
-    console.log('[IMPRESSAO] pedido de teste — impressão ignorada:', pedido.id);
+    _aviso('Este pedido está marcado como TESTE — por isso não imprime.');
     return;
   }
   // Garçom marcou pra NÃO imprimir este pedido
   if(pedido && pedido.imprimir === false){
-    console.log('[IMPRESSAO] pedido marcado como "não imprimir" pelo garçom:', pedido.id);
+    _aviso('O garçom marcou este pedido como "não imprimir".');
     return;
   }
   if(!_modelos.length || !_impressoras.length){
-    console.warn('[IMPRIMIR] ❌ sem modelos OU sem impressoras — não imprimirá');
+    _aviso('Sem modelo de impressão ou sem impressora cadastrada (modelos: '+_modelos.length+', impressoras: '+_impressoras.length+').');
     return;
   }
 
@@ -7803,7 +7834,11 @@ function _centralizar(txt, larg){
 function reimprimirPedido(pedidoId){
   var p = (_pedidosPDV||[]).find(function(x){ return x.id === pedidoId; });
   if(!p){ showToast('Pedido não encontrado','#f87171'); return; }
-  imprimirPedidoAutomatico(p);
+  // ⚠️ A reimpressão manual NUNCA pode falhar calada: antes, se não houvesse
+  // modelo/impressora ou se o envio falhasse, só saía aviso no console e o
+  // usuário via "não acontece nada". Agora todo desfecho aparece na tela.
+  showToast('🖨️ Enviando reimpressão...', '#f7a34f', 1500);
+  imprimirPedidoAutomatico(p, {manual: true});
 }
 
 // ════════════════════════════════════════

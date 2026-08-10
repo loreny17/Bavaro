@@ -4750,6 +4750,23 @@ function fbDocConfigImp(){
 var _modoImpressao = null; // 'electron' | 'qz' | null
 
 function qzInicializar(){
+  // Recupera impressões que ficaram pendentes (inclusive de antes de fechar
+  // ou recarregar o PDV) e volta a tentar imediatamente.
+  _logImpCarregar();
+  logImp('PDV_ABRIU', 'modo: ' + (window.__BAVARO_DESKTOP__ ? 'app desktop' : 'navegador') + ' | ' + navigator.userAgent.slice(0,80));
+  window.addEventListener('online', function(){ logImp('REDE', 'voltou'); });
+  window.addEventListener('offline', function(){ logImp('REDE', 'CAIU'); });
+  document.addEventListener('visibilitychange', function(){ logImp('JANELA', document.hidden ? 'em segundo plano' : 'em foco'); });
+  _filaImpCarregar();
+  if(_filaImp.length){
+    console.warn('[IMP] ' + _filaImp.length + ' impressão(ões) pendente(s) recuperada(s) da sessão anterior');
+    _filaImpAlarme();
+    _filaImpAgendar(2500);
+  }
+  // Reforço: a cada 15s garante que a fila está andando (rede voltou, app abriu)
+  setInterval(function(){ if(_filaImp.length && !_filaImpEnviando) _filaImpProcessar(false); }, 15000);
+  window.addEventListener('online', function(){ if(_filaImp.length) _filaImpProcessar(false); });
+
   // 1º Tenta detectar o modo Electron (app desktop Bávaro)
   if(window.__BAVARO_DESKTOP__){
     _modoImpressao = 'electron';
@@ -4774,6 +4791,7 @@ function verificarServicoElectron(){
   fetch(url).then(function(r){ return r.json(); }).then(function(data){
     if(data.ok){
       _qzPronto = true;
+      if(_electronFalhas > 0) logImp('APP_LOCAL_VOLTOU', 'após ' + _electronFalhas + ' tentativas');
       _electronFalhas = 0;
       atualizarStatusQZ('online', '✓ App Desktop conectado', 'Impressão automática habilitada (sem popups)');
       iniciarListenerImpressao();
@@ -4791,6 +4809,7 @@ function verificarServicoElectron(){
     // Isso explica "parou e nem reimprimir funciona": não era a impressora,
     // era o PDV se declarando desconectado e nunca mais revendo essa decisão.
     _qzPronto = false;
+    logImp('APP_LOCAL_SEM_RESPOSTA', (e && e.name ? e.name + ': ' : '') + (e && e.message || '?'));
     atualizarStatusQZ('erro', 'Serviço de impressão não responde', 'Tentando reconectar sozinho...');
     console.error('Servico Electron:', e);
     _agendarNovaVerificacaoElectron();
@@ -7229,12 +7248,144 @@ function _traduzirDialeto(imp, conteudo){
   return conteudo;
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  FILA DE IMPRESSÃO À PROVA DE FALHA
+//  Regra de ouro: uma impressão NUNCA se perde. Se o envio falhar
+//  (app fechado, oscilação, impressora sem papel), o trabalho vai
+//  pra uma fila GRAVADA NO COMPUTADOR e é reenviado sozinho até
+//  imprimir — mesmo que o PDV seja recarregado ou reaberto.
+//  E enquanto houver algo pendente, um alarme VERMELHO fica na
+//  tela: ninguém mais descobre pela falta do pedido.
+// ═══════════════════════════════════════════════════════════════
+var _filaImp = [];
+var _filaImpTimer = null;
+var _filaImpEnviando = false;
+
+function _filaImpCarregar(){
+  try{
+    var raw = localStorage.getItem('pdv_fila_impressao');
+    _filaImp = raw ? JSON.parse(raw) : [];
+  }catch(e){ _filaImp = []; }
+}
+function _filaImpSalvar(){
+  try{ localStorage.setItem('pdv_fila_impressao', JSON.stringify(_filaImp.slice(0,50))); }catch(e){}
+}
+
+function _filaImpAdicionar(imp, conteudoB64, motivo){
+  _filaImp.push({
+    id: 'f' + Date.now() + Math.random().toString(36).slice(2,7),
+    impId: imp.id, impNome: imp.nome, tipo: imp.tipo || 'usb',
+    nomeWindows: imp.nomeWindows, ip: imp.ip, porta: imp.porta || 9100,
+    b64: conteudoB64, criadoEm: Date.now(), tentativas: 0, ultimoErro: motivo || ''
+  });
+  _filaImpSalvar();
+  logImp('FILA_ENTROU', imp.nome + ' → ' + (motivo||'?') + ' (fila agora: ' + _filaImp.length + ')');
+  _filaImpAlarme();
+  _filaImpAgendar(1500);
+}
+
+function _filaImpAlarme(){
+  var el = document.getElementById('fila-imp-alarme');
+  if(!_filaImp.length){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'fila-imp-alarme';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:12px 14px;font-size:0.95rem;font-weight:800;text-align:center;cursor:pointer;box-shadow:0 3px 14px rgba(0,0,0,0.5);animation:pulsaAlarme 1.4s infinite;';
+    el.onclick = function(){ _filaImpProcessar(true); };
+    document.body.appendChild(el);
+    if(!document.getElementById('estilo-alarme-fila')){
+      var st = document.createElement('style');
+      st.id = 'estilo-alarme-fila';
+      st.textContent = '@keyframes pulsaAlarme{0%,100%{opacity:1}50%{opacity:0.72}}';
+      document.head.appendChild(st);
+    }
+    try{ _filaImpBip(); }catch(e){}
+  }
+  var maisAntigo = Math.round((Date.now() - _filaImp[0].criadoEm)/1000);
+  el.textContent = '🚨 ' + _filaImp.length + ' impressão(ões) NÃO saíram — reenviando sozinho (há ' + maisAntigo + 's). Toque pra tentar agora.';
+}
+
+// Bipe curto pra chamar atenção mesmo sem olhar a tela
+function _filaImpBip(){
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return;
+  var ctx = new AC();
+  [0, 0.25, 0.5].forEach(function(atraso){
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880; o.type = 'square';
+    g.gain.setValueAtTime(0.0001, ctx.currentTime + atraso);
+    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + atraso + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + atraso + 0.16);
+    o.start(ctx.currentTime + atraso); o.stop(ctx.currentTime + atraso + 0.18);
+  });
+}
+
+function _filaImpAgendar(ms){
+  if(_filaImpTimer) clearTimeout(_filaImpTimer);
+  _filaImpTimer = setTimeout(function(){ _filaImpProcessar(false); }, ms || 5000);
+}
+
+// Envia o primeiro da fila; se der certo, segue pro próximo na hora.
+function _filaImpProcessar(manual){
+  if(_filaImpEnviando) return;
+  if(!_filaImp.length){ _filaImpAlarme(); return; }
+  _filaImpEnviando = true;
+  var job = _filaImp[0];
+  job.tentativas++;
+  _envioBrutoImpressao(job)
+    .then(function(){
+      _filaImp.shift();
+      _filaImpSalvar();
+      _filaImpAlarme();
+      _filaImpEnviando = false;
+      logImp('FILA_SAIU', job.impNome + ' após ' + job.tentativas + ' tentativa(s), esperou ' + Math.round((Date.now()-job.criadoEm)/1000) + 's');
+      showToast('✓ Impressão pendente saiu em ' + job.impNome, '#4ade80', 3000);
+      if(_filaImp.length) _filaImpAgendar(400);
+    })
+    .catch(function(e){
+      job.ultimoErro = (e && e.message) || String(e);
+      _filaImpSalvar();
+      _filaImpAlarme();
+      _filaImpEnviando = false;
+      if(manual) showToast('❌ Ainda falhando: ' + job.ultimoErro, '#f87171', 5000);
+      // Espera crescente, no máximo 20s — nunca desiste
+      _filaImpAgendar(Math.min(20000, 3000 + job.tentativas * 1500));
+    });
+}
+
+// Envio "cru" pro app local, com prazo máximo — usado pela fila e pelo envio normal
+function _envioBrutoImpressao(job){
+  var d = window.__BAVARO_DESKTOP__;
+  if(!d || !d.printerApiUrl) return Promise.reject(new Error('App desktop não detectado'));
+  var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var t = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, 12000);
+  return fetch(d.printerApiUrl + '/print', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      tipo: job.tipo, conteudoBase64: job.b64, nomeWindows: job.nomeWindows,
+      ip: job.ip, porta: job.porta
+    }),
+    signal: ctrl ? ctrl.signal : undefined
+  }).then(function(r){
+    clearTimeout(t);
+    if(!r.ok) return r.json().catch(function(){ return {}; }).then(function(er){ throw new Error(er.error || ('HTTP ' + r.status)); });
+    return r.json().catch(function(){ return {ok:true}; });
+  }, function(e){
+    clearTimeout(t);
+    throw new Error(e.name === 'AbortError' ? 'App local não respondeu em 12s' : (e.message || 'Sem conexão com o app local'));
+  });
+}
+
 function enviarParaImpressora(imp, conteudo){
   conteudo = _traduzirDialeto(imp, conteudo);
-  if(!_qzPronto){
-    // Não desiste caladamente: força uma reverificação imediata do app local.
+  // ⚠️ NÃO existe mais "portão de prontidão" no app desktop: antes, se a
+  // verificação inicial tivesse falhado, TODA impressão era recusada aqui
+  // mesmo com o app funcionando. Agora sempre tentamos — e o que falhar
+  // cai na fila e é reenviado sozinho até sair.
+  if(!_qzPronto && _modoImpressao !== 'electron'){
     showToast('⚠️ Serviço de impressão desconectado — reconectando...','#f7a34f', 4000);
-    if(_modoImpressao === 'electron') verificarServicoElectron();
     return Promise.reject('desconectado');
   }
   if(!conteudo){ return Promise.reject('Sem conteúdo'); }
@@ -7262,18 +7413,25 @@ function enviarParaImpressora(imp, conteudo){
       ip: imp.ip,
       porta: imp.porta || 9100
     };
-    return fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    }).then(function(r){
-      if(!r.ok){ return r.json().then(function(e){ throw new Error(e.error||'Falha'); }); }
-      return r.json();
-    }).then(function(){
+    var job = {
+      impId: imp.id, impNome: imp.nome, tipo: imp.tipo || 'usb',
+      nomeWindows: imp.nomeWindows, ip: imp.ip, porta: imp.porta || 9100,
+      b64: conteudoB64E
+    };
+    var _t0env = Date.now();
+    logImp('ENVIO_INICIO', imp.nome + ' (' + (imp.tipo||'usb') + ')');
+    return _envioBrutoImpressao(job).then(function(){
+      _qzPronto = true;              // deu certo: o app local está vivo
+      _electronFalhas = 0;
+      logImp('ENVIO_OK', imp.nome + ' em ' + (Date.now()-_t0env) + 'ms');
       showToast('🖨️ Impresso em '+imp.nome,'#4ade80');
     }).catch(function(e){
-      showToast('❌ Falha ao imprimir em '+imp.nome+': '+e.message,'#f87171', 5000);
-      console.error(e);
+      logImp('ENVIO_FALHOU', imp.nome + ' após ' + (Date.now()-_t0env) + 'ms → ' + e.message);
+      // Nada se perde: entra na fila e será reenviado automaticamente
+      console.error('[IMP] falha no envio — indo pra fila:', e.message);
+      _filaImpAdicionar(imp, conteudoB64E, e.message);
+      showToast('🚨 Impressão não saiu — na fila, reenviando sozinho','#f87171', 6000);
+      if(_modoImpressao === 'electron') verificarServicoElectron();
     });
   }
 
@@ -7920,7 +8078,8 @@ function _impVerificarAgora(manual){
         try{ ultimo = parseInt(sessionStorage.getItem('pdv_auto_reload')||'0',10)||0; }catch(e){}
         if(Date.now() - ultimo > 5*60*1000){
           try{ sessionStorage.setItem('pdv_auto_reload', String(Date.now())); }catch(e){}
-          console.warn('[IMP] recarregando o PDV pra restabelecer a impressão');
+          logImp('AUTO_RECARGA', 'canal mudo após ' + _impReligadas + ' religações');
+      console.warn('[IMP] recarregando o PDV pra restabelecer a impressão');
           showToast('🔄 Restabelecendo a impressão...', '#f7a34f', 2500);
           setTimeout(function(){ location.reload(); }, 1500);
           return;
@@ -7937,6 +8096,71 @@ function _impVerificarAgora(manual){
                 vivo ? '#4ade80' : '#f87171', 4000);
     }
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DIÁRIO DE BORDO DA IMPRESSÃO
+//  Grava TUDO que acontece (envios, falhas, quedas, religações)
+//  com data/hora, direto no computador. Sobrevive a recarregar e
+//  reabrir o PDV. Assim, quando parar, não precisamos estar na
+//  frente da tela: o histórico mostra o instante exato e o motivo.
+// ═══════════════════════════════════════════════════════════════
+var _logImp = [];
+var _LOG_IMP_MAX = 400;
+
+function _logImpCarregar(){
+  try{
+    var raw = localStorage.getItem('pdv_log_impressao');
+    _logImp = raw ? JSON.parse(raw) : [];
+  }catch(e){ _logImp = []; }
+}
+function _logImpSalvar(){
+  try{ localStorage.setItem('pdv_log_impressao', JSON.stringify(_logImp.slice(-_LOG_IMP_MAX))); }catch(e){}
+}
+function logImp(evento, detalhe){
+  var reg = {
+    t: Date.now(),
+    hora: new Date().toLocaleString('pt-BR'),
+    ev: evento,
+    det: (detalhe == null ? '' : String(detalhe)).slice(0, 300),
+    online: navigator.onLine ? 1 : 0,
+    fila: (typeof _filaImp !== 'undefined' ? _filaImp.length : 0)
+  };
+  _logImp.push(reg);
+  if(_logImp.length > _LOG_IMP_MAX) _logImp = _logImp.slice(-_LOG_IMP_MAX);
+  _logImpSalvar();
+  console.log('[LOG-IMP] ' + evento + (reg.det ? ' — ' + reg.det : ''));
+}
+
+// Relatório pronto pra copiar e mandar
+function _logImpTexto(){
+  if(!_logImp.length) return '(sem registros ainda)';
+  return _logImp.map(function(r){
+    return r.hora + ' | ' + r.ev + (r.det ? ' | ' + r.det : '') +
+           ' | net:' + (r.online ? 'on' : 'OFF') + ' fila:' + r.fila;
+  }).join('\n');
+}
+
+function abrirHistoricoImpressao(){
+  var ex = document.getElementById('modal-log-imp');
+  if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-log-imp';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:760px;width:100%;max-height:90vh;display:flex;flex-direction:column;padding:16px;">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;color:var(--accent);">📜 DIÁRIO DA IMPRESSÃO</div>'+
+      '<button onclick="document.getElementById(\'modal-log-imp\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;">×</button>'+
+    '</div>'+
+    '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:8px;">Últimos '+_logImp.length+' eventos (mais recentes no fim). Quando parar de imprimir, copie e mande — o motivo estará aqui.</div>'+
+    '<pre id="log-imp-conteudo" style="flex:1;overflow:auto;background:var(--bg);border-radius:8px;padding:11px;font-size:0.7rem;line-height:1.45;white-space:pre-wrap;margin:0;">'+escapeHtml(_logImpTexto())+'</pre>'+
+    '<div style="display:flex;gap:8px;margin-top:11px;">'+
+      '<button onclick="if(confirm(\'Apagar o histórico?\')){_logImp=[];_logImpSalvar();document.getElementById(\'log-imp-conteudo\').textContent=\'(vazio)\';}" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:12px 15px;cursor:pointer;font-family:inherit;">🗑️ Limpar</button>'+
+      '<button onclick="(function(){navigator.clipboard.writeText(_logImpTexto()).then(function(){showToast(\'✓ Diário copiado\',\'#4ade80\');});})()" style="flex:1;background:var(--accent);color:#000;border:none;border-radius:9px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">📋 Copiar diário completo</button>'+
+    '</div>'+
+  '</div>';
+  document.body.appendChild(m);
 }
 
 // ═══ DIAGNÓSTICO DE IMPRESSÃO ═══
@@ -7957,6 +8181,8 @@ function _impDiagnostico(){
   linhas.push('Último sinal do canal: ' + (_impUltimoSinal ? Math.round((Date.now()-_impUltimoSinal)/1000) + 's atrás' : 'nunca'));
   linhas.push('Último erro do canal: ' + (_impUltimoErro || '(nenhum)'));
   linhas.push('Religadas: ' + (_impReligadas||0) + ' | Falhas seguidas no app local: ' + (_impFalhasSeguidas||0));
+  linhas.push('Fila de impressão pendente: ' + _filaImp.length + (_filaImp.length ? ' → ' + _filaImp.map(function(j){ return j.impNome + '(' + j.tentativas + 'x: ' + (j.ultimoErro||'?') + ')'; }).join(' | ') : ''));
+  linhas.push('Modo de impressão: ' + (_modoImpressao||'?') + ' | pronto: ' + _qzPronto);
 
   var caixa = document.getElementById('diag-imp-conteudo');
   function pintar(){ if(caixa) caixa.textContent = linhas.join('\n'); }
@@ -8004,6 +8230,13 @@ function _impDiagnostico(){
     });
 
   Promise.all([p1, p2]).then(function(){
+    linhas.push('');
+    linhas.push('--- ÚLTIMOS 25 EVENTOS ---');
+    var ult = _logImp.slice(-25);
+    if(!ult.length) linhas.push('(sem registros)');
+    ult.forEach(function(r){
+      linhas.push(r.hora + ' | ' + r.ev + (r.det ? ' | ' + r.det : '') + ' | net:' + (r.online?'on':'OFF') + ' fila:' + r.fila);
+    });
     linhas.push('=== FIM ===');
     pintar();
   });
@@ -8024,6 +8257,7 @@ function abrirDiagnosticoImpressao(){
     '<pre id="diag-imp-conteudo" style="flex:1;overflow:auto;background:var(--bg);border-radius:8px;padding:12px;font-size:0.75rem;line-height:1.5;white-space:pre-wrap;color:var(--text);margin:0;">Medindo...</pre>'+
     '<div style="display:flex;gap:8px;margin-top:12px;">'+
       '<button onclick="_impDiagnostico()" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:12px;font-weight:700;cursor:pointer;font-family:inherit;">🔄 Medir de novo</button>'+
+      '<button onclick="abrirHistoricoImpressao()" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:12px;font-weight:700;cursor:pointer;font-family:inherit;">📜 Diário</button>'+
       '<button onclick="(function(){var t=document.getElementById(\'diag-imp-conteudo\').textContent;navigator.clipboard.writeText(t).then(function(){showToast(\'✓ Copiado\',\'#4ade80\');});})()" style="flex:1.3;background:var(--accent);color:#000;border:none;border-radius:9px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">📋 Copiar relatório</button>'+
     '</div>'+
   '</div>';
@@ -8119,6 +8353,7 @@ function iniciarListenerComandosImpressao(){
     }, function(err){
       console.warn('[IMP] escutador de comandos caiu:', err.code||err.message);
       _impUltimoErro = (err.code || err.message || '?') + ' @ ' + new Date().toLocaleTimeString('pt-BR');
+      logImp('CANAL_CAIU', err.code || err.message);
       _impCanalVivo = false;
       _impAtualizarStatusVisual();
       setTimeout(function(){ iniciarListenerComandosImpressao(); }, 4000);

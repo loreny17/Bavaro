@@ -4757,6 +4757,8 @@ function qzInicializar(){
   window.addEventListener('online', function(){ logImp('REDE', 'voltou'); });
   window.addEventListener('offline', function(){ logImp('REDE', 'CAIU'); });
   document.addEventListener('visibilitychange', function(){ logImp('JANELA', document.hidden ? 'em segundo plano' : 'em foco'); });
+  try{ _filaImpPausada = localStorage.getItem('pdv_fila_pausada') === '1'; }catch(e){}
+  if(_filaImpPausada) console.warn('[IMP] fila está PAUSADA (freio de emergência ativo)');
   _filaImpCarregar();
   if(_filaImp.length){
     console.warn('[IMP] ' + _filaImp.length + ' impressão(ões) pendente(s) recuperada(s) da sessão anterior');
@@ -7260,6 +7262,7 @@ function _traduzirDialeto(imp, conteudo){
 var _filaImp = [];
 var _filaImpTimer = null;
 var _filaImpEnviando = false;
+var _filaImpDesde = 0;
 
 function _filaImpCarregar(){
   try{
@@ -7271,8 +7274,28 @@ function _filaImpSalvar(){
   try{ localStorage.setItem('pdv_fila_impressao', JSON.stringify(_filaImp.slice(0,50))); }catch(e){}
 }
 
+var _filaImpParadas = [];
+try{ _filaImpParadas = JSON.parse(localStorage.getItem('pdv_fila_imp_paradas')||'[]'); }catch(e){ _filaImpParadas = []; }
+
+// Assinatura curta do conteúdo, pra reconhecer trabalhos idênticos
+function _assinaturaImp(impId, b64){
+  var h = 0, str = impId + '|' + b64;
+  for(var i = 0; i < str.length; i++){ h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }
+  return 'a' + Math.abs(h).toString(36);
+}
+
 function _filaImpAdicionar(imp, conteudoB64, motivo){
+  // Não enfileira a MESMA impressão duas vezes (protege contra o mesmo
+  // pedido ser reenviado várias vezes por tentativas simultâneas).
+  if(_filaImpPausada){ logImp('FILA_PAUSADA_IGNOROU', imp.nome); return; }
+  var assin = _assinaturaImp(imp.id, conteudoB64);
+  var jaTem = _filaImp.some(function(j){ return j.assin === assin; });
+  if(jaTem){
+    logImp('FILA_DUPLICADA_IGNORADA', imp.nome);
+    return;
+  }
   _filaImp.push({
+    assin: assin,
     id: 'f' + Date.now() + Math.random().toString(36).slice(2,7),
     impId: imp.id, impNome: imp.nome, tipo: imp.tipo || 'usb',
     nomeWindows: imp.nomeWindows, ip: imp.ip, porta: imp.porta || 9100,
@@ -7284,6 +7307,90 @@ function _filaImpAdicionar(imp, conteudoB64, motivo){
   _filaImpAgendar(1500);
 }
 
+// Painel de controle da fila: o operador NUNCA fica preso com um alarme
+// que não some. Aqui ele vê o que está pendente, tenta de novo ou descarta.
+function abrirPainelFilaImpressao(){
+  var ex = document.getElementById('modal-fila-imp');
+  if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-fila-imp';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:100000;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  var itens = _filaImp.map(function(j, i){
+    return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">'+
+      '<div style="flex:1;">'+
+        '<div style="font-weight:700;">'+escapeHtml(j.impNome||'?')+'</div>'+
+        '<div style="font-size:0.72rem;color:var(--muted);">há '+Math.round((Date.now()-j.criadoEm)/1000)+'s · '+j.tentativas+' tentativa(s)</div>'+
+        (j.ultimoErro ? '<div style="font-size:0.72rem;color:#f87171;">'+escapeHtml(j.ultimoErro)+'</div>' : '')+
+      '</div>'+
+      '<button onclick="_filaImpDescartar('+i+')" style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.35);color:#f87171;border-radius:7px;padding:7px 11px;font-size:0.76rem;cursor:pointer;font-family:inherit;">Descartar</button>'+
+    '</div>';
+  }).join('') || '<div style="color:var(--muted);padding:12px;text-align:center;">Nenhuma pendência 🎉</div>';
+
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:16px;">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'+
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;color:#f87171;">🚨 IMPRESSÕES PENDENTES</div>'+
+      '<button onclick="document.getElementById(\'modal-fila-imp\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;">×</button>'+
+    '</div>'+
+    '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;">Reimprimir pelos Pedidos cria um envio NOVO — não esvazia esta fila. Use os botões abaixo.</div>'+
+    '<div style="flex:1;overflow-y:auto;">'+itens+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px;">'+
+      '<button onclick="_filaImpPararTudo()" style="flex:1;background:#dc2626;border:none;color:#fff;border-radius:9px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">⛔ PARAR TUDO</button>'+
+      '<button onclick="_filaImpDescartarTudo()" style="flex:1;background:var(--surface2);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:9px;padding:12px;font-weight:700;cursor:pointer;font-family:inherit;">🗑️ Descartar</button>'+
+      '<button onclick="_filaImpProcessar(true)" style="flex:1.3;background:var(--accent);color:#000;border:none;border-radius:9px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">🔄 Tentar agora</button>'+
+    '</div>'+
+  '</div>';
+  document.body.appendChild(m);
+}
+
+// FREIO DE EMERGÊNCIA: esvazia a fila e suspende o reenvio automático até o
+// operador religar. Serve pra estancar na hora qualquer repetição indevida.
+var _filaImpPausada = false;
+function _filaImpPararTudo(){
+  if(!confirm('PARAR a fila de impressão agora?\n\n• As pendências serão descartadas\n• O reenvio automático fica SUSPENSO até você religar\n\nUse se a mesma comanda estiver saindo repetidamente.')) return;
+  _filaImp = [];
+  _filaImpPausada = true;
+  _filaImpEnviando = false;
+  if(_filaImpTimer) clearTimeout(_filaImpTimer);
+  _filaImpSalvar();
+  try{ localStorage.setItem('pdv_fila_pausada','1'); }catch(e){}
+  logImp('FILA_PAUSADA', 'freio de emergência acionado pelo operador');
+  var mm = document.getElementById('modal-fila-imp');
+  if(mm) mm.remove();
+  _filaImpAlarme();
+  showToast('⛔ Fila parada. Impressão direta segue funcionando.', '#f7a34f', 7000);
+}
+
+function _filaImpReligar(){
+  _filaImpPausada = false;
+  try{ localStorage.removeItem('pdv_fila_pausada'); }catch(e){}
+  logImp('FILA_RELIGADA', 'pelo operador');
+  showToast('✓ Fila religada', '#4ade80');
+}
+
+function _filaImpDescartar(i){
+  if(i < 0 || i >= _filaImp.length) return;
+  var j = _filaImp.splice(i, 1)[0];
+  _filaImpSalvar();
+  logImp('FILA_DESCARTADA', j.impNome + ' (manual)');
+  _filaImpAlarme();
+  var mm = document.getElementById('modal-fila-imp');
+  if(mm){ mm.remove(); if(_filaImp.length) abrirPainelFilaImpressao(); }
+  showToast('Pendência descartada', '#f7a34f');
+}
+
+function _filaImpDescartarTudo(){
+  if(!_filaImp.length) return;
+  if(!confirm('Descartar as ' + _filaImp.length + ' impressões pendentes?\n\nElas NÃO sairão. Se precisar, use Reimprimir nos Pedidos.')) return;
+  logImp('FILA_DESCARTADA_TUDO', _filaImp.length + ' item(ns)');
+  _filaImp = [];
+  _filaImpSalvar();
+  _filaImpAlarme();
+  var mm = document.getElementById('modal-fila-imp');
+  if(mm) mm.remove();
+  showToast('✓ Fila limpa', '#4ade80');
+}
+
 function _filaImpAlarme(){
   var el = document.getElementById('fila-imp-alarme');
   if(!_filaImp.length){ if(el) el.remove(); return; }
@@ -7291,7 +7398,7 @@ function _filaImpAlarme(){
     el = document.createElement('div');
     el.id = 'fila-imp-alarme';
     el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:12px 14px;font-size:0.95rem;font-weight:800;text-align:center;cursor:pointer;box-shadow:0 3px 14px rgba(0,0,0,0.5);animation:pulsaAlarme 1.4s infinite;';
-    el.onclick = function(){ _filaImpProcessar(true); };
+    el.onclick = function(){ abrirPainelFilaImpressao(); };
     document.body.appendChild(el);
     if(!document.getElementById('estilo-alarme-fila')){
       var st = document.createElement('style');
@@ -7302,7 +7409,8 @@ function _filaImpAlarme(){
     try{ _filaImpBip(); }catch(e){}
   }
   var maisAntigo = Math.round((Date.now() - _filaImp[0].criadoEm)/1000);
-  el.textContent = '🚨 ' + _filaImp.length + ' impressão(ões) NÃO saíram — reenviando sozinho (há ' + maisAntigo + 's). Toque pra tentar agora.';
+  var err = _filaImp[0].ultimoErro ? ' — ' + _filaImp[0].ultimoErro : '';
+  el.textContent = '🚨 ' + _filaImp.length + ' impressão(ões) pendente(s) há ' + maisAntigo + 's' + err + ' — TOQUE PARA RESOLVER';
 }
 
 // Bipe curto pra chamar atenção mesmo sem olhar a tela
@@ -7328,7 +7436,15 @@ function _filaImpAgendar(ms){
 
 // Envia o primeiro da fila; se der certo, segue pro próximo na hora.
 function _filaImpProcessar(manual){
+  if(_filaImpPausada && !manual) return;
+  // Destrava: se um envio ficou preso por mais de 30s, libera a fila.
+  if(_filaImpEnviando && _filaImpDesde && (Date.now() - _filaImpDesde) > 30000){
+    console.warn('[IMP] envio preso — destravando fila');
+    logImp('FILA_DESTRAVADA', 'envio preso por mais de 30s');
+    _filaImpEnviando = false;
+  }
   if(_filaImpEnviando) return;
+  _filaImpDesde = Date.now();
   if(!_filaImp.length){ _filaImpAlarme(); return; }
   _filaImpEnviando = true;
   var job = _filaImp[0];
@@ -7345,12 +7461,23 @@ function _filaImpProcessar(manual){
     })
     .catch(function(e){
       job.ultimoErro = (e && e.message) || String(e);
+      _filaImpEnviando = false;
+      // ⚠️ TETO DE TENTATIVAS: sem isto, um trabalho que a impressora ACEITA
+      // mas responde de forma inesperada era reenviado eternamente — saía a
+      // mesma comanda sem parar. Após 5 tentativas ele para e espera decisão
+      // humana (fica no painel, pra reenviar ou descartar).
+      if(job.tentativas >= 5){
+        job.parado = true;
+        logImp('FILA_PAROU', job.impNome + ' após 5 tentativas → ' + job.ultimoErro);
+        _filaImp.shift();
+        _filaImpParadas.push(job);
+        try{ localStorage.setItem('pdv_fila_imp_paradas', JSON.stringify(_filaImpParadas.slice(-20))); }catch(err){}
+        showToast('⛔ "' + job.impNome + '" não aceitou após 5 tentativas — veja o painel', '#f87171', 7000);
+      }
       _filaImpSalvar();
       _filaImpAlarme();
-      _filaImpEnviando = false;
       if(manual) showToast('❌ Ainda falhando: ' + job.ultimoErro, '#f87171', 5000);
-      // Espera crescente, no máximo 20s — nunca desiste
-      _filaImpAgendar(Math.min(20000, 3000 + job.tentativas * 1500));
+      if(_filaImp.length) _filaImpAgendar(Math.min(20000, 3000 + job.tentativas * 1500));
     });
 }
 
@@ -7378,8 +7505,14 @@ function _envioBrutoImpressao(job){
     signal: ctrl ? ctrl.signal : undefined
   }).then(function(r){
     clearTimeout(t);
+    // Resposta 200 = a impressora recebeu. Mesmo que o corpo venha em formato
+    // inesperado, tratamos como SUCESSO: reenviar algo que já imprimiu é pior
+    // (era o que fazia a mesma comanda sair repetidamente).
     if(!r.ok) return r.json().catch(function(){ return {}; }).then(function(er){ throw new Error(er.error || ('HTTP ' + r.status)); });
-    return r.json().catch(function(){ return {ok:true}; });
+    return r.json().catch(function(){ return {ok:true}; }).then(function(j){
+      if(j && j.ok === false && j.error) throw new Error(j.error);
+      return j || {ok:true};
+    });
   }, function(e){
     clearTimeout(t);
     throw new Error(e.name === 'AbortError' ? 'App local não respondeu em 12s' : (e.message || 'Sem conexão com o app local'));

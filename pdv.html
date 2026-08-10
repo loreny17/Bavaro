@@ -7363,8 +7363,16 @@ function _envioBrutoImpressao(job){
   return fetch(d.printerApiUrl + '/print', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
+    // ⚠️ ENVIA OS DOIS FORMATOS. O app desktop instalado valida o campo
+    // "conteudo" (texto cru) e recusa com "conteudo vazio" se ele faltar.
+    // Ao migrar pra fila, passei a mandar só o base64 — foi isso que quebrou
+    // a impressão. O base64 preserva os bytes da logo/QR; o texto cru mantém
+    // compatibilidade com as versões do app já instaladas.
     body: JSON.stringify({
-      tipo: job.tipo, conteudoBase64: job.b64, nomeWindows: job.nomeWindows,
+      tipo: job.tipo,
+      conteudo: (function(){ try{ return atob(job.b64); }catch(e){ return ''; } })(),
+      conteudoBase64: job.b64,
+      nomeWindows: job.nomeWindows,
       ip: job.ip, porta: job.porta
     }),
     signal: ctrl ? ctrl.signal : undefined

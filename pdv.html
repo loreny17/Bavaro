@@ -4757,7 +4757,8 @@ function qzInicializar(){
   window.addEventListener('online', function(){ logImp('REDE', 'voltou'); });
   window.addEventListener('offline', function(){ logImp('REDE', 'CAIU'); });
   document.addEventListener('visibilitychange', function(){ logImp('JANELA', document.hidden ? 'em segundo plano' : 'em foco'); });
-  try{ _filaImpPausada = localStorage.getItem('pdv_fila_pausada') === '1'; }catch(e){}
+  // Só religa o reenvio automático se o operador tiver ligado explicitamente
+  try{ _filaImpPausada = (localStorage.getItem('pdv_fila_auto') !== '1'); }catch(e){ _filaImpPausada = true; }
   if(_filaImpPausada) console.warn('[IMP] fila está PAUSADA (freio de emergência ativo)');
   _filaImpCarregar();
   if(_filaImp.length){
@@ -7333,6 +7334,10 @@ function abrirPainelFilaImpressao(){
       '<button onclick="document.getElementById(\'modal-fila-imp\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;">×</button>'+
     '</div>'+
     '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;">Reimprimir pelos Pedidos cria um envio NOVO — não esvazia esta fila. Use os botões abaixo.</div>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:9px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:9px;">'+
+      '<div style="font-size:0.78rem;">Reenvio automático<div style="font-size:0.7rem;color:var(--muted);">' + (_filaImpPausada ? 'DESLIGADO — nada sai sozinho' : 'LIGADO — pendências saem sozinhas') + '</div></div>'+
+      '<button onclick="_filaImpAlternarAuto()" style="background:' + (_filaImpPausada ? 'var(--surface)' : 'var(--accent)') + ';color:' + (_filaImpPausada ? 'var(--muted)' : '#000') + ';border:1px solid ' + (_filaImpPausada ? 'var(--border)' : 'var(--accent)') + ';border-radius:8px;padding:9px 14px;font-weight:800;font-size:0.78rem;cursor:pointer;font-family:inherit;">' + (_filaImpPausada ? 'Ligar' : 'Desligar') + '</button>'+
+    '</div>'+
     '<div style="flex:1;overflow-y:auto;">'+itens+'</div>'+
     '<div style="display:flex;gap:8px;margin-top:12px;">'+
       '<button onclick="_filaImpPararTudo()" style="flex:1;background:#dc2626;border:none;color:#fff;border-radius:9px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;">⛔ PARAR TUDO</button>'+
@@ -7345,7 +7350,24 @@ function abrirPainelFilaImpressao(){
 
 // FREIO DE EMERGÊNCIA: esvazia a fila e suspende o reenvio automático até o
 // operador religar. Serve pra estancar na hora qualquer repetição indevida.
-var _filaImpPausada = false;
+// ⚠️ O reenvio automático agora nasce DESLIGADO. Ele foi a origem das
+// impressões repetidas: era melhor não reenviar sozinho do que arriscar
+// mandar a mesma comanda duas vezes pra cozinha. O que falhar fica no
+// painel, visível, e sai só quando o operador mandar.
+var _filaImpPausada = true;
+function _filaImpAlternarAuto(){
+  _filaImpPausada = !_filaImpPausada;
+  try{
+    if(_filaImpPausada) localStorage.removeItem('pdv_fila_auto');
+    else localStorage.setItem('pdv_fila_auto','1');
+  }catch(e){}
+  logImp('FILA_AUTO', _filaImpPausada ? 'desligado' : 'ligado');
+  showToast(_filaImpPausada ? '⛔ Reenvio automático DESLIGADO' : '✓ Reenvio automático ligado',
+            _filaImpPausada ? '#f7a34f' : '#4ade80', 4000);
+  var mm = document.getElementById('modal-fila-imp');
+  if(mm){ mm.remove(); abrirPainelFilaImpressao(); }
+}
+
 function _filaImpPararTudo(){
   if(!confirm('PARAR a fila de impressão agora?\n\n• As pendências serão descartadas\n• O reenvio automático fica SUSPENSO até você religar\n\nUse se a mesma comanda estiver saindo repetidamente.')) return;
   _filaImp = [];
@@ -7485,8 +7507,13 @@ function _filaImpProcessar(manual){
 function _envioBrutoImpressao(job){
   var d = window.__BAVARO_DESKTOP__;
   if(!d || !d.printerApiUrl) return Promise.reject(new Error('App desktop não detectado'));
+  // ⚠️ PRAZO MAIOR QUE O DO APP LOCAL (que é de 15s por impressão).
+  // Antes eu desistia em 12s — ANTES do app terminar. Resultado: a impressão
+  // saía, mas o PDV achava que tinha falhado e mandava de novo pela fila.
+  // Era essa a origem das comandas duplicadas na cozinha. Agora só considero
+  // falha quando o próprio app já desistiu.
   var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  var t = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, 12000);
+  var t = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, 25000);
   return fetch(d.printerApiUrl + '/print', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -7515,7 +7542,7 @@ function _envioBrutoImpressao(job){
     });
   }, function(e){
     clearTimeout(t);
-    throw new Error(e.name === 'AbortError' ? 'App local não respondeu em 12s' : (e.message || 'Sem conexão com o app local'));
+    throw new Error(e.name === 'AbortError' ? 'App local não respondeu em 25s' : (e.message || 'Sem conexão com o app local'));
   });
 }
 
@@ -7968,8 +7995,32 @@ function gerarCupomClienteTotem(pedido, modelo, imp){
   return s;
 }
 
+// Registro do que JÁ foi impresso automaticamente. Fica gravado no
+// computador, então nem recarregar o PDV, nem religar a fila, nem um
+// listener disparando duas vezes conseguem imprimir o mesmo pedido de novo.
+// A reimpressão MANUAL continua livre (é uma ordem sua, não automática).
+var _jaImpressos = {};
+try{ _jaImpressos = JSON.parse(localStorage.getItem('pdv_pedidos_impressos')||'{}'); }catch(e){ _jaImpressos = {}; }
+function _marcarImpresso(id){
+  if(!id) return;
+  _jaImpressos[id] = Date.now();
+  // Limpa registros com mais de 24h pra não crescer sem fim
+  var lim = Date.now() - 24*60*60*1000;
+  Object.keys(_jaImpressos).forEach(function(k){ if(_jaImpressos[k] < lim) delete _jaImpressos[k]; });
+  try{ localStorage.setItem('pdv_pedidos_impressos', JSON.stringify(_jaImpressos)); }catch(e){}
+}
+
 function imprimirPedidoAutomatico(pedido, opts){
   opts = opts || {};
+  // ⛔ TRAVA ANTI-DUPLICATA
+  if(pedido && pedido.id && !opts.manual){
+    if(_jaImpressos[pedido.id]){
+      logImp('DUPLICATA_BLOQUEADA', 'pedido ' + (pedido.numeroSequencial || pedido.id) + ' já foi impresso');
+      console.warn('[IMPRIMIR] bloqueado: pedido já impresso —', pedido.id);
+      return;
+    }
+    _marcarImpresso(pedido.id);
+  }
   // Avisa na tela quando a impressão desiste (só na ação manual, pra não
   // encher o operador de mensagens durante a impressão automática).
   function _aviso(msg){

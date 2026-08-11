@@ -2872,15 +2872,30 @@ function _pdvImprimirComRetry(comando, tentativas, delay){
 }
 
 // Watchdog PDV — reconecta se ficar sem update por 3min
+// ⚠️ CAUSA RAIZ ENCONTRADA (10/08): este vigia chamava 'escutarPedidosPDV()',
+// uma função que NUNCA EXISTIU no arquivo — a função real chama-se
+// 'iniciarListenerPedidos'. Envolvido num try/catch vazio, a chamada
+// quebrada falhava em silêncio: o vigia "detectava" o listener morto,
+// "tentava" reconectar, falhava sem avisar ninguém, e o PDV ficava sem
+// receber pedidos novos (e sem imprimir) até alguém dar F5 manualmente.
+// Esta é a explicação completa do "para depois de 1-2h e só F5 resolve".
 var _pdvUltimoUpdate = Date.now();
 var _pdvWatchdog = null;
 function _pdvIniciarWatchdog(){
   if(_pdvWatchdog) clearInterval(_pdvWatchdog);
   _pdvWatchdog = setInterval(function(){
-    if(Date.now() - _pdvUltimoUpdate > 180000 && navigator.onLine !== false){
-      console.warn('[PDV-WATCHDOG] Sem updates — reconectando...');
-      try{ escutarPedidosPDV && escutarPedidosPDV(); }catch(e){}
-      showToast('🔄 Reconectando PDV...', '#f59e0b', 2000);
+    var semUpdate = Date.now() - _pdvUltimoUpdate;
+    if(semUpdate > 180000 && navigator.onLine !== false){
+      console.warn('[PDV-WATCHDOG] Sem updates há ' + Math.round(semUpdate/1000) + 's — reconectando listener de pedidos...');
+      if(typeof logImp === 'function') logImp('PEDIDOS_WATCHDOG_ACIONADO', Math.round(semUpdate/1000) + 's sem receber nada do Firestore');
+      try{
+        iniciarListenerPedidos();
+        _pdvUltimoUpdate = Date.now(); // evita disparar de novo antes do 1º snapshot chegar
+      }catch(e){
+        console.error('[PDV-WATCHDOG] falha ao reconectar:', e);
+        if(typeof logImp === 'function') logImp('PEDIDOS_WATCHDOG_FALHOU', e.message);
+      }
+      showToast('🔄 Reconectando pedidos...', '#f59e0b', 2500);
     }
   }, 30000);
 }
@@ -3166,11 +3181,24 @@ function iniciarListenerPedidos() {
     _unsubPedidosPDV = q.onSnapshot(
       function(snap){ _processarSnap(snap, true); },
       function(e){
-        console.warn('Erro pedidos snapshot:', e.code);
+        // ⚠️ CAUSA RAIZ Nº 2: este handler só reagia ao código 'failed-precondition'.
+        // Firestore ENCERRA o listener após qualquer erro que dispare este callback —
+        // não tenta de novo sozinho. Qualquer outro código (ex: 'unavailable', ou
+        // uma renovação de sessão malsucedida por volta de 1h de uso) matava a
+        // escuta de pedidos pra sempre, e SEM ISSO, nada mais imprimia
+        // automaticamente. Agora: todo erro é registrado e sempre tentamos religar.
+        console.warn('Erro pedidos snapshot:', e.code || e.message);
+        logImp('PEDIDOS_LISTENER_CAIU', e.code || e.message);
         if(e.code === 'failed-precondition'){
           console.warn('[PDV] Índice pendente, fallback sem filtro de data');
           showToast('⚠️ Índice criando... carregando todos os pedidos', '#f59e0b', 5000);
           _assinarSemData();
+        } else {
+          // Religa com um pequeno atraso — evita loop apertado se o erro persistir
+          setTimeout(function(){
+            logImp('PEDIDOS_RECONECTANDO', 'após: ' + (e.code||e.message));
+            iniciarListenerPedidos();
+          }, 3000);
         }
       }
     );
@@ -3182,7 +3210,14 @@ function iniciarListenerPedidos() {
     if(_tenantId) q = q.where('tenantId','==', _tenantId);
     _unsubPedidosPDV = q.onSnapshot(
       function(snap){ _processarSnap(snap, false); },
-      function(e){ console.warn('Erro pedidos snapshot fallback:', e.code); }
+      function(e){
+        console.warn('Erro pedidos snapshot fallback:', e.code || e.message);
+        logImp('PEDIDOS_LISTENER_FALLBACK_CAIU', e.code || e.message);
+        setTimeout(function(){
+          logImp('PEDIDOS_FALLBACK_RECONECTANDO', 'após: ' + (e.code||e.message));
+          iniciarListenerPedidos();
+        }, 3000);
+      }
     );
   }
 
@@ -4812,8 +4847,9 @@ function verificarServicoElectron(){
   fetch(url).then(function(r){ return r.json(); }).then(function(data){
     if(data.ok){
       _qzPronto = true;
-      if(_electronFalhas > 0) logImp('APP_LOCAL_VOLTOU', 'após ' + _electronFalhas + ' tentativas');
+      if(_electronFalhas > 0) logImp('APP_LOCAL_VOLTOU', 'após ' + _electronFalhas + ' tentativas, ' + Math.round((Date.now()-_electronFalhandoDesde)/1000) + 's parado');
       _electronFalhas = 0;
+      _electronFalhandoDesde = 0;
       atualizarStatusQZ('online', '✓ App Desktop conectado', 'Impressão automática habilitada (sem popups)');
       iniciarListenerImpressao();
       iniciarListenerComandosImpressao();
@@ -4840,10 +4876,35 @@ function verificarServicoElectron(){
 // Reverifica o app local com espera crescente até voltar (nunca desiste).
 var _electronFalhas = 0;
 var _electronTimer = null;
+var _electronFalhandoDesde = 0;
 function _agendarNovaVerificacaoElectron(){
   _electronFalhas++;
+  if(!_electronFalhandoDesde) _electronFalhandoDesde = Date.now();
   if(_electronTimer) clearTimeout(_electronTimer);
   var espera = Math.min(30000, 3000 * _electronFalhas); // 3s, 6s, 9s... até 30s
+
+  // ⚠️ REDE DE SEGURANÇA ADMITIDA: eu ainda não sei com 100% de certeza por
+  // que a comunicação com o app local trava depois de um tempo, mesmo com
+  // você ficando parado na aba Pedidos. Minha teoria anterior (abas
+  // duplicando vigias) foi descartada por você. Em vez de continuar
+  // remendando às cegas, automatizo aqui o que JÁ FUNCIONA na prática:
+  // se o app local ficar inacessível por mais de 4 minutos seguidos, o PDV
+  // recarrega sozinho — exatamente o que você faz manualmente e que sempre
+  // resolve. Registra tudo no diário, então se acontecer de novo teremos os
+  // dados exatos do instante da falha pra achar a causa raiz de verdade.
+  var falhandoHa = Date.now() - _electronFalhandoDesde;
+  if(falhandoHa > 4*60*1000){
+    logImp('AUTO_RECARGA_APP_LOCAL', 'app local inacessível há ' + Math.round(falhandoHa/1000) + 's (' + _electronFalhas + ' tentativas) — recarregando');
+    var ultimo = 0;
+    try{ ultimo = parseInt(sessionStorage.getItem('pdv_auto_reload_electron')||'0',10)||0; }catch(e){}
+    if(Date.now() - ultimo > 5*60*1000){
+      try{ sessionStorage.setItem('pdv_auto_reload_electron', String(Date.now())); }catch(e){}
+      showToast('🔄 Impressão sem resposta há minutos — recarregando...', '#f7a34f', 3000);
+      setTimeout(function(){ location.reload(); }, 1500);
+      return;
+    }
+  }
+
   console.warn('[IMP] app local indisponível — nova verificação em ' + (espera/1000) + 's');
   _electronTimer = setTimeout(verificarServicoElectron, espera);
 }
@@ -8391,6 +8452,8 @@ function _impDiagnostico(){
   linhas.push('Último sinal do canal: ' + (_impUltimoSinal ? Math.round((Date.now()-_impUltimoSinal)/1000) + 's atrás' : 'nunca'));
   linhas.push('Último erro do canal: ' + (_impUltimoErro || '(nenhum)'));
   linhas.push('Religadas: ' + (_impReligadas||0) + ' | Falhas seguidas no app local: ' + (_impFalhasSeguidas||0));
+  linhas.push('Pedidos (Firestore): última mensagem ' + (Math.round((Date.now()-(_pdvUltimoUpdate||0))/1000)) + 's atrás | listener guard: ' + (typeof _impCmdListenerAtivo!=='undefined'?_impCmdListenerAtivo:'?'));
+  linhas.push('Comandos impressão (Firestore): último sinal ' + (_impUltimoSinal ? Math.round((Date.now()-_impUltimoSinal)/1000)+'s atrás' : 'nunca'));
   linhas.push('Fila de impressão pendente: ' + _filaImp.length + (_filaImp.length ? ' → ' + _filaImp.map(function(j){ return j.impNome + '(' + j.tentativas + 'x: ' + (j.ultimoErro||'?') + ')'; }).join(' | ') : ''));
   linhas.push('Modo de impressão: ' + (_modoImpressao||'?') + ' | pronto: ' + _qzPronto);
 
@@ -8579,8 +8642,17 @@ function iniciarListenerComandosImpressao(){
       _impUltimoErro = (err.code || err.message || '?') + ' @ ' + new Date().toLocaleTimeString('pt-BR');
       logImp('CANAL_CAIU', err.code || err.message);
       _impCanalVivo = false;
+      // ⚠️ CAUSA RAIZ (achada por você, confirmada no código): esta trava
+      // nunca era liberada depois de setada 'true' na criação do listener.
+      // O 'iniciarListenerComandosImpressao()' chamado 4s abaixo batia nela
+      // e retornava sem fazer NADA — silenciosamente, sem log, sem erro.
+      // A "reconexão automática" nunca existiu de fato: era um no-op.
+      _impCmdListenerAtivo = false;
       _impAtualizarStatusVisual();
-      setTimeout(function(){ iniciarListenerComandosImpressao(); }, 4000);
+      setTimeout(function(){
+        logImp('COMANDOS_RECONECTANDO', 'após queda: ' + (err.code||err.message));
+        iniciarListenerComandosImpressao();
+      }, 4000);
     });
   _impUltimoSinal = Date.now();
   _impCanalVivo = true;

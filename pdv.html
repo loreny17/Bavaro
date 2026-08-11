@@ -4749,7 +4749,25 @@ function fbDocConfigImp(){
 // ─── DETECTA MODO: Electron (recomendado) ou QZ Tray (fallback) ───
 var _modoImpressao = null; // 'electron' | 'qz' | null
 
+var _qzJaInicializado = false;
 function qzInicializar(){
+  // ⚠️ ESTE ERA O DEFEITO REAL. Esta função registra vigias (setInterval,
+  // ouvintes de rede/janela) que ficam rodando o dia inteiro. Ela era chamada
+  // de novo TODA VEZ que a aba 🖨️ Impressão era aberta — e nunca removia os
+  // vigias anteriores, só empilhava mais por cima. Com o tempo, dezenas de
+  // verificações duplicadas brigavam pela mesma porta local, entupindo a fila
+  // do PRÓPRIO NAVEGADOR (que limita conversas simultâneas com o mesmo
+  // endereço) — os pedidos ficavam presos nessa fila, sem nem chegar a sair,
+  // até estourar nosso prazo de 25s. Por isso recarregar sempre "consertava":
+  // matava tudo que tinha acumulado e voltava a ter um vigia só.
+  // Agora: só monta os vigias na PRIMEIRA vez; nas chamadas seguintes, só
+  // reconfere o status, sem duplicar nada.
+  if(_qzJaInicializado){
+    logImp('QZ_REINIT_IGNORADO', 'já estava inicializado — evitando duplicar vigias');
+    if(_modoImpressao === 'electron') verificarServicoElectron();
+    return;
+  }
+  _qzJaInicializado = true;
   // Recupera impressões que ficaram pendentes (inclusive de antes de fechar
   // ou recarregar o PDV) e volta a tentar imediatamente.
   _logImpCarregar();

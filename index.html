@@ -1477,6 +1477,7 @@ body.admin-mode .admin-only{display:flex!important;}
     <button class="filter-btn" id="btn-filtro-itau" onclick="toggleFiltro('itau')" title="Filtrar Conta Itaú">🏦</button>
     <button class="filter-btn" id="btn-filtro-vt" onclick="toggleFiltro('vt')" title="Filtrar Cartão V.T">🚌</button>
     <button class="filter-btn" onclick="abrirMenuWA(this)" title="Enviar via WhatsApp" style="color:#25d366;border-color:rgba(37,211,102,0.4);">📲</button>
+    <button class="filter-btn" onclick="abrirListaCartoesTransporte()" title="Lista de Cartões Transporte" style="color:var(--accent);border-color:rgba(212,168,67,0.4);">🎫</button>
   </div>
   <div id="lista-container"></div>
 </div>
@@ -1485,6 +1486,36 @@ body.admin-mode .admin-only{display:flex!important;}
 <button class="fab-btn" id="fab-novo-func" onclick="abrirCadastro()" title="Novo Funcionário" style="display:flex;">+</button>
 
 <!-- Menu WA dropdown -->
+<!-- Modal: Lista de Cartões Transporte (mensal) -->
+<div id="cartoes-transporte-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9800;align-items:flex-end;justify-content:center;" onclick="if(event.target===this)fecharListaCartoesTransporte()">
+  <div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88vh;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;border-bottom:1px solid var(--border2);flex-shrink:0;">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:0.05em;">🎫 CARTÕES DE TRANSPORTE</div>
+        <div style="font-size:0.72rem;color:var(--muted);" id="ct-subtitulo">0 funcionários com cartão cadastrado</div>
+      </div>
+      <button onclick="fecharListaCartoesTransporte()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;line-height:1;padding:4px 8px;">×</button>
+    </div>
+
+    <div style="padding:10px 18px;border-bottom:1px solid var(--border2);flex-shrink:0;display:flex;gap:8px;align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;cursor:pointer;">
+        <input type="checkbox" id="ct-marcar-todos" checked onchange="ctMarcarTodos(this.checked)" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+        Selecionar todos
+      </label>
+      <span style="margin-left:auto;font-size:0.76rem;color:var(--accent);font-weight:700;font-family:'Space Grotesk',sans-serif;" id="ct-contador">0 selecionados</span>
+    </div>
+
+    <div id="ct-lista" style="flex:1;overflow-y:auto;padding:6px 18px;"></div>
+
+    <div style="padding:12px 18px 18px;border-top:1px solid var(--border2);flex-shrink:0;">
+      <button class="btn btn-primary" onclick="ctEnviarWhatsApp()" style="width:100%;background:#25d366;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        Enviar lista selecionada
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="wa-menu-overlay" style="display:none;position:fixed;inset:0;z-index:9990;" onclick="fecharMenuWA()"></div>
 <div id="wa-menu" style="display:none;position:fixed;z-index:9991;background:var(--surface);border:1.5px solid rgba(37,211,102,0.4);border-radius:12px;padding:8px;min-width:200px;">
   <div style="font-size:0.68rem;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-weight:700;text-transform:uppercase;padding:4px 8px 8px;">📲 Enviar via WhatsApp</div>
@@ -8694,6 +8725,79 @@ function abrirMenuWA(btn){
 function fecharMenuWA(){
   document.getElementById('wa-menu').style.display='none';
   document.getElementById('wa-menu-overlay').style.display='none';
+}
+
+// ═══ LISTA DE CARTÕES DE TRANSPORTE (envio mensal por WhatsApp) ═══
+function abrirListaCartoesTransporte(){
+  var lista = funcionarios
+    .filter(function(f){ return f.cartaoNum && f.cartaoNum.trim(); })
+    .slice()
+    .sort(function(a,b){ return (a.nome||'').localeCompare(b.nome||''); });
+
+  var box = document.getElementById('ct-lista');
+  document.getElementById('ct-subtitulo').textContent = lista.length + ' funcionário' + (lista.length===1?'':'s') + ' com cartão cadastrado';
+
+  if(!lista.length){
+    box.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:0.85rem;padding:30px 10px;">Nenhum funcionário com cartão de transporte cadastrado.<br><br>Cadastre em <b>Editar funcionário → Cartão Transporte</b>.</div>';
+  } else {
+    box.innerHTML = lista.map(function(f){
+      var tipo = f.cartaoTipo || 'Transporte';
+      var corTipo = tipo === 'Urbs' ? '#f5b82a' : (tipo === 'Metrocard' ? '#7c3aed' : 'var(--muted)');
+      return '<label class="cl-check-item" data-ct-fid="'+f.id+'" style="cursor:pointer;padding:10px 4px;">'
+        + '<input type="checkbox" class="cl-checkbox ct-check" value="'+f.id+'" checked onchange="ctAtualizarContador()">'
+        + '<span style="flex:1;min-width:0;">'
+          + '<div style="font-weight:600;font-size:0.88rem;">'+escHtml(f.nome)+'</div>'
+          + '<div style="font-size:0.74rem;color:var(--muted);margin-top:1px;">Cartão: '+escHtml(f.cartaoNum)+'</div>'
+        + '</span>'
+        + '<span style="flex-shrink:0;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:'+corTipo+';background:'+corTipo+'1a;border:1px solid '+corTipo+'40;border-radius:20px;padding:3px 9px;">'+escHtml(tipo)+'</span>'
+      + '</label>';
+    }).join('');
+  }
+
+  document.getElementById('ct-marcar-todos').checked = true;
+  ctAtualizarContador();
+  document.getElementById('cartoes-transporte-overlay').style.display = 'flex';
+}
+
+function fecharListaCartoesTransporte(){
+  document.getElementById('cartoes-transporte-overlay').style.display = 'none';
+}
+
+function ctMarcarTodos(marcar){
+  document.querySelectorAll('.ct-check').forEach(function(cb){ cb.checked = marcar; });
+  ctAtualizarContador();
+}
+
+function ctAtualizarContador(){
+  var total = document.querySelectorAll('.ct-check').length;
+  var marcados = document.querySelectorAll('.ct-check:checked').length;
+  document.getElementById('ct-contador').textContent = marcados + ' de ' + total + ' selecionados';
+  var todos = document.getElementById('ct-marcar-todos');
+  if(todos) todos.checked = (total > 0 && marcados === total);
+}
+
+function ctEnviarWhatsApp(){
+  var idsMarcados = Array.prototype.map.call(document.querySelectorAll('.ct-check:checked'), function(cb){ return cb.value; });
+  if(!idsMarcados.length){ showToast('❌ Selecione ao menos um funcionário'); return; }
+
+  var selecionados = funcionarios.filter(function(f){ return idsMarcados.indexOf(String(f.id)) !== -1; });
+
+  var hoje = new Date();
+  var mesAno = hoje.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  mesAno = mesAno.charAt(0).toUpperCase() + mesAno.slice(1);
+
+  var linhas = selecionados.map(function(f,i){
+    var tipo = f.cartaoTipo || 'Transporte';
+    return (i+1)+'. *'+f.nome+'*\n   Cartão: '+f.cartaoNum+' — '+tipo;
+  });
+
+  var msg = '🚌 *Lista de Cartões Transporte — '+mesAno+'*\n\n'
+    + linhas.join('\n\n')
+    + '\n\n_Total: '+selecionados.length+' funcionário'+(selecionados.length===1?'':'s')+'_'
+    + '\n_Gestão Bávaro_';
+
+  window.open('https://wa.me/?text='+encodeURIComponent(msg), '_blank');
+  fecharListaCartoesTransporte();
 }
 
 

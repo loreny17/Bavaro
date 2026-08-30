@@ -12922,8 +12922,19 @@ function adicionarAoCarrinho(){
       nomeCliente: nomeClienteKg || '',         // nome do cliente pra impressão
       foto: _itemAberto.foto || '',
       selecoes: selecoes,
-      pessoa: ''
+      // ⚠️ Antes ficava sempre '': "Enviar Pedido" só checa o campo 'pessoa'
+      // pra decidir se precisa perguntar pra quem é o item. Como o buffet por
+      // kg só preenchia 'nomeCliente', o modal de "pra quem é" aparecia de
+      // novo mesmo o nome já tendo sido digitado aqui na pesagem.
+      pessoa: nomeClienteKg || ''
     };
+    // Salva o nome JÁ na lista de pessoas da mesa, assim que o item entra no
+    // carrinho — não precisa esperar o pedido ser enviado. Isso faz o nome
+    // aparecer pronto pra escolher ao adicionar a bebida (ou qualquer outro
+    // item) em seguida, na mesma comanda.
+    if(nomeClienteKg && _pessoasMesa.indexOf(nomeClienteKg) < 0){
+      _pessoasMesa.push(nomeClienteKg);
+    }
   } else {
     // Total da linha = base×qtd + extras (extras são ABSOLUTOS — ver nota no
     // atualizarBtnAdd). O modelo da conta multiplica preco×qtd, então o preço
@@ -14779,6 +14790,16 @@ function _getPessoasMesa(){
       }
     });
   });
+  // 3ª fonte: itens já no CARRINHO desta mesa, ainda não enviados. Sem isso,
+  // o nome digitado no buffet por kg sumia da lista de sugestões na hora de
+  // escolher a pessoa da próxima bebida — porque essa função só olhava pro
+  // que já estava confirmado no servidor, e o item recém-pesado ainda não
+  // tinha sido enviado.
+  (_carrinho||[]).forEach(function(it){
+    if(it.pessoa && pessoasItens.indexOf(it.pessoa) < 0){
+      pessoasItens.push(it.pessoa);
+    }
+  });
   // Nunca acumula de mesas anteriores: substitui em vez de mesclar
   _pessoasMesa = pessoasItens;
   return _pessoasMesa;
@@ -16351,31 +16372,78 @@ function _onDragMove(e){
   _dragGhost.style.left = (touch.clientX - 20) + 'px';
   _dragGhost.style.top = (touch.clientY - 30) + 'px';
 
+  // ═══ ROLAGEM AUTOMÁTICA ═══
+  // Antes, arrastar bloqueava toda rolagem (preventDefault acima) — então
+  // com muitas pessoas, item lá embaixo nunca chegava até a 1ª pessoa lá em
+  // cima, porque não tinha como rolar a tela enquanto segurava o item. Agora:
+  // se o dedo chegar perto do topo ou do fim da área visível, ela rola
+  // sozinha na direção certa, acelerando quanto mais perto da borda.
+  var contEl = document.getElementById('fechar-conta-body');
+  if(contEl){
+    var rect = contEl.getBoundingClientRect();
+    var zona = 70; // px de distância da borda que já dispara a rolagem
+    var dist;
+    if(touch.clientY < rect.top + zona){
+      dist = Math.max(0, touch.clientY - rect.top);
+      _dragAutoScrollVel = -Math.round((1 - dist/zona) * 14 + 3);
+    } else if(touch.clientY > rect.bottom - zona){
+      dist = Math.max(0, rect.bottom - touch.clientY);
+      _dragAutoScrollVel = Math.round((1 - dist/zona) * 14 + 3);
+    } else {
+      _dragAutoScrollVel = 0;
+    }
+    if(_dragAutoScrollVel !== 0 && !_dragAutoScrollAtivo){
+      _dragAutoScrollAtivo = true;
+      _dragAutoScrollTick();
+    }
+  }
+
   // Detecta zona embaixo
   _dragGhost.style.display = 'none';
   var el = document.elementFromPoint(touch.clientX, touch.clientY);
   _dragGhost.style.display = '';
 
-  var zona = el ? el.closest('.drag-zona-pessoa') : null;
-  if(zona !== _dragZonaAtual){
+  var zona2 = el ? el.closest('.drag-zona-pessoa') : null;
+  if(zona2 !== _dragZonaAtual){
     // Remove highlight anterior
     if(_dragZonaAtual){
       _dragZonaAtual.style.border = '2px dashed rgba(212,168,67,0.4)';
       _dragZonaAtual.style.background = '';
     }
-    _dragZonaAtual = zona;
+    _dragZonaAtual = zona2;
     // Destaca zona atual
-    if(zona){
-      zona.style.border = '2px solid var(--accent)';
-      zona.style.background = 'rgba(212,168,67,0.1)';
+    if(zona2){
+      zona2.style.border = '2px solid var(--accent)';
+      zona2.style.background = 'rgba(212,168,67,0.1)';
       try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e2){}
     }
+  }
+}
+
+// Loop de rolagem enquanto o dedo estiver perto da borda durante o arrastar.
+// Roda em requestAnimationFrame pra ficar suave mesmo se o dedo ficar parado.
+var _dragAutoScrollVel = 0;
+var _dragAutoScrollAtivo = false;
+function _dragAutoScrollTick(){
+  if(!_dragGhost){ _dragAutoScrollAtivo = false; return; }
+  if(_dragAutoScrollVel !== 0){
+    var contEl = document.getElementById('fechar-conta-body');
+    if(contEl) contEl.scrollTop += _dragAutoScrollVel;
+  }
+  if(_dragAutoScrollVel !== 0 || _dragGhost){
+    requestAnimationFrame(_dragAutoScrollTick);
+  } else {
+    _dragAutoScrollAtivo = false;
   }
 }
 
 function _onDragEnd(e){
   document.removeEventListener('touchmove', _onDragMove);
   document.removeEventListener('touchend', _onDragEnd);
+
+  // Para a rolagem automática imediatamente ao soltar
+  _dragAutoScrollVel = 0;
+  _dragAutoScrollAtivo = false;
 
   // Remove ghost
   if(_dragGhost){ _dragGhost.remove(); _dragGhost = null; }
@@ -16687,24 +16755,47 @@ function _renderItemFechar(it, c){
 
 // ─── SWIPE NOS ITENS DO FECHAR CONTA ───
 var _swipeFecharX = 0;
+var _swipeFecharY = 0;
 var _swipeFecharKey = null;
 var _swipeFecharEl = null;
 var _swipeFecharBg = null;
 var _swipeFecharMoving = false;
+var _swipeFecharCancelado = false;
+var _swipeFecharEixoDecidido = false;
 var _SWIPE_FECHAR_THRESHOLD = 72;
 
 function _swipeFecharStart(e, itemKey){
   if(e.touches.length !== 1) return;
   _swipeFecharX = e.touches[0].clientX;
+  _swipeFecharY = e.touches[0].clientY;
   _swipeFecharKey = itemKey;
   _swipeFecharEl = document.getElementById('fitem-'+itemKey);
   _swipeFecharMoving = false;
+  _swipeFecharCancelado = false;
+  _swipeFecharEixoDecidido = false;
   if(_swipeFecharBg){ _swipeFecharBg.remove(); _swipeFecharBg = null; }
 }
 
 function _swipeFecharMove(e){
-  if(!_swipeFecharEl) return;
+  if(!_swipeFecharEl || _swipeFecharCancelado) return;
   var dx = e.touches[0].clientX - _swipeFecharX;
+  var dy = e.touches[0].clientY - _swipeFecharY;
+
+  // ⚠️ Decide o EIXO do gesto só uma vez, no primeiro movimento perceptível.
+  // Com muitas pessoas na conta, rolar a tela pra ver quem está mais embaixo
+  // quase nunca é um movimento 100% vertical — e antes, qualquer sobra
+  // horizontal (mesmo mínima) já contava pro "+1/-1". Agora: se o movimento
+  // for mais vertical que horizontal, cancela o swipe e deixa a página rolar
+  // normalmente — sem interferir mais nada até o dedo soltar.
+  if(!_swipeFecharEixoDecidido){
+    if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return; // ainda indeterminado
+    _swipeFecharEixoDecidido = true;
+    if(Math.abs(dy) > Math.abs(dx)){
+      _swipeFecharCancelado = true;
+      return;
+    }
+  }
+
   if(Math.abs(dx) < 6) return;
   _swipeFecharMoving = true;
   e.stopPropagation();
@@ -16737,7 +16828,12 @@ function _swipeFecharMove(e){
 }
 
 function _swipeFecharEnd(e){
-  if(!_swipeFecharEl || !_swipeFecharKey) return;
+  if(!_swipeFecharEl || !_swipeFecharKey){ _swipeFecharEl = null; _swipeFecharKey = null; return; }
+  if(_swipeFecharCancelado){
+    // Era rolagem, não swipe — não faz nada, só limpa o estado
+    _swipeFecharEl = null; _swipeFecharKey = null;
+    return;
+  }
   var dx = e.changedTouches[0].clientX - _swipeFecharX;
 
   // Reset visual

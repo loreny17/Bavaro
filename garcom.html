@@ -9747,6 +9747,22 @@ function selecionarMesa(num){
 }
 
 function voltarParaMesas(){
+  // Se viemos do "➕ Adicionar item" dentro do Fechar Conta, volta pra lá em
+  // vez de ir pro mapa de mesas — tanto faz se o item foi enviado ou se o
+  // garçom desistiu e só apertou voltar: o lugar certo é sempre o Fechar
+  // Conta que estava aberto antes.
+  if(_fecharContaRetornoAposEnvio){
+    var _chaveRetorno = _fecharContaRetornoAposEnvio;
+    _fecharContaRetornoAposEnvio = null;
+    _comandaSelecionada = null;
+    _mesaAtiva = null;
+    _carrinho = [];
+    if(typeof atualizarCarrinhoBadge === 'function') atualizarCarrinhoBadge();
+    var _appElRetorno = document.getElementById('app');
+    if(_appElRetorno) _appElRetorno.style.display = 'none';
+    abrirFecharConta(_chaveRetorno);
+    return;
+  }
   // O carrinho é salvo automaticamente — pode voltar sem perguntar
   if(_carrinho.length > 0) salvarCarrinho();
   _comandaSelecionada = null;
@@ -16107,6 +16123,47 @@ var _fecharSelecaoFragmentos = {};
 var _fecharDividirPor = 1;
 var _fecharUnsub = null;
 
+// ═══ ADICIONAR ITEM SEM SAIR DA TELA DE FECHAR CONTA ═══
+// Pedido comum: "vou fechando e o cliente pede mais um bombom/água". Antes
+// era preciso sair do Fechar Conta, entrar na mesa, pedir, e reabrir o Fechar
+// Conta do zero pra conferir de novo. Agora: reaproveita o MESMO caminho de
+// sempre pra fazer pedido (mesmo carrinho, mesma tela de cardápio, mesmo
+// enviarPedido — com desconto de estoque, impressão na cozinha e tudo mais
+// já testado) — só que ao terminar, volta direto pro Fechar Conta em vez de
+// ir pro mapa de mesas.
+var _fecharContaRetornoAposEnvio = null;
+
+function fecharContaAdicionarItem(){
+  if(!_fecharMesaNum) return;
+  var chave = String(_fecharMesaNum);
+
+  // Mesma detecção usada no resto do app: comandas avulsas usam a chave
+  // "avulsa_<id>"; tudo o mais (mesa normal ou almoço por mesa) é mesa.
+  if(chave.indexOf('avulsa_') === 0){
+    _comandaSelecionada = chave.slice(7);
+    _mesaAtiva = null;
+  } else {
+    _mesaAtiva = _fecharMesaNum;
+    _comandaSelecionada = null;
+  }
+
+  // Carrinho novo, só pra esse item extra — não herda nada de antes
+  _carrinho = [];
+  if(typeof atualizarCarrinhoBadge === 'function') atualizarCarrinhoBadge();
+
+  // Guarda a chave: quando o pedido for enviado (ou se voltar sem enviar
+  // nada), reabrimos o Fechar Conta desta mesma mesa/comanda automaticamente
+  _fecharContaRetornoAposEnvio = chave;
+
+  var modalFC = document.getElementById('modal-fechar-conta');
+  if(modalFC) modalFC.classList.remove('show');
+
+  // Mesmo caminho usado ao entrar numa mesa pra pedir — cardápio, título,
+  // tudo já pronto e testado.
+  iniciarApp();
+  showToast('➕ Adicionando item à conta — envie quando terminar', '#d4a843', 3500);
+}
+
 function abrirFecharConta(num){
   _fecharMesaNum = num;
   _fecharSelecaoItens = {};
@@ -16935,6 +16992,7 @@ function renderFecharConta(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">'+
         '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">Itens</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+          '<button onclick="fecharContaAdicionarItem()" style="background:rgba(212,168,67,0.12);border:1px solid rgba(212,168,67,0.4);color:var(--accent);font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:700;">➕ Adicionar item</button>'+
           (qtdPagos>0?'<button onclick="alternarOcultarPagos()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:0.7rem;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit;">'+(_fecharOcultarPagos?'👁️ Mostrar pagos':'🙈 Ocultar pagos')+' ('+qtdPagos+')</button>':'')+
         '</div>'+
       '</div>';

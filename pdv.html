@@ -4785,6 +4785,34 @@ function fbDocConfigImp(){
 var _modoImpressao = null; // 'electron' | 'qz' | null
 
 var _qzJaInicializado = false;
+// ═══ TRAVA DE TELA LIGADA (Wake Lock) ═══
+// A janela/aba pode adormecer sozinha (economia de energia do Windows/Chrome)
+// depois de um tempo sem interação. Enquanto dormindo, os timers do
+// JavaScript congelam junto — nenhum pedido é enviado pra impressora nesse
+// período, e ao acordar os relógios "descobrem atrasado" que passou muito
+// tempo (é o que gera aqueles números de minutos nos logs de falha, quando
+// o limite configurado é de segundos). Pede ao navegador pra manter a tela
+// ativa enquanto o PDV estiver aberto — reduz bastante a chance disso.
+var _wakeLock = null;
+function _pedirWakeLock(){
+  if(!('wakeLock' in navigator)) return; // navegador sem suporte — segue sem
+  navigator.wakeLock.request('screen').then(function(wl){
+    _wakeLock = wl;
+    console.log('[WAKE-LOCK] tela travada ativa');
+    wl.addEventListener('release', function(){
+      console.log('[WAKE-LOCK] liberada (aba saiu de foco ou minimizada)');
+    });
+  }).catch(function(e){
+    console.warn('[WAKE-LOCK] não disponível:', e.message);
+  });
+}
+_pedirWakeLock();
+// A trava se solta sozinha quando a aba sai de foco (minimizada, tela
+// bloqueada) — pede de novo automaticamente assim que voltar a ficar visível.
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible') _pedirWakeLock();
+});
+
 function qzInicializar(){
   // ⚠️ ESTE ERA O DEFEITO REAL. Esta função registra vigias (setInterval,
   // ouvintes de rede/janela) que ficam rodando o dia inteiro. Ela era chamada

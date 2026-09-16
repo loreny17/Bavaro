@@ -13995,7 +13995,25 @@ function _enviarPedidoConfirmado(){
     // Falhou no envio. Verifica se é problema de conexão.
     var ehProblemaConexao = !_estaOnline || navigator.onLine === false ||
       (e && (e.code === 'unavailable' || e.code === 'deadline-exceeded' ||
+             e.code === 'resource-exhausted' ||
              (e.message && e.message.toLowerCase().indexOf('network') >= 0)));
+
+    // ⚠️ 'resource-exhausted' = a cota diária de leituras do Firestore
+    // estourou. Antes, esse erro específico caía no "senão" (erro comum),
+    // que só restaura o carrinho e mostra um toast — numa tela da qual o
+    // garçom já tinha saído (voltarParaMesas já rodou antes disso). O
+    // pedido chegava a aparecer no PDV (a escrita em 'pedidos' já tinha
+    // sido feita), mas nunca entrava na conta da mesa, porque a TRANSAÇÃO
+    // que adiciona os itens precisa LER a conta primeiro — e leitura é
+    // exatamente o que fica bloqueado quando a cota estoura. Agora ele
+    // entra na mesma fila offline usada pra falta de internet, e avisa
+    // com destaque que é a COTA (não a rede) — pra isso virar visível e
+    // ser resolvido (upgrade de plano), não repetir escondido.
+    if(e && e.code === 'resource-exhausted'){
+      console.error('[FIRESTORE] 🚨 COTA DE LEITURAS ESTOURADA — plano gratuito excedido');
+      showToast('🚨 Limite diário do banco de dados esgotado — pedido salvo, será enviado ao reconectar. Avise o suporte!', '#dc2626', 9000);
+      try{ if(navigator.vibrate) navigator.vibrate([100,60,100,60,100]); }catch(e3){}
+    }
 
     if(ehProblemaConexao){
       // SEM INTERNET → guarda o pedido na fila offline pra reenviar depois.
@@ -15632,9 +15650,32 @@ function abrirContaMesa(num){
         teste: _modoTeste ? true : false
       };
       entrarNaMesa('✓ Mesa ' + num + ' aberta', '#4ade80');
-      fbDb.collection('contas_mesa').add(conta).catch(function(e){
+      // ⚠️ CORRIDA ENCONTRADA: "concluida" tinha sido marcada true assim que
+      // confirmamos que a mesa estava vazia — mas criar a conta é um SEGUNDO
+      // passo assíncrono, que só termina aqui embaixo. Um garçom rápido
+      // demais mandava o pedido nessa brecha: o handshake do enviarPedido
+      // via "concluida = true" e seguia direto, mas a conta ainda não
+      // existia em lugar nenhum — daí o "Mesa sem conta aberta", só
+      // resolvido saindo e voltando (tempo suficiente pra conta existir).
+      // Agora: volta a marcar "ainda não" até a conta realmente existir E
+      // já estar no cache — o handshake espera esse tempinho a mais sozinho.
+      if(_mesaVerificacaoPendente && _mesaVerificacaoPendente.mesa === String(num)){
+        _mesaVerificacaoPendente.concluida = false;
+      }
+      fbDb.collection('contas_mesa').add(conta).then(function(docRef){
+        conta.id = docRef.id;
+        _contasMesaCache[String(num)] = conta;
+        if(_mesaVerificacaoPendente && _mesaVerificacaoPendente.mesa === String(num)){
+          _mesaVerificacaoPendente.concluida = true;
+        }
+      }).catch(function(e){
         console.error('Erro ao criar conta:', e);
         showToast('❌ Falha ao criar conta — verifique conexão','#f87171');
+        // Libera o handshake mesmo com erro, pra cair no guard normal do
+        // enviarPedido (que sabe buscar de novo) em vez de travar esperando.
+        if(_mesaVerificacaoPendente && _mesaVerificacaoPendente.mesa === String(num)){
+          _mesaVerificacaoPendente.concluida = true;
+        }
       });
     }).catch(function(e){
       // NÃO cria conta às cegas quando a consulta falha — era assim que

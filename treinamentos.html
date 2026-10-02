@@ -44,7 +44,7 @@
   .intro .titulo{font-size:2.6rem;color:var(--accent);margin:0;}
   .intro p{color:var(--muted);font-size:0.9rem;margin-top:6px;}
   .rest-card{display:flex;align-items:center;gap:14px;background:var(--surface);border:1.5px solid var(--border2);
-    border-radius:16px;padding:18px;margin-bottom:12px;}
+    border-radius:16px;padding:18px;margin-bottom:12px;color:var(--text);}
   .rest-card .emoji{font-size:2rem;width:50px;text-align:center;flex-shrink:0;}
   .rest-card .nome{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:0.03em;}
   .rest-card .seta{margin-left:auto;color:var(--muted);font-size:1.3rem;}
@@ -194,13 +194,28 @@
       <select id="admin-select-rest" onchange="adminTrocarRestaurante()"></select>
     </div>
 
-    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
-      <div style="font-weight:700;margin-bottom:12px;">🏠 Cadastrar novo restaurante</div>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="admin-novo-rest-emoji" placeholder="🍺" maxlength="2" style="width:56px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:1.1rem;text-align:center;outline:none;">
-        <input type="text" id="admin-novo-rest-nome" placeholder="Nome do restaurante" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;">
+    <button class="btn secundario" onclick="adminToggleGerenciar()" style="width:100%;margin-bottom:14px;" id="admin-btn-toggle-gerenciar">⚙️ Gerenciar restaurantes e categorias</button>
+
+    <div id="admin-area-gerenciar" style="display:none;">
+      <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:14px;">
+        <div style="font-weight:700;margin-bottom:12px;">🏠 Restaurantes</div>
+        <div id="admin-lista-restaurantes" style="margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="admin-novo-rest-emoji" placeholder="🍺" maxlength="2" style="width:56px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:1.1rem;text-align:center;outline:none;">
+          <input type="text" id="admin-novo-rest-nome" placeholder="Nome do restaurante" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;">
+        </div>
+        <button class="btn secundario" onclick="adminAdicionarRestaurante()" style="width:100%;margin-top:10px;">Adicionar restaurante</button>
       </div>
-      <button class="btn secundario" onclick="adminAdicionarRestaurante()" style="width:100%;margin-top:10px;">Adicionar restaurante</button>
+
+      <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
+        <div style="font-weight:700;margin-bottom:12px;">📂 Categorias</div>
+        <div id="admin-lista-categorias" style="margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="admin-nova-cat-emoji" placeholder="🧹" maxlength="2" style="width:56px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:1.1rem;text-align:center;outline:none;">
+          <input type="text" id="admin-nova-cat-nome" placeholder="Nome da categoria" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;">
+        </div>
+        <button class="btn secundario" onclick="adminAdicionarCategoria()" style="width:100%;margin-top:10px;">Adicionar categoria</button>
+      </div>
     </div>
 
     <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin:18px 0;">
@@ -250,10 +265,12 @@ var firebaseConfig = {
 // ⚠️ Senha do painel admin. Pra trocar, só muda o texto aqui embaixo.
 var ADMIN_SENHA = 'bavaro2026';
 
-// Categorias fixas. Pra adicionar/remover um tema, edita esta lista —
-// o resto do app (grade de categorias, formulário do admin) se ajusta
-// sozinho.
-var CATEGORIAS = [
+// Categorias AGORA vêm do Firestore (coleção "categorias"), pra dar pra
+// adicionar/remover pelo próprio painel admin, sem precisar editar código.
+// Essa lista aqui é só a semente inicial: na primeira vez que o app roda
+// com o banco vazio, ela é gravada automaticamente — depois disso, quem
+// manda é o Firestore.
+var CATEGORIAS_SEMENTE = [
   {id:'buffet',       nome:'Buffet',          icone:'🍽️'},
   {id:'cozinha',      nome:'Cozinha',         icone:'🍳'},
   {id:'bar',          nome:'Bar',             icone:'🍹'},
@@ -263,6 +280,7 @@ var CATEGORIAS = [
   {id:'estoque',      nome:'Estoque',         icone:'📦'},
   {id:'seguranca',    nome:'Segurança',       icone:'🦺'}
 ];
+var CATEGORIAS = []; // populado a partir do Firestore no boot (carregarCategorias)
 
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
@@ -500,6 +518,87 @@ function preencherSelectRestAdmin(){
   adminTrocarRestaurante();
 }
 
+function adminToggleGerenciar(){
+  var area = document.getElementById('admin-area-gerenciar');
+  var aberto = area.style.display !== 'none';
+  area.style.display = aberto ? 'none' : 'block';
+  if(!aberto){ adminRenderListaRestaurantes(); adminRenderListaCategorias(); }
+}
+
+function adminRenderListaRestaurantes(){
+  var box = document.getElementById('admin-lista-restaurantes');
+  if(!_restaurantes.length){ box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Nenhum cadastrado ainda.</div>'; return; }
+  box.innerHTML = _restaurantes.map(function(r){
+    return '<div class="admin-video-item"><div class="info">' + (r.emoji||'🍽️') + ' ' + escHtml(r.nome||r.id) + '</div>' +
+      '<button class="ic-btn" onclick="adminExcluirRestaurante(\'' + r.id + '\')" title="Excluir">🗑️</button></div>';
+  }).join('');
+}
+
+function adminExcluirRestaurante(id){
+  var r = _restaurantes.find(function(x){ return x.id === id; });
+  if(!r) return;
+  if(!confirm('Excluir "' + (r.nome||id) + '"? Isso apaga também TODOS os vídeos cadastrados nele. Não dá pra desfazer.')) return;
+  db.collection('restaurantes').doc(id).collection('treinamentos').get().then(function(snap){
+    var batch = db.batch();
+    snap.forEach(function(doc){ batch.delete(doc.ref); });
+    batch.delete(db.collection('restaurantes').doc(id));
+    return batch.commit();
+  }).then(function(){
+    showToast('✓ ' + (r.nome||id) + ' excluído');
+    if(_restAtivo && _restAtivo.id === id) _restAtivo = null;
+    db.collection('restaurantes').get().then(function(snap){
+      _restaurantes = [];
+      snap.forEach(function(doc){ _restaurantes.push(Object.assign({id:doc.id}, doc.data())); });
+      preencherSelectRestAdmin();
+      adminRenderListaRestaurantes();
+    });
+  }).catch(function(e){ showToast('❌ ' + e.message); });
+}
+
+function adminRenderListaCategorias(){
+  var box = document.getElementById('admin-lista-categorias');
+  if(!CATEGORIAS.length){ box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Nenhuma cadastrada ainda.</div>'; return; }
+  box.innerHTML = CATEGORIAS.map(function(c){
+    return '<div class="admin-video-item"><div class="info">' + c.icone + ' ' + escHtml(c.nome) + '</div>' +
+      '<button class="ic-btn" onclick="adminExcluirCategoria(\'' + c.id + '\')" title="Excluir">🗑️</button></div>';
+  }).join('');
+}
+
+function adminAdicionarCategoria(){
+  var emoji = document.getElementById('admin-nova-cat-emoji').value.trim() || '🏷️';
+  var nome = document.getElementById('admin-nova-cat-nome').value.trim();
+  if(!nome){ showToast('❌ Escreve o nome da categoria'); return; }
+  var id = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || ('cat' + Date.now());
+  db.collection('categorias').doc(id).set({nome:nome, icone:emoji, ordem: CATEGORIAS.length}).then(function(){
+    showToast('✓ Categoria "' + nome + '" adicionada');
+    document.getElementById('admin-nova-cat-nome').value = '';
+    document.getElementById('admin-nova-cat-emoji').value = '';
+    carregarCategorias(function(){
+      adminRenderListaCategorias();
+      if(_restAtivo){
+        var selCat = document.getElementById('admin-input-categoria');
+        selCat.innerHTML = CATEGORIAS.map(function(c){ return '<option value="' + c.id + '">' + c.icone + ' ' + c.nome + '</option>'; }).join('');
+      }
+    });
+  }).catch(function(e){ showToast('❌ ' + e.message); });
+}
+
+function adminExcluirCategoria(id){
+  var c = CATEGORIAS.find(function(x){ return x.id === id; });
+  if(!c) return;
+  var qtdUsando = _videos.filter(function(v){ return v.categoria === id; }).length;
+  var aviso = 'Excluir a categoria "' + c.nome + '"?';
+  if(qtdUsando) aviso += '\n\n⚠️ ' + qtdUsando + ' vídeo(s) deste restaurante usam essa categoria — eles continuam existindo, mas ela vai sumir da lista.';
+  if(!confirm(aviso)) return;
+  db.collection('categorias').doc(id).delete().then(function(){
+    showToast('✓ Categoria excluída');
+    carregarCategorias(function(){
+      adminRenderListaCategorias();
+      if(_restAtivo) adminCarregarLista();
+    });
+  }).catch(function(e){ showToast('❌ ' + e.message); });
+}
+
 function adminAdicionarRestaurante(){
   var emoji = document.getElementById('admin-novo-rest-emoji').value.trim() || '🍽️';
   var nome = document.getElementById('admin-novo-rest-nome').value.trim();
@@ -514,6 +613,7 @@ function adminAdicionarRestaurante(){
       preencherSelectRestAdmin();
       document.getElementById('admin-select-rest').value = docRef.id;
       adminTrocarRestaurante();
+      adminRenderListaRestaurantes();
     });
   }).catch(function(e){ showToast('❌ ' + e.message); });
 }
@@ -630,8 +730,36 @@ function adminExcluirVideo(id){
 }
 
 // ═══ BOOT ═══
+// Carrega as categorias do Firestore; se o banco estiver vazio (primeiro
+// uso), grava a semente padrão uma única vez.
+function carregarCategorias(callback){
+  db.collection('categorias').orderBy('ordem').get().then(function(snap){
+    if(snap.empty){
+      var batch = db.batch();
+      CATEGORIAS_SEMENTE.forEach(function(c, i){
+        var ref = db.collection('categorias').doc(c.id);
+        batch.set(ref, {nome:c.nome, icone:c.icone, ordem:i});
+      });
+      batch.commit().then(function(){
+        CATEGORIAS = CATEGORIAS_SEMENTE.slice();
+        if(callback) callback();
+      });
+      return;
+    }
+    CATEGORIAS = [];
+    snap.forEach(function(doc){ CATEGORIAS.push(Object.assign({id:doc.id}, doc.data())); });
+    if(callback) callback();
+  }).catch(function(e){
+    console.error('[categorias] erro ao carregar:', e.message);
+    CATEGORIAS = CATEGORIAS_SEMENTE.slice(); // nunca deixa o app travado sem categorias
+    if(callback) callback();
+  });
+}
+
 mostrarTela('tela-restaurantes');
-carregarRestaurantes();
+carregarCategorias(function(){
+  carregarRestaurantes();
+});
 </script>
 </body>
 </html>

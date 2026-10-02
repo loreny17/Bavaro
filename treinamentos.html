@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0d">
+<title>Treinamentos</title>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<style>
+  :root{
+    --bg:#0d0d0d; --surface:#161412; --surface2:#1e1b17; --border:#2a251f; --border2:#3a332a;
+    --text:#f2ede4; --muted:#9a9285; --accent:#d4a843; --accent-dim:rgba(212,168,67,0.14);
+    --danger:#f87171; --ok:#4ade80;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;height:100%;overflow-x:hidden;}
+  body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+  .titulo{font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;}
+  button{font-family:inherit;cursor:pointer;}
+  input{font-family:inherit;}
+  ::-webkit-scrollbar{display:none;}
+
+  /* ── Topo ── */
+  .topo{position:sticky;top:0;z-index:40;background:rgba(13,13,13,0.92);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--border);padding:14px 18px;padding-top:calc(14px + env(safe-area-inset-top,0px));
+    display:flex;align-items:center;gap:12px;}
+  .topo-voltar{width:38px;height:38px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);
+    color:var(--text);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;}
+  .topo-titulos{flex:1;min-width:0;}
+  .topo-titulos h1{font-size:1.3rem;margin:0;line-height:1.1;}
+  .topo-titulos p{font-size:0.76rem;color:var(--muted);margin:2px 0 0;}
+  .topo-admin{width:38px;height:38px;border-radius:50%;background:none;border:1px solid var(--border2);
+    color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
+
+  .tela{display:none;padding:18px;max-width:720px;margin:0 auto;}
+  .tela.show{display:block;}
+
+  /* ── Tela 1: restaurantes ── */
+  #tela-restaurantes{padding-top:10vh;}
+  .intro{text-align:center;margin-bottom:34px;}
+  .intro .titulo{font-size:2.6rem;color:var(--accent);margin:0;}
+  .intro p{color:var(--muted);font-size:0.9rem;margin-top:6px;}
+  .rest-card{display:flex;align-items:center;gap:14px;background:var(--surface);border:1.5px solid var(--border2);
+    border-radius:16px;padding:18px;margin-bottom:12px;}
+  .rest-card .emoji{font-size:2rem;width:50px;text-align:center;flex-shrink:0;}
+  .rest-card .nome{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:0.03em;}
+  .rest-card .seta{margin-left:auto;color:var(--muted);font-size:1.3rem;}
+  .rest-vazio{text-align:center;color:var(--muted);padding:40px 20px;font-size:0.88rem;line-height:1.6;}
+
+  /* ── Busca ── */
+  .busca-box{position:relative;margin-bottom:20px;}
+  .busca-box input{width:100%;background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;
+    padding:14px 16px 14px 44px;color:var(--text);font-size:0.95rem;outline:none;}
+  .busca-box input:focus{border-color:var(--accent);}
+  .busca-box .icone{position:absolute;left:15px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:1rem;}
+
+  /* ── Categorias ── */
+  .cat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:11px;}
+  .cat-card{background:var(--surface);border:1.5px solid var(--border2);border-radius:16px;padding:18px 14px;
+    text-align:left;color:var(--text);}
+  .cat-card .ic{font-size:1.7rem;margin-bottom:8px;display:block;}
+  .cat-card .nome{font-weight:600;font-size:0.92rem;}
+  .cat-card .qtd{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+
+  /* ── Lista de vídeos ── */
+  .video-row{display:flex;gap:12px;background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;
+    padding:10px;margin-bottom:10px;align-items:center;}
+  .video-row .thumb{width:100px;height:62px;border-radius:9px;object-fit:cover;flex-shrink:0;background:var(--surface2);}
+  .video-row .info{flex:1;min-width:0;}
+  .video-row .vt{font-weight:600;font-size:0.9rem;line-height:1.25;}
+  .video-row .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+  .tag-chip{background:var(--accent-dim);color:var(--accent);font-size:0.68rem;font-weight:700;border-radius:20px;
+    padding:2px 9px;}
+  .lista-vazio{text-align:center;color:var(--muted);padding:50px 20px;font-size:0.88rem;line-height:1.7;}
+
+  /* ── Player ── */
+  #player-overlay{display:none;position:fixed;inset:0;background:#000;z-index:200;flex-direction:column;}
+  #player-overlay.show{display:flex;}
+  .player-topo{display:flex;align-items:center;gap:12px;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top,0px));}
+  .player-topo .fechar{width:36px;height:36px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);
+    color:var(--text);display:flex;align-items:center;justify-content:center;font-size:1.1rem;}
+  .player-topo .vt{font-weight:600;font-size:0.9rem;flex:1;}
+  .player-frame-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;}
+  .player-frame-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
+  .player-tags{padding:16px;display:flex;flex-wrap:wrap;gap:6px;}
+
+  /* ── Admin ── */
+  #tela-admin-login{padding-top:16vh;text-align:center;}
+  #tela-admin-login input{width:100%;max-width:280px;background:var(--surface);border:1.5px solid var(--border2);
+    border-radius:12px;padding:14px;color:var(--text);font-size:1rem;text-align:center;outline:none;margin-bottom:12px;}
+  .btn{display:inline-block;background:var(--accent);color:#000;border:none;border-radius:12px;padding:13px 22px;
+    font-weight:800;font-size:0.92rem;}
+  .btn.secundario{background:var(--surface2);color:var(--text);border:1px solid var(--border2);font-weight:700;}
+  .btn.perigo{background:rgba(248,113,113,0.12);color:var(--danger);border:1px solid rgba(248,113,113,0.4);font-weight:700;}
+  .campo{margin-bottom:14px;}
+  .campo label{display:block;font-size:0.76rem;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  .campo input, .campo select, .campo textarea{width:100%;background:var(--surface);border:1.5px solid var(--border2);
+    border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;font-family:inherit;}
+  .campo input:focus, .campo select:focus, .campo textarea:focus{border-color:var(--accent);}
+  .admin-video-item{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;padding:10px;margin-bottom:8px;}
+  .admin-video-item .thumb{width:64px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;}
+  .admin-video-item .info{flex:1;min-width:0;font-size:0.82rem;}
+  .admin-video-item .cat{font-size:0.68rem;color:var(--accent);}
+  .ic-btn{background:none;border:none;color:var(--muted);font-size:1.1rem;padding:6px;flex-shrink:0;}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border2);
+    color:var(--text);padding:12px 20px;border-radius:30px;font-size:0.85rem;z-index:999;box-shadow:0 6px 20px rgba(0,0,0,0.4);
+    opacity:0;transition:opacity .2s;pointer-events:none;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══ TELA 1: ESCOLHER RESTAURANTE ═══ -->
+<div class="tela show" id="tela-restaurantes">
+  <div class="intro">
+    <div class="titulo">TREINAMENTOS</div>
+    <p>Escolha o restaurante pra começar</p>
+  </div>
+  <div id="lista-restaurantes"><div class="rest-vazio">Carregando...</div></div>
+  <div style="text-align:center;margin-top:30px;">
+    <button class="topo-admin" onclick="abrirAdmin()" style="margin:0 auto;">⚙️</button>
+  </div>
+</div>
+
+<!-- ═══ TELA 2: CATEGORIAS + BUSCA ═══ -->
+<div id="tela-categorias">
+  <div class="topo">
+    <button class="topo-voltar" onclick="voltarPraRestaurantes()">‹</button>
+    <div class="topo-titulos">
+      <h1 id="cat-rest-nome">—</h1>
+      <p>O que você quer aprender?</p>
+    </div>
+  </div>
+  <div class="tela show">
+    <div class="busca-box">
+      <span class="icone">🔍</span>
+      <input type="text" id="input-busca" placeholder="Ex: lava-louças, buffet, caixa..." oninput="onBuscaDigitada()">
+    </div>
+    <div id="area-busca" style="display:none;"></div>
+    <div id="area-categorias">
+      <div class="cat-grid" id="cat-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TELA 3: LISTA DE VÍDEOS DE UMA CATEGORIA ═══ -->
+<div id="tela-lista-videos">
+  <div class="topo">
+    <button class="topo-voltar" onclick="voltarPraCategorias()">‹</button>
+    <div class="topo-titulos">
+      <h1 id="lista-cat-nome">—</h1>
+      <p id="lista-cat-qtd"></p>
+    </div>
+  </div>
+  <div class="tela show"><div id="lista-videos-conteudo"></div></div>
+</div>
+
+<!-- ═══ PLAYER ═══ -->
+<div id="player-overlay">
+  <div class="player-topo">
+    <button class="fechar" onclick="fecharPlayer()">×</button>
+    <div class="vt" id="player-titulo">—</div>
+  </div>
+  <div class="player-frame-wrap"><div id="player-frame"></div></div>
+  <div class="player-tags" id="player-tags"></div>
+</div>
+
+<!-- ═══ ADMIN: LOGIN ═══ -->
+<div id="tela-admin-login">
+  <div class="tela show">
+    <div class="intro"><div class="titulo" style="font-size:1.9rem;">ÁREA ADMIN</div></div>
+    <input type="password" id="admin-senha-input" placeholder="Senha" onkeydown="if(event.key==='Enter')tentarLoginAdmin()">
+    <div><button class="btn" onclick="tentarLoginAdmin()">Entrar</button></div>
+    <div style="margin-top:14px;"><button class="btn secundario" onclick="fecharAdmin()">Voltar</button></div>
+  </div>
+</div>
+
+<!-- ═══ ADMIN: PAINEL ═══ -->
+<div id="tela-admin-painel">
+  <div class="topo">
+    <button class="topo-voltar" onclick="fecharAdmin()">‹</button>
+    <div class="topo-titulos"><h1>Admin</h1><p>Gerenciar vídeos de treinamento</p></div>
+  </div>
+  <div class="tela show">
+    <div class="campo">
+      <label>Restaurante</label>
+      <select id="admin-select-rest" onchange="adminTrocarRestaurante()"></select>
+    </div>
+
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
+      <div style="font-weight:700;margin-bottom:12px;">🏠 Cadastrar novo restaurante</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="admin-novo-rest-emoji" placeholder="🍺" maxlength="2" style="width:56px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:1.1rem;text-align:center;outline:none;">
+        <input type="text" id="admin-novo-rest-nome" placeholder="Nome do restaurante" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;">
+      </div>
+      <button class="btn secundario" onclick="adminAdicionarRestaurante()" style="width:100%;margin-top:10px;">Adicionar restaurante</button>
+    </div>
+
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin:18px 0;">
+      <div style="font-weight:700;margin-bottom:12px;" id="admin-form-titulo">➕ Novo vídeo</div>
+      <div class="campo">
+        <label>Link do YouTube</label>
+        <input type="text" id="admin-input-url" placeholder="https://youtube.com/watch?v=...">
+      </div>
+      <div class="campo">
+        <label>Título</label>
+        <input type="text" id="admin-input-titulo" placeholder="Ex: Como funciona o buffet">
+      </div>
+      <div class="campo">
+        <label>Categoria</label>
+        <select id="admin-input-categoria"></select>
+      </div>
+      <div class="campo">
+        <label>Tags (separadas por vírgula)</label>
+        <input type="text" id="admin-input-tags" placeholder="Ex: lava-louças, máquina, limpeza">
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="adminSalvarVideo()" style="flex:1;" id="admin-btn-salvar">Adicionar vídeo</button>
+        <button class="btn secundario" onclick="adminCancelarEdicao()" style="display:none;" id="admin-btn-cancelar">Cancelar</button>
+      </div>
+    </div>
+
+    <div style="font-weight:700;margin-bottom:10px;color:var(--muted);font-size:0.8rem;">VÍDEOS CADASTRADOS (<span id="admin-total">0</span>)</div>
+    <div id="admin-lista-videos"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIGURAÇÃO — mesmo projeto Firebase do resto do sistema Bávaro
+// ═══════════════════════════════════════════════════════════════
+// Projeto PRÓPRIO, isolado do sistema principal (PDV/garçom/totem) — assim
+// nenhum dos dois pode derrubar o outro por limite de leituras do Firebase.
+var firebaseConfig = {
+  apiKey: "AIzaSyA_4mGsWfGQ2RHKxKOL5eRoAmOGqoT_jA0",
+  authDomain: "bavaro-treinamentos.firebaseapp.com",
+  projectId: "bavaro-treinamentos",
+  storageBucket: "bavaro-treinamentos.firebasestorage.app",
+  messagingSenderId: "655925421819",
+  appId: "1:655925421819:web:82792cc2557ff9cc37b25e"
+};
+
+// ⚠️ Senha do painel admin. Pra trocar, só muda o texto aqui embaixo.
+var ADMIN_SENHA = 'bavaro2026';
+
+// Categorias fixas. Pra adicionar/remover um tema, edita esta lista —
+// o resto do app (grade de categorias, formulário do admin) se ajusta
+// sozinho.
+var CATEGORIAS = [
+  {id:'buffet',       nome:'Buffet',          icone:'🍽️'},
+  {id:'cozinha',      nome:'Cozinha',         icone:'🍳'},
+  {id:'bar',          nome:'Bar',             icone:'🍹'},
+  {id:'caixa',        nome:'Caixa / PDV',     icone:'💳'},
+  {id:'atendimento',  nome:'Atendimento',     icone:'🙋'},
+  {id:'louca',        nome:'Louça e Limpeza', icone:'🧽'},
+  {id:'estoque',      nome:'Estoque',         icone:'📦'},
+  {id:'seguranca',    nome:'Segurança',       icone:'🦺'}
+];
+
+firebase.initializeApp(firebaseConfig);
+var db = firebase.firestore();
+
+var _restaurantes = [];
+var _restAtivo = null;       // {id, nome, emoji}
+var _videos = [];            // vídeos do restaurante ativo (carregados uma vez por restaurante)
+var _categoriaAtiva = null;
+var _adminLogado = false;
+var _adminEditandoId = null; // id do vídeo em edição (null = criando novo)
+
+function showToast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2400);
+}
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Aceita qualquer formato comum de link do YouTube (watch?v=, youtu.be/,
+// shorts/, embed/) e extrai só o ID de 11 caracteres.
+function extrairYoutubeId(url){
+  if(!url) return null;
+  url = url.trim();
+  if(/^[\w-]{11}$/.test(url)) return url; // já é só o ID
+  var m = url.match(/(?:v=|\/embed\/|youtu\.be\/|\/shorts\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+function mostrarTela(id){
+  ['tela-restaurantes','tela-categorias','tela-lista-videos','tela-admin-login','tela-admin-painel'].forEach(function(t){
+    document.getElementById(t).style.display = (t === id) ? 'block' : 'none';
+  });
+}
+
+// ═══ TELA 1: RESTAURANTES ═══
+function carregarRestaurantes(){
+  db.collection('restaurantes').get().then(function(snap){
+    _restaurantes = [];
+    snap.forEach(function(doc){ _restaurantes.push(Object.assign({id:doc.id}, doc.data())); });
+    renderRestaurantes();
+  }).catch(function(e){
+    document.getElementById('lista-restaurantes').innerHTML =
+      '<div class="rest-vazio">Não consegui carregar os restaurantes.<br>' + escHtml(e.message) + '</div>';
+  });
+}
+
+function renderRestaurantes(){
+  var box = document.getElementById('lista-restaurantes');
+  if(!_restaurantes.length){
+    box.innerHTML = '<div class="rest-vazio">Nenhum restaurante cadastrado ainda.</div>';
+    return;
+  }
+  box.innerHTML = _restaurantes.map(function(r){
+    return '<button class="rest-card" onclick="escolherRestaurante(\'' + r.id + '\')" style="width:100%;text-align:left;">' +
+      '<span class="emoji">' + (r.emoji || '🍽️') + '</span>' +
+      '<span class="nome">' + escHtml(r.nome || r.id) + '</span>' +
+      '<span class="seta">›</span>' +
+    '</button>';
+  }).join('');
+}
+
+function escolherRestaurante(id){
+  var r = _restaurantes.find(function(x){ return x.id === id; });
+  if(!r) return;
+  _restAtivo = r;
+  document.getElementById('cat-rest-nome').textContent = (r.emoji||'🍽️') + ' ' + r.nome;
+  mostrarTela('tela-categorias');
+  carregarVideosDoRestaurante();
+}
+
+function voltarPraRestaurantes(){
+  _restAtivo = null; _videos = [];
+  mostrarTela('tela-restaurantes');
+}
+
+// ═══ Carrega todos os vídeos do restaurante de uma vez (lista pequena —
+//     dá pra filtrar tudo no celular sem precisar de busca no servidor) ═══
+function carregarVideosDoRestaurante(){
+  document.getElementById('cat-grid').innerHTML = '<div class="lista-vazio">Carregando...</div>';
+  db.collection('restaurantes').doc(_restAtivo.id)
+    .collection('treinamentos').get().then(function(snap){
+      _videos = [];
+      snap.forEach(function(doc){ _videos.push(Object.assign({id:doc.id}, doc.data())); });
+      renderCategorias();
+    }).catch(function(e){
+      document.getElementById('cat-grid').innerHTML = '<div class="lista-vazio">Erro ao carregar vídeos.<br>' + escHtml(e.message) + '</div>';
+    });
+}
+
+function renderCategorias(){
+  var grid = document.getElementById('cat-grid');
+  grid.innerHTML = CATEGORIAS.map(function(c){
+    var qtd = _videos.filter(function(v){ return v.categoria === c.id; }).length;
+    return '<button class="cat-card" onclick="abrirCategoria(\'' + c.id + '\')">' +
+      '<span class="ic">' + c.icone + '</span>' +
+      '<div class="nome">' + c.nome + '</div>' +
+      '<div class="qtd">' + qtd + (qtd===1?' vídeo':' vídeos') + '</div>' +
+    '</button>';
+  }).join('');
+}
+
+// ═══ BUSCA (título + tags, em tempo real, cruzando todas as categorias) ═══
+function onBuscaDigitada(){
+  var q = document.getElementById('input-busca').value.trim().toLowerCase();
+  var areaBusca = document.getElementById('area-busca');
+  var areaCat = document.getElementById('area-categorias');
+  if(!q){
+    areaBusca.style.display = 'none';
+    areaCat.style.display = 'block';
+    return;
+  }
+  areaCat.style.display = 'none';
+  areaBusca.style.display = 'block';
+
+  var resultados = _videos.filter(function(v){
+    var noTitulo = (v.titulo||'').toLowerCase().indexOf(q) >= 0;
+    var nasTags = (v.tags||[]).some(function(t){ return t.toLowerCase().indexOf(q) >= 0; });
+    return noTitulo || nasTags;
+  });
+
+  if(!resultados.length){
+    areaBusca.innerHTML = '<div class="lista-vazio">Nada encontrado pra "' + escHtml(q) + '".<br>Tenta outra palavra.</div>';
+    return;
+  }
+  areaBusca.innerHTML = resultados.map(linhaVideoHtml).join('');
+}
+
+// ═══ TELA 3: VÍDEOS DE UMA CATEGORIA ═══
+function abrirCategoria(catId){
+  _categoriaAtiva = catId;
+  var cat = CATEGORIAS.find(function(c){ return c.id === catId; });
+  var lista = _videos.filter(function(v){ return v.categoria === catId; });
+  document.getElementById('lista-cat-nome').textContent = (cat?cat.icone:'') + ' ' + (cat?cat.nome:'');
+  document.getElementById('lista-cat-qtd').textContent = lista.length + (lista.length===1?' vídeo':' vídeos');
+  var box = document.getElementById('lista-videos-conteudo');
+  box.innerHTML = lista.length
+    ? lista.map(linhaVideoHtml).join('')
+    : '<div class="lista-vazio">Nenhum vídeo nesta categoria ainda.</div>';
+  mostrarTela('tela-lista-videos');
+}
+
+function voltarPraCategorias(){
+  mostrarTela('tela-categorias');
+  document.getElementById('input-busca').value = '';
+  onBuscaDigitada();
+}
+
+function linhaVideoHtml(v){
+  var thumb = 'https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg';
+  var tagsHtml = (v.tags||[]).slice(0,4).map(function(t){ return '<span class="tag-chip">' + escHtml(t) + '</span>'; }).join('');
+  return '<button onclick="abrirPlayer(\'' + v.id + '\')" style="all:unset;display:block;width:100%;cursor:pointer;">' +
+    '<div class="video-row">' +
+      '<img class="thumb" src="' + thumb + '" loading="lazy" alt="">' +
+      '<div class="info"><div class="vt">' + escHtml(v.titulo) + '</div><div class="tags">' + tagsHtml + '</div></div>' +
+    '</div>' +
+  '</button>';
+}
+
+// ═══ PLAYER ═══
+function abrirPlayer(videoId){
+  var v = _videos.find(function(x){ return x.id === videoId; });
+  if(!v) return;
+  document.getElementById('player-titulo').textContent = v.titulo;
+  document.getElementById('player-frame').innerHTML =
+    '<iframe src="https://www.youtube.com/embed/' + v.youtubeId + '?autoplay=1&playsinline=1" ' +
+    'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+  document.getElementById('player-tags').innerHTML = (v.tags||[]).map(function(t){
+    return '<span class="tag-chip">' + escHtml(t) + '</span>';
+  }).join('');
+  document.getElementById('player-overlay').classList.add('show');
+}
+
+function fecharPlayer(){
+  document.getElementById('player-overlay').classList.remove('show');
+  document.getElementById('player-frame').innerHTML = ''; // para o vídeo ao fechar
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ADMIN
+//  A senha aqui é só uma trava de interface (evita que um funcionário
+//  qualquer abra o painel sem querer) — não é autenticação forte. Pra
+//  esse app (só links de vídeo de treinamento, nada financeiro), esse
+//  nível de proteção é proporcional ao risco.
+// ═══════════════════════════════════════════════════════════════
+function abrirAdmin(){
+  mostrarTela('tela-admin-login');
+  document.getElementById('admin-senha-input').value = '';
+  setTimeout(function(){ document.getElementById('admin-senha-input').focus(); }, 200);
+}
+
+function fecharAdmin(){
+  _adminLogado = false;
+  mostrarTela(_restAtivo ? 'tela-categorias' : 'tela-restaurantes');
+}
+
+function tentarLoginAdmin(){
+  var senha = document.getElementById('admin-senha-input').value;
+  if(senha !== ADMIN_SENHA){
+    showToast('❌ Senha incorreta');
+    return;
+  }
+  _adminLogado = true;
+  abrirPainelAdmin();
+}
+
+function abrirPainelAdmin(){
+  mostrarTela('tela-admin-painel');
+  // Preenche o seletor de categoria do formulário
+  var selCat = document.getElementById('admin-input-categoria');
+  selCat.innerHTML = CATEGORIAS.map(function(c){ return '<option value="' + c.id + '">' + c.icone + ' ' + c.nome + '</option>'; }).join('');
+
+  var selRest = document.getElementById('admin-select-rest');
+  if(!_restaurantes.length){
+    // Admin pode ter sido aberto direto, sem passar pela tela 1 ainda
+    db.collection('restaurantes').get().then(function(snap){
+      _restaurantes = [];
+      snap.forEach(function(doc){ _restaurantes.push(Object.assign({id:doc.id}, doc.data())); });
+      preencherSelectRestAdmin();
+    });
+  } else {
+    preencherSelectRestAdmin();
+  }
+}
+
+function preencherSelectRestAdmin(){
+  var selRest = document.getElementById('admin-select-rest');
+  selRest.innerHTML = _restaurantes.map(function(r){
+    return '<option value="' + r.id + '">' + (r.emoji||'🍽️') + ' ' + escHtml(r.nome||r.id) + '</option>';
+  }).join('');
+  if(_restAtivo) selRest.value = _restAtivo.id;
+  adminTrocarRestaurante();
+}
+
+function adminAdicionarRestaurante(){
+  var emoji = document.getElementById('admin-novo-rest-emoji').value.trim() || '🍽️';
+  var nome = document.getElementById('admin-novo-rest-nome').value.trim();
+  if(!nome){ showToast('❌ Escreve o nome do restaurante'); return; }
+  db.collection('restaurantes').add({ nome: nome, emoji: emoji }).then(function(docRef){
+    showToast('✓ ' + nome + ' cadastrado');
+    document.getElementById('admin-novo-rest-nome').value = '';
+    document.getElementById('admin-novo-rest-emoji').value = '';
+    db.collection('restaurantes').get().then(function(snap){
+      _restaurantes = [];
+      snap.forEach(function(doc){ _restaurantes.push(Object.assign({id:doc.id}, doc.data())); });
+      preencherSelectRestAdmin();
+      document.getElementById('admin-select-rest').value = docRef.id;
+      adminTrocarRestaurante();
+    });
+  }).catch(function(e){ showToast('❌ ' + e.message); });
+}
+
+function adminTrocarRestaurante(){
+  var id = document.getElementById('admin-select-rest').value;
+  var r = _restaurantes.find(function(x){ return x.id === id; });
+  if(!r){
+    // Banco ainda vazio, sem nenhum restaurante — guia o admin pra cadastrar
+    // o primeiro ali em cima, em vez de mostrar uma lista quebrada.
+    _restAtivo = null;
+    document.getElementById('admin-lista-videos').innerHTML =
+      '<div class="lista-vazio">Cadastre o primeiro restaurante acima pra começar.</div>';
+    document.getElementById('admin-total').textContent = '0';
+    return;
+  }
+  _restAtivo = r;
+  adminCancelarEdicao();
+  adminCarregarLista();
+}
+
+function adminCarregarLista(){
+  var box = document.getElementById('admin-lista-videos');
+  box.innerHTML = '<div class="lista-vazio">Carregando...</div>';
+  db.collection('restaurantes').doc(_restAtivo.id)
+    .collection('treinamentos').get().then(function(snap){
+      _videos = [];
+      snap.forEach(function(doc){ _videos.push(Object.assign({id:doc.id}, doc.data())); });
+      _videos.sort(function(a,b){ return (b.criadoEm||0) - (a.criadoEm||0); });
+      document.getElementById('admin-total').textContent = _videos.length;
+      box.innerHTML = _videos.length
+        ? _videos.map(adminLinhaVideoHtml).join('')
+        : '<div class="lista-vazio">Nenhum vídeo cadastrado pra este restaurante ainda.</div>';
+    });
+}
+
+function adminLinhaVideoHtml(v){
+  var cat = CATEGORIAS.find(function(c){ return c.id === v.categoria; });
+  var thumb = 'https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg';
+  return '<div class="admin-video-item">' +
+    '<img class="thumb" src="' + thumb + '" loading="lazy" alt="">' +
+    '<div class="info"><div>' + escHtml(v.titulo) + '</div><div class="cat">' + (cat?cat.icone+' '+cat.nome:v.categoria) + '</div></div>' +
+    '<button class="ic-btn" onclick="adminEditarVideo(\'' + v.id + '\')" title="Editar">✏️</button>' +
+    '<button class="ic-btn" onclick="adminExcluirVideo(\'' + v.id + '\')" title="Excluir">🗑️</button>' +
+  '</div>';
+}
+
+function adminEditarVideo(id){
+  var v = _videos.find(function(x){ return x.id === id; });
+  if(!v) return;
+  _adminEditandoId = id;
+  document.getElementById('admin-input-url').value = 'https://youtube.com/watch?v=' + v.youtubeId;
+  document.getElementById('admin-input-titulo').value = v.titulo || '';
+  document.getElementById('admin-input-categoria').value = v.categoria || CATEGORIAS[0].id;
+  document.getElementById('admin-input-tags').value = (v.tags||[]).join(', ');
+  document.getElementById('admin-form-titulo').textContent = '✏️ Editando vídeo';
+  document.getElementById('admin-btn-salvar').textContent = 'Salvar alterações';
+  document.getElementById('admin-btn-cancelar').style.display = 'inline-block';
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function adminCancelarEdicao(){
+  _adminEditandoId = null;
+  document.getElementById('admin-input-url').value = '';
+  document.getElementById('admin-input-titulo').value = '';
+  document.getElementById('admin-input-tags').value = '';
+  document.getElementById('admin-form-titulo').textContent = '➕ Novo vídeo';
+  document.getElementById('admin-btn-salvar').textContent = 'Adicionar vídeo';
+  document.getElementById('admin-btn-cancelar').style.display = 'none';
+}
+
+function adminSalvarVideo(){
+  if(!_restAtivo){ showToast('❌ Cadastre um restaurante primeiro'); return; }
+  var url = document.getElementById('admin-input-url').value;
+  var titulo = document.getElementById('admin-input-titulo').value.trim();
+  var categoria = document.getElementById('admin-input-categoria').value;
+  var tagsRaw = document.getElementById('admin-input-tags').value;
+  var youtubeId = extrairYoutubeId(url);
+
+  if(!youtubeId){ showToast('❌ Link do YouTube inválido'); return; }
+  if(!titulo){ showToast('❌ Escreve um título'); return; }
+
+  var tags = tagsRaw.split(',').map(function(t){ return t.trim().toLowerCase(); }).filter(Boolean);
+
+  var dados = { titulo: titulo, categoria: categoria, tags: tags, youtubeId: youtubeId };
+
+  var base = db.collection('restaurantes').doc(_restAtivo.id)
+    .collection('treinamentos');
+
+  var promessa;
+  if(_adminEditandoId){
+    promessa = base.doc(_adminEditandoId).update(dados);
+  } else {
+    dados.criadoEm = Date.now();
+    promessa = base.add(dados);
+  }
+
+  promessa.then(function(){
+    showToast(_adminEditandoId ? '✓ Vídeo atualizado' : '✓ Vídeo adicionado');
+    adminCancelarEdicao();
+    adminCarregarLista();
+  }).catch(function(e){
+    showToast('❌ ' + e.message);
+  });
+}
+
+function adminExcluirVideo(id){
+  if(!confirm('Excluir este vídeo da lista de treinamento?')) return;
+  db.collection('restaurantes').doc(_restAtivo.id)
+    .collection('treinamentos').doc(id).delete().then(function(){
+      showToast('✓ Vídeo excluído');
+      adminCarregarLista();
+    }).catch(function(e){ showToast('❌ ' + e.message); });
+}
+
+// ═══ BOOT ═══
+mostrarTela('tela-restaurantes');
+carregarRestaurantes();
+</script>
+</body>
+</html>

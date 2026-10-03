@@ -81,30 +81,38 @@ module.exports = async (req, res) => {
 
     const prompt =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS DUAS COISAS:
+ser UMA DAS TRÊS COISAS:
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
 (B) Um COMANDO DE PEDIDO pra lançar numa mesa (ex: "1 pilsen na 34", "2
     chopp mesa 12 e 1 coca na 8").
+(C) Um COMANDO DE CANCELAMENTO de item já pedido (ex: "cancelar 1 pilsen
+    da mesa 10", "tira a coca da 15", "cancela o chopp mesa 8").
 
-Decida qual dos dois é e responda SOMENTE com um JSON válido, sem texto
+Decida qual das três é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
-SE FOR DÚVIDA, responda neste formato:
+SE FOR DÚVIDA:
 {"tipo":"pergunta","resposta":"texto da resposta, até 2 frases, português do Brasil"}
-Responda a dúvida SOMENTE com base nas fichas técnicas e na base de
-conhecimento abaixo. NUNCA invente um valor técnico. Se não estiver
-cadastrado, diga isso claramente.
+Responda SOMENTE com base nas fichas técnicas e na base de conhecimento
+abaixo. NUNCA invente um valor técnico. Se não estiver cadastrado, diga
+isso claramente.
 
-SE FOR PEDIDO, responda neste formato:
+SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1}]}
-Regras do pedido:
 - "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
   NUNCA invente um id — se não reconhecer o item com confiança, use
   "itemId": null e inclua "nomeDigitado" com o texto falado.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
+
+SE FOR CANCELAMENTO:
+{"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","quantidade":1}]}
+- "nomeDigitado" é só o texto do produto como foi falado — NÃO tente casar
+  com um id do cardápio aqui (o app faz essa checagem depois, olhando o que
+  realmente está na conta daquela mesa agora).
+- Cada combinação mesa+item é um objeto separado.
 
 FICHAS TÉCNICAS DE ITENS:
 ${blocoFichas}${blocoGeral}
@@ -159,6 +167,17 @@ TEXTO:
       }).filter((p) => p.mesa !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    if (parsed.tipo === 'cancelamento') {
+      const brutos = Array.isArray(parsed.itens) ? parsed.itens : [];
+      const resultado = brutos.map((p) => {
+        const mesa = parseInt(p.mesa, 10);
+        const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
+        return { mesa: isNaN(mesa) ? null : mesa, nomeDigitado: (p.nomeDigitado || '').toString(), quantidade: qtd };
+      }).filter((p) => p.mesa !== null && p.nomeDigitado);
+
+      return res.status(200).json({ ok: true, tipo: 'cancelamento', itens: resultado });
     }
 
     // Default: trata como pergunta (cobre tipo==="pergunta" e qualquer formato inesperado)

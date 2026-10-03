@@ -19582,9 +19582,10 @@ function _renderDraftsPedidoIA(){
         '<div style="flex:1;font-size:0.8rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div></div>' +
       '</div>';
     }
+    var obsHtml = p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(p.obs) + '</div>' : '';
     return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + '</div>' +
+      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + obsHtml + '</div>' +
       '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -19614,7 +19615,7 @@ function confirmarEnviarPedidosIA(){
   var porMesa = {};
   selecionados.forEach(function(p){
     if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
-    porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade });
+    porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '' });
   });
   var mesas = Object.keys(porMesa);
   var resultados = [];
@@ -19859,7 +19860,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
     var _pedidoIdTemp = fbDb.collection('pedidos').doc().id;
     var itensPedido = itensCarrinho.map(function(it){
       return {
-        id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: '',
+        id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
         selecoes: [], precoBase: it.preco, extras: 0, pessoa: '',
         itemKey: _pedidoIdTemp + '_' + Math.random().toString(36).slice(2,8),
         cozinhaCriadoEm: _agoraPedido
@@ -19889,7 +19890,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
       var itensConta = itensPedido.map(function(it){
         return {
           itemKey: it.itemKey, pedidoId: pedidoId,
-          id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: '',
+          id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
           selecoes: [], pessoa: '', status: 'ativo', pagamentoId: null,
           adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
           teste: _modoTeste ? true : false

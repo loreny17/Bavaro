@@ -100,12 +100,20 @@ abaixo. NUNCA invente um valor técnico. Se não estiver cadastrado, diga
 isso claramente.
 
 SE FOR PEDIDO:
-{"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1}]}
+{"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
 - "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
   NUNCA invente um id — se não reconhecer o item com confiança, use
   "itemId": null e inclua "nomeDigitado" com o texto falado.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
+- "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",
+  "sem gelo", "bem passado", "sem cebola") — texto curto, só o essencial,
+  SEM repetir o nome do produto. Deixe "" se não houver observação pra
+  aquele item específico. Cada observação vale só pro item que está
+  associado a ela na frase (ex: "2 bacon, 1 sem salada" significa UM dos
+  dois bacons tem a observação "sem salada" — nesse caso gere dois objetos
+  separados pro Bacon, um com quantidade 1 e obs "sem salada", outro com
+  quantidade 1 e obs "").
 
 SE FOR CANCELAMENTO:
 {"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","quantidade":1}]}
@@ -163,6 +171,7 @@ TEXTO:
           itemPreco: item ? item.preco : null,
           encontrado: !!item,
           nomeDigitado: p.nomeDigitado || null,
+          obs: (p.obs || '').toString().trim().slice(0, 140),
         };
       }).filter((p) => p.mesa !== null);
 

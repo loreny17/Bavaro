@@ -1279,6 +1279,14 @@ html[data-anim="off"] .g-ripple{display:none!important;}
         </div>
       </button>
 
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirPersonalizarFonte()">
+        <span style="font-size:1.4rem;">🔤</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Tamanho da Letra</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Na tela de Fechar Conta, só pra você</div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" id="menu-item-insumos" onclick="fecharMenuLateral();abrirPedidoInsumosGarcom()" style="display:none;">
         <span style="font-size:1.4rem;">🚚</span>
         <div style="flex:1;text-align:left;">
@@ -1663,7 +1671,7 @@ var firebaseConfig = {
 // Atualize a cada publicação. Aparece no painel de debug e no console —
 // é como confirmamos que o celular está rodando a versão certa (o PWA
 // às vezes segura versão velha em cache mesmo depois de publicar).
-var APP_VERSAO = 'v29.07-1 (juntar comandas)';
+var APP_VERSAO = 'v30.10-1 (tamanho da letra)';
 // Cronômetro do boot: marca quanto tempo cada etapa levou desde a abertura.
 // Aparece no painel de debug — é como sabemos ONDE os segundos estão indo.
 var _bootT0 = Date.now();
@@ -16236,6 +16244,7 @@ function fecharContaAdicionarItem(){
 }
 
 function abrirFecharConta(num){
+  _aplicarFonteFecharConta(); // reaplica o tamanho de letra salvo deste garçom
   _fecharMesaNum = num;
   _fecharSelecaoItens = {};
   _fecharSelecaoFragmentos = {};
@@ -17595,6 +17604,90 @@ function desfazerDivisao(itemKey){
     showToast('↺ Divisão desfeita','#4ade80');
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
+// ═══ TAMANHO DA LETRA NO FECHAR CONTA (por garçom, neste aparelho) ═══
+// Guardado no localStorage com o NOME do garçom na chave — assim, se vários
+// garçons usam o mesmo celular/tablet pra fechar conta, cada um mantém o
+// próprio tamanho preferido, sem mexer no dos outros. Quem nunca mexeu
+// continua vendo exatamente o tamanho padrão de sempre (zoom 100%).
+var _FONTE_FECHAR_PASSOS = [1, 1.15, 1.3]; // normal → grande → extra grande
+function _fonteFecharContaChave(){
+  var nome = (_nomeGarcom || 'padrao').toLowerCase().replace(/[^a-z0-9]/g,'_');
+  return 'fecharConta_zoom_' + nome;
+}
+function _fonteFecharContaAtual(){
+  try{
+    var salvo = parseFloat(localStorage.getItem(_fonteFecharContaChave()));
+    if(_FONTE_FECHAR_PASSOS.indexOf(salvo) >= 0) return salvo;
+  }catch(e){}
+  return 1; // padrão: tamanho atual, sem nenhuma mudança
+}
+function _aplicarFonteFecharConta(){
+  var box = document.querySelector('#modal-fechar-conta .modal-box');
+  if(!box) return;
+  var z = _fonteFecharContaAtual();
+  box.style.zoom = z;
+  var btn = document.getElementById('btn-fonte-fechar-conta');
+  if(btn) btn.style.color = (z > 1) ? 'var(--accent)' : 'var(--text)';
+}
+function ciclarFonteFecharConta(){
+  var atual = _fonteFecharContaAtual();
+  var idx = _FONTE_FECHAR_PASSOS.indexOf(atual);
+  var proximo = _FONTE_FECHAR_PASSOS[(idx + 1) % _FONTE_FECHAR_PASSOS.length];
+  try{ localStorage.setItem(_fonteFecharContaChave(), String(proximo)); }catch(e){}
+  _aplicarFonteFecharConta();
+  var rotulo = proximo === 1 ? 'Normal' : (proximo === 1.15 ? 'Grande' : 'Extra grande');
+  showToast('🔤 Letra: ' + rotulo + ' (só pra você, neste aparelho)', '#4ade80', 2000);
+}
+
+// Modal de personalização — mesmo visual do "Personalizar Gestos", acessível
+// pelo menu lateral (além do botão "Aa" rápido dentro do Fechar Conta).
+function abrirPersonalizarFonte(){
+  var ex = document.getElementById('modal-personalizar-fonte');
+  if(ex) ex.remove();
+
+  var opcoes = [
+    {valor: 1,    nome: 'Normal',       desc: 'Tamanho padrão do sistema', icone: 'A'},
+    {valor: 1.15, nome: 'Grande',       desc: 'Um pouco maior',            icone: 'A'},
+    {valor: 1.3,  nome: 'Extra Grande', desc: 'Bem mais fácil de ler',     icone: 'A'}
+  ];
+  var atual = _fonteFecharContaAtual();
+  var html = opcoes.map(function(o){
+    var ativo = atual === o.valor;
+    return '<button onclick="setFonteFecharConta(' + o.valor + ')" ' +
+      'style="display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;background:' + (ativo?'rgba(212,168,67,0.12)':'var(--bg)') + ';border:1px solid ' + (ativo?'var(--accent)':'var(--border2)') + ';color:var(--text);border-radius:10px;font-family:inherit;cursor:pointer;margin-bottom:6px;text-align:left;">' +
+      '<span style="font-size:' + (1.1 * o.valor) + 'rem;font-weight:800;">' + o.icone + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-weight:' + (ativo?'700':'600') + ';font-size:0.86rem;color:' + (ativo?'var(--accent)':'var(--text)') + ';">' + o.nome + '</div>' +
+        '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">' + o.desc + '</div>' +
+      '</div>' +
+      (ativo ? '<span style="font-size:1.1rem;color:var(--accent);">✓</span>' : '') +
+    '</button>';
+  }).join('');
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-personalizar-fonte';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom));">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;color:var(--accent);">🔤 TAMANHO DA LETRA</div>' +
+        '<button onclick="document.getElementById(\'modal-personalizar-fonte\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:14px;">Só muda a tela de Fechar Conta, e só pra você (' + esc(_nomeGarcom||'') + ') neste aparelho — os outros garçons continuam com o tamanho deles.</div>' +
+      html +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function setFonteFecharConta(valor){
+  try{ localStorage.setItem(_fonteFecharContaChave(), String(valor)); }catch(e){}
+  var ex = document.getElementById('modal-personalizar-fonte');
+  if(ex) ex.remove();
+  var rotulo = valor === 1 ? 'Normal' : (valor === 1.15 ? 'Grande' : 'Extra grande');
+  showToast('🔤 Letra: ' + rotulo, '#4ade80', 2000);
+}
+
 function fecharModalFechar(){
   document.getElementById('modal-fechar-conta').classList.remove('show');
   if(_fecharUnsub){ _fecharUnsub(); _fecharUnsub = null; }
@@ -19208,6 +19301,7 @@ try{
     <div class="modal-header">
       <div class="modal-titulo" style="flex:1;">FECHAR CONTA</div>
       <button onclick="limparContaAlmocoEmergencia()" id="btn-limpar-emergencia" style="display:none;background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:5px 10px;font-size:0.7rem;font-family:inherit;cursor:pointer;margin-right:6px;">🧹 Limpar</button>
+      <button onclick="ciclarFonteFecharConta()" id="btn-fonte-fechar-conta" title="Tamanho da letra (só pra você)" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:5px 10px;font-size:0.78rem;font-weight:800;font-family:inherit;cursor:pointer;margin-right:6px;">Aa</button>
       <button class="modal-fechar" onclick="fecharModalFechar()">×</button>
     </div>
     <div class="modal-body" id="fechar-conta-body"></div>

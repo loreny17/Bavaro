@@ -824,6 +824,11 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         <textarea class="f-textarea" id="item-descricao" maxlength="200" placeholder="Descrição curta do item..."></textarea>
       </div>
       <div class="f-grupo">
+        <label class="f-label">Ficha técnica (opcional — pro assistente de IA)</label>
+        <textarea class="f-textarea" id="item-ficha-tecnica" maxlength="500" placeholder="Ex: IBU 18, teor alcoólico 5,2%. Ingredientes: água, malte, lúpulo, levedura. Contém glúten."></textarea>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">O garçom pode perguntar pro assistente (IBU, teor alcoólico, alérgenos...) e ele responde só com o que estiver escrito aqui — sem isso, ele diz que não sabe.</div>
+      </div>
+      <div class="f-grupo">
         <label class="f-label">Código (opcional)</label>
         <input type="text" class="f-input" id="item-codigo" maxlength="20" placeholder="Ex: 001">
       </div>
@@ -1712,6 +1717,7 @@ function abrirModalItem(){
   if(pvNovo) pvNovo.value = '';
   document.getElementById('item-preco').value = '';
   document.getElementById('item-descricao').value = '';
+  document.getElementById('item-ficha-tecnica').value = '';
   document.getElementById('item-codigo').value = '';
   document.getElementById('item-disponivel-toggle').classList.add('active');
   document.getElementById('item-pausado-toggle').classList.remove('active');
@@ -1742,6 +1748,7 @@ function editarItem(id){
   if(pvEd) pvEd.value = i.palavrasVoz || '';
   document.getElementById('item-preco').value = formatarPreco(i.preco);
   document.getElementById('item-descricao').value = i.descricao || '';
+  document.getElementById('item-ficha-tecnica').value = i.fichaTecnica || '';
   document.getElementById('item-codigo').value = i.codigo || '';
   document.getElementById('item-disponivel-toggle').classList.toggle('active', i.disponivel !== false);
   document.getElementById('item-pausado-toggle').classList.toggle('active', i.pausado === true);
@@ -2598,6 +2605,7 @@ function salvarItem(){
   var preco = parseFloat(precoStr);
   var categoria = document.getElementById('item-categoria').value;
   var descricao = document.getElementById('item-descricao').value.trim();
+  var fichaTecnica = document.getElementById('item-ficha-tecnica').value.trim();
   var codigo = document.getElementById('item-codigo').value.trim();
   var disponivel = document.getElementById('item-disponivel-toggle').classList.contains('active');
   var pausado = document.getElementById('item-pausado-toggle').classList.contains('active');
@@ -2622,6 +2630,7 @@ function salvarItem(){
   var ordemSugerido = ordemSugeridoEl ? (parseInt(ordemSugeridoEl.value)||99) : 99;
   var dados = {
     nome:nome, preco:preco, categoria:categoria, descricao:descricao,
+    fichaTecnica:fichaTecnica,
     codigo:codigo, foto:foto, disponivel:disponivel,
     pausado: pausado,
     controlarEstoque: controlarEstoque,
@@ -7084,7 +7093,7 @@ function gerarCupomPedido(pedido, modelo){
     if(it.pessoa){
       s += _aplicarEstilo(estAdc);
       var indentP = estAdc.indentar !== false ? '  ' : '';
-      s += indentP + '👤 ' + it.pessoa + '\n';
+      s += indentP + 'Cliente: ' + removerAcentosImpressao(String(it.pessoa)) + '\n';
       s += _resetarEstilo();
     }
     // Seleções (opções/adicionais — estilo separado)
@@ -7960,7 +7969,7 @@ function gerarCupomContaMesaAlmoco(pedido, modelo, imp){
     var totalCliente = 'R$ ' + (pessoa.total || 0).toFixed(2).replace('.', ',');
     // Nome à esquerda, total à direita
     var espacos = Math.max(1, L - nomeCliente.length - totalCliente.length - 2);
-    s += '👤 ' + nomeCliente + (espacos > 1 ? new Array(espacos).join(' ') : ' ') + totalCliente + '\n';
+    s += nomeCliente + (espacos > 1 ? new Array(espacos).join(' ') : ' ') + totalCliente + '\n';
     s += escposBold(false);
     s += linha('-', L) + '\n';
 
@@ -10892,6 +10901,56 @@ function trocarRestaurante(id, nome, emoji){
 // servidor, nunca aqui no navegador). Falha na planilha NUNCA deve travar
 // o caixa — por isso é sempre uma ação manual/separada, com try/catch e
 // aviso claro, nunca embutida silenciosamente no fluxo de fechar mesa.
+// ═══ BASE DE CONHECIMENTO DA IA (texto geral, por restaurante) ═══
+// Mesma ideia da "Ficha técnica" por item, mas pra tudo que NÃO é de um
+// produto específico — horário de funcionamento, política de troca,
+// promoção do dia, qualquer coisa que o assistente do app Garçom deva
+// saber ao responder perguntas. As duas fontes (isto + ficha técnica de
+// cada item) alimentam a mesma resposta, já estão somadas no servidor.
+function abrirBaseConhecimentoIA(){
+  var ex = document.getElementById('modal-base-ia');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-base-ia';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9900;display:flex;align-items:center;justify-content:center;padding:16px;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;max-width:480px;width:100%;padding:18px;max-height:88vh;display:flex;flex-direction:column;">' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.25rem;color:var(--accent);margin-bottom:4px;">🤖 BASE DE CONHECIMENTO DA IA</div>' +
+      '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Restaurante: ' + (_restauranteAtivo ? _restauranteAtivo.nome : '?') + '</div>' +
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:10px;">Cole aqui qualquer coisa que o assistente do app Garçom deva saber, fora de ficha técnica de item específico — horário, promoções, políticas, o que for. Ele consulta isto em TODA pergunta, junto das fichas técnicas de cada item.</div>' +
+      '<textarea id="base-ia-texto" rows="10" placeholder="Ex: Happy hour de chopp das 17h às 19h, segunda a sexta.&#10;&#10;Troca de produto só em até 15 minutos após o pedido.&#10;&#10;(pode colar quantas informações quiser)" style="resize:vertical;width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.88rem;outline:none;font-family:inherit;"></textarea>' +
+      '<button onclick="salvarBaseConhecimentoIA()" style="width:100%;margin-top:12px;background:var(--accent);border:none;color:#000;border-radius:10px;padding:13px;font-weight:800;cursor:pointer;font-family:inherit;">Salvar</button>' +
+      '<div id="base-ia-status" style="font-size:0.74rem;color:var(--muted);margin-top:8px;"></div>' +
+      '<button onclick="document.getElementById(\'modal-base-ia\').remove()" style="width:100%;background:none;border:none;color:var(--muted);margin-top:8px;padding:8px;cursor:pointer;font-family:inherit;">Fechar</button>' +
+    '</div>';
+  document.body.appendChild(mod);
+
+  // Carrega o que já estiver salvo pra esse restaurante
+  if(_restauranteAtivo){
+    fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id)
+      .get().then(function(doc){
+        var d = doc.data() || {};
+        document.getElementById('base-ia-texto').value = d.documentoGeralIA || '';
+      }).catch(function(){});
+  }
+}
+
+function salvarBaseConhecimentoIA(){
+  if(!_restauranteAtivo){ showToast('❌ Nenhum restaurante ativo','#f87171'); return; }
+  var texto = document.getElementById('base-ia-texto').value;
+  var status = document.getElementById('base-ia-status');
+  status.textContent = 'Salvando...';
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id)
+    .update({ documentoGeralIA: texto }).then(function(){
+      status.textContent = '✓ Salvo (' + texto.length + ' caracteres)';
+      showToast('✓ Base de conhecimento salva','#4ade80');
+    }).catch(function(e){
+      status.textContent = '❌ ' + e.message;
+      showToast('❌ ' + e.message,'#f87171');
+    });
+}
+
 function abrirSyncGoogleSheets(){
   var ex = document.getElementById('modal-sync-sheets');
   if(ex) ex.remove();
@@ -15657,6 +15716,7 @@ function toggleAdminUsuario(garcomId, novoValor){
         <button class="menu-item" onclick="abrirEstoque();fecharMenuLateral();"><span class="ico">📦</span><span class="lbl">Pausar e Estoque</span></button>
         <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">🔁</span><span class="lbl">Copiar de outro restaurante</span></button>
         <button class="menu-item" onclick="abrirSyncGoogleSheets();fecharMenuLateral();"><span class="ico">📊</span><span class="lbl">Sincronizar Google Sheets</span></button>
+        <button class="menu-item" onclick="abrirBaseConhecimentoIA();fecharMenuLateral();"><span class="ico">🤖</span><span class="lbl">Base de Conhecimento da IA</span></button>
       </div>
     </div>
 

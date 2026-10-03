@@ -1122,6 +1122,15 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <div class="mesa-search" id="comanda-search-bar" style="display:none;">
     <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
   </div>
+  <!-- Caixa do assistente — sempre visível na tela de escolher mesa -->
+  <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:0 14px 12px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Pergunte sobre um produto</div>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="input-pergunta-produto-mesas" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" onkeydown="if(event.key==='Enter')perguntarSobreProduto()">
+      <button onclick="perguntarSobreProduto()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 15px;font-weight:800;">➤</button>
+    </div>
+    <div id="resposta-produto-mesas" style="margin-top:9px;"></div>
+  </div>
   <div class="mesas-grid" id="mesas-grid"></div>
   <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
   <!-- ☀️ Tela do Almoço -->
@@ -1388,6 +1397,18 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       ">0</span>
     </span>
   </button>
+
+  <!-- FAB Assistente de Produto — sempre visível durante o pedido, pra
+       responder pergunta de cliente no meio do atendimento sem precisar
+       sair da mesa -->
+  <button id="fab-pergunta-produto" onclick="abrirModalPerguntaProduto()" style="
+    position:fixed;bottom:80px;left:16px;z-index:90;
+    background:var(--surface2);color:var(--accent);
+    border:1.5px solid var(--border2);width:52px;height:52px;border-radius:50%;
+    box-shadow:0 4px 14px rgba(0,0,0,0.35);
+    cursor:pointer;font-size:1.4rem;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;
+  ">🤖</button>
 
   <!-- FAB Pedir Insumos ao Central (só pra quem tem permissão, no mapa de mesas) -->
   <button id="fab-insumos" onclick="abrirPedidoInsumosGarcom()" style="
@@ -19391,6 +19412,66 @@ try{
     setTimeout(function(){sp.remove();},570);
   },{passive:true});
 })();
+
+// ═══ ASSISTENTE DE PRODUTO (IA) ═══
+// Mesma ideia do assistente do app de Treinamentos: responde SOMENTE com
+// base no que foi cadastrado na "Ficha técnica" de cada item do cardápio —
+// nunca inventa IBU, teor alcoólico, ingrediente ou alérgeno. Se não está
+// cadastrado, ela diz isso claramente em vez de arriscar um número.
+
+// Caixa fixa na tela de Escolher Mesa
+function perguntarSobreProduto(){
+  _executarPerguntaProduto('input-pergunta-produto-mesas', 'resposta-produto-mesas');
+}
+
+// Botão flutuante durante o pedido — abre modal com a mesma caixa
+function abrirModalPerguntaProduto(){
+  var ex = document.getElementById('modal-pergunta-produto');
+  if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-pergunta-produto';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom));">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;color:var(--accent);">🤖 PERGUNTE SOBRE UM PRODUTO</div>' +
+        '<button onclick="document.getElementById(\'modal-pergunta-produto\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.5rem;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<input type="text" id="input-pergunta-produto-modal" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key===\'Enter\')_executarPerguntaProduto(\'input-pergunta-produto-modal\',\'resposta-produto-modal\')">' +
+        '<button onclick="_executarPerguntaProduto(\'input-pergunta-produto-modal\',\'resposta-produto-modal\')" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 16px;font-weight:800;">➤</button>' +
+      '</div>' +
+      '<div id="resposta-produto-modal" style="margin-top:10px;"></div>' +
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ document.getElementById('input-pergunta-produto-modal').focus(); }, 150);
+}
+
+function _executarPerguntaProduto(inputId, caixaId){
+  var pergunta = document.getElementById(inputId).value.trim();
+  if(!pergunta) return;
+  var caixa = document.getElementById(caixaId);
+  caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Pensando...</div>';
+
+  fetch('/api/perguntar-produto', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      tenantId: _tenantId,
+      restauranteId: _restauranteId,
+      pergunta: pergunta
+    })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(!j.ok){
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + (j.error||'Algo deu errado.') + '</div>';
+      return;
+    }
+    caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>';
+  }).catch(function(){
+    caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">Não consegui falar com o assistente agora.</div>';
+  });
+}
 </script>
 
 </body>

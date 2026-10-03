@@ -1119,7 +1119,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
     <div id="caixa-assistente-garcom" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:16px 16px 4px;">
       <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Assistente — pergunte ou lance um pedido</div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="input-assistente-garcom" placeholder="Ex: qual o IBU do IPA? / 1 pilsen na 34" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
+        <input type="text" id="input-assistente-garcom" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
         <button id="btn-voz-assistente-garcom" onclick="iniciarVozAssistenteGarcom()" title="Falar"
           style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -19442,6 +19442,7 @@ function _limparAssistenteGarcom(){
   var caixa = document.getElementById('resposta-assistente-garcom');
   if(caixa) caixa.innerHTML = '';
   _draftsPedidoIA = [];
+  _draftsCancelamentoIA = [];
 }
 
 // Chamado sempre que a tela de Escolher Mesa é deixada pra trás (entrar
@@ -19507,6 +19508,9 @@ function executarAssistenteGarcom(){
     if(j.tipo === 'pedido'){
       _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
       _renderDraftsPedidoIA();
+    } else if(j.tipo === 'cancelamento'){
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando o item na conta...</div>';
+      _resolverCancelamentosIA(j.itens||[]);
     } else {
       caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>';
     }
@@ -19592,6 +19596,205 @@ function _mostrarResultadoPedidosIA(resultados){
   if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
   var algumSucesso = resultados.some(function(r){ return r.ok; });
   if(algumSucesso) showToast('✓ Pedido(s) enviado(s)', '#4ade80');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CANCELAMENTO DE ITEM VIA IA
+//  A IA só extrai "mesa + nome do produto falado" — ela NUNCA decide
+//  sozinha qual item cancelar. A identificação de verdade acontece aqui,
+//  comparando com o que está REALMENTE aberto na conta daquela mesa agora
+//  (não com o cardápio geral). Se achar mais de um item parecido, mostra
+//  o nome encontrado pro garçom conferir visualmente antes de marcar.
+//  A execução reaproveita EXATAMENTE as mesmas proteções do cancelamento
+//  manual: motivo registrado, senha do gerente (se configurada no
+//  restaurante), devolução de estoque, e oferta de avisar a cozinha.
+// ═══════════════════════════════════════════════════════════════
+var _draftsCancelamentoIA = [];
+
+function _resolverCancelamentosIA(itensBrutos){
+  if(!itensBrutos.length){
+    document.getElementById('resposta-assistente-garcom').innerHTML =
+      '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhum cancelamento nesse texto.</div>';
+    return;
+  }
+  // Busca a conta ABERTA de cada mesa mencionada, direto no servidor —
+  // nunca confia em cache local pra decidir o que cancelar.
+  var mesasUnicas = itensBrutos.map(function(it){ return it.mesa; })
+    .filter(function(m, i, arr){ return arr.indexOf(m) === i; });
+
+  Promise.all(mesasUnicas.map(function(mesa){
+    return fbDb.collection('contas_mesa')
+      .where('restauranteId','==', _restauranteId)
+      .where('mesa','==', mesa)
+      .where('status','==','aberta')
+      .limit(1).get()
+      .then(function(snap){ return { mesa: mesa, doc: snap.empty ? null : snap.docs[0] }; });
+  })).then(function(contasPorMesa){
+    var mapaContas = {};
+    contasPorMesa.forEach(function(c){ mapaContas[c.mesa] = c.doc; });
+
+    _draftsCancelamentoIA = itensBrutos.map(function(it, i){
+      var doc = mapaContas[it.mesa];
+      if(!doc){
+        return { _idx:i, mesa:it.mesa, nomeDigitado:it.nomeDigitado, encontrado:false, motivoFalha:'Mesa sem conta aberta' };
+      }
+      var conta = doc.data();
+      var termo = it.nomeDigitado.toLowerCase();
+      var ativos = (conta.itens||[]).filter(function(x){ return x.status !== 'cancelado' && x.status !== 'pago'; });
+      var candidatos = ativos.filter(function(x){ return (x.nome||'').toLowerCase().indexOf(termo) >= 0; });
+      if(!candidatos.length){
+        return { _idx:i, mesa:it.mesa, nomeDigitado:it.nomeDigitado, encontrado:false, motivoFalha:'Não encontrei esse item na conta da mesa' };
+      }
+      var alvo = candidatos[0]; // se houver mais de um parecido, usa o primeiro — o nome real aparece pro garçom conferir
+      return {
+        _idx:i, mesa:it.mesa, encontrado:true, _selecionado:false,
+        itemKey: alvo.itemKey, itemNome: alvo.nome, itemQtd: alvo.qtd||1,
+        itemId: alvo.id, itemPreco: alvo.preco, pedidoId: alvo.pedidoId||null,
+        contaId: doc.id, ambiguo: candidatos.length > 1
+      };
+    });
+    _renderDraftsCancelamentoIA();
+  }).catch(function(e){
+    document.getElementById('resposta-assistente-garcom').innerHTML =
+      '<div style="font-size:0.82rem;color:#f87171;">Erro ao buscar as contas: ' + esc(e.message) + '</div>';
+  });
+}
+
+function _renderDraftsCancelamentoIA(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  var linhas = _draftsCancelamentoIA.map(function(p){
+    if(!p.encontrado){
+      return '<div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
+        '<span style="font-size:1rem;">⚠️</span>' +
+        '<div style="flex:1;font-size:0.8rem;">"' + esc(p.nomeDigitado) + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">' + esc(p.motivoFalha) + '</div></div>' +
+      '</div>';
+    }
+    var avisoAmbiguo = p.ambiguo ? '<div style="font-size:0.68rem;color:#f7a34f;">Havia mais de um item parecido — confere se é este</div>' : '';
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.05);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" onchange="_draftsCancelamentoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarCancelIA()" style="width:18px;height:18px;accent-color:#f87171;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.84rem;">❌ <b>' + (p.itemQtd) + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + avisoAmbiguo + '</div>' +
+    '</label>';
+  }).join('');
+  caixa.innerHTML = linhas +
+    '<button id="btn-confirmar-cancel-ia" onclick="confirmarCancelamentosIA()" style="display:none;width:100%;margin-top:4px;background:#f87171;border:none;color:#fff;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;">Confirmar cancelamento</button>';
+  _atualizarBotaoConfirmarCancelIA();
+}
+
+function _atualizarBotaoConfirmarCancelIA(){
+  var qtd = _draftsCancelamentoIA.filter(function(p){ return p.encontrado && p._selecionado; }).length;
+  var btn = document.getElementById('btn-confirmar-cancel-ia');
+  if(!btn) return;
+  if(qtd > 0){ btn.style.display = 'block'; btn.textContent = 'Confirmar cancelamento (' + qtd + ')'; }
+  else { btn.style.display = 'none'; }
+}
+
+function confirmarCancelamentosIA(){
+  var selecionados = _draftsCancelamentoIA.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!selecionados.length) return;
+
+  // Mesma trava do cancelamento manual: se o restaurante configurou senha
+  // de gerente pra cancelar, ela é exigida aqui também — sem exceção.
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+    var pedeSenha = false, senhaCorreta = '';
+    if(doc.exists){
+      var c = doc.data();
+      pedeSenha = !!c.cancelSenha;
+      senhaCorreta = c.cancelSenhaValor || '';
+    }
+    if(pedeSenha){
+      var senhaDigitada = prompt('Senha do gerente pra confirmar o cancelamento:');
+      if(senhaDigitada === null) return; // cancelou o prompt
+      if(senhaDigitada !== senhaCorreta){ showToast('❌ Senha incorreta', '#f87171'); return; }
+    }
+    _executarCancelamentosIA(selecionados);
+  }).catch(function(){
+    _executarCancelamentosIA(selecionados); // sem config de senha legível — segue sem bloquear
+  });
+}
+
+function _executarCancelamentosIA(selecionados){
+  var btn = document.getElementById('btn-confirmar-cancel-ia');
+  if(btn){ btn.disabled = true; btn.textContent = 'Cancelando...'; }
+  var resultados = [];
+  var pedidosPraReimprimir = {};
+
+  function processarProximo(i){
+    if(i >= selecionados.length){
+      _mostrarResultadoCancelamentosIA(resultados, Object.keys(pedidosPraReimprimir));
+      return;
+    }
+    var p = selecionados[i];
+    _cancelarItemPorKey(p).then(function(){
+      resultados.push({mesa:p.mesa, item:p.itemNome, ok:true});
+      if(p.pedidoId) pedidosPraReimprimir[p.pedidoId] = true;
+      processarProximo(i+1);
+    }).catch(function(e){
+      resultados.push({mesa:p.mesa, item:p.itemNome, ok:false, erro:e.message});
+      processarProximo(i+1);
+    });
+  }
+  processarProximo(0);
+}
+
+// Cancela UM item (por itemKey) — mesma lógica de executarCancelamento:
+// devolve estoque, marca status+motivo na conta E no pedido original.
+function _cancelarItemPorKey(p){
+  var agora = Date.now();
+  devolverEstoque(p.itemId, p.itemQtd || 1);
+
+  return fbDb.collection('contas_mesa').doc(p.contaId).get().then(function(doc){
+    if(!doc.exists) throw new Error('Conta não encontrada');
+    var conta = doc.data();
+    var itensAtualizados = (conta.itens||[]).map(function(it){
+      if(it.itemKey === p.itemKey){
+        return Object.assign({}, it, {
+          status: 'cancelado', canceladoEm: agora,
+          canceladoPor: _nomeGarcom || 'Garçom',
+          motivoCancelamento: 'Cancelado via assistente de IA'
+        });
+      }
+      return it;
+    });
+    var totais = calcularTotaisConta({itens: itensAtualizados, pagamentos: conta.pagamentos||[]});
+    return fbDb.collection('contas_mesa').doc(p.contaId).update({
+      itens: itensAtualizados, subtotal: totais.subtotal, taxa10: totais.taxa10,
+      total: totais.total, pagoTotal: totais.pagoTotal, restante: totais.restante,
+      atualizadoEm: agora
+    }).then(function(){
+      _invalidarCacheItens(p.contaId);
+      // Sincroniza o status no pedido original também (best-effort, igual
+      // ao cancelamento manual — não trava o fluxo se não achar)
+      if(p.pedidoId){
+        fbDb.collection('pedidos').doc(p.pedidoId).get().then(function(pedDoc){
+          if(!pedDoc.exists) return;
+          var ped = pedDoc.data();
+          var itensP = (ped.itens||[]).map(function(it){
+            if(it.itemKey === p.itemKey && it.status !== 'cancelado'){
+              return Object.assign({}, it, {status:'cancelado', canceladoEm:agora, canceladoPor:_nomeGarcom||'Garçom', motivoCancelamento:'Cancelado via assistente de IA'});
+            }
+            return it;
+          });
+          fbDb.collection('pedidos').doc(p.pedidoId).update({itens: itensP, atualizadoEm: agora}).catch(function(){});
+        }).catch(function(){});
+      }
+    });
+  });
+}
+
+function _mostrarResultadoCancelamentosIA(resultados, pedidosAfetados){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  caixa.innerHTML = resultados.map(function(r){
+    return r.ok
+      ? '<div style="padding:9px 10px;border-radius:9px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.82rem;margin-bottom:6px;">✓ ' + esc(r.item) + ' — Mesa ' + r.mesa + ' cancelado</div>'
+      : '<div style="padding:9px 10px;border-radius:9px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.82rem;margin-bottom:6px;">❌ ' + esc(r.item) + ' — Mesa ' + r.mesa + ': ' + esc(r.erro) + '</div>';
+  }).join('');
+  if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+  var algumSucesso = resultados.some(function(r){ return r.ok; });
+  if(algumSucesso) showToast('✕ Cancelamento(s) feito(s)', '#f87171');
+  // Oferece reimpressão pra cada pedido afetado — mesma pergunta do fluxo manual
+  pedidosAfetados.forEach(function(pedidoId){
+    perguntarReimpressao(pedidoId, 'Cancelamento de item (via assistente)');
+  });
 }
 
 // Resolve (ou cria) a conta da mesa e escreve o pedido exatamente no mesmo

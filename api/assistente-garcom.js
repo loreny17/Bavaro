@@ -1,0 +1,170 @@
+// ═══════════════════════════════════════════════════════════════
+//  POST /api/assistente-garcom
+//  Body: { tenantId, restauranteId, texto }
+//
+//  Caixa única do app Garçom: a mesma pergunta pode ser uma DÚVIDA
+//  ("qual o IBU do IPA?") ou um COMANDO DE PEDIDO ("1 pilsen na 34").
+//  Esta function decide qual é, numa chamada só, e devolve:
+//    { tipo: "pergunta", resposta: "..." }
+//  ou
+//    { tipo: "pedido", pedidos: [{mesa, itemId, itemNome, itemPreco,
+//      quantidade, encontrado, nomeDigitado}] }
+//
+//  ⚠️ Mesma garantia de sempre: isto SÓ interpreta. Um pedido nunca é
+//  lançado por aqui — o app mostra o rascunho e só escreve no banco
+//  quando o garçom confirma manualmente. A classificação errada (ex:
+//  tratar um pedido como pergunta) é só um incômodo de UX, nunca um
+//  risco de dado — porque escrever no banco está noutro passo, sempre
+//  atrás de confirmação humana.
+// ═══════════════════════════════════════════════════════════════
+const admin = require('firebase-admin');
+
+function getDb() {
+  if (admin.apps.length) return admin.app().firestore();
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'gestao-reataurante';
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  if (!clientEmail || !privateKey) {
+    throw new Error('Credenciais do Firebase Admin ausentes (FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY).');
+  }
+  admin.initializeApp({ credential: admin.credential.cert({ projectId, clientEmail, privateKey }) });
+  return admin.firestore();
+}
+
+const TENANT_PADRAO = 'tnt_molrfz1k_rznlgl';
+const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Use POST' });
+  }
+
+  const body = req.body || {};
+  const tenantId = (body.tenantId || TENANT_PADRAO).toString();
+  const restauranteId = (body.restauranteId || 'default').toString();
+  const texto = (body.texto || '').toString().trim();
+
+  if (!texto) return res.status(400).json({ ok: false, error: 'Falta o texto' });
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ ok: false, error: 'GEMINI_API_KEY não configurada no servidor.' });
+
+  try {
+    const db = getDb();
+    const [restDoc, itensSnap] = await Promise.all([
+      db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
+      db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
+        .collection('cardapio').doc('data').collection('itens').get(),
+    ]);
+
+    const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
+
+    const cardapioCompleto = []; // pra lançar pedido (todos os itens por unidade)
+    const comFicha = [];         // pra responder dúvida técnica
+    itensSnap.forEach((doc) => {
+      const it = doc.data() || {};
+      if (it.disponivel === false) return;
+      if (it.tipoVenda !== 'kg') {
+        cardapioCompleto.push({ id: doc.id, nome: it.nome || '(sem nome)', preco: typeof it.preco === 'number' ? it.preco : 0 });
+      }
+      if (it.fichaTecnica && it.fichaTecnica.trim()) {
+        comFicha.push({ nome: it.nome || '(sem nome)', ficha: it.fichaTecnica.trim() });
+      }
+    });
+
+    const listaCardapio = cardapioCompleto.map((it, i) => `${i + 1}. ${it.nome} [id:${it.id}]`).join('\n');
+    const blocoFichas = comFicha.length
+      ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
+      : '(nenhum item com ficha técnica cadastrada)';
+    const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
+
+    const prompt =
+`Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
+ser UMA DAS DUAS COISAS:
+
+(A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
+    ou sobre o restaurante (horário, promoção, política).
+(B) Um COMANDO DE PEDIDO pra lançar numa mesa (ex: "1 pilsen na 34", "2
+    chopp mesa 12 e 1 coca na 8").
+
+Decida qual dos dois é e responda SOMENTE com um JSON válido, sem texto
+antes ou depois, sem marcação de código — só o JSON puro.
+
+SE FOR DÚVIDA, responda neste formato:
+{"tipo":"pergunta","resposta":"texto da resposta, até 2 frases, português do Brasil"}
+Responda a dúvida SOMENTE com base nas fichas técnicas e na base de
+conhecimento abaixo. NUNCA invente um valor técnico. Se não estiver
+cadastrado, diga isso claramente.
+
+SE FOR PEDIDO, responda neste formato:
+{"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1}]}
+Regras do pedido:
+- "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
+  NUNCA invente um id — se não reconhecer o item com confiança, use
+  "itemId": null e inclua "nomeDigitado" com o texto falado.
+- Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
+- Se mencionar várias mesas, cada uma gera seus próprios itens no array.
+
+FICHAS TÉCNICAS DE ITENS:
+${blocoFichas}${blocoGeral}
+
+CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
+${listaCardapio}
+
+TEXTO:
+"${texto}"`;
+
+    const geminiResp = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+
+    if (!geminiResp.ok) {
+      const errTxt = await geminiResp.text().catch(() => '');
+      console.error('[assistente-garcom] Gemini falhou:', geminiResp.status, errTxt);
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento.' });
+    }
+
+    const data = await geminiResp.json();
+    let textoResposta = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+      data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+      data.candidates[0].content.parts[0].text) || '';
+    textoResposta = textoResposta.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(textoResposta);
+    } catch (e) {
+      console.error('[assistente-garcom] JSON inválido:', textoResposta);
+      return res.status(200).json({ ok: true, tipo: 'pergunta', resposta: 'Não consegui entender. Tenta reformular.' });
+    }
+
+    if (parsed.tipo === 'pedido') {
+      const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
+      const resultado = brutos.map((p) => {
+        const mesa = parseInt(p.mesa, 10);
+        const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
+        const item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
+        return {
+          mesa: isNaN(mesa) ? null : mesa,
+          quantidade: qtd,
+          itemId: item ? item.id : null,
+          itemNome: item ? item.nome : null,
+          itemPreco: item ? item.preco : null,
+          encontrado: !!item,
+          nomeDigitado: p.nomeDigitado || null,
+        };
+      }).filter((p) => p.mesa !== null);
+
+      return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    // Default: trata como pergunta (cobre tipo==="pergunta" e qualquer formato inesperado)
+    return res.status(200).json({ ok: true, tipo: 'pergunta', resposta: (parsed.resposta || 'Não consegui gerar uma resposta agora.').trim() });
+  } catch (err) {
+    console.error('[assistente-garcom] falhou:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+};

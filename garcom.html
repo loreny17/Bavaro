@@ -1105,10 +1105,17 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       <span style="font-size:1.05rem;">📝</span> Comandas
     </button>
   </div>
-  <div class="mesa-search" id="mesa-search-bar">
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="text" id="mesa-search-input" placeholder="Buscar mesa..." inputmode="numeric" oninput="renderMesas()" style="flex:1;">
-      <button id="btn-voz-mesa" onclick="iniciarVozMesa()" title="Comando de voz"
+  <div class="mesa-search" id="comanda-search-bar" style="display:none;">
+    <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
+  </div>
+  <!-- Caixa do assistente — sempre visível na tela de escolher mesa.
+       Subiu pro lugar da antiga barra de buscar mesa (removida), e herdou
+       o microfone dela — agora pra perguntar por voz em vez de buscar mesa. -->
+  <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:0 14px 12px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Pergunte sobre um produto</div>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="input-pergunta-produto-mesas" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" onkeydown="if(event.key==='Enter')perguntarSobreProduto()">
+      <button id="btn-voz-pergunta-produto" onclick="iniciarVozPerguntaProduto()" title="Perguntar por voz"
         style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -1117,16 +1124,6 @@ html[data-anim="off"] .g-ripple{display:none!important;}
           <line x1="8" y1="23" x2="16" y2="23"/>
         </svg>
       </button>
-    </div>
-  </div>
-  <div class="mesa-search" id="comanda-search-bar" style="display:none;">
-    <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
-  </div>
-  <!-- Caixa do assistente — sempre visível na tela de escolher mesa -->
-  <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:0 14px 12px;">
-    <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Pergunte sobre um produto</div>
-    <div style="display:flex;gap:8px;">
-      <input type="text" id="input-pergunta-produto-mesas" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" onkeydown="if(event.key==='Enter')perguntarSobreProduto()">
       <button onclick="perguntarSobreProduto()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 15px;font-weight:800;">➤</button>
     </div>
     <div id="resposta-produto-mesas" style="margin-top:9px;"></div>
@@ -3065,8 +3062,7 @@ function trocarAba(aba){
   var btnAlm = document.getElementById('aba-almoco-btn');
   if(btnAlm) btnAlm.classList.toggle('active', aba==='almoco');
 
-  // Mostra/esconde grid de mesas e barra de busca
-  document.getElementById('mesa-search-bar').style.display = aba==='mesas' ? '' : 'none';
+  // Mostra/esconde grid de mesas (a barra de busca de mesa foi removida)
   document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
 
   // Search bar — esconde quando admin view ativo
@@ -5523,7 +5519,10 @@ function _admTempoDecorrido(ts){
 }
 
 function renderMesas(){
-  var busca = (document.getElementById('mesa-search-input').value||'').trim();
+  // Campo de busca removido da tela — leitura defensiva: se um dia voltar,
+  // volta a funcionar sozinho; sem ele, só não filtra (mostra tudo).
+  var elBuscaMesa = document.getElementById('mesa-search-input');
+  var busca = elBuscaMesa ? (elBuscaMesa.value||'').trim() : '';
   var grid = document.getElementById('mesas-grid');
   grid.className = 'mesas-grid cols-' + _colsMesas;
   grid.innerHTML = '';
@@ -19422,6 +19421,66 @@ try{
 // Caixa fixa na tela de Escolher Mesa
 function perguntarSobreProduto(){
   _executarPerguntaProduto('input-pergunta-produto-mesas', 'resposta-produto-mesas');
+}
+
+// Microfone da caixa de pergunta — fala a dúvida, transcreve e já pergunta
+// sozinho pro assistente. Mesmo mecanismo de voz já usado no app (overlay
+// "ouvindo" + vibração), só que terminando em perguntarSobreProduto() em
+// vez de buscar uma mesa.
+var _reconhecimentoVozProduto = null;
+function iniciarVozPerguntaProduto(){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){
+    showToast('Comando de voz não disponível neste aparelho', '#f7a34f', 3000);
+    return;
+  }
+  var btn = document.getElementById('btn-voz-pergunta-produto');
+
+  if(_reconhecimentoVozProduto){
+    try{ _reconhecimentoVozProduto.stop(); }catch(e){}
+    _reconhecimentoVozProduto = null;
+    return;
+  }
+
+  var recon = new Recon();
+  recon.lang = 'pt-BR';
+  recon.continuous = false;
+  recon.interimResults = false;
+  recon.maxAlternatives = 1;
+  _reconhecimentoVozProduto = recon;
+
+  if(btn){
+    btn.style.background = '#dc2626';
+    btn.style.borderColor = '#dc2626';
+    btn.style.color = '#fff';
+  }
+  _mostrarOverlayVoz('Qual a sua dúvida?');
+
+  recon.onresult = function(e){
+    var texto = (e.results[0][0].transcript || '').trim();
+    if(texto){
+      document.getElementById('input-pergunta-produto-mesas').value = texto;
+      perguntarSobreProduto();
+    }
+  };
+  recon.onerror = function(e){
+    var msg = 'Não entendi, tente de novo';
+    if(e.error === 'not-allowed') msg = 'Permita o microfone';
+    else if(e.error === 'no-speech') msg = 'Não ouvi nada';
+    _vibrarErro();
+    showToast(msg, '#f7a34f', 3000);
+  };
+  recon.onend = function(){
+    _esconderOverlayVoz();
+    _reconhecimentoVozProduto = null;
+    if(btn){
+      btn.style.background = 'var(--surface2)';
+      btn.style.borderColor = 'var(--border2)';
+      btn.style.color = 'var(--accent)';
+    }
+  };
+  try{ recon.start(); }
+  catch(e){ _reconhecimentoVozProduto = null; showToast('Erro ao iniciar voz', '#f87171'); }
 }
 
 // Botão flutuante durante o pedido — abre modal com a mesma caixa

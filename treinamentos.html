@@ -498,12 +498,16 @@ function voltarPraCategorias(){
 }
 
 function linhaVideoHtml(v){
-  var thumb = 'https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg';
+  var temVideo = !!v.youtubeId;
+  var thumb = temVideo
+    ? '<img class="thumb" src="https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg" loading="lazy" alt="">'
+    : '<div class="thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem;">📝</div>';
   var tagsHtml = (v.tags||[]).slice(0,4).map(function(t){ return '<span class="tag-chip">' + escHtml(t) + '</span>'; }).join('');
+  var aviso = temVideo ? '' : '<div style="font-size:0.68rem;color:var(--muted);margin-top:3px;">Vídeo ainda não adicionado</div>';
   return '<button onclick="abrirPlayer(\'' + v.id + '\')" style="all:unset;display:block;width:100%;cursor:pointer;">' +
     '<div class="video-row">' +
-      '<img class="thumb" src="' + thumb + '" loading="lazy" alt="">' +
-      '<div class="info"><div class="vt">' + escHtml(v.titulo) + '</div><div class="tags">' + tagsHtml + '</div></div>' +
+      thumb +
+      '<div class="info"><div class="vt">' + escHtml(v.titulo) + '</div><div class="tags">' + tagsHtml + '</div>' + aviso + '</div>' +
     '</div>' +
   '</button>';
 }
@@ -512,6 +516,10 @@ function linhaVideoHtml(v){
 function abrirPlayer(videoId){
   var v = _videos.find(function(x){ return x.id === videoId; });
   if(!v) return;
+  if(!v.youtubeId){
+    showToast('📝 Esse procedimento ainda não tem vídeo — só a instrução escrita por enquanto.');
+    return;
+  }
   document.getElementById('player-titulo').textContent = v.titulo;
   document.getElementById('player-frame').innerHTML =
     '<iframe src="https://www.youtube.com/embed/' + v.youtubeId + '?autoplay=1&playsinline=1" ' +
@@ -736,10 +744,13 @@ function adminCarregarLista(){
 
 function adminLinhaVideoHtml(v){
   var cat = CATEGORIAS.find(function(c){ return c.id === v.categoria; });
-  var thumb = 'https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg';
+  var thumb = v.youtubeId
+    ? '<img class="thumb" src="https://img.youtube.com/vi/' + v.youtubeId + '/mqdefault.jpg" loading="lazy" alt="">'
+    : '<div class="thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.1rem;">📝</div>';
+  var semVideoTag = v.youtubeId ? '' : ' · <span style="color:var(--accent);">sem vídeo</span>';
   return '<div class="admin-video-item">' +
-    '<img class="thumb" src="' + thumb + '" loading="lazy" alt="">' +
-    '<div class="info"><div>' + escHtml(v.titulo) + '</div><div class="cat">' + (cat?cat.icone+' '+cat.nome:v.categoria) + '</div></div>' +
+    thumb +
+    '<div class="info"><div>' + escHtml(v.titulo) + '</div><div class="cat">' + (cat?cat.icone+' '+cat.nome:v.categoria) + semVideoTag + '</div></div>' +
     '<button class="ic-btn" onclick="adminEditarVideo(\'' + v.id + '\')" title="Editar">✏️</button>' +
     '<button class="ic-btn" onclick="adminExcluirVideo(\'' + v.id + '\')" title="Excluir">🗑️</button>' +
   '</div>';
@@ -749,7 +760,7 @@ function adminEditarVideo(id){
   var v = _videos.find(function(x){ return x.id === id; });
   if(!v) return;
   _adminEditandoId = id;
-  document.getElementById('admin-input-url').value = 'https://youtube.com/watch?v=' + v.youtubeId;
+  document.getElementById('admin-input-url').value = v.youtubeId ? ('https://youtube.com/watch?v=' + v.youtubeId) : '';
   document.getElementById('admin-input-titulo').value = v.titulo || '';
   document.getElementById('admin-input-categoria').value = v.categoria || CATEGORIAS[0].id;
   document.getElementById('admin-input-tags').value = (v.tags||[]).join(', ');
@@ -778,9 +789,13 @@ function adminSalvarVideo(){
   var categoria = document.getElementById('admin-input-categoria').value;
   var tagsRaw = document.getElementById('admin-input-tags').value;
   var instrucao = document.getElementById('admin-input-instrucao').value.trim();
-  var youtubeId = extrairYoutubeId(url);
+  var urlLimpa = url.trim();
 
-  if(!youtubeId){ showToast('❌ Link do YouTube inválido'); return; }
+  // ⚠️ O link do YouTube agora é OPCIONAL: dá pra escrever a instrução hoje
+  // e colar o vídeo depois. Só bloqueia se a pessoa digitou ALGO no campo
+  // e esse algo não é um link reconhecível — campo vazio nunca é erro.
+  var youtubeId = urlLimpa ? extrairYoutubeId(urlLimpa) : null;
+  if(urlLimpa && !youtubeId){ showToast('❌ Link do YouTube não reconhecido — confere se copiou certo'); return; }
   if(!titulo){ showToast('❌ Escreve um título'); return; }
 
   var tags = tagsRaw.split(',').map(function(t){ return t.trim().toLowerCase(); }).filter(Boolean);

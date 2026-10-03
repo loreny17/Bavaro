@@ -228,6 +228,14 @@
       </div>
     </div>
 
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
+      <div style="font-weight:700;margin-bottom:6px;">📄 Documento geral de procedimentos</div>
+      <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">Opcional. Cole aqui tudo que quiser de uma vez só, sem precisar separar por vídeo — a IA consulta este texto em TODAS as perguntas deste restaurante, além das instruções que você escrever em cada vídeo (as duas fontes funcionam juntas).</div>
+      <textarea id="admin-input-documento" rows="8" placeholder="Ex: ÁGUA DO BUFFET: encher até a marca branca...&#10;&#10;LAVA-LOUÇAS: ligar o ciclo curto no almoço, o longo à noite...&#10;&#10;(pode colar quantos procedimentos quiser, um embaixo do outro)" style="resize:vertical;width:100%;"></textarea>
+      <button class="btn secundario" onclick="adminSalvarDocumento()" style="width:100%;margin-top:10px;">Salvar documento</button>
+      <div id="admin-documento-status" style="font-size:0.72rem;color:var(--muted);margin-top:6px;"></div>
+    </div>
+
     <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin:18px 0;">
       <div style="font-weight:700;margin-bottom:12px;" id="admin-form-titulo">➕ Novo vídeo</div>
       <div class="campo">
@@ -690,6 +698,25 @@ function adminTrocarRestaurante(){
   _restAtivo = r;
   adminCancelarEdicao();
   adminCarregarLista();
+  document.getElementById('admin-input-documento').value = r.documentoGeral || '';
+  document.getElementById('admin-documento-status').textContent = '';
+}
+
+function adminSalvarDocumento(){
+  if(!_restAtivo){ showToast('❌ Cadastre um restaurante primeiro'); return; }
+  var texto = document.getElementById('admin-input-documento').value;
+  var status = document.getElementById('admin-documento-status');
+  status.textContent = 'Salvando...';
+  db.collection('restaurantes').doc(_restAtivo.id).update({ documentoGeral: texto }).then(function(){
+    _restAtivo.documentoGeral = texto;
+    var idx = _restaurantes.findIndex(function(r){ return r.id === _restAtivo.id; });
+    if(idx >= 0) _restaurantes[idx].documentoGeral = texto;
+    status.textContent = '✓ Salvo (' + texto.length + ' caracteres)';
+    showToast('✓ Documento salvo');
+  }).catch(function(e){
+    status.textContent = '❌ ' + e.message;
+    showToast('❌ ' + e.message);
+  });
 }
 
 function adminCarregarLista(){

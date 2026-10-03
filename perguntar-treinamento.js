@@ -8,7 +8,32 @@
 //  perigoso: ela poderia "inventar" um procedimento plausível, mas
 //  errado, pra uma pergunta operacional real).
 // ═══════════════════════════════════════════════════════════════
-const { getDbTreinamentos } = require('./_lib/firebaseAdminTreinamentos');
+// ⚠️ Antes importava de ./_lib/firebaseAdminTreinamentos.js — trazido pra
+// dentro deste mesmo arquivo porque o upload da subpasta via GitHub mobile
+// causou idas e vindas (pasta errada, nome errado) difíceis de depurar à
+// distância. Sem pasta aninhada = sem essa categoria inteira de problema.
+const admin = require('firebase-admin');
+
+function getDbTreinamentos() {
+  var apps = admin.apps.filter(function(a){ return a && a.name === 'treinamentos'; });
+  if (apps.length) return apps[0].firestore();
+
+  var projectId = process.env.TREINAMENTOS_FIREBASE_PROJECT_ID || 'bavaro-treinamentos';
+  var clientEmail = process.env.TREINAMENTOS_FIREBASE_CLIENT_EMAIL;
+  var privateKey = (process.env.TREINAMENTOS_FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+  if (!clientEmail || !privateKey) {
+    throw new Error(
+      'Credenciais do Firebase Admin (treinamentos) ausentes. Configure ' +
+      'TREINAMENTOS_FIREBASE_CLIENT_EMAIL e TREINAMENTOS_FIREBASE_PRIVATE_KEY.'
+    );
+  }
+
+  var app = admin.initializeApp({
+    credential: admin.credential.cert({ projectId: projectId, clientEmail: clientEmail, privateKey: privateKey }),
+  }, 'treinamentos');
+  return app.firestore();
+}
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'; // leve e barato — suficiente pra isto
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
@@ -32,21 +57,28 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDbTreinamentos();
-    const snap = await db.collection('restaurantes').doc(restauranteId).collection('treinamentos').get();
+    // Duas fontes, lidas em paralelo: as instruções por vídeo E o documento
+    // geral de texto livre — as duas alimentam a mesma resposta.
+    const [restDoc, videosSnap] = await Promise.all([
+      db.collection('restaurantes').doc(restauranteId).get(),
+      db.collection('restaurantes').doc(restauranteId).collection('treinamentos').get(),
+    ]);
+
+    const documentoGeral = ((restDoc.data() || {}).documentoGeral || '').trim();
 
     const comInstrucao = [];
-    snap.forEach((doc) => {
+    videosSnap.forEach((doc) => {
       const v = doc.data() || {};
       if (v.instrucao && v.instrucao.trim()) {
         comInstrucao.push({ titulo: v.titulo || '(sem título)', instrucao: v.instrucao.trim(), youtubeId: v.youtubeId || null });
       }
     });
 
-    // Sem nada cadastrado ainda — avisa sem gastar chamada de IA à toa.
-    if (!comInstrucao.length) {
+    // Sem nenhuma das duas fontes cadastrada — avisa sem gastar chamada de IA à toa.
+    if (!comInstrucao.length && !documentoGeral) {
       return res.status(200).json({
         ok: true,
-        resposta: 'Ainda não tenho nenhuma instrução cadastrada pra esse restaurante. Peça pro admin preencher o campo "Instrução resumida" nos vídeos de treinamento.',
+        resposta: 'Ainda não tenho nenhum procedimento cadastrado pra esse restaurante. Peça pro admin preencher o documento geral ou a instrução de algum vídeo de treinamento.',
         youtubeId: null,
       });
     }
@@ -54,7 +86,16 @@ module.exports = async (req, res) => {
     // Limite de segurança — não deve chegar perto disso na prática.
     const contexto = comInstrucao.slice(0, 80);
 
-    const blocoContexto = contexto.map((v, i) => `[${i + 1}] ${v.titulo}\n${v.instrucao}`).join('\n\n');
+    const blocoVideos = contexto.length
+      ? contexto.map((v, i) => `[${i + 1}] ${v.titulo}\n${v.instrucao}`).join('\n\n')
+      : '(nenhum vídeo com instrução cadastrada)';
+
+    // Documento geral entra como um bloco à parte, sem título de vídeo
+    // associado — por isso não aciona o botão "assistir vídeo" na resposta,
+    // o que é o comportamento certo (não existe vídeo pra esse conteúdo).
+    const blocoDocumento = documentoGeral
+      ? `\n\nDOCUMENTO GERAL DE PROCEDIMENTOS (sem vídeo associado):\n${documentoGeral.slice(0, 40000)}`
+      : '';
 
     const prompt =
 `Você é o assistente interno de treinamento de um restaurante. Responda SOMENTE
@@ -68,11 +109,12 @@ a um gerente — não tente adivinhar.
 Responda em português do Brasil, em até 3 frases, direto ao ponto, no tom de
 quem está ajudando um funcionário durante o serviço.
 
-Se a resposta vier de um procedimento específico da lista, cite o título
-dele exatamente como está escrito, em algum ponto da resposta.
+Se a resposta vier de um procedimento de vídeo específico da lista abaixo
+(não do documento geral), cite o título dele exatamente como está escrito,
+em algum ponto da resposta.
 
-PROCEDIMENTOS CADASTRADOS:
-${blocoContexto}
+PROCEDIMENTOS DE VÍDEOS CADASTRADOS:
+${blocoVideos}${blocoDocumento}
 
 PERGUNTA DO FUNCIONÁRIO:
 ${pergunta}`;

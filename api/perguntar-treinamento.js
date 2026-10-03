@@ -8,7 +8,32 @@
 //  perigoso: ela poderia "inventar" um procedimento plausível, mas
 //  errado, pra uma pergunta operacional real).
 // ═══════════════════════════════════════════════════════════════
-const { getDbTreinamentos } = require('./_lib/firebaseAdminTreinamentos');
+// ⚠️ Antes importava de ./_lib/firebaseAdminTreinamentos.js — trazido pra
+// dentro deste mesmo arquivo porque o upload da subpasta via GitHub mobile
+// causou idas e vindas (pasta errada, nome errado) difíceis de depurar à
+// distância. Sem pasta aninhada = sem essa categoria inteira de problema.
+const admin = require('firebase-admin');
+
+function getDbTreinamentos() {
+  var apps = admin.apps.filter(function(a){ return a && a.name === 'treinamentos'; });
+  if (apps.length) return apps[0].firestore();
+
+  var projectId = process.env.TREINAMENTOS_FIREBASE_PROJECT_ID || 'bavaro-treinamentos';
+  var clientEmail = process.env.TREINAMENTOS_FIREBASE_CLIENT_EMAIL;
+  var privateKey = (process.env.TREINAMENTOS_FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+  if (!clientEmail || !privateKey) {
+    throw new Error(
+      'Credenciais do Firebase Admin (treinamentos) ausentes. Configure ' +
+      'TREINAMENTOS_FIREBASE_CLIENT_EMAIL e TREINAMENTOS_FIREBASE_PRIVATE_KEY.'
+    );
+  }
+
+  var app = admin.initializeApp({
+    credential: admin.credential.cert({ projectId: projectId, clientEmail: clientEmail, privateKey: privateKey }),
+  }, 'treinamentos');
+  return app.firestore();
+}
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'; // leve e barato — suficiente pra isto
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';

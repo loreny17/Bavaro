@@ -1404,7 +1404,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <!-- FAB Assistente de Produto — sempre visível durante o pedido, pra
        responder pergunta de cliente no meio do atendimento sem precisar
        sair da mesa -->
-  <button id="fab-pergunta-produto" onclick="abrirModalPerguntaProduto()" style="
+  <button id="fab-pergunta-produto" onclick="abrirAssistenteFlutuante()" style="
     position:fixed;bottom:80px;left:16px;z-index:90;
     background:var(--surface2);color:var(--accent);
     border:1.5px solid var(--border2);width:52px;height:52px;border-radius:50%;
@@ -19452,6 +19452,56 @@ function _resetarAssistenteGarcomAoSair(){
   var input = document.getElementById('input-assistente-garcom');
   if(input) input.value = '';
   _limparAssistenteGarcom();
+}
+
+// ═══ BOTÃO FLUTUANTE (durante o pedido) ═══
+// Em vez de duplicar toda a lógica de pergunta/pedido/cancelamento numa
+// segunda caixa, isto move a MESMA caixa (#caixa-assistente-garcom, com
+// seus mesmos ids internos) pra um balão por cima da tela — zero
+// duplicação, zero risco de as duas versões se desalinharem no futuro.
+// Ao fechar, ela volta pro lugar de origem dentro da tela de mesas.
+var _assistenteOrigemParent = null;
+var _assistenteOrigemIrmaoSeguinte = null;
+
+function abrirAssistenteFlutuante(){
+  var caixa = document.getElementById('caixa-assistente-garcom');
+  if(!caixa || document.getElementById('overlay-assistente-flutuante')) return;
+
+  _assistenteOrigemParent = caixa.parentNode;
+  _assistenteOrigemIrmaoSeguinte = caixa.nextSibling;
+
+  var overlay = document.createElement('div');
+  overlay.id = 'overlay-assistente-flutuante';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99998;display:flex;align-items:flex-end;justify-content:center;';
+  overlay.onclick = function(e){ if(e.target === overlay) fecharAssistenteFlutuante(); };
+
+  var wrap = document.createElement('div');
+  wrap.id = 'wrap-assistente-flutuante';
+  wrap.style.cssText = 'width:100%;max-width:520px;padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom));';
+
+  var fechar = document.createElement('button');
+  fechar.textContent = '× Fechar';
+  fechar.onclick = fecharAssistenteFlutuante;
+  fechar.style.cssText = 'display:block;margin:0 0 8px auto;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:8px;padding:7px 12px;font-size:0.78rem;cursor:pointer;font-family:inherit;';
+
+  wrap.appendChild(fechar);
+  wrap.appendChild(caixa); // move o elemento de VERDADE — mesmos ids, mesma lógica
+  caixa.style.margin = '0';
+  overlay.appendChild(wrap);
+  document.body.appendChild(overlay);
+
+  setTimeout(function(){ var el = document.getElementById('input-assistente-garcom'); if(el) el.focus(); }, 150);
+}
+
+function fecharAssistenteFlutuante(){
+  var overlay = document.getElementById('overlay-assistente-flutuante');
+  var caixa = document.getElementById('caixa-assistente-garcom');
+  if(caixa && _assistenteOrigemParent){
+    caixa.style.margin = '16px 16px 4px';
+    if(_assistenteOrigemIrmaoSeguinte) _assistenteOrigemParent.insertBefore(caixa, _assistenteOrigemIrmaoSeguinte);
+    else _assistenteOrigemParent.appendChild(caixa);
+  }
+  if(overlay) overlay.remove();
 }
 
 function iniciarVozAssistenteGarcom(){

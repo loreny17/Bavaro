@@ -391,7 +391,8 @@ button{cursor:pointer;border:none;background:none;}
   background-repeat:no-repeat;background-position:12px center;
 }
 .mesa-search input:focus{border-color:var(--accent);}
-.mesas-grid{flex:1;overflow-y:auto;padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:start;padding-bottom:40px;position:relative;-webkit-overflow-scrolling:touch;}
+.mesas-scroll-wrapper{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.mesas-grid{padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:start;padding-bottom:40px;position:relative;}
 .mesas-grid::before{display:none;}
 .comandas-lista::before{display:none;}.mesas-grid > *{position:relative;z-index:1;}
 
@@ -1108,27 +1109,32 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <div class="mesa-search" id="comanda-search-bar" style="display:none;">
     <input type="text" id="comanda-search-input" placeholder="Buscar por nome..." oninput="renderComandas()">
   </div>
-  <!-- Caixa do assistente — sempre visível na tela de escolher mesa.
-       Subiu pro lugar da antiga barra de buscar mesa (removida), e herdou
-       o microfone dela — agora pra perguntar por voz em vez de buscar mesa. -->
-  <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:0 14px 12px;">
-    <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Pergunte sobre um produto</div>
-    <div style="display:flex;gap:8px;">
-      <input type="text" id="input-pergunta-produto-mesas" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" onkeydown="if(event.key==='Enter')perguntarSobreProduto()">
-      <button id="btn-voz-pergunta-produto" onclick="iniciarVozPerguntaProduto()" title="Perguntar por voz"
-        style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-          <line x1="12" y1="19" x2="12" y2="23"/>
-          <line x1="8" y1="23" x2="16" y2="23"/>
-        </svg>
-      </button>
-      <button onclick="perguntarSobreProduto()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 15px;font-weight:800;">➤</button>
+  <!-- Envelope que rola — a caixa do assistente é o primeiro item dentro
+       dele, então sobe junto com a grade e some da tela ao descer. A grade
+       em si (#mesas-grid) mantém exatamente o mesmo id/comportamento de
+       sempre — renderMesas() continua funcionando sem nenhuma mudança,
+       só ganhou um "envelope" por fora. -->
+  <div class="mesas-scroll-wrapper" id="mesas-scroll-wrapper">
+    <!-- Caixa ÚNICA do assistente — pergunta OU pedido, a IA decide. -->
+    <div id="caixa-assistente-garcom" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:16px 16px 4px;">
+      <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Assistente — pergunte ou lance um pedido</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="input-assistente-garcom" placeholder="Ex: qual o IBU do IPA? / 1 pilsen na 34" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
+        <button id="btn-voz-assistente-garcom" onclick="iniciarVozAssistenteGarcom()" title="Falar"
+          style="flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <button onclick="executarAssistenteGarcom()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 15px;font-weight:800;">➤</button>
+      </div>
+      <div id="resposta-assistente-garcom" style="margin-top:9px;"></div>
     </div>
-    <div id="resposta-produto-mesas" style="margin-top:9px;"></div>
+    <div class="mesas-grid" id="mesas-grid"></div>
   </div>
-  <div class="mesas-grid" id="mesas-grid"></div>
   <div class="comandas-lista" id="comandas-lista" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;position:relative;"></div>
   <!-- ☀️ Tela do Almoço -->
   <div id="almoco-tela" style="display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:90px;">
@@ -3063,7 +3069,7 @@ function trocarAba(aba){
   if(btnAlm) btnAlm.classList.toggle('active', aba==='almoco');
 
   // Mostra/esconde grid de mesas (a barra de busca de mesa foi removida)
-  document.getElementById('mesas-grid').style.display = aba==='mesas' ? '' : 'none';
+  document.getElementById('mesas-scroll-wrapper').style.display = aba==='mesas' ? '' : 'none';
 
   // Search bar — esconde quando admin view ativo
   document.getElementById('comanda-search-bar').style.display = aba==='comandas' ? '' : 'none';
@@ -9825,6 +9831,10 @@ function voltarParaMesas(){
 //  APP PRINCIPAL
 // ════════════════════════════════════════
 function iniciarApp(){
+  // Toda entrada numa mesa/comanda passa por aqui — então é o ponto certo
+  // pra garantir que a caixa do assistente esteja limpa quando o garçom
+  // voltar pra tela de mesas (sem resposta nem rascunho de pedido sobrando).
+  if(typeof _resetarAssistenteGarcomAoSair === 'function') _resetarAssistenteGarcomAoSair();
   var _appEl = document.getElementById('app');
   var _msEl = document.getElementById('mesa-screen');
   if(_msEl) _msEl.style.display = 'none'; // esconde o mapa na hora → o slide revela fundo escuro, sem faixa dourada
@@ -19412,55 +19422,54 @@ try{
   },{passive:true});
 })();
 
-// ═══ ASSISTENTE DE PRODUTO (IA) ═══
-// Mesma ideia do assistente do app de Treinamentos: responde SOMENTE com
-// base no que foi cadastrado na "Ficha técnica" de cada item do cardápio —
-// nunca inventa IBU, teor alcoólico, ingrediente ou alérgeno. Se não está
-// cadastrado, ela diz isso claramente em vez de arriscar um número.
+// ═══════════════════════════════════════════════════════════════
+//  ASSISTENTE ÚNICO DO GARÇOM (IA) — pergunta OU pedido, mesma caixa.
+//  Uma chamada só decide o que é:
+//   - DÚVIDA → responde em texto, baseada só no que foi cadastrado
+//     (ficha técnica do item / base de conhecimento) — nunca inventa.
+//   - PEDIDO → mostra rascunho com checkbox, confirma item por item;
+//     só escreve no banco quando o garçom aperta "Confirmar e enviar".
+//  Classificar errado é só um incômodo de UX (pergunta ao contrário),
+//  nunca um risco — porque o PEDIDO sempre passa por confirmação manual
+//  antes de qualquer escrita real no banco, de qualquer jeito.
+// ═══════════════════════════════════════════════════════════════
+var _draftsPedidoIA = [];
+var _reconhecimentoVozAssistenteGarcom = null;
 
-// Caixa fixa na tela de Escolher Mesa
-function perguntarSobreProduto(){
-  _executarPerguntaProduto('input-pergunta-produto-mesas', 'resposta-produto-mesas');
+// Limpa a caixa (resposta/rascunho) sem limpar o texto digitado — usado
+// quando o campo fica vazio, ou ao sair da tela de mesas.
+function _limparAssistenteGarcom(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(caixa) caixa.innerHTML = '';
+  _draftsPedidoIA = [];
 }
 
-// Microfone da caixa de pergunta — fala a dúvida, transcreve e já pergunta
-// sozinho pro assistente. Mesmo mecanismo de voz já usado no app (overlay
-// "ouvindo" + vibração), só que terminando em perguntarSobreProduto() em
-// vez de buscar uma mesa.
-var _reconhecimentoVozProduto = null;
-function iniciarVozPerguntaProduto(){
-  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!Recon){
-    showToast('Comando de voz não disponível neste aparelho', '#f7a34f', 3000);
-    return;
-  }
-  var btn = document.getElementById('btn-voz-pergunta-produto');
+// Chamado sempre que a tela de Escolher Mesa é deixada pra trás (entrar
+// numa mesa, abrir comanda...) — assim, ao voltar, a caixa está limpa,
+// sem resposta nem rascunho antigo sobrando.
+function _resetarAssistenteGarcomAoSair(){
+  var input = document.getElementById('input-assistente-garcom');
+  if(input) input.value = '';
+  _limparAssistenteGarcom();
+}
 
-  if(_reconhecimentoVozProduto){
-    try{ _reconhecimentoVozProduto.stop(); }catch(e){}
-    _reconhecimentoVozProduto = null;
-    return;
-  }
+function iniciarVozAssistenteGarcom(){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){ showToast('Comando de voz não disponível neste aparelho', '#f7a34f', 3000); return; }
+  var btn = document.getElementById('btn-voz-assistente-garcom');
+  if(_reconhecimentoVozAssistenteGarcom){ try{ _reconhecimentoVozAssistenteGarcom.stop(); }catch(e){} _reconhecimentoVozAssistenteGarcom = null; return; }
 
   var recon = new Recon();
-  recon.lang = 'pt-BR';
-  recon.continuous = false;
-  recon.interimResults = false;
-  recon.maxAlternatives = 1;
-  _reconhecimentoVozProduto = recon;
-
-  if(btn){
-    btn.style.background = '#dc2626';
-    btn.style.borderColor = '#dc2626';
-    btn.style.color = '#fff';
-  }
-  _mostrarOverlayVoz('Qual a sua dúvida?');
+  recon.lang = 'pt-BR'; recon.continuous = false; recon.interimResults = false; recon.maxAlternatives = 1;
+  _reconhecimentoVozAssistenteGarcom = recon;
+  if(btn){ btn.style.background = '#dc2626'; btn.style.borderColor = '#dc2626'; btn.style.color = '#fff'; }
+  _mostrarOverlayVoz('Pergunte ou diga o pedido');
 
   recon.onresult = function(e){
     var texto = (e.results[0][0].transcript || '').trim();
     if(texto){
-      document.getElementById('input-pergunta-produto-mesas').value = texto;
-      perguntarSobreProduto();
+      document.getElementById('input-assistente-garcom').value = texto;
+      executarAssistenteGarcom();
     }
   };
   recon.onerror = function(e){
@@ -19472,64 +19481,209 @@ function iniciarVozPerguntaProduto(){
   };
   recon.onend = function(){
     _esconderOverlayVoz();
-    _reconhecimentoVozProduto = null;
-    if(btn){
-      btn.style.background = 'var(--surface2)';
-      btn.style.borderColor = 'var(--border2)';
-      btn.style.color = 'var(--accent)';
-    }
+    _reconhecimentoVozAssistenteGarcom = null;
+    if(btn){ btn.style.background = 'var(--surface2)'; btn.style.borderColor = 'var(--border2)'; btn.style.color = 'var(--accent)'; }
   };
-  try{ recon.start(); }
-  catch(e){ _reconhecimentoVozProduto = null; showToast('Erro ao iniciar voz', '#f87171'); }
+  try{ recon.start(); } catch(e){ _reconhecimentoVozAssistenteGarcom = null; showToast('Erro ao iniciar voz', '#f87171'); }
 }
 
-// Botão flutuante durante o pedido — abre modal com a mesma caixa
-function abrirModalPerguntaProduto(){
-  var ex = document.getElementById('modal-pergunta-produto');
-  if(ex) ex.remove();
-  var mod = document.createElement('div');
-  mod.id = 'modal-pergunta-produto';
-  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
-  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
-  mod.innerHTML =
-    '<div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom));">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
-        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;color:var(--accent);">🤖 PERGUNTE SOBRE UM PRODUTO</div>' +
-        '<button onclick="document.getElementById(\'modal-pergunta-produto\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.5rem;cursor:pointer;">×</button>' +
-      '</div>' +
-      '<div style="display:flex;gap:8px;">' +
-        '<input type="text" id="input-pergunta-produto-modal" placeholder="Ex: qual o IBU do chopp de vinho?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key===\'Enter\')_executarPerguntaProduto(\'input-pergunta-produto-modal\',\'resposta-produto-modal\')">' +
-        '<button onclick="_executarPerguntaProduto(\'input-pergunta-produto-modal\',\'resposta-produto-modal\')" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 16px;font-weight:800;">➤</button>' +
-      '</div>' +
-      '<div id="resposta-produto-modal" style="margin-top:10px;"></div>' +
-    '</div>';
-  document.body.appendChild(mod);
-  setTimeout(function(){ document.getElementById('input-pergunta-produto-modal').focus(); }, 150);
-}
-
-function _executarPerguntaProduto(inputId, caixaId){
-  var pergunta = document.getElementById(inputId).value.trim();
-  if(!pergunta) return;
-  var caixa = document.getElementById(caixaId);
+function executarAssistenteGarcom(){
+  var input = document.getElementById('input-assistente-garcom');
+  var texto = input.value.trim();
+  if(!texto) return;
+  var caixa = document.getElementById('resposta-assistente-garcom');
   caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Pensando...</div>';
+  _draftsPedidoIA = [];
 
-  fetch('/api/perguntar-produto', {
+  fetch('/api/assistente-garcom', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      tenantId: _tenantId,
-      restauranteId: _restauranteId,
-      pergunta: pergunta
-    })
+    body: JSON.stringify({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto })
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
-      caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + (j.error||'Algo deu errado.') + '</div>';
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + '</div>';
       return;
     }
-    caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>';
+    if(j.tipo === 'pedido'){
+      _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
+      _renderDraftsPedidoIA();
+    } else {
+      caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>';
+    }
   }).catch(function(){
     caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">Não consegui falar com o assistente agora.</div>';
   });
+}
+
+function _renderDraftsPedidoIA(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(!_draftsPedidoIA.length){
+    caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhum pedido nesse texto. Tenta ser mais específico (ex: "mesa 12, 2 pilsen").</div>';
+    return;
+  }
+  var linhas = _draftsPedidoIA.map(function(p){
+    if(!p.encontrado){
+      return '<div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
+        '<span style="font-size:1rem;">⚠️</span>' +
+        '<div style="flex:1;font-size:0.8rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div></div>' +
+      '</div>';
+    }
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + '</div>' +
+      '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
+    '</label>';
+  }).join('');
+  caixa.innerHTML = linhas +
+    '<button id="btn-confirmar-pedidos-ia" onclick="confirmarEnviarPedidosIA()" style="display:none;width:100%;margin-top:4px;background:var(--accent);border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;">Confirmar e enviar</button>';
+  _atualizarBotaoConfirmarIA();
+}
+
+function _atualizarBotaoConfirmarIA(){
+  var qtd = _draftsPedidoIA.filter(function(p){ return p.encontrado && p._selecionado; }).length;
+  var btn = document.getElementById('btn-confirmar-pedidos-ia');
+  if(!btn) return;
+  if(qtd > 0){
+    btn.style.display = 'block';
+    btn.textContent = 'Confirmar e enviar (' + qtd + ')';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function confirmarEnviarPedidosIA(){
+  var selecionados = _draftsPedidoIA.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!selecionados.length) return;
+  var btn = document.getElementById('btn-confirmar-pedidos-ia');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+
+  var porMesa = {};
+  selecionados.forEach(function(p){
+    if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
+    porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade });
+  });
+  var mesas = Object.keys(porMesa);
+  var resultados = [];
+
+  function processarProxima(i){
+    if(i >= mesas.length){
+      _mostrarResultadoPedidosIA(resultados);
+      return;
+    }
+    var mesaNum = mesas[i];
+    _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum]).then(function(numeroSequencial){
+      resultados.push({mesa: mesaNum, ok: true, numero: numeroSequencial});
+      processarProxima(i+1);
+    }).catch(function(e){
+      resultados.push({mesa: mesaNum, ok: false, erro: e.message});
+      processarProxima(i+1);
+    });
+  }
+  processarProxima(0);
+}
+
+function _mostrarResultadoPedidosIA(resultados){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  caixa.innerHTML = resultados.map(function(r){
+    return r.ok
+      ? '<div style="padding:9px 10px;border-radius:9px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.82rem;margin-bottom:6px;">✓ Mesa ' + r.mesa + (r.numero?' — pedido #'+r.numero:'') + ' enviado</div>'
+      : '<div style="padding:9px 10px;border-radius:9px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.82rem;margin-bottom:6px;">❌ Mesa ' + r.mesa + ': ' + esc(r.erro) + '</div>';
+  }).join('');
+  if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+  var algumSucesso = resultados.some(function(r){ return r.ok; });
+  if(algumSucesso) showToast('✓ Pedido(s) enviado(s)', '#4ade80');
+}
+
+// Resolve (ou cria) a conta da mesa e escreve o pedido exatamente no mesmo
+// formato do fluxo manual (_enviarPedidoConfirmado) — mesma coleção
+// 'pedidos', mesmo jeito de somar itens em 'contas_mesa', mesmo desconto de
+// estoque. Devolve o número sequencial (ou null) quando concluir.
+function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
+  var mesaInt = parseInt(mesaNum, 10);
+
+  function escreverPedido(contaId){
+    var _agoraPedido = Date.now();
+    var _pedidoIdTemp = fbDb.collection('pedidos').doc().id;
+    var itensPedido = itensCarrinho.map(function(it){
+      return {
+        id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: '',
+        selecoes: [], precoBase: it.preco, extras: 0, pessoa: '',
+        itemKey: _pedidoIdTemp + '_' + Math.random().toString(36).slice(2,8),
+        cozinhaCriadoEm: _agoraPedido
+      };
+    });
+    var totalPedido = itensPedido.reduce(function(acc,it){ return acc + (it.preco||0)*(it.qtd||1); }, 0);
+
+    var pedido = {
+      garcom: _nomeGarcom, mesa: mesaInt, restauranteId: _restauranteId,
+      tenantId: _tenantId || null, contaId: contaId, tipoConta: 'mesa',
+      cliente: null, status: 'preparo', criadoEm: Date.now(),
+      itens: itensPedido, total: totalPedido,
+      teste: _modoTeste ? true : false,
+      imprimir: true,
+      origemIA: true // marca de onde veio, útil pra diagnóstico/histórico
+    };
+
+    return gerarNumeroSequencial().then(function(numero){
+      if(numero) pedido.numeroSequencial = numero;
+      return fbDb.collection('pedidos').add(pedido);
+    }).then(function(ref){
+      var pedidoId = ref.id;
+      itensPedido.forEach(function(it){ it.itemKey = pedidoId + '_' + it.itemKey.split('_').slice(-1)[0]; });
+      fbDb.collection('pedidos').doc(pedidoId).update({itens: itensPedido}).catch(function(){});
+      decrementarEstoque(itensCarrinho, pedidoId);
+
+      var itensConta = itensPedido.map(function(it){
+        return {
+          itemKey: it.itemKey, pedidoId: pedidoId,
+          id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: '',
+          selecoes: [], pessoa: '', status: 'ativo', pagamentoId: null,
+          adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
+          teste: _modoTeste ? true : false
+        };
+      });
+      return fbDb.runTransaction(function(tx){
+        var contaRef = fbDb.collection('contas_mesa').doc(contaId);
+        return tx.get(contaRef).then(function(doc){
+          if(!doc.exists) throw new Error('Conta não encontrada');
+          var data = doc.data();
+          if(data.status !== 'aberta') throw new Error('Conta já foi fechada');
+          var todosItens = (data.itens||[]).concat(itensConta);
+          var totais = calcularTotaisConta({itens: todosItens, pagamentos: data.pagamentos||[]});
+          tx.update(contaRef, {
+            itens: todosItens, subtotal: totais.subtotal, taxa10: totais.taxa10,
+            total: totais.total, pagoTotal: totais.pagoTotal, restante: totais.restante,
+            atualizadoEm: Date.now()
+          });
+        });
+      }).then(function(){
+        _invalidarCacheItens(contaId);
+        return pedido.numeroSequencial || null;
+      });
+    });
+  }
+
+  // Resolve a conta: usa a aberta existente, ou cria uma nova (mesmo
+  // formato usado em abrirContaMesa — "TERCEIRO: cria nova").
+  return fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('mesa','==', mesaInt)
+    .where('status','==','aberta')
+    .get().then(function(snap){
+      if(!snap.empty){
+        return escreverPedido(snap.docs[0].id);
+      }
+      var contaNova = {
+        restauranteId: _restauranteId, tenantId: _tenantId || null, mesa: mesaInt,
+        status: 'aberta', itens: [], pagamentos: [],
+        subtotal: 0, taxa10: 0, total: 0, pagoTotal: 0, restante: 0,
+        garcomPrincipal: _nomeGarcom, abertaEm: Date.now(), abertaPor: _nomeGarcom,
+        teste: _modoTeste ? true : false
+      };
+      return fbDb.collection('contas_mesa').add(contaNova).then(function(docRef){
+        return escreverPedido(docRef.id);
+      });
+    });
 }
 </script>
 

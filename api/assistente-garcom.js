@@ -35,6 +35,55 @@ const TENANT_PADRAO = 'tnt_molrfz1k_rznlgl';
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
+// ─── CACHE EM MEMÓRIA (por instância do servidor, curta duração) ───
+// Buscar cardápio+fichas+base geral do zero a cada pergunta é o que mais
+// pesa no tempo de resposta. Se duas perguntas chegarem com menos de 60s
+// de intervalo pro MESMO restaurante, a segunda reaproveita o que já foi
+// buscado — sem bater no banco de novo. 60s é curto o bastante pra nunca
+// responder com cardápio desatualizado de verdade (se alguém mudar o
+// cardápio, a diferença prática é no máximo 1 minuto de atraso), mas já
+// evita a repetição na correria de perguntas seguidas no mesmo serviço.
+// ⚠️ Só funciona enquanto o servidor estiver "quente" (chamadas recentes).
+// Depois de um tempo sem uso, a Vercel desliga a function e o cache some
+// junto — isso é o "cold start" que às vezes torna a PRIMEIRA pergunta do
+// dia mais lenta que as seguintes; não tem como evitar isso sem mudar de
+// plano de hospedagem.
+const _cacheContexto = {};
+const CACHE_TTL_MS = 60 * 1000;
+
+async function obterContexto(db, tenantId, restauranteId) {
+  const chave = tenantId + '|' + restauranteId;
+  const agora = Date.now();
+  const cacheado = _cacheContexto[chave];
+  if (cacheado && (agora - cacheado.em) < CACHE_TTL_MS) {
+    return cacheado.dados;
+  }
+
+  const [restDoc, itensSnap] = await Promise.all([
+    db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
+    db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
+      .collection('cardapio').doc('data').collection('itens').get(),
+  ]);
+
+  const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
+  const cardapioCompleto = [];
+  const comFicha = [];
+  itensSnap.forEach((doc) => {
+    const it = doc.data() || {};
+    if (it.disponivel === false) return;
+    if (it.tipoVenda !== 'kg') {
+      cardapioCompleto.push({ id: doc.id, nome: it.nome || '(sem nome)', preco: typeof it.preco === 'number' ? it.preco : 0 });
+    }
+    if (it.fichaTecnica && it.fichaTecnica.trim()) {
+      comFicha.push({ nome: it.nome || '(sem nome)', ficha: it.fichaTecnica.trim() });
+    }
+  });
+
+  const dados = { documentoGeral, cardapioCompleto, comFicha };
+  _cacheContexto[chave] = { em: agora, dados };
+  return dados;
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Use POST' });
@@ -52,26 +101,7 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDb();
-    const [restDoc, itensSnap] = await Promise.all([
-      db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
-      db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
-        .collection('cardapio').doc('data').collection('itens').get(),
-    ]);
-
-    const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
-
-    const cardapioCompleto = []; // pra lançar pedido (todos os itens por unidade)
-    const comFicha = [];         // pra responder dúvida técnica
-    itensSnap.forEach((doc) => {
-      const it = doc.data() || {};
-      if (it.disponivel === false) return;
-      if (it.tipoVenda !== 'kg') {
-        cardapioCompleto.push({ id: doc.id, nome: it.nome || '(sem nome)', preco: typeof it.preco === 'number' ? it.preco : 0 });
-      }
-      if (it.fichaTecnica && it.fichaTecnica.trim()) {
-        comFicha.push({ nome: it.nome || '(sem nome)', ficha: it.fichaTecnica.trim() });
-      }
-    });
+    const { documentoGeral, cardapioCompleto, comFicha } = await obterContexto(db, tenantId, restauranteId);
 
     const listaCardapio = cardapioCompleto.map((it, i) => `${i + 1}. ${it.nome} [id:${it.id}]`).join('\n');
     const blocoFichas = comFicha.length

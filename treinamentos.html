@@ -4,11 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0d0d0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Treinamento — Bávaro">
+<link rel="manifest" href="/manifest-treinamentos.json">
+<link rel="apple-touch-icon" href="/icon-treinamentos-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-treinamentos-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-treinamentos-512.png">
 <title>Treinamentos</title>
 <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-storage-compat.min.js"></script>
 <style>
   :root{
     --bg:#0d0d0d; --surface:#161412; --surface2:#1e1b17; --border:#2a251f; --border2:#3a332a;
@@ -114,6 +123,22 @@
 </style>
 </head>
 <body>
+
+<!-- Banner de instalação PWA — próprio deste app, isolado do Garçom -->
+<div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:99999;padding:16px;background:rgba(10,8,6,0.96);border-top:1px solid rgba(255,255,255,0.12);box-shadow:0 -8px 32px rgba(0,0,0,0.5);">
+  <div style="display:flex;align-items:center;gap:14px;max-width:480px;margin:0 auto;">
+    <img src="/icon-treinamentos-512.png" onerror="this.style.display='none'" style="width:52px;height:52px;border-radius:12px;flex-shrink:0;">
+    <div style="flex:1;">
+      <div style="font-weight:700;font-size:0.95rem;color:#fff;">Instalar aplicativo</div>
+      <div style="font-size:0.78rem;color:rgba(255,255,255,0.6);margin-top:2px;">Adicione na tela inicial e use como app: Treinamento</div>
+    </div>
+    <button onclick="document.getElementById('pwa-install-banner').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:1.4rem;cursor:pointer;padding:4px;flex-shrink:0;line-height:1;">×</button>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:12px;max-width:480px;margin-left:auto;margin-right:auto;">
+    <button onclick="document.getElementById('pwa-install-banner').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:12px;font-family:inherit;font-weight:600;cursor:pointer;">Agora não</button>
+    <button id="pwa-install-btn" style="flex:2;padding:12px;background:var(--accent);border:none;color:#000;border-radius:12px;font-family:inherit;font-weight:800;font-size:1rem;cursor:pointer;">Instalar</button>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -228,14 +253,34 @@
       </div>
     </div>
 
-    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
-      <div style="font-weight:700;margin-bottom:6px;">📄 Documento geral de procedimentos</div>
-      <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">Opcional. Cole aqui tudo que quiser de uma vez só, sem precisar separar por vídeo — a IA consulta este texto em TODAS as perguntas deste restaurante, além das instruções que você escrever em cada vídeo (as duas fontes funcionam juntas).</div>
-      <textarea id="admin-input-documento" rows="8" placeholder="Ex: ÁGUA DO BUFFET: encher até a marca branca...&#10;&#10;LAVA-LOUÇAS: ligar o ciclo curto no almoço, o longo à noite...&#10;&#10;(pode colar quantos procedimentos quiser, um embaixo do outro)" style="resize:vertical;width:100%;"></textarea>
-      <button class="btn secundario" onclick="adminSalvarDocumento()" style="width:100%;margin-top:10px;">Salvar documento</button>
-      <div id="admin-documento-status" style="font-size:0.72rem;color:var(--muted);margin-top:6px;"></div>
+    <button class="btn secundario" onclick="adminToggleIA()" style="width:100%;margin-bottom:14px;background:var(--accent-dim);border-color:rgba(212,168,67,0.4);color:var(--accent);" id="admin-btn-toggle-ia">🤖 Base de Conhecimento da IA</button>
+
+    <div id="admin-area-ia" style="display:none;">
+      <div style="font-size:0.74rem;color:var(--muted);margin:-6px 0 14px;padding:0 2px;">Tudo que você colocar aqui dentro — texto ou arquivo — a IA consulta em TODA pergunta deste restaurante, por fora do catálogo de vídeos abaixo.</div>
+
+      <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:14px;">
+        <div style="font-weight:700;margin-bottom:6px;">📄 Documento geral de procedimentos</div>
+        <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">Cole aqui tudo que quiser de uma vez só, sem precisar separar por vídeo.</div>
+        <textarea id="admin-input-documento" rows="8" placeholder="Ex: ÁGUA DO BUFFET: encher até a marca branca...&#10;&#10;LAVA-LOUÇAS: ligar o ciclo curto no almoço, o longo à noite...&#10;&#10;(pode colar quantos procedimentos quiser, um embaixo do outro)" style="resize:vertical;width:100%;"></textarea>
+        <button class="btn secundario" onclick="adminSalvarDocumento()" style="width:100%;margin-top:10px;">Salvar documento</button>
+        <div id="admin-documento-status" style="font-size:0.72rem;color:var(--muted);margin-top:6px;"></div>
+      </div>
+
+      <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:18px;">
+        <div style="font-weight:700;margin-bottom:6px;">📎 Arquivos (cardápios, tabelas, fotos...)</div>
+        <div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">PNG, JPEG ou PDF até 8MB. A IA LÊ o conteúdo de verdade do arquivo — não precisa escrever nada explicando o que tem nele.</div>
+        <div id="admin-lista-arquivos" style="margin-bottom:12px;"></div>
+        <div class="campo">
+          <label>Nome (como vai aparecer pra IA e nas respostas)</label>
+          <input type="text" id="admin-novo-arq-nome" placeholder="Ex: Cardápio de Almoço">
+        </div>
+        <input type="file" id="admin-novo-arq-file" accept="image/png,image/jpeg,.pdf,application/pdf" style="width:100%;color:var(--muted);font-size:0.82rem;margin-bottom:10px;">
+        <button class="btn secundario" onclick="adminUploadArquivo()" style="width:100%;" id="admin-btn-upload-arq">Enviar arquivo</button>
+        <div id="admin-arquivo-status" style="font-size:0.72rem;color:var(--muted);margin-top:6px;"></div>
+      </div>
     </div>
 
+    <div style="font-size:0.78rem;color:var(--muted);font-weight:700;margin-bottom:4px;">🎬 CATÁLOGO DE VÍDEOS</div>
     <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px;margin:18px 0;">
       <div style="font-weight:700;margin-bottom:12px;" id="admin-form-titulo">➕ Novo vídeo</div>
       <div class="campo">
@@ -307,6 +352,7 @@ var CATEGORIAS = []; // populado a partir do Firestore no boot (carregarCategori
 
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
+var storage = firebase.storage();
 
 var _restaurantes = [];
 var _restAtivo = null;       // {id, nome, emoji}
@@ -458,9 +504,14 @@ function perguntarIA(){
     }
     var videoBtn = '';
     if(j.youtubeId){
-      videoBtn = '<button onclick="abrirPlayerPorYoutubeId(\'' + j.youtubeId + '\',\'' + escHtml(j.videoTitulo||'') + '\')" style="margin-top:9px;background:var(--accent-dim);color:var(--accent);border:1px solid rgba(212,168,67,0.4);border-radius:9px;padding:9px 13px;font-size:0.8rem;font-weight:700;">🎥 Assistir ao vídeo completo</button>';
+      videoBtn = '<button onclick="abrirPlayerPorYoutubeId(\'' + j.youtubeId + '\',\'' + escHtml(j.videoTitulo||'') + '\')" style="margin-top:9px;margin-right:6px;background:var(--accent-dim);color:var(--accent);border:1px solid rgba(212,168,67,0.4);border-radius:9px;padding:9px 13px;font-size:0.8rem;font-weight:700;">🎥 Assistir ao vídeo completo</button>';
     }
-    caixa.innerHTML = '<div style="font-size:0.86rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:12px;">' + escHtml(j.resposta) + '</div>' + videoBtn;
+    var arquivoBtn = '';
+    if(j.arquivoUrl){
+      var icone = j.arquivoTipo === 'application/pdf' ? '📄' : '🖼️';
+      arquivoBtn = '<a href="' + j.arquivoUrl + '" target="_blank" style="display:inline-block;margin-top:9px;background:var(--accent-dim);color:var(--accent);border:1px solid rgba(212,168,67,0.4);border-radius:9px;padding:9px 13px;font-size:0.8rem;font-weight:700;text-decoration:none;">' + icone + ' Ver ' + escHtml(j.arquivoNome||'arquivo') + '</a>';
+    }
+    caixa.innerHTML = '<div style="font-size:0.86rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:12px;">' + escHtml(j.resposta) + '</div>' + videoBtn + arquivoBtn;
   }).catch(function(e){
     caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--danger);">Não consegui falar com o assistente agora. Tenta de novo.</div>';
   });
@@ -591,6 +642,16 @@ function preencherSelectRestAdmin(){
   adminTrocarRestaurante();
 }
 
+function adminToggleIA(){
+  var area = document.getElementById('admin-area-ia');
+  var aberto = area.style.display !== 'none';
+  area.style.display = aberto ? 'none' : 'block';
+  if(!aberto && _restAtivo){
+    document.getElementById('admin-input-documento').value = _restAtivo.documentoGeral || '';
+    adminCarregarArquivos();
+  }
+}
+
 function adminToggleGerenciar(){
   var area = document.getElementById('admin-area-gerenciar');
   var aberto = area.style.display !== 'none';
@@ -708,6 +769,87 @@ function adminTrocarRestaurante(){
   adminCarregarLista();
   document.getElementById('admin-input-documento').value = r.documentoGeral || '';
   document.getElementById('admin-documento-status').textContent = '';
+  adminCarregarArquivos();
+}
+
+// ═══ ARQUIVOS (imagens/PDF que a IA lê diretamente) ═══
+var _arquivos = [];
+
+function adminCarregarArquivos(){
+  var box = document.getElementById('admin-lista-arquivos');
+  box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Carregando...</div>';
+  db.collection('restaurantes').doc(_restAtivo.id).collection('arquivos').get().then(function(snap){
+    _arquivos = [];
+    snap.forEach(function(doc){ _arquivos.push(Object.assign({id:doc.id}, doc.data())); });
+    adminRenderListaArquivos();
+  }).catch(function(e){
+    box.innerHTML = '<div style="font-size:0.78rem;color:var(--danger);">Erro: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function adminRenderListaArquivos(){
+  var box = document.getElementById('admin-lista-arquivos');
+  if(!_arquivos.length){ box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Nenhum arquivo enviado ainda.</div>'; return; }
+  box.innerHTML = _arquivos.map(function(a){
+    var icone = a.tipo === 'application/pdf' ? '📄' : '🖼️';
+    return '<div class="admin-video-item">' +
+      '<a href="' + a.url + '" target="_blank" style="font-size:1.3rem;text-decoration:none;">' + icone + '</a>' +
+      '<div class="info">' + escHtml(a.nome) + '</div>' +
+      '<button class="ic-btn" onclick="adminExcluirArquivo(\'' + a.id + '\')" title="Excluir">🗑️</button>' +
+    '</div>';
+  }).join('');
+}
+
+function adminUploadArquivo(){
+  if(!_restAtivo){ showToast('❌ Cadastre um restaurante primeiro'); return; }
+  var nome = document.getElementById('admin-novo-arq-nome').value.trim();
+  var fileInput = document.getElementById('admin-novo-arq-file');
+  var file = fileInput.files[0];
+  var status = document.getElementById('admin-arquivo-status');
+
+  if(!nome){ showToast('❌ Escreve um nome pro arquivo'); return; }
+  if(!file){ showToast('❌ Escolhe um arquivo'); return; }
+  var tiposAceitos = ['image/png', 'image/jpeg', 'application/pdf'];
+  if(tiposAceitos.indexOf(file.type) < 0){ showToast('❌ Só PNG, JPEG ou PDF'); return; }
+  if(file.size > 8 * 1024 * 1024){ showToast('❌ Arquivo maior que 8MB — reduz o tamanho e tenta de novo'); return; }
+
+  var btn = document.getElementById('admin-btn-upload-arq');
+  btn.disabled = true;
+  status.textContent = 'Enviando...';
+
+  var caminho = 'restaurantes/' + _restAtivo.id + '/arquivos/' + Date.now() + '_' + file.name;
+  var ref = storage.ref().child(caminho);
+  ref.put(file).then(function(snapshot){
+    return snapshot.ref.getDownloadURL();
+  }).then(function(url){
+    return db.collection('restaurantes').doc(_restAtivo.id).collection('arquivos').add({
+      nome: nome, url: url, tipo: file.type, storagePath: caminho, criadoEm: Date.now()
+    });
+  }).then(function(){
+    status.textContent = '✓ Enviado';
+    showToast('✓ Arquivo enviado');
+    document.getElementById('admin-novo-arq-nome').value = '';
+    fileInput.value = '';
+    btn.disabled = false;
+    adminCarregarArquivos();
+  }).catch(function(e){
+    status.textContent = '❌ ' + e.message;
+    showToast('❌ ' + e.message);
+    btn.disabled = false;
+  });
+}
+
+function adminExcluirArquivo(id){
+  var a = _arquivos.find(function(x){ return x.id === id; });
+  if(!a) return;
+  if(!confirm('Excluir "' + a.nome + '"?')) return;
+  var promessaStorage = a.storagePath ? storage.ref().child(a.storagePath).delete().catch(function(){}) : Promise.resolve();
+  promessaStorage.then(function(){
+    return db.collection('restaurantes').doc(_restAtivo.id).collection('arquivos').doc(id).delete();
+  }).then(function(){
+    showToast('✓ Arquivo excluído');
+    adminCarregarArquivos();
+  }).catch(function(e){ showToast('❌ ' + e.message); });
 }
 
 function adminSalvarDocumento(){
@@ -862,6 +1004,59 @@ mostrarTela('tela-restaurantes');
 carregarCategorias(function(){
   carregarRestaurantes();
 });
+</script>
+
+<!-- ═══ INSTALAÇÃO (PWA) ═══ -->
+<script>
+  var _pwaPrompt = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    _pwaPrompt = e;
+    setTimeout(function(){
+      var banner = document.getElementById('pwa-install-banner');
+      if(banner) banner.style.display = 'block';
+    }, 3000);
+  });
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.getElementById('pwa-install-btn');
+    if(btn){
+      btn.addEventListener('click', function(){
+        if(!_pwaPrompt) return;
+        _pwaPrompt.prompt();
+        _pwaPrompt.userChoice.then(function(){
+          document.getElementById('pwa-install-banner').style.display = 'none';
+          _pwaPrompt = null;
+        });
+      });
+    }
+  });
+  window.addEventListener('appinstalled', function(){
+    var banner = document.getElementById('pwa-install-banner');
+    if(banner) banner.style.display = 'none';
+  });
+
+  // ⚠️ scope '/treinamentos.html' — isolado do Garçom de propósito. Cada
+  // app controla só a própria página; nenhum dos dois interfere no outro,
+  // mesmo os dois vivendo no mesmo domínio e podendo ser instalados juntos.
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('/sw-treinamentos.js', { scope: '/treinamentos.html' })
+        .then(function(registration){
+          setInterval(function(){ registration.update().catch(function(){}); }, 5 * 60 * 1000);
+          document.addEventListener('visibilitychange', function(){
+            if(document.visibilityState === 'visible') registration.update().catch(function(){});
+          });
+        })
+        .catch(function(e){ console.warn('[PWA] SW erro:', e); });
+
+      var refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function(){
+        if(refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+    });
+  }
 </script>
 </body>
 </html>

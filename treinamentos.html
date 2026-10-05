@@ -201,7 +201,7 @@
     <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:14px;margin-bottom:20px;">
       <div style="font-weight:700;font-size:0.84rem;margin-bottom:9px;">🤖 Pergunte ao assistente</div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="input-pergunta-ia" placeholder="Ex: até onde encho a água do buffet?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:11px 12px;color:var(--text);font-size:0.88rem;outline:none;" onkeydown="if(event.key==='Enter')perguntarIA()">
+        <input type="text" id="input-pergunta-ia" placeholder="Ex: até onde encho a água do buffet?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:11px 12px;color:var(--text);font-size:0.88rem;outline:none;" oninput="if(!this.value.trim())document.getElementById('resposta-ia').innerHTML=''" onkeydown="if(event.key==='Enter')perguntarIA()">
         <button onclick="perguntarIA()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 16px;font-weight:800;">➤</button>
       </div>
       <div id="resposta-ia" style="margin-top:10px;"></div>
@@ -381,7 +381,25 @@ var CATEGORIAS = []; // populado a partir do Firestore no boot (carregarCategori
 
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
-var storage = firebase.storage();
+
+// ⚠️ Storage aponta pro projeto PRINCIPAL (gestao-reataurante), não pro
+// bavaro-treinamentos — porque habilitar Storage exige o plano Blaze, e
+// fazer esse upgrade duas vezes (um depósito reembolsável por projeto)
+// não era viável agora. O gestao-reataurante já está no Blaze, então
+// reaproveita o bucket dele — só os ARQUIVOS (imagens/PDF) ficam lá; todo
+// o resto (restaurantes, vídeos, categorias, documento geral) continua
+// 100% isolado no projeto próprio do Treinamentos, como sempre foi.
+// Fica tudo dentro de uma pasta "treinamentos/" nesse bucket, separado de
+// qualquer coisa do sistema principal — nunca mistura os arquivos dos dois.
+var _gestaoApp = firebase.initializeApp({
+  apiKey: "AIzaSyBmuVAH50RHsNZ7nAcMCdzulJZf3e86f74",
+  authDomain: "gestao-reataurante.firebaseapp.com",
+  projectId: "gestao-reataurante",
+  storageBucket: "gestao-reataurante.firebasestorage.app",
+  messagingSenderId: "510785409925",
+  appId: "1:510785409925:web:e687e387509fb0605b6aec"
+}, 'gestaoStorage');
+var storage = _gestaoApp.storage();
 
 var _restaurantes = [];
 var _restAtivo = null;       // {id, nome, emoji}
@@ -449,13 +467,25 @@ function escolherRestaurante(id){
   if(!r) return;
   _restAtivo = r;
   document.getElementById('cat-rest-nome').textContent = (r.emoji||'🍽️') + ' ' + r.nome;
+  _limparAssistenteIA(); // pergunta/resposta de outro restaurante não deve sobrar aqui
   mostrarTela('tela-categorias');
   carregarVideosDoRestaurante();
 }
 
 function voltarPraRestaurantes(){
   _restAtivo = null; _videos = [];
+  _limparAssistenteIA();
   mostrarTela('tela-restaurantes');
+}
+
+// Limpa o campo de pergunta e a resposta do assistente — chamado sempre
+// que a tela de categorias é deixada pra trás (trocar de restaurante ou
+// voltar), pra nunca sobrar pergunta/resposta de antes na tela seguinte.
+function _limparAssistenteIA(){
+  var input = document.getElementById('input-pergunta-ia');
+  if(input) input.value = '';
+  var caixa = document.getElementById('resposta-ia');
+  if(caixa) caixa.innerHTML = '';
 }
 
 // ═══ Carrega todos os vídeos do restaurante de uma vez (lista pequena —
@@ -846,7 +876,7 @@ function adminUploadArquivo(){
   btn.disabled = true;
   status.textContent = 'Enviando...';
 
-  var caminho = 'restaurantes/' + _restAtivo.id + '/arquivos/' + Date.now() + '_' + file.name;
+  var caminho = 'treinamentos/restaurantes/' + _restAtivo.id + '/arquivos/' + Date.now() + '_' + file.name;
   var ref = storage.ref().child(caminho);
   ref.put(file).then(function(snapshot){
     return snapshot.ref.getDownloadURL();

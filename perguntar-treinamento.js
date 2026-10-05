@@ -57,11 +57,12 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDbTreinamentos();
-    // Duas fontes, lidas em paralelo: as instruções por vídeo E o documento
-    // geral de texto livre — as duas alimentam a mesma resposta.
-    const [restDoc, videosSnap] = await Promise.all([
+    // Três fontes, lidas em paralelo: instruções por vídeo, documento geral
+    // de texto livre, e arquivos (imagens/PDF que o Gemini lê diretamente).
+    const [restDoc, videosSnap, arquivosSnap] = await Promise.all([
       db.collection('restaurantes').doc(restauranteId).get(),
       db.collection('restaurantes').doc(restauranteId).collection('treinamentos').get(),
+      db.collection('restaurantes').doc(restauranteId).collection('arquivos').get(),
     ]);
 
     const documentoGeral = ((restDoc.data() || {}).documentoGeral || '').trim();
@@ -74,13 +75,38 @@ module.exports = async (req, res) => {
       }
     });
 
-    // Sem nenhuma das duas fontes cadastrada — avisa sem gastar chamada de IA à toa.
-    if (!comInstrucao.length && !documentoGeral) {
+    const arquivos = [];
+    arquivosSnap.forEach((doc) => {
+      const a = doc.data() || {};
+      if (a.url && a.nome) arquivos.push({ nome: a.nome, url: a.url, tipo: a.tipo || 'image/png' });
+    });
+
+    // Sem nenhuma das três fontes cadastrada — avisa sem gastar chamada de IA à toa.
+    if (!comInstrucao.length && !documentoGeral && !arquivos.length) {
       return res.status(200).json({
         ok: true,
-        resposta: 'Ainda não tenho nenhum procedimento cadastrado pra esse restaurante. Peça pro admin preencher o documento geral ou a instrução de algum vídeo de treinamento.',
+        resposta: 'Ainda não tenho nenhum procedimento cadastrado pra esse restaurante. Peça pro admin preencher a Base de Conhecimento da IA (documento, arquivo ou instrução de vídeo).',
         youtubeId: null,
       });
+    }
+
+    // Baixa cada arquivo e converte em base64 pro Gemini "ver" de verdade.
+    // Limite de 10 arquivos por pergunta — nunca deve chegar perto disso na
+    // prática, é só uma trava de segurança. Arquivo que falhar ao baixar é
+    // pulado (não derruba a resposta inteira por causa de um arquivo só).
+    const arquivosPraUsar = arquivos.slice(0, 10);
+    const partesArquivos = [];
+    for (const a of arquivosPraUsar) {
+      try {
+        const r = await fetch(a.url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 8 * 1024 * 1024) throw new Error('arquivo grande demais');
+        partesArquivos.push({ text: `Arquivo anexado: "${a.nome}"` });
+        partesArquivos.push({ inline_data: { mime_type: a.tipo, data: buf.toString('base64') } });
+      } catch (e) {
+        console.error('[perguntar-treinamento] falhou ao carregar arquivo', a.nome, e.message);
+      }
     }
 
     // Limite de segurança — não deve chegar perto disso na prática.
@@ -109,20 +135,25 @@ a um gerente — não tente adivinhar.
 Responda em português do Brasil, em até 3 frases, direto ao ponto, no tom de
 quem está ajudando um funcionário durante o serviço.
 
-Se a resposta vier de um procedimento de vídeo específico da lista abaixo
-(não do documento geral), cite o título dele exatamente como está escrito,
-em algum ponto da resposta.
+Se a resposta vier de um procedimento de vídeo específico da lista abaixo,
+cite o título dele exatamente como está escrito. Se vier de um dos arquivos
+anexados (imagem ou PDF), cite o nome do arquivo exatamente como foi dado,
+em algum ponto da resposta — em qualquer um dos dois casos, assim a pessoa
+sabe onde encontrar a fonte completa.
 
 PROCEDIMENTOS DE VÍDEOS CADASTRADOS:
 ${blocoVideos}${blocoDocumento}
+${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}
 
 PERGUNTA DO FUNCIONÁRIO:
 ${pergunta}`;
 
+    const parts = [{ text: prompt }, ...partesArquivos];
+
     const geminiResp = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({ contents: [{ parts: parts }] }),
     });
 
     if (!geminiResp.ok) {
@@ -136,15 +167,19 @@ ${pergunta}`;
       data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
       data.candidates[0].content.parts[0].text) || 'Não consegui gerar uma resposta agora.';
 
-    // Detecta qual vídeo a resposta citou (match pelo título exato) pra
-    // oferecer o botão "assistir ao vídeo completo".
+    // Detecta qual vídeo OU arquivo a resposta citou (match pelo nome exato)
+    // pra oferecer o botão de "ver a fonte completa".
     let videoCitado = contexto.find((v) => resposta.indexOf(v.titulo) >= 0);
+    let arquivoCitado = arquivosPraUsar.find((a) => resposta.indexOf(a.nome) >= 0);
 
     return res.status(200).json({
       ok: true,
       resposta: resposta.trim(),
       youtubeId: videoCitado ? videoCitado.youtubeId : null,
       videoTitulo: videoCitado ? videoCitado.titulo : null,
+      arquivoUrl: arquivoCitado ? arquivoCitado.url : null,
+      arquivoNome: arquivoCitado ? arquivoCitado.nome : null,
+      arquivoTipo: arquivoCitado ? arquivoCitado.tipo : null,
     });
   } catch (err) {
     console.error('[perguntar-treinamento] falhou:', err);

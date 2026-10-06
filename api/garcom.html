@@ -1279,6 +1279,22 @@ html[data-anim="off"] .g-ripple{display:none!important;}
         </div>
       </button>
 
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirPersonalizarFonte()">
+        <span style="font-size:1.4rem;">🔤</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Tamanho da Letra</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Na tela de Fechar Conta, só pra você</div>
+        </div>
+      </button>
+
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirChatAssistente()">
+        <span style="font-size:1.4rem;">💬</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:600;">Assistente (chat) <span style="background:var(--accent);color:#000;font-size:0.6rem;font-weight:800;border-radius:6px;padding:1px 5px;margin-left:4px;">NOVO</span></div>
+          <div style="font-size:0.72rem;color:var(--muted);">Testando um jeito novo de conversar com a IA</div>
+        </div>
+      </button>
+
       <button class="menu-lateral-item" id="menu-item-insumos" onclick="fecharMenuLateral();abrirPedidoInsumosGarcom()" style="display:none;">
         <span style="font-size:1.4rem;">🚚</span>
         <div style="flex:1;text-align:left;">
@@ -1663,7 +1679,7 @@ var firebaseConfig = {
 // Atualize a cada publicação. Aparece no painel de debug e no console —
 // é como confirmamos que o celular está rodando a versão certa (o PWA
 // às vezes segura versão velha em cache mesmo depois de publicar).
-var APP_VERSAO = 'v29.07-1 (juntar comandas)';
+var APP_VERSAO = 'v30.10-1 (tamanho da letra)';
 // Cronômetro do boot: marca quanto tempo cada etapa levou desde a abertura.
 // Aparece no painel de debug — é como sabemos ONDE os segundos estão indo.
 var _bootT0 = Date.now();
@@ -17631,6 +17647,55 @@ function ciclarFonteFecharConta(){
   showToast('🔤 Letra: ' + rotulo + ' (só pra você, neste aparelho)', '#4ade80', 2000);
 }
 
+// Modal de personalização — mesmo visual do "Personalizar Gestos", acessível
+// pelo menu lateral (além do botão "Aa" rápido dentro do Fechar Conta).
+function abrirPersonalizarFonte(){
+  var ex = document.getElementById('modal-personalizar-fonte');
+  if(ex) ex.remove();
+
+  var opcoes = [
+    {valor: 1,    nome: 'Normal',       desc: 'Tamanho padrão do sistema', icone: 'A'},
+    {valor: 1.15, nome: 'Grande',       desc: 'Um pouco maior',            icone: 'A'},
+    {valor: 1.3,  nome: 'Extra Grande', desc: 'Bem mais fácil de ler',     icone: 'A'}
+  ];
+  var atual = _fonteFecharContaAtual();
+  var html = opcoes.map(function(o){
+    var ativo = atual === o.valor;
+    return '<button onclick="setFonteFecharConta(' + o.valor + ')" ' +
+      'style="display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;background:' + (ativo?'rgba(212,168,67,0.12)':'var(--bg)') + ';border:1px solid ' + (ativo?'var(--accent)':'var(--border2)') + ';color:var(--text);border-radius:10px;font-family:inherit;cursor:pointer;margin-bottom:6px;text-align:left;">' +
+      '<span style="font-size:' + (1.1 * o.valor) + 'rem;font-weight:800;">' + o.icone + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-weight:' + (ativo?'700':'600') + ';font-size:0.86rem;color:' + (ativo?'var(--accent)':'var(--text)') + ';">' + o.nome + '</div>' +
+        '<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">' + o.desc + '</div>' +
+      '</div>' +
+      (ativo ? '<span style="font-size:1.1rem;color:var(--accent);">✓</span>' : '') +
+    '</button>';
+  }).join('');
+
+  var mod = document.createElement('div');
+  mod.id = 'modal-personalizar-fonte';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
+  mod.innerHTML =
+    '<div style="background:var(--surface);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom));">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
+        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;color:var(--accent);">🔤 TAMANHO DA LETRA</div>' +
+        '<button onclick="document.getElementById(\'modal-personalizar-fonte\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>' +
+      '</div>' +
+      '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:14px;">Só muda a tela de Fechar Conta, e só pra você (' + esc(_nomeGarcom||'') + ') neste aparelho — os outros garçons continuam com o tamanho deles.</div>' +
+      html +
+    '</div>';
+  document.body.appendChild(mod);
+}
+
+function setFonteFecharConta(valor){
+  try{ localStorage.setItem(_fonteFecharContaChave(), String(valor)); }catch(e){}
+  var ex = document.getElementById('modal-personalizar-fonte');
+  if(ex) ex.remove();
+  var rotulo = valor === 1 ? 'Normal' : (valor === 1.15 ? 'Grande' : 'Extra grande');
+  showToast('🔤 Letra: ' + rotulo, '#4ade80', 2000);
+}
+
 function fecharModalFechar(){
   document.getElementById('modal-fechar-conta').classList.remove('show');
   if(_fecharUnsub){ _fecharUnsub(); _fecharUnsub = null; }
@@ -19599,7 +19664,12 @@ function executarAssistenteGarcom(){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando o item na conta...</div>';
       _resolverCancelamentosIA(j.itens||[]);
     } else {
-      caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>';
+      var arquivoBtn = '';
+      if(j.arquivoUrl){
+        var icone = j.arquivoTipo === 'application/pdf' ? '📄' : '🖼️';
+        arquivoBtn = '<a href="' + j.arquivoUrl + '" target="_blank" style="display:inline-block;margin-top:9px;background:rgba(212,168,67,0.12);color:var(--accent);border:1px solid rgba(212,168,67,0.4);border-radius:9px;padding:9px 13px;font-size:0.8rem;font-weight:700;text-decoration:none;">' + icone + ' Ver ' + esc(j.arquivoNome||'arquivo') + '</a>';
+      }
+      caixa.innerHTML = '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(j.resposta) + '</div>' + arquivoBtn;
     }
   }).catch(function(){
     caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">Não consegui falar com o assistente agora.</div>';
@@ -19675,6 +19745,10 @@ function confirmarEnviarPedidosIA(){
 }
 
 function _mostrarResultadoPedidosIA(resultados){
+  // Limpa o texto digitado — a caixa de busca não deve ficar com o comando
+  // antigo depois de já ter sido executado, fica pronta pro próximo.
+  var inputEl = document.getElementById('input-assistente-garcom');
+  if(inputEl) inputEl.value = '';
   var caixa = document.getElementById('resposta-assistente-garcom');
   caixa.innerHTML = resultados.map(function(r){
     return r.ok
@@ -19699,18 +19773,16 @@ function _mostrarResultadoPedidosIA(resultados){
 // ═══════════════════════════════════════════════════════════════
 var _draftsCancelamentoIA = [];
 
-function _resolverCancelamentosIA(itensBrutos){
-  if(!itensBrutos.length){
-    document.getElementById('resposta-assistente-garcom').innerHTML =
-      '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhum cancelamento nesse texto.</div>';
-    return;
-  }
-  // Busca a conta ABERTA de cada mesa mencionada, direto no servidor —
-  // nunca confia em cache local pra decidir o que cancelar.
+// Núcleo da resolução de cancelamento — busca a conta ABERTA de cada mesa
+// mencionada, direto no servidor, e casa o nome falado com os itens
+// REALMENTE ativos naquela conta. Devolve uma Promise com a lista
+// resolvida; quem chama decide onde guardar/renderizar o resultado (a
+// caixa da tela de mesas e o chat usam esta mesma função).
+function _resolverItensCancelamento(itensBrutos){
   var mesasUnicas = itensBrutos.map(function(it){ return it.mesa; })
     .filter(function(m, i, arr){ return arr.indexOf(m) === i; });
 
-  Promise.all(mesasUnicas.map(function(mesa){
+  return Promise.all(mesasUnicas.map(function(mesa){
     return fbDb.collection('contas_mesa')
       .where('restauranteId','==', _restauranteId)
       .where('mesa','==', mesa)
@@ -19721,7 +19793,7 @@ function _resolverCancelamentosIA(itensBrutos){
     var mapaContas = {};
     contasPorMesa.forEach(function(c){ mapaContas[c.mesa] = c.doc; });
 
-    _draftsCancelamentoIA = itensBrutos.map(function(it, i){
+    return itensBrutos.map(function(it, i){
       var doc = mapaContas[it.mesa];
       if(!doc){
         return { _idx:i, mesa:it.mesa, nomeDigitado:it.nomeDigitado, encontrado:false, motivoFalha:'Mesa sem conta aberta' };
@@ -19741,6 +19813,17 @@ function _resolverCancelamentosIA(itensBrutos){
         contaId: doc.id, ambiguo: candidatos.length > 1
       };
     });
+  });
+}
+
+function _resolverCancelamentosIA(itensBrutos){
+  if(!itensBrutos.length){
+    document.getElementById('resposta-assistente-garcom').innerHTML =
+      '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhum cancelamento nesse texto.</div>';
+    return;
+  }
+  _resolverItensCancelamento(itensBrutos).then(function(resolvidos){
+    _draftsCancelamentoIA = resolvidos;
     _renderDraftsCancelamentoIA();
   }).catch(function(e){
     document.getElementById('resposta-assistente-garcom').innerHTML =
@@ -19870,6 +19953,8 @@ function _cancelarItemPorKey(p){
 }
 
 function _mostrarResultadoCancelamentosIA(resultados, pedidosAfetados){
+  var inputEl = document.getElementById('input-assistente-garcom');
+  if(inputEl) inputEl.value = '';
   var caixa = document.getElementById('resposta-assistente-garcom');
   caixa.innerHTML = resultados.map(function(r){
     return r.ok
@@ -19975,6 +20060,375 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
         return escreverPedido(docRef.id);
       });
     });
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAT DO ASSISTENTE (tela cheia) — versão em teste, acessível só
+     pelo menu lateral por enquanto. Mesmo back-end de sempre
+     (/api/assistente-garcom), só a apresentação muda: em vez de uma
+     caixa que substitui a resposta a cada pergunta, vira um histórico
+     de conversa que vai crescendo, com o rosto do assistente.
+     Histórico fica só na memória (reinicia se fechar o app) — decisão
+     de propósito pra essa primeira versão de teste.
+═══════════════════════════════════════════════════════════════ -->
+<style>
+  .chat-bolha-usuario{align-self:flex-end;max-width:82%;background:var(--accent);color:#000;
+    border-radius:16px 16px 4px 16px;padding:10px 14px;font-size:0.88rem;line-height:1.4;margin-bottom:10px;}
+  .chat-bolha-assistente-wrap{align-self:flex-start;max-width:88%;display:flex;gap:8px;margin-bottom:10px;}
+  .chat-bolha-assistente-wrap img{width:28px;height:28px;border-radius:50%;flex-shrink:0;margin-top:2px;}
+  .chat-bolha-assistente{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
+    border-radius:16px 16px 16px 4px;padding:10px 14px;font-size:0.88rem;line-height:1.45;}
+  .chat-bolha-sistema{align-self:center;font-size:0.78rem;padding:7px 12px;border-radius:20px;margin-bottom:10px;}
+</style>
+
+<div id="tela-chat-assistente" style="display:none;position:fixed;inset:0;z-index:999000;background:var(--bg);flex-direction:column;">
+  <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));
+    background:rgba(10,10,10,0.96);border-bottom:1px solid var(--border);flex-shrink:0;">
+    <img src="/assistente-avatar.png" style="width:42px;height:42px;border-radius:50%;border:1.5px solid var(--accent);flex-shrink:0;" onerror="this.style.display='none'">
+    <div style="flex:1;min-width:0;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:0.03em;">ASSISTENTE BÁVARO</div>
+      <div style="font-size:0.72rem;color:var(--muted);">Pergunte, peça ou cancele um item</div>
+    </div>
+    <button onclick="fecharChatAssistente()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:34px;height:34px;border-radius:50%;font-size:1.2rem;cursor:pointer;flex-shrink:0;">×</button>
+  </div>
+
+  <div id="chat-mensagens" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch;"></div>
+
+  <div style="padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="input-chat-assistente" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:22px;padding:11px 16px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key==='Enter')enviarMensagemChat()">
+      <button id="btn-voz-chat-assistente" onclick="iniciarVozChatAssistente()" title="Falar" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button onclick="enviarMensagemChat()" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--accent);color:#000;border:none;font-size:1.1rem;cursor:pointer;">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CHAT DO ASSISTENTE — histórico em memória (reinicia ao fechar o
+//  app). Mesmo /api/assistente-garcom de sempre; só a apresentação é
+//  nova. Cada mensagem de rascunho (pedido/cancelamento) guarda o
+//  próprio estado dentro dela mesma — assim várias conversas antigas
+//  podem conviver no histórico sem uma interferir na outra.
+// ═══════════════════════════════════════════════════════════════
+var _chatHistorico = [];
+var _chatIdContador = 0;
+var _reconhecimentoVozChat = null;
+
+function _novoIdChat(){ return 'm' + (++_chatIdContador) + '_' + Date.now(); }
+
+function abrirChatAssistente(){
+  var tela = document.getElementById('tela-chat-assistente');
+  tela.style.display = 'flex';
+  if(!_chatHistorico.length){
+    _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
+      texto:'Oi! Pode perguntar sobre um produto, pedir pra lançar um pedido, ou cancelar um item. Em que posso ajudar?' });
+  }
+  renderChatMensagens();
+  setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
+}
+
+function fecharChatAssistente(){
+  document.getElementById('tela-chat-assistente').style.display = 'none';
+}
+
+function _chatScrollParaBaixo(){
+  var box = document.getElementById('chat-mensagens');
+  if(box) box.scrollTop = box.scrollHeight;
+}
+
+function renderChatMensagens(semScroll){
+  var box = document.getElementById('chat-mensagens');
+  if(!box) return;
+  box.innerHTML = _chatHistorico.map(_renderMensagemChat).join('');
+  if(!semScroll) setTimeout(_chatScrollParaBaixo, 30);
+}
+
+function _renderMensagemChat(msg){
+  if(msg.tipo === 'usuario'){
+    return '<div class="chat-bolha-usuario">' + esc(msg.texto) + '</div>';
+  }
+  if(msg.tipo === 'carregando'){
+    return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+      '<div class="chat-bolha-assistente" style="color:var(--muted);">Pensando...</div></div>';
+  }
+  if(msg.tipo === 'texto-assistente'){
+    var arquivoBtn = '';
+    if(msg.arquivoUrl){
+      var icone = msg.arquivoTipo === 'application/pdf' ? '📄' : '🖼️';
+      arquivoBtn = '<a href="' + msg.arquivoUrl + '" target="_blank" style="display:inline-block;margin-top:8px;background:rgba(212,168,67,0.12);color:var(--accent);border:1px solid rgba(212,168,67,0.4);border-radius:9px;padding:7px 11px;font-size:0.76rem;font-weight:700;text-decoration:none;">' + icone + ' Ver ' + esc(msg.arquivoNome||'arquivo') + '</a>';
+    }
+    return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+      '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
+  }
+  if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'cancelamento') return _renderMsgCancelamentoChat(msg);
+  if(msg.tipo === 'resultado'){
+    return msg.linhas.map(function(l){
+      var cor = l.ok ? '#4ade80' : '#f87171';
+      var fundo = l.ok ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)';
+      var borda = l.ok ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)';
+      return '<div class="chat-bolha-sistema" style="background:'+fundo+';color:'+cor+';border:1px solid '+borda+';">' + (l.ok?'✓ ':'❌ ') + esc(l.texto) + '</div>';
+    }).join('');
+  }
+  return '';
+}
+
+function _renderMsgPedidoChat(msg){
+  if(msg.enviado) return ''; // virou mensagem de resultado separada, essa bolha não fica repetindo
+  var linhas = msg.itens.map(function(p, i){
+    if(!p.encontrado){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
+        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '</div></div>';
+    }
+    var obsHtml = p.obs ? '<div style="font-size:0.68rem;color:#f7a34f;margin-top:1px;">📝 ' + esc(p.obs) + '</div>' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + obsHtml + '</div>' +
+      '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
+    '</label>';
+  }).join('');
+  var qtdSel = msg.itens.filter(function(p){ return p.encontrado && p._selecionado; }).length;
+  var btn = '';
+  if(msg.enviando){
+    btn = '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Enviando...</div>';
+  } else if(qtdSel > 0){
+    btn = '<button onclick="_chatConfirmarPedido(\'' + msg.id + '\')" style="width:100%;margin-top:4px;background:var(--accent);border:none;color:#000;border-radius:8px;padding:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar e enviar (' + qtdSel + ')</button>';
+  }
+  return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+    '<div class="chat-bolha-assistente" style="width:100%;">' + linhas + btn + '</div></div>';
+}
+
+function _chatTogglePedidoItem(msgId, idx, checked){
+  var msg = _chatHistorico.find(function(m){ return m.id === msgId; });
+  if(!msg) return;
+  msg.itens[idx]._selecionado = checked;
+  renderChatMensagens(true);
+}
+
+function _chatConfirmarPedido(msgId){
+  var msg = _chatHistorico.find(function(m){ return m.id === msgId; });
+  if(!msg) return;
+  var selecionados = msg.itens.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!selecionados.length) return;
+  msg.enviando = true;
+  renderChatMensagens(true);
+
+  var porMesa = {};
+  selecionados.forEach(function(p){
+    if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
+    porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'' });
+  });
+  var mesas = Object.keys(porMesa);
+  var resultados = [];
+
+  function processarProxima(i){
+    if(i >= mesas.length){
+      msg.enviado = true;
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: resultados.map(function(r){
+        return { ok:r.ok, texto: 'Mesa ' + r.mesa + (r.ok ? (r.numero?' — pedido #'+r.numero:'') + ' enviado' : ': ' + r.erro) };
+      })});
+      renderChatMensagens();
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      return;
+    }
+    var mesaNum = mesas[i];
+    _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum]).then(function(numero){
+      resultados.push({mesa:mesaNum, ok:true, numero:numero});
+      processarProxima(i+1);
+    }).catch(function(e){
+      resultados.push({mesa:mesaNum, ok:false, erro:e.message});
+      processarProxima(i+1);
+    });
+  }
+  processarProxima(0);
+}
+
+function _renderMsgCancelamentoChat(msg){
+  if(msg.enviado) return '';
+  var linhas = msg.itens.map(function(p, i){
+    if(!p.encontrado){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
+        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">"' + esc(p.nomeDigitado) + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">' + esc(p.motivoFalha) + '</div></div></div>';
+    }
+    var aviso = p.ambiguo ? '<div style="font-size:0.66rem;color:#f7a34f;">Havia mais de um item parecido — confere se é este</div>' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.05);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+      '<input type="checkbox" onchange="_chatToggleCancelItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:#f87171;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.82rem;">❌ <b>' + p.itemQtd + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + aviso + '</div>' +
+    '</label>';
+  }).join('');
+  var qtdSel = msg.itens.filter(function(p){ return p.encontrado && p._selecionado; }).length;
+  var btn = '';
+  if(msg.enviando){
+    btn = '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Cancelando...</div>';
+  } else if(qtdSel > 0){
+    btn = '<button onclick="_chatConfirmarCancelamento(\'' + msg.id + '\')" style="width:100%;margin-top:4px;background:#f87171;border:none;color:#fff;border-radius:8px;padding:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar cancelamento (' + qtdSel + ')</button>';
+  }
+  return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+    '<div class="chat-bolha-assistente" style="width:100%;">' + linhas + btn + '</div></div>';
+}
+
+function _chatToggleCancelItem(msgId, idx, checked){
+  var msg = _chatHistorico.find(function(m){ return m.id === msgId; });
+  if(!msg) return;
+  msg.itens[idx]._selecionado = checked;
+  renderChatMensagens(true);
+}
+
+function _chatConfirmarCancelamento(msgId){
+  var msg = _chatHistorico.find(function(m){ return m.id === msgId; });
+  if(!msg) return;
+  var selecionados = msg.itens.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!selecionados.length) return;
+
+  // Mesma trava do cancelamento manual: senha de gerente, se configurada —
+  // nunca pulada, nem aqui no chat.
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+    var pedeSenha = false, senhaCorreta = '';
+    if(doc.exists){
+      var c = doc.data();
+      pedeSenha = !!c.cancelSenha;
+      senhaCorreta = c.cancelSenhaValor || '';
+    }
+    if(pedeSenha){
+      var senhaDigitada = prompt('Senha do gerente pra confirmar o cancelamento:');
+      if(senhaDigitada === null) return;
+      if(senhaDigitada !== senhaCorreta){ showToast('❌ Senha incorreta', '#f87171'); return; }
+    }
+    _chatExecutarCancelamento(msg, selecionados);
+  }).catch(function(){
+    _chatExecutarCancelamento(msg, selecionados);
+  });
+}
+
+function _chatExecutarCancelamento(msg, selecionados){
+  msg.enviando = true;
+  renderChatMensagens(true);
+  var resultados = [];
+  var pedidosPraReimprimir = {};
+
+  function processarProximo(i){
+    if(i >= selecionados.length){
+      msg.enviado = true;
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: resultados.map(function(r){
+        return { ok:r.ok, texto: esc(r.item) + ' — Mesa ' + r.mesa + (r.ok ? ' cancelado' : ': ' + r.erro) };
+      })});
+      renderChatMensagens();
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      Object.keys(pedidosPraReimprimir).forEach(function(pedidoId){
+        perguntarReimpressao(pedidoId, 'Cancelamento de item (via assistente)');
+      });
+      return;
+    }
+    var p = selecionados[i];
+    _cancelarItemPorKey(p).then(function(){
+      resultados.push({mesa:p.mesa, item:p.itemNome, ok:true});
+      if(p.pedidoId) pedidosPraReimprimir[p.pedidoId] = true;
+      processarProximo(i+1);
+    }).catch(function(e){
+      resultados.push({mesa:p.mesa, item:p.itemNome, ok:false, erro:e.message});
+      processarProximo(i+1);
+    });
+  }
+  processarProximo(0);
+}
+
+function enviarMensagemChat(){
+  var input = document.getElementById('input-chat-assistente');
+  var texto = input.value.trim();
+  if(!texto) return;
+  input.value = '';
+
+  _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
+  var idCarregando = _novoIdChat();
+  _chatHistorico.push({ id:idCarregando, tipo:'carregando' });
+  renderChatMensagens();
+
+  fetch('/api/assistente-garcom', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
+
+    if(!j.ok){
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto: j.error || 'Algo deu errado.' });
+      renderChatMensagens();
+      return;
+    }
+
+    if(j.tipo === 'pedido'){
+      var itensPedido = (j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; });
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: itensPedido });
+      renderChatMensagens();
+
+    } else if(j.tipo === 'cancelamento'){
+      var itensCancel = j.itens || [];
+      if(!itensCancel.length){
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhum cancelamento nesse texto.' });
+        renderChatMensagens();
+        return;
+      }
+      var idCarregando2 = _novoIdChat();
+      _chatHistorico.push({ id:idCarregando2, tipo:'carregando' });
+      renderChatMensagens();
+      _resolverItensCancelamento(itensCancel).then(function(resolvidos){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando2; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'cancelamento', itens: resolvidos });
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando2; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar as contas: ' + e.message });
+        renderChatMensagens();
+      });
+
+    } else {
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:j.resposta,
+        arquivoUrl:j.arquivoUrl, arquivoNome:j.arquivoNome, arquivoTipo:j.arquivoTipo });
+      renderChatMensagens();
+    }
+  }).catch(function(){
+    _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
+    _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não consegui falar com o assistente agora.' });
+    renderChatMensagens();
+  });
+}
+
+function iniciarVozChatAssistente(){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){ showToast('Comando de voz não disponível neste aparelho', '#f7a34f', 3000); return; }
+  var btn = document.getElementById('btn-voz-chat-assistente');
+  if(_reconhecimentoVozChat){ try{ _reconhecimentoVozChat.stop(); }catch(e){} _reconhecimentoVozChat = null; return; }
+
+  var recon = new Recon();
+  recon.lang = 'pt-BR'; recon.continuous = false; recon.interimResults = false; recon.maxAlternatives = 1;
+  _reconhecimentoVozChat = recon;
+  if(btn){ btn.style.background = '#dc2626'; btn.style.borderColor = '#dc2626'; btn.style.color = '#fff'; }
+  _mostrarOverlayVoz('Pergunte ou diga o pedido');
+
+  recon.onresult = function(e){
+    var texto = (e.results[0][0].transcript || '').trim();
+    if(texto){
+      document.getElementById('input-chat-assistente').value = texto;
+      enviarMensagemChat();
+    }
+  };
+  recon.onerror = function(e){
+    var msg = 'Não entendi, tente de novo';
+    if(e.error === 'not-allowed') msg = 'Permita o microfone';
+    else if(e.error === 'no-speech') msg = 'Não ouvi nada';
+    _vibrarErro();
+    showToast(msg, '#f7a34f', 3000);
+  };
+  recon.onend = function(){
+    _esconderOverlayVoz();
+    _reconhecimentoVozChat = null;
+    if(btn){ btn.style.background = 'var(--surface2)'; btn.style.borderColor = 'var(--border2)'; btn.style.color = 'var(--accent)'; }
+  };
+  try{ recon.start(); } catch(e){ _reconhecimentoVozChat = null; showToast('Erro ao iniciar voz', '#f87171'); }
 }
 </script>
 

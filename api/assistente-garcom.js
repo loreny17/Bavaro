@@ -258,6 +258,23 @@ SE FOR PEDIDO:
   quando ele disser peso/gramas (ex: "350 gramas de buffet na 10"). NUNCA
   preencha os dois ao mesmo tempo. Itens por kg NÃO têm "quantidade" nem
   "obs" — ignore esses campos pra eles.
+- ATALHO COMUM PRA ITEM POR KG: garçom apressado costuma digitar/falar só
+  números, sem citar o nome do produto — ex: "34,15-26", "34,15 - 26",
+  "24,32 mesa 10", "17,90, 5". Nesse padrão (um número com vírgula/decimal
+  + um número inteiro separados por traço, vírgula, espaço ou "mesa"), o
+  número COM decimal É o valor em reais da pesagem, e o número INTEIRO é
+  a mesa — NUNCA o contrário, e nunca duas mesas. Se a lista "CARDÁPIO POR
+  KG" tiver exatamente UM item, interprete esse padrão como um pedido
+  desse item usando "valorTotal". Se a lista por kg tiver mais de um item
+  e não der pra saber qual dos dois pelo texto, retorne com itemId null
+  e nomeDigitado "valor da pesagem sem produto identificado" em vez de
+  chutar qual dos dois é.
+- NUNCA ESCOLHA UM ITEM (por unidade OU por kg) QUE NÃO FOI CLARAMENTE
+  MENCIONADO NO TEXTO, só porque "tem que escolher algum". Isso vale
+  mesmo quando o texto é confuso ou só tem números. Errar escolhendo o
+  item errado é MUITO PIOR do que admitir que não entendeu — um item
+  errado pode sair pra cozinha com nome e preço que não têm nada a ver
+  com o que foi pedido. Na dúvida genuína, use "itemId": null.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",

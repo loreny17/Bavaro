@@ -98,11 +98,18 @@ async function obterContexto(db, tenantId, restauranteId) {
 
   const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
   const cardapioCompleto = [];
+  const cardapioKg = []; // itens vendidos por peso (ex: prato de buffet) — separados dos de unidade
   const comFicha = [];
   itensSnap.forEach((doc) => {
     const it = doc.data() || {};
     if (it.disponivel === false) return;
-    if (it.tipoVenda !== 'kg') {
+    if (it.tipoVenda === 'kg') {
+      cardapioKg.push({
+        id: doc.id,
+        nome: it.nome || '(sem nome)',
+        precoPorKg: typeof it.preco === 'number' ? it.preco : 0,
+      });
+    } else {
       // A Ficha técnica também entra aqui (resumida) — é o que permite
       // diferenciar itens de MESMO NOME na hora de montar um pedido (ex:
       // três itens chamados "Alcatra Grelhada", cada um com uma nota
@@ -128,7 +135,7 @@ async function obterContexto(db, tenantId, restauranteId) {
     if (a.url && a.nome) arquivos.push({ nome: a.nome, url: a.url, tipo: a.tipo || 'image/png' });
   });
 
-  const dados = { documentoGeral, cardapioCompleto, comFicha, arquivos };
+  const dados = { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos };
   _cacheContexto[chave] = { em: agora, dados };
   return dados;
 }
@@ -156,10 +163,13 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDb();
-    const { documentoGeral, cardapioCompleto, comFicha, arquivos } = await obterContexto(db, tenantId, restauranteId);
+    const { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos } = await obterContexto(db, tenantId, restauranteId);
 
     const listaCardapio = cardapioCompleto.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}]${it.dica ? ` — ${it.dica}` : ''}`
+    ).join('\n');
+    const listaCardapioKg = cardapioKg.map((it, i) =>
+      `${i + 1}. ${it.nome} [id:${it.id}] — R$ ${it.precoPorKg.toFixed(2)}/kg`
     ).join('\n');
     const blocoFichas = comFicha.length
       ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
@@ -236,6 +246,18 @@ SE FOR PEDIDO:
   mencionar algo que bate com a dica de um deles (ex: "alcatra do dia"
   batendo com a dica "Alcatra do dia"), escolha ESSE id específico, não
   o primeiro da lista com aquele nome.
+- ITEM POR KG (lista separada "CARDÁPIO POR KG" abaixo — ex: prato de
+  buffet pesado na balança): quando o funcionário mencionar um desses
+  itens, o objeto do pedido usa um formato DIFERENTE:
+  {"mesa":32,"itemId":"xyz","tipoVenda":"kg","valorTotal":24.32}
+  ou, se ele disser o peso em vez do valor já calculado:
+  {"mesa":32,"itemId":"xyz","tipoVenda":"kg","pesoGramas":350}
+  Use "valorTotal" quando o funcionário disser um valor em reais (ex: "um
+  prato de 24,32 na mesa 32" — isso é o valor que já saiu na balança,
+  use exatamente esse número, não tente adivinhar peso). Use "pesoGramas"
+  quando ele disser peso/gramas (ex: "350 gramas de buffet na 10"). NUNCA
+  preencha os dois ao mesmo tempo. Itens por kg NÃO têm "quantidade" nem
+  "obs" — ignore esses campos pra eles.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",
@@ -259,7 +281,8 @@ ${blocoFichas}${blocoGeral}
 ${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}
 
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
-${listaCardapio}${blocoHistorico}
+${listaCardapio}
+${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
 
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
@@ -292,11 +315,40 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
       const resultado = brutos.map((p) => {
         const mesa = parseInt(p.mesa, 10);
+        if (isNaN(mesa)) return null;
+
+        // ── Item por kg (prato de buffet pesado) — formato separado ──
+        if (p.tipoVenda === 'kg') {
+          const itemKg = p.itemId ? cardapioKg.find((c) => c.id === p.itemId) : null;
+          if (!itemKg) {
+            return {
+              mesa, tipoVenda: 'kg', encontrado: false,
+              nomeDigitado: p.nomeDigitado || null,
+            };
+          }
+          let valorTotal = null;
+          let pesoGramas = null;
+          if (typeof p.valorTotal === 'number' && p.valorTotal > 0) {
+            valorTotal = Math.round(p.valorTotal * 100) / 100; // confia no valor dito (já saiu da balança)
+          } else if (typeof p.pesoGramas === 'number' && p.pesoGramas > 0) {
+            pesoGramas = Math.round(p.pesoGramas);
+            valorTotal = Math.round((pesoGramas / 1000) * itemKg.precoPorKg * 100) / 100;
+          }
+          if (valorTotal === null) {
+            return { mesa, tipoVenda: 'kg', encontrado: false, nomeDigitado: itemKg.nome };
+          }
+          return {
+            mesa, tipoVenda: 'kg', encontrado: true,
+            itemId: itemKg.id, itemNome: itemKg.nome,
+            precoBase: itemKg.precoPorKg, peso: pesoGramas, itemPreco: valorTotal,
+          };
+        }
+
+        // ── Item normal (por unidade) ──
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
         const item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
         return {
-          mesa: isNaN(mesa) ? null : mesa,
-          quantidade: qtd,
+          mesa, quantidade: qtd,
           itemId: item ? item.id : null,
           itemNome: item ? item.nome : null,
           itemPreco: item ? item.preco : null,
@@ -304,7 +356,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           nomeDigitado: p.nomeDigitado || null,
           obs: (p.obs || '').toString().trim().slice(0, 140),
         };
-      }).filter((p) => p.mesa !== null);
+      }).filter((p) => p !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
     }

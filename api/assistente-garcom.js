@@ -195,8 +195,14 @@ resposta. Isso vale tanto pra imagem quanto pra PDF.
 SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
 - "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
-  NUNCA invente um id — se não reconhecer o item com confiança, use
-  "itemId": null e inclua "nomeDigitado" com o texto falado.
+  NUNCA invente um id que não esteja na lista.
+- O texto pode vir de reconhecimento de voz, então pode ter erros de
+  grafia/som parecido (ex: "pilsom" por "pilsen", "ipa" ouvido como "ipá"
+  ou "aipa", "cocazero" grudado). Tente reconhecer o item mesmo com esse
+  tipo de erro fonético, comparando pela PRONÚNCIA/semelhança, não só pela
+  escrita exata. Só use "itemId": null (com "nomeDigitado" preenchido) se
+  genuinamente não conseguir identificar qual item da lista é, mesmo
+  considerando possível erro de voz.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",

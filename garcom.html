@@ -1117,7 +1117,10 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <div class="mesas-scroll-wrapper" id="mesas-scroll-wrapper">
     <!-- Caixa ÚNICA do assistente — pergunta OU pedido, a IA decide. -->
     <div id="caixa-assistente-garcom" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:16px 16px 4px;">
-      <div onclick="abrirChatAssistente()" style="font-weight:700;font-size:0.82rem;margin-bottom:8px;cursor:pointer;">🤖 Assistente — pergunte ou lance um pedido <span style="color:var(--muted);font-weight:400;font-size:0.72rem;">(toque pra abrir o chat completo)</span></div>
+      <div onclick="abrirChatAssistente()" style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.82rem;margin-bottom:8px;cursor:pointer;">
+        <img src="/assistente-avatar.png" style="width:22px;height:22px;border-radius:50%;flex-shrink:0;" onerror="this.style.display='none'">
+        <span>Pergunte ou lance um pedido</span>
+      </div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="input-assistente-garcom" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
         <button id="btn-voz-assistente-garcom" onclick="iniciarVozAssistenteGarcom()" title="Falar"
@@ -1423,11 +1426,12 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <button id="fab-pergunta-produto" onclick="abrirAssistenteFlutuante()" style="
     position:fixed;bottom:80px;left:16px;z-index:90;
     background:var(--surface2);color:var(--accent);
-    border:1.5px solid var(--border2);width:52px;height:52px;border-radius:50%;
+    border:1.5px solid var(--accent);width:52px;height:52px;border-radius:50%;
     box-shadow:0 4px 14px rgba(0,0,0,0.35);
     cursor:pointer;font-size:1.4rem;font-family:inherit;
     display:flex;align-items:center;justify-content:center;
-  ">🤖</button>
+    padding:0;overflow:hidden;
+  "><img src="/assistente-avatar.png" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='🤖';"></button>
 
   <!-- FAB Pedir Insumos ao Central (só pra quem tem permissão, no mapa de mesas) -->
   <button id="fab-insumos" onclick="abrirPedidoInsumosGarcom()" style="
@@ -20136,9 +20140,19 @@ function _chatAdicionarContexto(autor, texto){
 
 function _novoIdChat(){ return 'm' + (++_chatIdContador) + '_' + Date.now(); }
 
+// ⚠️ Botão/gesto físico de "voltar" do Android não sabe nada sobre essa
+// tela por padrão — ele navega o histórico normal do navegador, que pode
+// até sair do app. O jeito certo de "ensinar" o Android é empurrar um
+// marcador no histórico do navegador ao abrir, e escutar o evento
+// "popstate" (disparado tanto pelo botão físico quanto por gesto) pra
+// fechar a tela nesse momento, em vez de deixar a navegação padrão rolar.
+var _chatHistoricoNavegadorAberto = false;
+
 function abrirChatAssistente(){
   var tela = document.getElementById('tela-chat-assistente');
   tela.style.display = 'flex';
+  tela.style.height = '';
+  tela.style.bottom = '';
   // Conversa sempre começa do zero — evita o histórico crescer pra sempre
   // e ficar pesado/confuso depois de um tempo de uso.
   _chatHistorico = [];
@@ -20147,9 +20161,34 @@ function abrirChatAssistente(){
     texto:'Oi! Pode perguntar sobre um produto, pedir pra lançar um pedido, ou cancelar um item. Em que posso ajudar?' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
+
+  if(!_chatHistoricoNavegadorAberto){
+    history.pushState({ chatAssistente:true }, '');
+    _chatHistoricoNavegadorAberto = true;
+  }
 }
 
+// Chamado pelo botão "‹ Voltar" dentro do app — delega pro navegador
+// "voltar" de verdade, o que aciona o popstate abaixo e fecha a tela por
+// lá. Assim os dois caminhos (botão do app e botão físico) passam pelo
+// MESMO lugar, e o histórico do navegador nunca fica com sobra.
 function fecharChatAssistente(){
+  if(_chatHistoricoNavegadorAberto){
+    history.back();
+  } else {
+    _fecharChatAssistenteDeVerdade();
+  }
+}
+
+window.addEventListener('popstate', function(){
+  var tela = document.getElementById('tela-chat-assistente');
+  if(tela && tela.style.display === 'flex'){
+    _chatHistoricoNavegadorAberto = false;
+    _fecharChatAssistenteDeVerdade();
+  }
+});
+
+function _fecharChatAssistenteDeVerdade(){
   document.getElementById('tela-chat-assistente').style.display = 'none';
   // Garante que volta pro mapa de mesas, não importa de onde o chat tenha
   // sido aberto — o menu lateral só existe na tela de mesas hoje, mas isso
@@ -20157,6 +20196,30 @@ function fecharChatAssistente(){
   var msEl = document.getElementById('mesa-screen');
   if(msEl) msEl.classList.remove('hidden');
 }
+
+// ⚠️ Quando o teclado do celular abre, o Android nem sempre encolhe a
+// tela do jeito que o "position:fixed;inset:0" espera — o resultado é a
+// última mensagem (ou o campo de digitar) ficando escondida atrás do
+// teclado. window.visualViewport é a API certa pra saber a altura
+// VISÍVEL de verdade (já descontando o teclado) e ajustar a tela do chat
+// pra caber nela, além de rolar pro fim de novo depois que o teclado
+// termina de abrir/fechar (a animação leva um tempinho).
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', function(){
+    var tela = document.getElementById('tela-chat-assistente');
+    if(!tela || tela.style.display !== 'flex') return;
+    tela.style.height = window.visualViewport.height + 'px';
+    tela.style.bottom = 'auto'; // evita que o "inset:0" original dispute com a altura calculada
+    setTimeout(_chatScrollParaBaixo, 80);
+  });
+}
+// Também rola pro fim assim que o campo ganha foco (teclado abrindo) —
+// cobre o instante entre tocar no campo e o resize disparar.
+document.addEventListener('focusin', function(e){
+  if(e.target && e.target.id === 'input-chat-assistente'){
+    setTimeout(_chatScrollParaBaixo, 300);
+  }
+});
 
 function _chatScrollParaBaixo(){
   var box = document.getElementById('chat-mensagens');

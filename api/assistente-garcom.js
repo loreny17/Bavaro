@@ -59,10 +59,12 @@ async function obterContexto(db, tenantId, restauranteId) {
     return cacheado.dados;
   }
 
-  const [restDoc, itensSnap] = await Promise.all([
+  const [restDoc, itensSnap, arquivosSnap] = await Promise.all([
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
       .collection('cardapio').doc('data').collection('itens').get(),
+    db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
+      .collection('assistente_arquivos').get(),
   ]);
 
   const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
@@ -79,7 +81,16 @@ async function obterContexto(db, tenantId, restauranteId) {
     }
   });
 
-  const dados = { documentoGeral, cardapioCompleto, comFicha };
+  // Só a METADADOS dos arquivos entram no cache (nome/url/tipo) — os bytes
+  // em si são baixados na hora de cada pergunta, nunca guardados em
+  // memória entre chamadas (evita inchar a instância do servidor).
+  const arquivos = [];
+  arquivosSnap.forEach((doc) => {
+    const a = doc.data() || {};
+    if (a.url && a.nome) arquivos.push({ nome: a.nome, url: a.url, tipo: a.tipo || 'image/png' });
+  });
+
+  const dados = { documentoGeral, cardapioCompleto, comFicha, arquivos };
   _cacheContexto[chave] = { em: agora, dados };
   return dados;
 }
@@ -101,13 +112,32 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDb();
-    const { documentoGeral, cardapioCompleto, comFicha } = await obterContexto(db, tenantId, restauranteId);
+    const { documentoGeral, cardapioCompleto, comFicha, arquivos } = await obterContexto(db, tenantId, restauranteId);
 
     const listaCardapio = cardapioCompleto.map((it, i) => `${i + 1}. ${it.nome} [id:${it.id}]`).join('\n');
     const blocoFichas = comFicha.length
       ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
       : '(nenhum item com ficha técnica cadastrada)';
     const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
+
+    // Baixa cada arquivo e converte em base64 pro Gemini "ver" de verdade —
+    // mesmo mecanismo já usado no app de Treinamentos. Arquivo que falhar
+    // ao baixar é pulado (não derruba a resposta inteira por causa de um
+    // arquivo só). Limite de 10 por pergunta, só por segurança.
+    const arquivosPraUsar = (arquivos || []).slice(0, 10);
+    const partesArquivos = [];
+    for (const a of arquivosPraUsar) {
+      try {
+        const r = await fetch(a.url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 8 * 1024 * 1024) throw new Error('arquivo grande demais');
+        partesArquivos.push({ text: `Arquivo anexado: "${a.nome}"` });
+        partesArquivos.push({ inline_data: { mime_type: a.tipo, data: buf.toString('base64') } });
+      } catch (e) {
+        console.error('[assistente-garcom] falhou ao carregar arquivo', a.nome, e.message);
+      }
+    }
 
     const prompt =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
@@ -125,9 +155,11 @@ antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA:
 {"tipo":"pergunta","resposta":"texto da resposta, até 2 frases, português do Brasil"}
-Responda SOMENTE com base nas fichas técnicas e na base de conhecimento
-abaixo. NUNCA invente um valor técnico. Se não estiver cadastrado, diga
-isso claramente.
+Responda SOMENTE com base nas fichas técnicas, na base de conhecimento e
+nos arquivos anexados abaixo (se houver). NUNCA invente um valor técnico.
+Se não estiver cadastrado nem nos arquivos, diga isso claramente. Se a
+resposta vier de um arquivo anexado, cite o nome dele exatamente como foi
+dado, em algum ponto da resposta.
 
 SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
@@ -154,6 +186,7 @@ SE FOR CANCELAMENTO:
 
 FICHAS TÉCNICAS DE ITENS:
 ${blocoFichas}${blocoGeral}
+${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}
 
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
 ${listaCardapio}
@@ -161,10 +194,12 @@ ${listaCardapio}
 TEXTO:
 "${texto}"`;
 
+    const parts = [{ text: prompt }, ...partesArquivos];
+
     const geminiResp = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({ contents: [{ parts: parts }] }),
     });
 
     if (!geminiResp.ok) {
@@ -220,7 +255,16 @@ TEXTO:
     }
 
     // Default: trata como pergunta (cobre tipo==="pergunta" e qualquer formato inesperado)
-    return res.status(200).json({ ok: true, tipo: 'pergunta', resposta: (parsed.resposta || 'Não consegui gerar uma resposta agora.').trim() });
+    const respostaTexto = (parsed.resposta || 'Não consegui gerar uma resposta agora.').trim();
+    const arquivoCitado = arquivosPraUsar.find((a) => respostaTexto.indexOf(a.nome) >= 0);
+    return res.status(200).json({
+      ok: true,
+      tipo: 'pergunta',
+      resposta: respostaTexto,
+      arquivoUrl: arquivoCitado ? arquivoCitado.url : null,
+      arquivoNome: arquivoCitado ? arquivoCitado.nome : null,
+      arquivoTipo: arquivoCitado ? arquivoCitado.tipo : null,
+    });
   } catch (err) {
     console.error('[assistente-garcom] falhou:', err);
     return res.status(500).json({ ok: false, error: err.message });

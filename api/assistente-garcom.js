@@ -1,21 +1,32 @@
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/assistente-garcom
-//  Body: { tenantId, restauranteId, texto }
+//  Body: { tenantId, restauranteId, texto, historico? }
 //
 //  Caixa única do app Garçom: a mesma pergunta pode ser uma DÚVIDA
-//  ("qual o IBU do IPA?") ou um COMANDO DE PEDIDO ("1 pilsen na 34").
-//  Esta function decide qual é, numa chamada só, e devolve:
+//  ("qual o IBU do IPA?"), um COMANDO DE PEDIDO ("1 pilsen na 34") ou
+//  um COMANDO DE CANCELAMENTO. Esta function decide qual é e devolve:
 //    { tipo: "pergunta", resposta: "..." }
-//  ou
-//    { tipo: "pedido", pedidos: [{mesa, itemId, itemNome, itemPreco,
-//      quantidade, encontrado, nomeDigitado}] }
+//    { tipo: "pedido", pedidos: [...] }
+//    { tipo: "cancelamento", itens: [...] }
 //
-//  ⚠️ Mesma garantia de sempre: isto SÓ interpreta. Um pedido nunca é
+//  ⚠️ EM DUAS ETAPAS, DE PROPÓSITO (pra ser rápido):
+//  Fichas técnicas, base de conhecimento geral e arquivos anexados só
+//  servem pra responder DÚVIDA — pedido e cancelamento nunca precisam
+//  disso. Antes, tudo isso (inclusive BAIXAR cada arquivo anexado e
+//  converter pra base64) acontecia em TODA pergunta, mesmo pedidos
+//  simples — isso que deixava lançar pedido lento. Agora:
+//    Etapa 1 (sempre, leve): só cardápio + histórico. Já resolve
+//      pedido/cancelamento sozinha — mais rápido, porque o texto que
+//      a IA processa é bem menor e não baixa arquivo nenhum.
+//    Etapa 2 (só se for dúvida de verdade): aí sim busca fichas,
+//      base de conhecimento e arquivos, e responde com tudo isso.
+//  Pedido/cancelamento ficam mais rápidos (1 chamada enxuta); dúvida
+//  fica com uma chamada extra, mas isso é bem menos frequente que
+//  lançar pedido durante o serviço.
+//
+//  Mesma garantia de sempre: isto SÓ interpreta. Um pedido nunca é
 //  lançado por aqui — o app mostra o rascunho e só escreve no banco
-//  quando o garçom confirma manualmente. A classificação errada (ex:
-//  tratar um pedido como pergunta) é só um incômodo de UX, nunca um
-//  risco de dado — porque escrever no banco está noutro passo, sempre
-//  atrás de confirmação humana.
+//  quando o garçom confirma manualmente.
 // ═══════════════════════════════════════════════════════════════
 const admin = require('firebase-admin');
 
@@ -36,14 +47,6 @@ const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
 // ─── CHAMADA AO GEMINI COM REENVIO AUTOMÁTICO ───
-// A própria API do Gemini, de vez em quando, devolve um erro passageiro
-// (sobrecarga momentânea, limite de uso por segundo) — não é bug nosso, é
-// normal em qualquer API de IA. Antes, isso virava "assistente
-// indisponível" na hora, e a pessoa tinha que perguntar de novo na mão
-// pra funcionar (o que sempre funcionava, confirmando que era passageiro).
-// Agora o servidor tenta sozinho, até 2 vezes a mais, com uma pausa curta
-// entre tentativas — só erro de verdade (ou 3 tentativas sem sucesso)
-// chega a aparecer pro usuário.
 function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
 const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
 
@@ -58,25 +61,28 @@ async function chamarGeminiComRetry(apiKey, body) {
     if (resp.ok) return resp;
 
     ultimoErro = resp;
-    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break; // erro que não é passageiro — não adianta tentar de novo
-    if (tentativa < 3) await _esperar(tentativa * 500); // 500ms, depois 1000ms
+    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break;
+    if (tentativa < 3) await _esperar(tentativa * 500);
   }
   return ultimoErro;
 }
 
+async function textoDoGemini(apiKey, parts) {
+  const resp = await chamarGeminiComRetry(apiKey, { contents: [{ parts }] });
+  if (!resp.ok) {
+    const errTxt = await resp.text().catch(() => '');
+    console.error('[assistente-garcom] Gemini falhou mesmo após tentar de novo:', resp.status, errTxt);
+    return { ok: false };
+  }
+  const data = await resp.json();
+  let texto = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+    data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+    data.candidates[0].content.parts[0].text) || '';
+  texto = texto.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+  return { ok: true, texto };
+}
+
 // ─── CACHE EM MEMÓRIA (por instância do servidor, curta duração) ───
-// Buscar cardápio+fichas+base geral do zero a cada pergunta é o que mais
-// pesa no tempo de resposta. Se duas perguntas chegarem com menos de 60s
-// de intervalo pro MESMO restaurante, a segunda reaproveita o que já foi
-// buscado — sem bater no banco de novo. 60s é curto o bastante pra nunca
-// responder com cardápio desatualizado de verdade (se alguém mudar o
-// cardápio, a diferença prática é no máximo 1 minuto de atraso), mas já
-// evita a repetição na correria de perguntas seguidas no mesmo serviço.
-// ⚠️ Só funciona enquanto o servidor estiver "quente" (chamadas recentes).
-// Depois de um tempo sem uso, a Vercel desliga a function e o cache some
-// junto — isso é o "cold start" que às vezes torna a PRIMEIRA pergunta do
-// dia mais lenta que as seguintes; não tem como evitar isso sem mudar de
-// plano de hospedagem.
 const _cacheContexto = {};
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -98,7 +104,7 @@ async function obterContexto(db, tenantId, restauranteId) {
 
   const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
   const cardapioCompleto = [];
-  const cardapioKg = []; // itens vendidos por peso (ex: prato de buffet) — separados dos de unidade
+  const cardapioKg = [];
   const comFicha = [];
   itensSnap.forEach((doc) => {
     const it = doc.data() || {};
@@ -110,10 +116,6 @@ async function obterContexto(db, tenantId, restauranteId) {
         precoPorKg: typeof it.preco === 'number' ? it.preco : 0,
       });
     } else {
-      // A Ficha técnica também entra aqui (resumida) — é o que permite
-      // diferenciar itens de MESMO NOME na hora de montar um pedido (ex:
-      // três itens chamados "Alcatra Grelhada", cada um com uma nota
-      // diferente escrita na ficha, tipo "Alcatra do dia").
       cardapioCompleto.push({
         id: doc.id,
         nome: it.nome || '(sem nome)',
@@ -126,9 +128,9 @@ async function obterContexto(db, tenantId, restauranteId) {
     }
   });
 
-  // Só a METADADOS dos arquivos entram no cache (nome/url/tipo) — os bytes
-  // em si são baixados na hora de cada pergunta, nunca guardados em
-  // memória entre chamadas (evita inchar a instância do servidor).
+  // Só os METADADOS dos arquivos entram no cache (nome/url/tipo) — os
+  // bytes em si só são baixados na Etapa 2, e só quando realmente for
+  // uma dúvida — nunca pra pedido/cancelamento.
   const arquivos = [];
   arquivosSnap.forEach((doc) => {
     const a = doc.data() || {};
@@ -149,11 +151,6 @@ module.exports = async (req, res) => {
   const tenantId = (body.tenantId || TENANT_PADRAO).toString();
   const restauranteId = (body.restauranteId || 'default').toString();
   const texto = (body.texto || '').toString().trim();
-  // Histórico curto da conversa atual (opcional — só o chat do app manda
-  // isso; a caixa simples da tela de mesas não manda, então cada pergunta
-  // continua sendo tratada isolada ali, como sempre foi). Usado só pra
-  // entender referências tipo "muda pra 3" se referindo à troca anterior —
-  // nunca pra inventar dado novo que não esteja em nenhum deles.
   const historico = Array.isArray(body.historico) ? body.historico.slice(-12) : [];
 
   if (!texto) return res.status(400).json({ ok: false, error: 'Falta o texto' });
@@ -171,11 +168,6 @@ module.exports = async (req, res) => {
     const listaCardapioKg = cardapioKg.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}] — R$ ${it.precoPorKg.toFixed(2)}/kg`
     ).join('\n');
-    const blocoFichas = comFicha.length
-      ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
-      : '(nenhum item com ficha técnica cadastrada)';
-    const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
-
     const blocoHistorico = historico.length
       ? '\n\nHISTÓRICO RECENTE DESTA CONVERSA (mais antigo primeiro):\n' +
         historico.map((h) => `${h.autor === 'usuario' ? 'Funcionário' : h.autor === 'sistema' ? 'Sistema' : 'Você'}: ${h.texto}`).join('\n') +
@@ -186,26 +178,8 @@ module.exports = async (req, res) => {
         'PERGUNTA, não como novo pedido/cancelamento.'
       : '';
 
-    // Baixa cada arquivo e converte em base64 pro Gemini "ver" de verdade —
-    // mesmo mecanismo já usado no app de Treinamentos. Arquivo que falhar
-    // ao baixar é pulado (não derruba a resposta inteira por causa de um
-    // arquivo só). Limite de 10 por pergunta, só por segurança.
-    const arquivosPraUsar = (arquivos || []).slice(0, 10);
-    const partesArquivos = [];
-    for (const a of arquivosPraUsar) {
-      try {
-        const r = await fetch(a.url);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length > 8 * 1024 * 1024) throw new Error('arquivo grande demais');
-        partesArquivos.push({ text: `Arquivo anexado: "${a.nome}"` });
-        partesArquivos.push({ inline_data: { mime_type: a.tipo, data: buf.toString('base64') } });
-      } catch (e) {
-        console.error('[assistente-garcom] falhou ao carregar arquivo', a.nome, e.message);
-      }
-    }
-
-    const prompt =
+    // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
+    const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
 ser UMA DAS TRÊS COISAS:
 
@@ -219,15 +193,9 @@ ser UMA DAS TRÊS COISAS:
 Decida qual das três é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
-SE FOR DÚVIDA:
-{"tipo":"pergunta","resposta":"texto da resposta, até 2 frases, português do Brasil"}
-Responda SOMENTE com base nas fichas técnicas, na base de conhecimento e
-nos arquivos anexados abaixo (se houver). NUNCA invente um valor técnico.
-Se não estiver cadastrado nem nos arquivos, diga isso claramente. SEMPRE
-que a resposta vier de um arquivo anexado (imagem ou PDF), é OBRIGATÓRIO
-citar o nome dele EXATAMENTE como foi dado no texto "Arquivo anexado:
-..." — sem alterar maiúscula/minúscula, sem abreviar, em algum ponto da
-resposta. Isso vale tanto pra imagem quanto pra PDF.
+SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
+seguinte, com mais informação disponível — aqui é só classificar):
+{"tipo":"pergunta"}
 
 SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
@@ -258,23 +226,26 @@ SE FOR PEDIDO:
   quando ele disser peso/gramas (ex: "350 gramas de buffet na 10"). NUNCA
   preencha os dois ao mesmo tempo. Itens por kg NÃO têm "quantidade" nem
   "obs" — ignore esses campos pra eles.
-- ATALHO COMUM PRA ITEM POR KG: garçom apressado costuma digitar/falar só
-  números, sem citar o nome do produto — ex: "34,15-26", "34,15 - 26",
-  "24,32 mesa 10", "17,90, 5". Nesse padrão (um número com vírgula/decimal
-  + um número inteiro separados por traço, vírgula, espaço ou "mesa"), o
-  número COM decimal É o valor em reais da pesagem, e o número INTEIRO é
-  a mesa — NUNCA o contrário, e nunca duas mesas. Se a lista "CARDÁPIO POR
-  KG" tiver exatamente UM item, interprete esse padrão como um pedido
-  desse item usando "valorTotal". Se a lista por kg tiver mais de um item
-  e não der pra saber qual dos dois pelo texto, retorne com itemId null
-  e nomeDigitado "valor da pesagem sem produto identificado" em vez de
-  chutar qual dos dois é.
+- ATALHO COMUM PRA ITEM POR KG, PRIORIDADE ALTA: garçom apressado costuma
+  digitar/falar SÓ NÚMEROS, sem citar o nome do produto — ex: "34,15-26",
+  "34,15 - 26", "24,32 mesa 10", "17,90, 5", "29,90 na mesa 8". Mesmo SEM
+  nenhuma palavra de comida, esse padrão (um número com vírgula/decimal +
+  um número inteiro, separados por traço, vírgula, espaço ou "mesa") É um
+  pedido de item por kg: o número COM decimal é o valor em reais da
+  pesagem, o número INTEIRO é a mesa — NUNCA o contrário, nunca duas
+  mesas. Se a lista "CARDÁPIO POR KG" tiver exatamente UM item, SEMPRE
+  interprete esse padrão como pedido desse item usando "valorTotal" —
+  não precisa o funcionário citar o nome do prato nenhuma vez. Se a lista
+  por kg tiver mais de um item e não der pra saber qual dos dois pelo
+  texto, retorne com itemId null e nomeDigitado "valor da pesagem sem
+  produto identificado" em vez de chutar qual dos dois é.
 - NUNCA ESCOLHA UM ITEM (por unidade OU por kg) QUE NÃO FOI CLARAMENTE
   MENCIONADO NO TEXTO, só porque "tem que escolher algum". Isso vale
-  mesmo quando o texto é confuso ou só tem números. Errar escolhendo o
-  item errado é MUITO PIOR do que admitir que não entendeu — um item
-  errado pode sair pra cozinha com nome e preço que não têm nada a ver
-  com o que foi pedido. Na dúvida genuína, use "itemId": null.
+  mesmo quando o texto é confuso ou só tem números (fora do atalho de kg
+  acima). Errar escolhendo o item errado é MUITO PIOR do que admitir que
+  não entendeu — um item errado pode sair pra cozinha com nome e preço
+  que não têm nada a ver com o que foi pedido. Na dúvida genuína, use
+  "itemId": null.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",
@@ -293,10 +264,6 @@ SE FOR CANCELAMENTO:
   realmente está na conta daquela mesa agora).
 - Cada combinação mesa+item é um objeto separado.
 
-FICHAS TÉCNICAS DE ITENS:
-${blocoFichas}${blocoGeral}
-${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}
-
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
 ${listaCardapio}
 ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
@@ -304,27 +271,16 @@ ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM P
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
-    const parts = [{ text: prompt }, ...partesArquivos];
-
-    const geminiResp = await chamarGeminiComRetry(apiKey, { contents: [{ parts: parts }] });
-
-    if (!geminiResp.ok) {
-      const errTxt = await geminiResp.text().catch(() => '');
-      console.error('[assistente-garcom] Gemini falhou mesmo após tentar de novo:', geminiResp.status, errTxt);
+    const r1 = await textoDoGemini(apiKey, [{ text: promptEtapa1 }]);
+    if (!r1.ok) {
       return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
     }
 
-    const data = await geminiResp.json();
-    let textoResposta = (data.candidates && data.candidates[0] && data.candidates[0].content &&
-      data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
-      data.candidates[0].content.parts[0].text) || '';
-    textoResposta = textoResposta.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-
     let parsed;
     try {
-      parsed = JSON.parse(textoResposta);
+      parsed = JSON.parse(r1.texto);
     } catch (e) {
-      console.error('[assistente-garcom] JSON inválido:', textoResposta);
+      console.error('[assistente-garcom] JSON inválido (etapa 1):', r1.texto);
       return res.status(200).json({ ok: true, tipo: 'pergunta', resposta: 'Não consegui entender. Tenta reformular.' });
     }
 
@@ -334,19 +290,15 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const mesa = parseInt(p.mesa, 10);
         if (isNaN(mesa)) return null;
 
-        // ── Item por kg (prato de buffet pesado) — formato separado ──
         if (p.tipoVenda === 'kg') {
           const itemKg = p.itemId ? cardapioKg.find((c) => c.id === p.itemId) : null;
           if (!itemKg) {
-            return {
-              mesa, tipoVenda: 'kg', encontrado: false,
-              nomeDigitado: p.nomeDigitado || null,
-            };
+            return { mesa, tipoVenda: 'kg', encontrado: false, nomeDigitado: p.nomeDigitado || null };
           }
           let valorTotal = null;
           let pesoGramas = null;
           if (typeof p.valorTotal === 'number' && p.valorTotal > 0) {
-            valorTotal = Math.round(p.valorTotal * 100) / 100; // confia no valor dito (já saiu da balança)
+            valorTotal = Math.round(p.valorTotal * 100) / 100;
           } else if (typeof p.pesoGramas === 'number' && p.pesoGramas > 0) {
             pesoGramas = Math.round(p.pesoGramas);
             valorTotal = Math.round((pesoGramas / 1000) * itemKg.precoPorKg * 100) / 100;
@@ -361,7 +313,6 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           };
         }
 
-        // ── Item normal (por unidade) ──
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
         const item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
         return {
@@ -389,12 +340,64 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return res.status(200).json({ ok: true, tipo: 'cancelamento', itens: resultado });
     }
 
-    // Default: trata como pergunta (cobre tipo==="pergunta" e qualquer formato inesperado)
-    const respostaTexto = (parsed.resposta || 'Não consegui gerar uma resposta agora.').trim();
-    // Comparação tolerante a maiúscula/minúscula — a IA às vezes cita o
-    // nome do arquivo com capitalização levemente diferente (mais comum
-    // em respostas vindas de PDF), e uma comparação exata deixava o botão
-    // "ver arquivo" de fora mesmo quando a resposta realmente veio dele.
+    // ═══ ETAPA 2 — só roda aqui: era dúvida de verdade. Agora sim busca
+    // fichas técnicas, base de conhecimento e arquivos, e baixa os
+    // arquivos (isso que é pesado) — nada disso rodou na Etapa 1. ═══
+    const blocoFichas = comFicha.length
+      ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
+      : '(nenhum item com ficha técnica cadastrada)';
+    const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
+
+    const arquivosPraUsar = (arquivos || []).slice(0, 10);
+    const partesArquivos = [];
+    for (const a of arquivosPraUsar) {
+      try {
+        const r = await fetch(a.url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 8 * 1024 * 1024) throw new Error('arquivo grande demais');
+        partesArquivos.push({ text: `Arquivo anexado: "${a.nome}"` });
+        partesArquivos.push({ inline_data: { mime_type: a.tipo, data: buf.toString('base64') } });
+      } catch (e) {
+        console.error('[assistente-garcom] falhou ao carregar arquivo', a.nome, e.message);
+      }
+    }
+
+    const promptEtapa2 =
+`Você é o assistente de um restaurante, respondendo a dúvida de um
+funcionário. Responda SOMENTE com base nas fichas técnicas, na base de
+conhecimento e nos arquivos anexados abaixo (se houver). NUNCA invente um
+valor técnico. Se não estiver cadastrado nem nos arquivos, diga isso
+claramente. SEMPRE que a resposta vier de um arquivo anexado (imagem ou
+PDF), é OBRIGATÓRIO citar o nome dele EXATAMENTE como foi dado no texto
+"Arquivo anexado: ..." — sem alterar maiúscula/minúscula, sem abreviar,
+em algum ponto da resposta.
+
+Responda em português do Brasil, em até 2 frases, direto ao ponto.
+Responda SOMENTE com um JSON válido, sem texto antes ou depois, sem
+marcação de código: {"resposta":"texto da resposta"}
+
+FICHAS TÉCNICAS DE ITENS:
+${blocoFichas}${blocoGeral}
+${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}${blocoHistorico}
+
+PERGUNTA (mensagem ATUAL do funcionário):
+"${texto}"`;
+
+    const parts2 = [{ text: promptEtapa2 }, ...partesArquivos];
+    const r2 = await textoDoGemini(apiKey, parts2);
+    if (!r2.ok) {
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
+    }
+
+    let parsed2;
+    try {
+      parsed2 = JSON.parse(r2.texto);
+    } catch (e) {
+      parsed2 = { resposta: r2.texto };
+    }
+
+    const respostaTexto = (parsed2.resposta || 'Não consegui gerar uma resposta agora.').trim();
     const respostaMin = respostaTexto.toLowerCase();
     const arquivoCitado = arquivosPraUsar.find((a) => respostaMin.indexOf(a.nome.toLowerCase()) >= 0);
     return res.status(200).json({

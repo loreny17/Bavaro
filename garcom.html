@@ -19721,6 +19721,14 @@ function _renderDraftsPedidoIA(){
         '<div style="flex:1;font-size:0.8rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div></div>' +
       '</div>';
     }
+    if(p.tipoVenda === 'kg'){
+      var pesoHtml = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
+      return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+        '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
+        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + '</div>' +
+        '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
+      '</label>';
+    }
     var obsHtml = p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(p.obs) + '</div>' : '';
     return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
@@ -19754,7 +19762,11 @@ function confirmarEnviarPedidosIA(){
   var porMesa = {};
   selecionados.forEach(function(p){
     if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
-    porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '' });
+    if(p.tipoVenda === 'kg'){
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco });
+    } else {
+      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '' });
+    }
   });
   var mesas = Object.keys(porMesa);
   var resultados = [];
@@ -20013,14 +20025,30 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
     var _agoraPedido = Date.now();
     var _pedidoIdTemp = fbDb.collection('pedidos').doc().id;
     var itensPedido = itensCarrinho.map(function(it){
+      var chaveItem = _pedidoIdTemp + '_' + Math.random().toString(36).slice(2,8);
+      // Item por kg (ex: prato de buffet pesado) usa um formato diferente
+      // do item por unidade: "preco" já é o valor final da porção (peso ×
+      // preço/kg), não um preço multiplicado por quantidade — mesmo
+      // formato exato usado quando o garçom pesa na balança manualmente,
+      // pra relatório/impressão/fechamento tratarem igual os dois casos.
+      if(it.tipoVenda === 'kg'){
+        return {
+          id: it.id, nome: it.nome, tipoVenda: 'kg',
+          peso: it.peso || 0, precoBase: it.precoBase || 0,
+          preco: it.preco || 0, extras: 0, qtd: 1, obs: it.obs || '',
+          selecoes: [], pessoa: '',
+          itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
+        };
+      }
       return {
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
         selecoes: [], precoBase: it.preco, extras: 0, pessoa: '',
-        itemKey: _pedidoIdTemp + '_' + Math.random().toString(36).slice(2,8),
-        cozinhaCriadoEm: _agoraPedido
+        itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
       };
     });
-    var totalPedido = itensPedido.reduce(function(acc,it){ return acc + (it.preco||0)*(it.qtd||1); }, 0);
+    var totalPedido = itensPedido.reduce(function(acc,it){
+      return acc + (it.preco||0) * (it.tipoVenda==='kg' ? 1 : (it.qtd||1));
+    }, 0);
 
     var pedido = {
       garcom: _nomeGarcom, mesa: mesaInt, restauranteId: _restauranteId,
@@ -20042,13 +20070,21 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
       decrementarEstoque(itensCarrinho, pedidoId);
 
       var itensConta = itensPedido.map(function(it){
-        return {
+        var item = {
           itemKey: it.itemKey, pedidoId: pedidoId,
           id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
           selecoes: [], pessoa: '', status: 'ativo', pagamentoId: null,
           adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
           teste: _modoTeste ? true : false
         };
+        // Mesmo tratamento do fluxo manual: preserva peso/preço-por-kg pra
+        // relatório e fechamento de conta reconhecerem como item por kg.
+        if(it.tipoVenda === 'kg' && it.peso){
+          item.tipoVenda = 'kg';
+          item.peso = it.peso;
+          item.precoBase = it.precoBase || 0;
+        }
+        return item;
       });
       return fbDb.runTransaction(function(tx){
         var contaRef = fbDb.collection('contas_mesa').doc(contaId);
@@ -20298,6 +20334,14 @@ function _renderMsgPedidoChat(msg){
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
         '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '</div></div>';
     }
+    if(p.tipoVenda === 'kg'){
+      var pesoHtml2 = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+        '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
+        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + '</div>' +
+        '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
+      '</label>';
+    }
     var obsHtml = p.obs ? '<div style="font-size:0.68rem;color:#f7a34f;margin-top:1px;">📝 ' + esc(p.obs) + '</div>' : '';
     return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
@@ -20334,7 +20378,11 @@ function _chatConfirmarPedido(msgId){
   var porMesa = {};
   selecionados.forEach(function(p){
     if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
-    porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'' });
+    if(p.tipoVenda === 'kg'){
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco });
+    } else {
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'' });
+    }
   });
   var mesas = Object.keys(porMesa);
   var resultados = [];
@@ -20490,9 +20538,9 @@ function enviarMensagemChat(){
       // Resumo em texto puro — é isso que a próxima pergunta vai "ver"
       // como contexto, pra entender "muda pra 3" se referindo a isto.
       var resumoPedido = itensPedido.map(function(p){
-        return p.encontrado
-          ? (p.quantidade + 'x ' + p.itemNome + ' - Mesa ' + p.mesa + (p.obs?' ('+p.obs+')':''))
-          : ('item não identificado: "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa);
+        if(!p.encontrado) return 'item não identificado: "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa;
+        if(p.tipoVenda === 'kg') return p.itemNome + (p.peso?' ('+p.peso+'g)':'') + ' - R$ ' + fmtPreco(p.itemPreco||0) + ' - Mesa ' + p.mesa;
+        return p.quantidade + 'x ' + p.itemNome + ' - Mesa ' + p.mesa + (p.obs?' ('+p.obs+')':'');
       }).join('; ');
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();

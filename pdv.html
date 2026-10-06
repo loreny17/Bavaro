@@ -829,6 +829,12 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">O garçom pode perguntar pro assistente (IBU, teor alcoólico, alérgenos...) e ele responde só com o que estiver escrito aqui — sem isso, ele diz que não sabe.</div>
       </div>
       <div class="f-grupo">
+        <label class="f-label">Preço por horário (opcional)</label>
+        <div style="font-size:0.7rem;color:var(--muted);margin-bottom:8px;">O preço acima vale até a primeira faixa abaixo começar. Ex: cadastra "15:00 → R$ 7,00" pra esse item passar a custar R$ 7,00 a partir das 15h, sozinho, todo dia — sem precisar vir aqui mudar na mão. Pode adicionar mais de uma faixa.</div>
+        <div id="item-faixas-horario-lista"></div>
+        <button type="button" onclick="adicionarFaixaHorario()" style="width:100%;background:var(--surface2);border:1px dashed var(--border2);color:var(--accent);border-radius:8px;padding:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.82rem;">+ Adicionar faixa de horário</button>
+      </div>
+      <div class="f-grupo">
         <label class="f-label">Código (opcional)</label>
         <input type="text" class="f-input" id="item-codigo" maxlength="20" placeholder="Ex: 001">
       </div>
@@ -1482,7 +1488,8 @@ function iniciarListeners(){
         combo: d.combo || [],
         controlarEstoque: d.controlarEstoque === true,
         estoque: d.estoque || 0,
-        fichaTecnica: d.fichaTecnica || ''
+        fichaTecnica: d.fichaTecnica || '',
+        precosPorHorario: d.precosPorHorario || []
       });
     });
     // Ordena por: 1) ordem (manual), 2) criadoEm desc (mais novo primeiro) como fallback
@@ -1684,6 +1691,58 @@ function alternarReordenarItens(){
 // ═══ MODAL ITEM ═══
 // ── COMBO: componentes de impressão dividida ──
 var _itemCombo = []; // [{nome, categoriaId, qtd}]
+var _itemFaixasHorario = []; // [{inicio:"15:00", preco:7.00}]
+
+function renderFaixasHorario(){
+  var box = document.getElementById('item-faixas-horario-lista');
+  if(!box) return;
+  if(!_itemFaixasHorario.length){
+    box.innerHTML = '';
+    return;
+  }
+  // Mostra sempre em ordem de horário — fica mais fácil de ler a "linha do tempo"
+  var comIndiceOriginal = _itemFaixasHorario.map(function(f,i){ return {f:f, i:i}; });
+  comIndiceOriginal.sort(function(a,b){ return (a.f.inicio||'').localeCompare(b.f.inicio||''); });
+  box.innerHTML = comIndiceOriginal.map(function(o){
+    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:7px;">' +
+      '<input type="time" value="' + (o.f.inicio||'') + '" onchange="_itemFaixasHorario[' + o.i + '].inicio=this.value" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.85rem;">' +
+      '<span style="color:var(--muted);font-size:0.8rem;">→ R$</span>' +
+      '<input type="text" inputmode="decimal" value="' + (o.f.preco!=null?String(o.f.preco).replace('.',','):'') + '" oninput="_itemFaixasHorario[' + o.i + '].preco=parseFloat(this.value.replace(\',\',\'.\'))||0" placeholder="0,00" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.85rem;">' +
+      '<button type="button" onclick="removerFaixaHorario(' + o.i + ')" style="background:none;border:none;color:var(--danger);font-size:1.1rem;cursor:pointer;padding:4px;">🗑️</button>' +
+    '</div>';
+  }).join('');
+}
+
+function adicionarFaixaHorario(){
+  _itemFaixasHorario.push({ inicio:'15:00', preco:0 });
+  renderFaixasHorario();
+}
+
+function removerFaixaHorario(idx){
+  _itemFaixasHorario.splice(idx, 1);
+  renderFaixasHorario();
+}
+
+// ═══ PREÇO POR HORÁRIO ═══
+// Calcula o preço que vale AGORA pra um item, considerando as faixas de
+// horário cadastradas (se tiver). Sem faixa cadastrada, comportamento
+// idêntico a sempre — só lê it.preco. Usado no momento de adicionar o
+// item ao pedido (trava o valor ali, não recalcula depois).
+function precoAtualDoItem(it){
+  var base = (it && it.preco) || 0;
+  var faixas = it && it.precosPorHorario;
+  if(!faixas || !faixas.length) return base;
+  var agora = new Date();
+  var minAgora = agora.getHours()*60 + agora.getMinutes();
+  var melhor = null, melhorMin = -1;
+  faixas.forEach(function(f){
+    if(!f || !f.inicio) return;
+    var partes = f.inicio.split(':');
+    var minF = (parseInt(partes[0],10)||0)*60 + (parseInt(partes[1],10)||0);
+    if(minF <= minAgora && minF > melhorMin){ melhor = f.preco; melhorMin = minF; }
+  });
+  return melhor !== null ? melhor : base;
+}
 function comboRender(){
   var box = document.getElementById('item-combo-lista');
   if(!box) return;
@@ -1721,6 +1780,8 @@ function abrirModalItem(){
   document.getElementById('item-preco').value = '';
   document.getElementById('item-descricao').value = '';
   document.getElementById('item-ficha-tecnica').value = '';
+  _itemFaixasHorario = [];
+  renderFaixasHorario();
   document.getElementById('item-codigo').value = '';
   document.getElementById('item-disponivel-toggle').classList.add('active');
   document.getElementById('item-pausado-toggle').classList.remove('active');
@@ -1752,6 +1813,8 @@ function editarItem(id){
   document.getElementById('item-preco').value = formatarPreco(i.preco);
   document.getElementById('item-descricao').value = i.descricao || '';
   document.getElementById('item-ficha-tecnica').value = i.fichaTecnica || '';
+  _itemFaixasHorario = (i.precosPorHorario || []).map(function(f){ return {inicio:f.inicio||'', preco:f.preco||0}; });
+  renderFaixasHorario();
   document.getElementById('item-codigo').value = i.codigo || '';
   document.getElementById('item-disponivel-toggle').classList.toggle('active', i.disponivel !== false);
   document.getElementById('item-pausado-toggle').classList.toggle('active', i.pausado === true);
@@ -2618,6 +2681,13 @@ function salvarItem(){
   if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
   if(isNaN(preco) || preco < 0){ showToast('⚠️ Preço inválido','#f7a34f'); return; }
   if(!categoria){ showToast('⚠️ Selecione uma categoria','#f7a34f'); return; }
+  // Valida as faixas de horário, se tiver alguma cadastrada
+  for(var fx=0; fx<_itemFaixasHorario.length; fx++){
+    var faixaChk = _itemFaixasHorario[fx];
+    if(!faixaChk.inicio){ showToast('⚠️ Preenche o horário de todas as faixas','#f7a34f'); return; }
+    if(isNaN(faixaChk.preco) || faixaChk.preco < 0){ showToast('⚠️ Preço inválido numa das faixas de horário','#f7a34f'); return; }
+  }
+  var precosPorHorario = _itemFaixasHorario.slice();
   // Foto: se não trocou e já tinha, mantém
   var foto = _fotoSelecionadaBase64;
   if(foto === null && _itemEditando) foto = _itemEditando.foto || '';
@@ -2633,7 +2703,7 @@ function salvarItem(){
   var ordemSugerido = ordemSugeridoEl ? (parseInt(ordemSugeridoEl.value)||99) : 99;
   var dados = {
     nome:nome, preco:preco, categoria:categoria, descricao:descricao,
-    fichaTecnica:fichaTecnica,
+    fichaTecnica:fichaTecnica, precosPorHorario:precosPorHorario,
     codigo:codigo, foto:foto, disponivel:disponivel,
     pausado: pausado,
     controlarEstoque: controlarEstoque,
@@ -5294,7 +5364,7 @@ function bufAddExtra(id){
   if(!it) return;
   var ex = _bufExtras.find(function(e){ return e.id === id; });
   if(ex) ex.qtd++;
-  else _bufExtras.push({id: it.id, nome: it.nome, preco: it.preco||0, qtd: 1});
+  else _bufExtras.push({id: it.id, nome: it.nome, preco: precoAtualDoItem(it), qtd: 1});
   try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
   bufAtualizar();
 }

@@ -10007,7 +10007,8 @@ function iniciarListeners(){
         pausado: v.pausado === true,
         pausadoAte: v.pausadoAte || null,
         controlarEstoque: v.controlarEstoque === true,
-        estoque: (typeof v.estoque === 'number') ? v.estoque : null
+        estoque: (typeof v.estoque === 'number') ? v.estoque : null,
+        precosPorHorario: v.precosPorHorario || []
       });
     });
     _itens.sort(function(a,b){
@@ -13035,13 +13036,14 @@ function adicionarAoCarrinho(){
     // unitário gravado embute os extras diluídos: total/qtd. A multiplicação
     // reconstrói o total exato ao centavo.
     var qtdFinal = Math.max(1, _qtdTemp||1);
-    var totalLinha = (_itemAberto.preco||0) * qtdFinal + extras;
+    var precoVigente = precoAtualDoItem(_itemAberto);
+    var totalLinha = precoVigente * qtdFinal + extras;
     itemCarrinho = {
       id: _itemAberto.id,
       nome: _itemAberto.nome,
       tipoVenda: 'unidade',
       preco: totalLinha / qtdFinal,
-      precoBase: _itemAberto.preco||0,
+      precoBase: precoVigente,
       extras: extras,
       qtd: qtdFinal,
       obs: obs,
@@ -14695,6 +14697,27 @@ function sair(){
 // ════════════════════════════════════════
 function fmtPreco(v){
   return parseFloat(v||0).toFixed(2).replace('.',',');
+}
+
+// ═══ PREÇO POR HORÁRIO ═══
+// Calcula o preço que vale AGORA pra um item, considerando as faixas de
+// horário cadastradas no PDV (se tiver). Sem faixa cadastrada, comportamento
+// idêntico a sempre — só lê it.preco. Aplicado no momento de adicionar o
+// item (trava o valor ali, não recalcula depois se o relógio virar).
+function precoAtualDoItem(it){
+  var base = (it && it.preco) || 0;
+  var faixas = it && it.precosPorHorario;
+  if(!faixas || !faixas.length) return base;
+  var agora = new Date();
+  var minAgora = agora.getHours()*60 + agora.getMinutes();
+  var melhor = null, melhorMin = -1;
+  faixas.forEach(function(f){
+    if(!f || !f.inicio) return;
+    var partes = f.inicio.split(':');
+    var minF = (parseInt(partes[0],10)||0)*60 + (parseInt(partes[1],10)||0);
+    if(minF <= minAgora && minF > melhorMin){ melhor = f.preco; melhorMin = minF; }
+  });
+  return melhor !== null ? melhor : base;
 }
 function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

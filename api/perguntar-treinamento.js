@@ -135,11 +135,14 @@ a um gerente — não tente adivinhar.
 Responda em português do Brasil, em até 3 frases, direto ao ponto, no tom de
 quem está ajudando um funcionário durante o serviço.
 
-Se a resposta vier de um procedimento de vídeo específico da lista abaixo,
-cite o título dele exatamente como está escrito. Se vier de um dos arquivos
-anexados (imagem ou PDF), cite o nome do arquivo exatamente como foi dado,
-em algum ponto da resposta — em qualquer um dos dois casos, assim a pessoa
-sabe onde encontrar a fonte completa.
+SEMPRE que a resposta vier de um procedimento de vídeo específico da lista
+abaixo, é OBRIGATÓRIO citar o título dele exatamente como está escrito.
+SEMPRE que vier de um dos arquivos anexados (imagem ou PDF), é OBRIGATÓRIO
+citar o nome do arquivo EXATAMENTE como foi dado no texto "Arquivo
+anexado: ..." — sem alterar maiúscula/minúscula, sem abreviar — em algum
+ponto da resposta. Isso vale igual pros dois casos (vídeo ou arquivo), e
+igual pra imagem ou PDF, assim a pessoa sempre sabe onde encontrar a fonte
+completa.
 
 PROCEDIMENTOS DE VÍDEOS CADASTRADOS:
 ${blocoVideos}${blocoDocumento}
@@ -169,8 +172,13 @@ ${pergunta}`;
 
     // Detecta qual vídeo OU arquivo a resposta citou (match pelo nome exato)
     // pra oferecer o botão de "ver a fonte completa".
-    let videoCitado = contexto.find((v) => resposta.indexOf(v.titulo) >= 0);
-    let arquivoCitado = arquivosPraUsar.find((a) => resposta.indexOf(a.nome) >= 0);
+    // Comparação tolerante a maiúscula/minúscula — mesma correção aplicada
+    // no app Garçom: a IA às vezes cita o nome com capitalização levemente
+    // diferente (mais comum em respostas vindas de PDF), e a comparação
+    // exata deixava o botão de fora mesmo quando a resposta vinha dali.
+    const respostaMin = resposta.toLowerCase();
+    let videoCitado = contexto.find((v) => respostaMin.indexOf(v.titulo.toLowerCase()) >= 0);
+    let arquivoCitado = arquivosPraUsar.find((a) => respostaMin.indexOf(a.nome.toLowerCase()) >= 0);
 
     return res.status(200).json({
       ok: true,

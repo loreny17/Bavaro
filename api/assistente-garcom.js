@@ -157,9 +157,11 @@ SE FOR DÚVIDA:
 {"tipo":"pergunta","resposta":"texto da resposta, até 2 frases, português do Brasil"}
 Responda SOMENTE com base nas fichas técnicas, na base de conhecimento e
 nos arquivos anexados abaixo (se houver). NUNCA invente um valor técnico.
-Se não estiver cadastrado nem nos arquivos, diga isso claramente. Se a
-resposta vier de um arquivo anexado, cite o nome dele exatamente como foi
-dado, em algum ponto da resposta.
+Se não estiver cadastrado nem nos arquivos, diga isso claramente. SEMPRE
+que a resposta vier de um arquivo anexado (imagem ou PDF), é OBRIGATÓRIO
+citar o nome dele EXATAMENTE como foi dado no texto "Arquivo anexado:
+..." — sem alterar maiúscula/minúscula, sem abreviar, em algum ponto da
+resposta. Isso vale tanto pra imagem quanto pra PDF.
 
 SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
@@ -256,7 +258,12 @@ TEXTO:
 
     // Default: trata como pergunta (cobre tipo==="pergunta" e qualquer formato inesperado)
     const respostaTexto = (parsed.resposta || 'Não consegui gerar uma resposta agora.').trim();
-    const arquivoCitado = arquivosPraUsar.find((a) => respostaTexto.indexOf(a.nome) >= 0);
+    // Comparação tolerante a maiúscula/minúscula — a IA às vezes cita o
+    // nome do arquivo com capitalização levemente diferente (mais comum
+    // em respostas vindas de PDF), e uma comparação exata deixava o botão
+    // "ver arquivo" de fora mesmo quando a resposta realmente veio dele.
+    const respostaMin = respostaTexto.toLowerCase();
+    const arquivoCitado = arquivosPraUsar.find((a) => respostaMin.indexOf(a.nome.toLowerCase()) >= 0);
     return res.status(200).json({
       ok: true,
       tipo: 'pergunta',

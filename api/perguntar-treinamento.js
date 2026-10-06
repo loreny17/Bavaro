@@ -38,6 +38,32 @@ function getDbTreinamentos() {
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'; // leve e barato — suficiente pra isto
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
+// ─── CHAMADA AO GEMINI COM REENVIO AUTOMÁTICO ───
+// A própria API do Gemini, de vez em quando, devolve um erro passageiro
+// (sobrecarga momentânea, limite de uso por segundo) — não é bug nosso.
+// Antes, isso virava "assistente indisponível" na hora, e a pessoa tinha
+// que perguntar de novo na mão pra funcionar. Agora o servidor tenta
+// sozinho, até 2 vezes a mais, com uma pausa curta entre tentativas.
+function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
+const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
+
+async function chamarGeminiComRetry(apiKey, body) {
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const resp = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) return resp;
+
+    ultimoErro = resp;
+    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break;
+    if (tentativa < 3) await _esperar(tentativa * 500);
+  }
+  return ultimoErro;
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Use POST' });
@@ -153,16 +179,12 @@ ${pergunta}`;
 
     const parts = [{ text: prompt }, ...partesArquivos];
 
-    const geminiResp = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: parts }] }),
-    });
+    const geminiResp = await chamarGeminiComRetry(apiKey, { contents: [{ parts: parts }] });
 
     if (!geminiResp.ok) {
       const errTxt = await geminiResp.text().catch(() => '');
-      console.error('[perguntar-treinamento] Gemini falhou:', geminiResp.status, errTxt);
-      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento (' + geminiResp.status + ').' });
+      console.error('[perguntar-treinamento] Gemini falhou mesmo após tentar de novo:', geminiResp.status, errTxt);
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
     }
 
     const data = await geminiResp.json();

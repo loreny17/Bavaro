@@ -35,6 +35,35 @@ const TENANT_PADRAO = 'tnt_molrfz1k_rznlgl';
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
+// ─── CHAMADA AO GEMINI COM REENVIO AUTOMÁTICO ───
+// A própria API do Gemini, de vez em quando, devolve um erro passageiro
+// (sobrecarga momentânea, limite de uso por segundo) — não é bug nosso, é
+// normal em qualquer API de IA. Antes, isso virava "assistente
+// indisponível" na hora, e a pessoa tinha que perguntar de novo na mão
+// pra funcionar (o que sempre funcionava, confirmando que era passageiro).
+// Agora o servidor tenta sozinho, até 2 vezes a mais, com uma pausa curta
+// entre tentativas — só erro de verdade (ou 3 tentativas sem sucesso)
+// chega a aparecer pro usuário.
+function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
+const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
+
+async function chamarGeminiComRetry(apiKey, body) {
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const resp = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) return resp;
+
+    ultimoErro = resp;
+    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break; // erro que não é passageiro — não adianta tentar de novo
+    if (tentativa < 3) await _esperar(tentativa * 500); // 500ms, depois 1000ms
+  }
+  return ultimoErro;
+}
+
 // ─── CACHE EM MEMÓRIA (por instância do servidor, curta duração) ───
 // Buscar cardápio+fichas+base geral do zero a cada pergunta é o que mais
 // pesa no tempo de resposta. Se duas perguntas chegarem com menos de 60s
@@ -198,16 +227,12 @@ TEXTO:
 
     const parts = [{ text: prompt }, ...partesArquivos];
 
-    const geminiResp = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: parts }] }),
-    });
+    const geminiResp = await chamarGeminiComRetry(apiKey, { contents: [{ parts: parts }] });
 
     if (!geminiResp.ok) {
       const errTxt = await geminiResp.text().catch(() => '');
-      console.error('[assistente-garcom] Gemini falhou:', geminiResp.status, errTxt);
-      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento.' });
+      console.error('[assistente-garcom] Gemini falhou mesmo após tentar de novo:', geminiResp.status, errTxt);
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
     }
 
     const data = await geminiResp.json();

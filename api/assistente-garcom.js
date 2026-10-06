@@ -133,6 +133,12 @@ module.exports = async (req, res) => {
   const tenantId = (body.tenantId || TENANT_PADRAO).toString();
   const restauranteId = (body.restauranteId || 'default').toString();
   const texto = (body.texto || '').toString().trim();
+  // Histórico curto da conversa atual (opcional — só o chat do app manda
+  // isso; a caixa simples da tela de mesas não manda, então cada pergunta
+  // continua sendo tratada isolada ali, como sempre foi). Usado só pra
+  // entender referências tipo "muda pra 3" se referindo à troca anterior —
+  // nunca pra inventar dado novo que não esteja em nenhum deles.
+  const historico = Array.isArray(body.historico) ? body.historico.slice(-12) : [];
 
   if (!texto) return res.status(400).json({ ok: false, error: 'Falta o texto' });
 
@@ -148,6 +154,16 @@ module.exports = async (req, res) => {
       ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
       : '(nenhum item com ficha técnica cadastrada)';
     const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
+
+    const blocoHistorico = historico.length
+      ? '\n\nHISTÓRICO RECENTE DESTA CONVERSA (mais antigo primeiro):\n' +
+        historico.map((h) => `${h.autor === 'usuario' ? 'Funcionário' : h.autor === 'sistema' ? 'Sistema' : 'Você'}: ${h.texto}`).join('\n') +
+        '\n\nUse este histórico SÓ pra entender referências à troca anterior ' +
+        '(ex: "muda pra 3", "na verdade era o IPA", "cancela aquele"). Nunca ' +
+        'repita uma ação que o histórico já mostra como CONFIRMADA — se o ' +
+        'funcionário só comentar sobre algo já confirmado, trate como ' +
+        'PERGUNTA, não como novo pedido/cancelamento.'
+      : '';
 
     // Baixa cada arquivo e converte em base64 pro Gemini "ver" de verdade —
     // mesmo mecanismo já usado no app de Treinamentos. Arquivo que falhar
@@ -226,9 +242,9 @@ ${blocoFichas}${blocoGeral}
 ${arquivosPraUsar.length ? `\n\n${arquivosPraUsar.length} arquivo(s) anexado(s) abaixo — leia o conteúdo deles diretamente.` : ''}
 
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
-${listaCardapio}
+${listaCardapio}${blocoHistorico}
 
-TEXTO:
+TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
     const parts = [{ text: prompt }, ...partesArquivos];

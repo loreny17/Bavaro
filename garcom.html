@@ -1117,7 +1117,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
   <div class="mesas-scroll-wrapper" id="mesas-scroll-wrapper">
     <!-- Caixa ÚNICA do assistente — pergunta OU pedido, a IA decide. -->
     <div id="caixa-assistente-garcom" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:12px 14px;margin:16px 16px 4px;">
-      <div style="font-weight:700;font-size:0.82rem;margin-bottom:8px;">🤖 Assistente — pergunte ou lance um pedido</div>
+      <div onclick="abrirChatAssistente()" style="font-weight:700;font-size:0.82rem;margin-bottom:8px;cursor:pointer;">🤖 Assistente — pergunte ou lance um pedido <span style="color:var(--muted);font-weight:400;font-size:0.72rem;">(toque pra abrir o chat completo)</span></div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="input-assistente-garcom" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
         <button id="btn-voz-assistente-garcom" onclick="iniciarVozAssistenteGarcom()" title="Falar"
@@ -1288,7 +1288,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       </button>
 
       <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirChatAssistente()">
-        <span style="font-size:1.4rem;">💬</span>
+        <img src="/assistente-avatar.png" style="width:28px;height:28px;border-radius:50%;flex-shrink:0;" onerror="this.outerHTML='<span style=\'font-size:1.4rem;\'>💬</span>'">
         <div style="flex:1;text-align:left;">
           <div style="font-weight:600;">Assistente (chat) <span style="background:var(--accent);color:#000;font-size:0.6rem;font-weight:800;border-radius:6px;padding:1px 5px;margin-left:4px;">NOVO</span></div>
           <div style="font-size:0.72rem;color:var(--muted);">Testando um jeito novo de conversar com a IA</div>
@@ -20080,6 +20080,11 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
   .chat-bolha-assistente{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
     border-radius:16px 16px 16px 4px;padding:10px 14px;font-size:0.88rem;line-height:1.45;}
   .chat-bolha-sistema{align-self:center;font-size:0.78rem;padding:7px 12px;border-radius:20px;margin-bottom:10px;}
+  .chat-digitando{display:flex;gap:4px;align-items:center;padding:4px 2px;}
+  .chat-digitando span{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block;animation:chatPulso 1.1s infinite ease-in-out;}
+  .chat-digitando span:nth-child(2){animation-delay:0.15s;}
+  .chat-digitando span:nth-child(3){animation-delay:0.3s;}
+  @keyframes chatPulso{0%,60%,100%{opacity:0.3;transform:translateY(0);}30%{opacity:1;transform:translateY(-3px);}}
 </style>
 
 <div id="tela-chat-assistente" style="display:none;position:fixed;inset:0;z-index:999000;background:var(--bg);flex-direction:column;">
@@ -20090,7 +20095,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:0.03em;">ASSISTENTE BÁVARO</div>
       <div style="font-size:0.72rem;color:var(--muted);">Pergunte, peça ou cancele um item</div>
     </div>
-    <button onclick="fecharChatAssistente()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:34px;height:34px;border-radius:50%;font-size:1.2rem;cursor:pointer;flex-shrink:0;">×</button>
+    <button onclick="fecharChatAssistente()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:8px 13px;border-radius:20px;font-size:0.82rem;font-weight:700;cursor:pointer;flex-shrink:0;display:flex;align-items:center;gap:5px;font-family:inherit;">‹ Voltar</button>
   </div>
 
   <div id="chat-mensagens" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch;"></div>
@@ -20114,25 +20119,43 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
 //  próprio estado dentro dela mesma — assim várias conversas antigas
 //  podem conviver no histórico sem uma interferir na outra.
 // ═══════════════════════════════════════════════════════════════
-var _chatHistorico = [];
+var _chatHistorico = [];     // pra tela (inclui "carregando", resultado, etc)
+var _chatContexto = [];      // versão enxuta só com o conteúdo, mandada
+                              // pro servidor a cada pergunta nova, pra IA
+                              // entender frases como "muda pra 3"
 var _chatIdContador = 0;
 var _reconhecimentoVozChat = null;
+
+// Acrescenta uma troca no contexto enxuto e mantém só as últimas 12
+// entradas (6 idas e vindas) — suficiente pra entender referência à
+// pergunta anterior, sem deixar a mensagem enviada pro servidor enorme.
+function _chatAdicionarContexto(autor, texto){
+  _chatContexto.push({ autor: autor, texto: texto });
+  if(_chatContexto.length > 12) _chatContexto = _chatContexto.slice(-12);
+}
 
 function _novoIdChat(){ return 'm' + (++_chatIdContador) + '_' + Date.now(); }
 
 function abrirChatAssistente(){
   var tela = document.getElementById('tela-chat-assistente');
   tela.style.display = 'flex';
-  if(!_chatHistorico.length){
-    _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-      texto:'Oi! Pode perguntar sobre um produto, pedir pra lançar um pedido, ou cancelar um item. Em que posso ajudar?' });
-  }
+  // Conversa sempre começa do zero — evita o histórico crescer pra sempre
+  // e ficar pesado/confuso depois de um tempo de uso.
+  _chatHistorico = [];
+  _chatContexto = [];
+  _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
+    texto:'Oi! Pode perguntar sobre um produto, pedir pra lançar um pedido, ou cancelar um item. Em que posso ajudar?' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 }
 
 function fecharChatAssistente(){
   document.getElementById('tela-chat-assistente').style.display = 'none';
+  // Garante que volta pro mapa de mesas, não importa de onde o chat tenha
+  // sido aberto — o menu lateral só existe na tela de mesas hoje, mas isso
+  // deixa explícito e à prova de mudança futura.
+  var msEl = document.getElementById('mesa-screen');
+  if(msEl) msEl.classList.remove('hidden');
 }
 
 function _chatScrollParaBaixo(){
@@ -20153,7 +20176,7 @@ function _renderMensagemChat(msg){
   }
   if(msg.tipo === 'carregando'){
     return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
-      '<div class="chat-bolha-assistente" style="color:var(--muted);">Pensando...</div></div>';
+      '<div class="chat-bolha-assistente"><div class="chat-digitando"><span></span><span></span><span></span></div></div></div>';
   }
   if(msg.tipo === 'texto-assistente'){
     var arquivoBtn = '';
@@ -20228,9 +20251,11 @@ function _chatConfirmarPedido(msgId){
   function processarProxima(i){
     if(i >= mesas.length){
       msg.enviado = true;
-      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: resultados.map(function(r){
+      var linhasResultado = resultados.map(function(r){
         return { ok:r.ok, texto: 'Mesa ' + r.mesa + (r.ok ? (r.numero?' — pedido #'+r.numero:'') + ' enviado' : ': ' + r.erro) };
-      })});
+      });
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: linhasResultado });
+      _chatAdicionarContexto('sistema', 'Pedido já foi CONFIRMADO E ENVIADO: ' + linhasResultado.map(function(l){ return l.texto; }).join('; '));
       renderChatMensagens();
       if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
       return;
@@ -20313,9 +20338,11 @@ function _chatExecutarCancelamento(msg, selecionados){
   function processarProximo(i){
     if(i >= selecionados.length){
       msg.enviado = true;
-      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: resultados.map(function(r){
-        return { ok:r.ok, texto: esc(r.item) + ' — Mesa ' + r.mesa + (r.ok ? ' cancelado' : ': ' + r.erro) };
-      })});
+      var linhasResultadoCancel = resultados.map(function(r){
+        return { ok:r.ok, texto: r.item + ' — Mesa ' + r.mesa + (r.ok ? ' cancelado' : ': ' + r.erro) };
+      });
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: linhasResultadoCancel });
+      _chatAdicionarContexto('sistema', 'Cancelamento já foi CONFIRMADO: ' + linhasResultadoCancel.map(function(l){ return l.texto; }).join('; '));
       renderChatMensagens();
       if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
       Object.keys(pedidosPraReimprimir).forEach(function(pedidoId){
@@ -20342,6 +20369,12 @@ function enviarMensagemChat(){
   if(!texto) return;
   input.value = '';
 
+  // Captura o histórico ANTES de somar essa mensagem nova — é o que vai
+  // de contexto pro servidor entender referências ("muda pra 3" só faz
+  // sentido junto da troca anterior, que ainda não inclui esta mensagem).
+  var historicoParaEnviar = _chatContexto.slice();
+  _chatAdicionarContexto('usuario', texto);
+
   _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
   var idCarregando = _novoIdChat();
   _chatHistorico.push({ id:idCarregando, tipo:'carregando' });
@@ -20350,7 +20383,7 @@ function enviarMensagemChat(){
   fetch('/api/assistente-garcom', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto })
+    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar })
   }).then(function(r){ return r.json(); }).then(function(j){
     _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
 
@@ -20363,12 +20396,21 @@ function enviarMensagemChat(){
     if(j.tipo === 'pedido'){
       var itensPedido = (j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; });
       _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: itensPedido });
+      // Resumo em texto puro — é isso que a próxima pergunta vai "ver"
+      // como contexto, pra entender "muda pra 3" se referindo a isto.
+      var resumoPedido = itensPedido.map(function(p){
+        return p.encontrado
+          ? (p.quantidade + 'x ' + p.itemNome + ' - Mesa ' + p.mesa + (p.obs?' ('+p.obs+')':''))
+          : ('item não identificado: "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa);
+      }).join('; ');
+      _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
 
     } else if(j.tipo === 'cancelamento'){
       var itensCancel = j.itens || [];
       if(!itensCancel.length){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhum cancelamento nesse texto.' });
+        _chatAdicionarContexto('assistente', 'Não identifiquei nenhum cancelamento nesse texto.');
         renderChatMensagens();
         return;
       }
@@ -20378,6 +20420,12 @@ function enviarMensagemChat(){
       _resolverItensCancelamento(itensCancel).then(function(resolvidos){
         _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando2; });
         _chatHistorico.push({ id:_novoIdChat(), tipo:'cancelamento', itens: resolvidos });
+        var resumoCancel = resolvidos.map(function(p){
+          return p.encontrado
+            ? ('cancelar ' + p.itemQtd + 'x ' + p.itemNome + ' - Mesa ' + p.mesa)
+            : ('item não encontrado: "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa);
+        }).join('; ');
+        _chatAdicionarContexto('assistente', 'Entendi este cancelamento (ainda não confirmado): ' + resumoCancel);
         renderChatMensagens();
       }).catch(function(e){
         _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando2; });
@@ -20388,6 +20436,7 @@ function enviarMensagemChat(){
     } else {
       _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:j.resposta,
         arquivoUrl:j.arquivoUrl, arquivoNome:j.arquivoNome, arquivoTipo:j.arquivoTipo });
+      _chatAdicionarContexto('assistente', j.resposta);
       renderChatMensagens();
     }
   }).catch(function(){

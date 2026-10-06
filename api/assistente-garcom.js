@@ -103,7 +103,16 @@ async function obterContexto(db, tenantId, restauranteId) {
     const it = doc.data() || {};
     if (it.disponivel === false) return;
     if (it.tipoVenda !== 'kg') {
-      cardapioCompleto.push({ id: doc.id, nome: it.nome || '(sem nome)', preco: typeof it.preco === 'number' ? it.preco : 0 });
+      // A Ficha técnica também entra aqui (resumida) — é o que permite
+      // diferenciar itens de MESMO NOME na hora de montar um pedido (ex:
+      // três itens chamados "Alcatra Grelhada", cada um com uma nota
+      // diferente escrita na ficha, tipo "Alcatra do dia").
+      cardapioCompleto.push({
+        id: doc.id,
+        nome: it.nome || '(sem nome)',
+        preco: typeof it.preco === 'number' ? it.preco : 0,
+        dica: (it.fichaTecnica || '').trim().slice(0, 100),
+      });
     }
     if (it.fichaTecnica && it.fichaTecnica.trim()) {
       comFicha.push({ nome: it.nome || '(sem nome)', ficha: it.fichaTecnica.trim() });
@@ -149,7 +158,9 @@ module.exports = async (req, res) => {
     const db = getDb();
     const { documentoGeral, cardapioCompleto, comFicha, arquivos } = await obterContexto(db, tenantId, restauranteId);
 
-    const listaCardapio = cardapioCompleto.map((it, i) => `${i + 1}. ${it.nome} [id:${it.id}]`).join('\n');
+    const listaCardapio = cardapioCompleto.map((it, i) =>
+      `${i + 1}. ${it.nome} [id:${it.id}]${it.dica ? ` — ${it.dica}` : ''}`
+    ).join('\n');
     const blocoFichas = comFicha.length
       ? comFicha.map((it, i) => `[${i + 1}] ${it.nome}\n${it.ficha}`).join('\n\n')
       : '(nenhum item com ficha técnica cadastrada)';
@@ -219,6 +230,12 @@ SE FOR PEDIDO:
   escrita exata. Só use "itemId": null (com "nomeDigitado" preenchido) se
   genuinamente não conseguir identificar qual item da lista é, mesmo
   considerando possível erro de voz.
+- Pode haver mais de um item com o MESMO NOME no cardápio — nesse caso,
+  cada um deles tem uma "dica" diferente (texto depois do "—" na lista),
+  que é como esse item específico costuma ser pedido. Se o funcionário
+  mencionar algo que bate com a dica de um deles (ex: "alcatra do dia"
+  batendo com a dica "Alcatra do dia"), escolha ESSE id específico, não
+  o primeiro da lista com aquele nome.
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",

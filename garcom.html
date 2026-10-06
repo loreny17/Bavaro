@@ -16,7 +16,12 @@
       var t = localStorage.getItem('garcom_tema') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
       var mt = document.getElementById('meta-theme-color');
-      if(mt) mt.setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0d');
+      // Modo AMOLED: preto absoluto no lugar do cinza-escuro padrão — só
+      // faz sentido junto do tema escuro. Aplicado aqui, antes do CSS
+      // pintar a tela, pra nunca piscar o cinza antes de virar preto.
+      var amoledAtivo = localStorage.getItem('garcom_amoled') === '1';
+      if(amoledAtivo) document.documentElement.setAttribute('data-amoled','on');
+      if(mt) mt.setAttribute('content', t === 'light' ? '#ffffff' : (amoledAtivo ? '#000000' : '#0d0d0d'));
       // Aplica cor de acento customizada imediatamente (antes do CSS carregar)
       var corCustom = localStorage.getItem('garcom_cor_accent');
       if(corCustom){
@@ -159,6 +164,11 @@ html[data-theme="light"]{
   --text:#1a1a1a; --muted:#6b7280; --accent:#b8862e; --accent2:#a47525;
   --danger:#dc2626; --success:#16a34a; --warning:#d97706;
 }
+/* ─── Modo AMOLED (preto absoluto, só com o tema escuro) ─── */
+html[data-theme="dark"][data-amoled="on"]{
+  --bg:#000000; --surface:#0a0a0a; --surface2:#121212; --surface3:#1a1a1a;
+}
+
 /* Ajuste de logos/imagens no modo claro (deixa o gradient escuro de login funcionar) */
 html[data-theme="light"] #login-screen{
   background:radial-gradient(ellipse at 50% -5%,#fff7e6 0%,#fafafa 55%,#f1f1f1 100%);
@@ -4950,6 +4960,7 @@ function renderAparenciaModal(){
           '<button onclick="setTema(\'dark\');renderAparenciaModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid '+(temaAtual==='dark'?'var(--accent)':'var(--border2)')+';background:var(--bg);color:var(--text);font-family:inherit;font-weight:600;font-size:0.88rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">🌙 Escuro</button>' +
           '<button onclick="setTema(\'light\');renderAparenciaModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid '+(temaAtual==='light'?'var(--accent)':'var(--border2)')+';background:var(--bg);color:var(--text);font-family:inherit;font-weight:600;font-size:0.88rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">☀️ Claro</button>' +
         '</div>' +
+        (temaAtual === 'dark' ? toggleRow('⚫', 'Modo AMOLED', 'Preto absoluto — economiza bateria em tela AMOLED', _amoledAtivo(), 'alternarAmoled') : '') +
 
         // ─── COR DO APP ───
         '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin:0 2px 8px;">Cor principal</div>' +
@@ -6046,6 +6057,23 @@ function setTema(tema){
   atualizarUITema();
   if(typeof showToast === 'function'){
     showToast(tema === 'light' ? '☀️ Modo claro ativado' : '🌙 Modo escuro ativado', '#4ade80', 1500);
+  }
+}
+
+function _amoledAtivo(){
+  return document.documentElement.getAttribute('data-amoled') === 'on';
+}
+
+function alternarAmoled(){
+  var ligar = !_amoledAtivo();
+  if(ligar) document.documentElement.setAttribute('data-amoled','on');
+  else document.documentElement.removeAttribute('data-amoled');
+  try{ localStorage.setItem('garcom_amoled', ligar ? '1' : '0'); }catch(e){}
+  var mt = document.getElementById('meta-theme-color');
+  var temaAtual = document.documentElement.getAttribute('data-theme') || 'dark';
+  if(mt) mt.setAttribute('content', temaAtual === 'light' ? '#ffffff' : (ligar ? '#000000' : '#0d0d0d'));
+  if(typeof showToast === 'function'){
+    showToast(ligar ? '⚫ Modo AMOLED ativado' : '⚫ Modo AMOLED desativado', '#4ade80', 1500);
   }
 }
 

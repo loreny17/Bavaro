@@ -987,6 +987,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-storage-compat.min.js"></script>
 <!-- QR Code (leve) -->
 <!-- QR Code: tenta cdnjs (já liberado nas regras), com fallback jsdelivr -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -1062,7 +1063,7 @@ var firebaseConfig = {
   appId: "1:510785409925:web:e687e387509fb0605b6aec"
 };
 
-var fbDb = null, fbAuth = null;
+var fbDb = null, fbAuth = null, fbStorage = null;
 var _user = null;       // {uid, email}
 var _tenantId = null;   // tenant id do usuário logado
 var _restauranteAtivo = null; // {id, nome, emoji}
@@ -1085,6 +1086,7 @@ window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
+    fbStorage = firebase.storage();
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // NÃO usamos mais persistence com synchronizeTabs (multi-aba).
     // No PWA isso causava o Firestore a usar uma sessão de auth antiga,
@@ -10915,16 +10917,28 @@ function abrirBaseConhecimentoIA(){
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9900;display:flex;align-items:center;justify-content:center;padding:16px;';
   mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
   mod.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;max-width:480px;width:100%;padding:18px;max-height:88vh;display:flex;flex-direction:column;">' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;max-width:480px;width:100%;padding:18px;max-height:88vh;overflow-y:auto;display:flex;flex-direction:column;">' +
       '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.25rem;color:var(--accent);margin-bottom:4px;">🤖 BASE DE CONHECIMENTO DA IA</div>' +
       '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Restaurante: ' + (_restauranteAtivo ? _restauranteAtivo.nome : '?') + '</div>' +
       '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:10px;">Cole aqui qualquer coisa que o assistente do app Garçom deva saber, fora de ficha técnica de item específico — horário, promoções, políticas, o que for. Ele consulta isto em TODA pergunta, junto das fichas técnicas de cada item.</div>' +
       '<textarea id="base-ia-texto" rows="10" placeholder="Ex: Happy hour de chopp das 17h às 19h, segunda a sexta.&#10;&#10;Troca de produto só em até 15 minutos após o pedido.&#10;&#10;(pode colar quantas informações quiser)" style="resize:vertical;width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:0.88rem;outline:none;font-family:inherit;"></textarea>' +
       '<button onclick="salvarBaseConhecimentoIA()" style="width:100%;margin-top:12px;background:var(--accent);border:none;color:#000;border-radius:10px;padding:13px;font-weight:800;cursor:pointer;font-family:inherit;">Salvar</button>' +
       '<div id="base-ia-status" style="font-size:0.74rem;color:var(--muted);margin-top:8px;"></div>' +
-      '<button onclick="document.getElementById(\'modal-base-ia\').remove()" style="width:100%;background:none;border:none;color:var(--muted);margin-top:8px;padding:8px;cursor:pointer;font-family:inherit;">Fechar</button>' +
+
+      '<div style="height:1px;background:var(--border2);margin:18px 0;"></div>' +
+
+      '<div style="font-weight:700;font-size:0.9rem;margin-bottom:6px;">📎 Arquivos (cardápios, tabelas, fotos...)</div>' +
+      '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:10px;">PNG, JPEG ou PDF até 8MB. A IA LÊ o conteúdo de verdade do arquivo — não precisa escrever nada explicando o que tem nele.</div>' +
+      '<div id="base-ia-lista-arquivos" style="margin-bottom:12px;"></div>' +
+      '<input type="text" id="base-ia-arq-nome" placeholder="Nome (ex: Cardápio de Almoço)" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:11px 12px;color:var(--text);font-size:0.86rem;outline:none;margin-bottom:8px;box-sizing:border-box;">' +
+      '<input type="file" id="base-ia-arq-file" accept="image/png,image/jpeg,.pdf,application/pdf" style="width:100%;color:var(--muted);font-size:0.8rem;margin-bottom:10px;">' +
+      '<button onclick="uploadArquivoBaseIA()" id="base-ia-btn-upload" style="width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;font-family:inherit;">Enviar arquivo</button>' +
+      '<div id="base-ia-arq-status" style="font-size:0.74rem;color:var(--muted);margin-top:8px;"></div>' +
+
+      '<button onclick="document.getElementById(\'modal-base-ia\').remove()" style="width:100%;background:none;border:none;color:var(--muted);margin-top:14px;padding:8px;cursor:pointer;font-family:inherit;">Fechar</button>' +
     '</div>';
   document.body.appendChild(mod);
+  carregarArquivosBaseIA();
 
   // Carrega o que já estiver salvo pra esse restaurante
   if(_restauranteAtivo){
@@ -10949,6 +10963,94 @@ function salvarBaseConhecimentoIA(){
       status.textContent = '❌ ' + e.message;
       showToast('❌ ' + e.message,'#f87171');
     });
+}
+
+// ═══ ARQUIVOS DA BASE DE CONHECIMENTO (imagens/PDF que a IA lê direto) ═══
+// Mesmo princípio do app de Treinamentos: o arquivo fica isolado numa
+// pasta própria ("assistente_garcom/") dentro do Storage deste mesmo
+// projeto — não mistura com nenhum outro uso que o Storage venha a ter.
+var _arquivosBaseIA = [];
+
+function _refArquivosBaseIA(){
+  return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteAtivo.id)
+    .collection('assistente_arquivos');
+}
+
+function carregarArquivosBaseIA(){
+  var box = document.getElementById('base-ia-lista-arquivos');
+  if(!_restauranteAtivo || !box) return;
+  box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Carregando...</div>';
+  _refArquivosBaseIA().get().then(function(snap){
+    _arquivosBaseIA = [];
+    snap.forEach(function(doc){ _arquivosBaseIA.push(Object.assign({id:doc.id}, doc.data())); });
+    _renderArquivosBaseIA();
+  }).catch(function(e){
+    box.innerHTML = '<div style="font-size:0.78rem;color:#f87171;">Erro: ' + e.message + '</div>';
+  });
+}
+
+function _renderArquivosBaseIA(){
+  var box = document.getElementById('base-ia-lista-arquivos');
+  if(!box) return;
+  if(!_arquivosBaseIA.length){ box.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);">Nenhum arquivo enviado ainda.</div>'; return; }
+  box.innerHTML = _arquivosBaseIA.map(function(a){
+    var icone = a.tipo === 'application/pdf' ? '📄' : '🖼️';
+    return '<div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:7px;">' +
+      '<a href="' + a.url + '" target="_blank" style="font-size:1.2rem;text-decoration:none;">' + icone + '</a>' +
+      '<div style="flex:1;font-size:0.82rem;">' + a.nome + '</div>' +
+      '<button onclick="excluirArquivoBaseIA(\'' + a.id + '\')" style="background:none;border:none;color:var(--muted);font-size:1.05rem;cursor:pointer;padding:4px;">🗑️</button>' +
+    '</div>';
+  }).join('');
+}
+
+function uploadArquivoBaseIA(){
+  if(!_restauranteAtivo){ showToast('❌ Nenhum restaurante ativo','#f87171'); return; }
+  var nome = document.getElementById('base-ia-arq-nome').value.trim();
+  var fileInput = document.getElementById('base-ia-arq-file');
+  var file = fileInput.files[0];
+  var status = document.getElementById('base-ia-arq-status');
+
+  if(!nome){ showToast('❌ Escreve um nome pro arquivo','#f87171'); return; }
+  if(!file){ showToast('❌ Escolhe um arquivo','#f87171'); return; }
+  var tiposAceitos = ['image/png', 'image/jpeg', 'application/pdf'];
+  if(tiposAceitos.indexOf(file.type) < 0){ showToast('❌ Só PNG, JPEG ou PDF','#f87171'); return; }
+  if(file.size > 8 * 1024 * 1024){ showToast('❌ Arquivo maior que 8MB','#f87171'); return; }
+
+  var btn = document.getElementById('base-ia-btn-upload');
+  btn.disabled = true;
+  status.textContent = 'Enviando...';
+
+  var caminho = 'assistente_garcom/' + _tenantId + '/' + _restauranteAtivo.id + '/' + Date.now() + '_' + file.name;
+  var ref = fbStorage.ref().child(caminho);
+  ref.put(file).then(function(snapshot){
+    return snapshot.ref.getDownloadURL();
+  }).then(function(url){
+    return _refArquivosBaseIA().add({ nome: nome, url: url, tipo: file.type, storagePath: caminho, criadoEm: Date.now() });
+  }).then(function(){
+    status.textContent = '✓ Enviado';
+    showToast('✓ Arquivo enviado','#4ade80');
+    document.getElementById('base-ia-arq-nome').value = '';
+    fileInput.value = '';
+    btn.disabled = false;
+    carregarArquivosBaseIA();
+  }).catch(function(e){
+    status.textContent = '❌ ' + e.message;
+    showToast('❌ ' + e.message,'#f87171');
+    btn.disabled = false;
+  });
+}
+
+function excluirArquivoBaseIA(id){
+  var a = _arquivosBaseIA.find(function(x){ return x.id === id; });
+  if(!a) return;
+  if(!confirm('Excluir "' + a.nome + '"?')) return;
+  var promessaStorage = a.storagePath ? fbStorage.ref().child(a.storagePath).delete().catch(function(){}) : Promise.resolve();
+  promessaStorage.then(function(){
+    return _refArquivosBaseIA().doc(id).delete();
+  }).then(function(){
+    showToast('✓ Arquivo excluído','#4ade80');
+    carregarArquivosBaseIA();
+  }).catch(function(e){ showToast('❌ ' + e.message,'#f87171'); });
 }
 
 function abrirSyncGoogleSheets(){

@@ -50,25 +50,43 @@ const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + 
 function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
 const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
 
+let _thinkingSuportado = true;
+
 async function chamarGeminiComRetry(apiKey, body) {
   let ultimoErro = null;
   for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const corpo = JSON.parse(JSON.stringify(body));
+    if (_thinkingSuportado) {
+      corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
+    }
     const resp = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(body),
+      body: JSON.stringify(corpo),
     });
     if (resp.ok) return resp;
 
+    // Se o modelo não aceitar o ajuste de "raciocínio", desliga e repete já.
+    if (resp.status === 400 && _thinkingSuportado) {
+      _thinkingSuportado = false;
+      tentativa--;
+      continue;
+    }
+
     ultimoErro = resp;
     if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break;
-    if (tentativa < 3) await _esperar(tentativa * 500);
+    if (tentativa < 3) await _esperar(tentativa * 400);
   }
   return ultimoErro;
 }
 
-async function textoDoGemini(apiKey, parts) {
-  const resp = await chamarGeminiComRetry(apiKey, { contents: [{ parts }] });
+async function textoDoGemini(apiKey, parts, maxTokens) {
+  const t0 = Date.now();
+  const resp = await chamarGeminiComRetry(apiKey, {
+    contents: [{ parts }],
+    generationConfig: { temperature: 0, maxOutputTokens: maxTokens || 1200, responseMimeType: 'application/json' },
+  });
+  console.log('[assistente-garcom] Gemini levou ' + (Date.now() - t0) + 'ms, status ' + resp.status);
   if (!resp.ok) {
     const errTxt = await resp.text().catch(() => '');
     console.error('[assistente-garcom] Gemini falhou mesmo após tentar de novo:', resp.status, errTxt);
@@ -84,7 +102,8 @@ async function textoDoGemini(apiKey, parts) {
 
 // ─── CACHE EM MEMÓRIA (por instância do servidor, curta duração) ───
 const _cacheContexto = {};
-const CACHE_TTL_MS = 60 * 1000;
+const _cacheArquivos = {};
+const CACHE_TTL_MS = 5 * 60 * 1000; // o aquecimento (a cada 4 min) renova antes de vencer
 
 async function obterContexto(db, tenantId, restauranteId) {
   const chave = tenantId + '|' + restauranteId;
@@ -321,7 +340,7 @@ ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM P
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
-    const r1 = await textoDoGemini(apiKey, [{ text: promptEtapa1 }]);
+    const r1 = await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
     if (!r1.ok) {
       return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
     }
@@ -400,19 +419,33 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
     const blocoGeral = documentoGeral ? `\n\nBASE DE CONHECIMENTO GERAL:\n${documentoGeral.slice(0, 40000)}` : '';
 
     const arquivosPraUsar = (arquivos || []).slice(0, 10);
-    const partesArquivos = [];
-    for (const a of arquivosPraUsar) {
+    const tArq = Date.now();
+    const resultadosArq = await Promise.all(arquivosPraUsar.map(async (a) => {
       try {
-        const r = await fetch(a.url);
+        const c = _cacheArquivos[a.url];
+        if (c && (Date.now() - c.em) < 30 * 60 * 1000) return { a, b64: c.b64 };
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(a.url, { signal: ctl.signal });
+        clearTimeout(to);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const buf = Buffer.from(await r.arrayBuffer());
         if (buf.length > 8 * 1024 * 1024) throw new Error('arquivo grande demais');
-        partesArquivos.push({ text: `Arquivo anexado: "${a.nome}"` });
-        partesArquivos.push({ inline_data: { mime_type: a.tipo, data: buf.toString('base64') } });
+        const b64 = buf.toString('base64');
+        _cacheArquivos[a.url] = { em: Date.now(), b64 };
+        return { a, b64 };
       } catch (e) {
         console.error('[assistente-garcom] falhou ao carregar arquivo', a.nome, e.message);
+        return null;
       }
-    }
+    }));
+    const partesArquivos = [];
+    resultadosArq.forEach((x) => {
+      if (!x) return;
+      partesArquivos.push({ text: `Arquivo anexado: "${x.a.nome}"` });
+      partesArquivos.push({ inline_data: { mime_type: x.a.tipo, data: x.b64 } });
+    });
+    console.log('[assistente-garcom] arquivos prontos em ' + (Date.now() - tArq) + 'ms');
 
     const promptEtapa2 =
 `Você é o assistente de um restaurante, respondendo a dúvida de um
@@ -436,7 +469,7 @@ PERGUNTA (mensagem ATUAL do funcionário):
 "${texto}"`;
 
     const parts2 = [{ text: promptEtapa2 }, ...partesArquivos];
-    const r2 = await textoDoGemini(apiKey, parts2);
+    const r2 = await textoDoGemini(apiKey, parts2, 700);
     if (!r2.ok) {
       return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
     }

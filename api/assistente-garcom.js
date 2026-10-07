@@ -218,8 +218,40 @@ function precoAtualDoItem(it) {
 }
 
 module.exports = async (req, res) => {
+  // GET ?aquecer=1 — pra um "despertador" externo (cron-job.org / UptimeRobot)
+  // chamar de 5 em 5 minutos, com o app fechado. Só acorda o servidor, abre
+  // a conexão com o Google e, se vierem tenantId/restauranteId, já carrega o
+  // cardápio. Nunca devolve dado nenhum do restaurante.
+  if (req.method === 'GET') {
+    try {
+      const q = req.query || {};
+      const apiKeyG = process.env.GEMINI_API_KEY;
+      const tarefas = [];
+      if (apiKeyG) {
+        tarefas.push((async () => {
+          try {
+            const ctl = new AbortController();
+            const to = setTimeout(() => ctl.abort(), 6000);
+            await fetch(GEMINI_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKeyG },
+              body: JSON.stringify({ contents: [{ parts: [{ text: 'ok' }] }], generationConfig: { maxOutputTokens: 4, temperature: 0 } }),
+              signal: ctl.signal,
+            }).then((r) => r.text()).catch(() => {});
+            clearTimeout(to);
+          } catch (e) {}
+        })());
+      }
+      tarefas.push(obterContexto(getDb(), (q.tenantId || TENANT_PADRAO).toString(), (q.restauranteId || 'default').toString()).catch(() => {}));
+      await Promise.all(tarefas);
+      return res.status(200).json({ ok: true, aquecido: true });
+    } catch (e) {
+      return res.status(200).json({ ok: false });
+    }
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Use POST' });
+    return res.status(405).json({ ok: false, error: 'Use POST ou GET ?aquecer=1' });
   }
 
   const body = req.body || {};

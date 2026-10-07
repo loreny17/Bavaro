@@ -436,7 +436,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS CINCO COISAS:
+ser UMA DAS SEIS COISAS:
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -452,7 +452,11 @@ ser UMA DAS CINCO COISAS:
     lata da 25 por uma coca 600", "troque o chopp da mesa 8 pra IPA",
     "na 12 era coca zero, não coca normal").
 
-Decida qual das cinco é e responda SOMENTE com um JSON válido, sem texto
+(F) Um COMANDO DE TRANSFERÊNCIA: mudar a mesa inteira, ou um item, de uma
+    mesa pra outra (ex: "transfere a 5 pra 8", "muda a mesa 12 para a 20",
+    "passa a coca da 5 pra 8", "muda o chopp da mesa 3 para a 4").
+
+Decida qual das seis é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -543,6 +547,15 @@ SE FOR FECHAR CONTA POR NOME:
   palavras. Se o funcionário já falou o NÚMERO DA MESA ("fechar a mesa 12"),
   isso NÃO é este caso — o app já tem outro caminho pra isso: responda
   {"tipo":"fechar","nome":"","mesa":12}.
+
+SE FOR TRANSFERÊNCIA:
+{"tipo":"transferir","transferencias":[{"origem":5,"destino":8,"nomeItem":null,"itemId":null}]}
+- "origem" é a mesa de onde sai, "destino" a mesa pra onde vai (números).
+- MESA INTEIRA (nenhum item citado): "nomeItem": null, "itemId": null.
+- UM ITEM: "nomeItem" é o texto do item como foi falado, e "itemId" é o
+  [id:...] do cardápio que corresponde a ele (mesmas regras de PEDIDO:
+  abreviação, sem acento, erro de voz); se não souber com segurança, null.
+- Cada item transferido é um objeto separado (mesma origem/destino).
 
 SE FOR TROCA:
 {"tipo":"troca","trocas":[{"mesa":25,"nomeAntigo":"coca lata","itemIdAntigo":"id-da-coca-lata","itemIdNovo":"abc123","obs":""}]}
@@ -640,6 +653,18 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       }).filter((p) => p !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    if (parsed.tipo === 'transferir') {
+      const brutos = Array.isArray(parsed.transferencias) ? parsed.transferencias : [];
+      const transferencias = brutos.map((t) => {
+        const origem = parseInt(t.origem, 10), destino = parseInt(t.destino, 10);
+        if (isNaN(origem) || isNaN(destino)) return null;
+        const idOk = t.itemId && (cardapioCompleto.some((c) => c.id === t.itemId) || cardapioKg.some((c) => c.id === t.itemId));
+        const nomeItem = (t.nomeItem || '').toString().trim();
+        return { origem, destino, nomeItem: nomeItem || null, itemId: idOk ? t.itemId : null };
+      }).filter((t) => t);
+      return res.status(200).json({ ok: true, tipo: 'transferir', transferencias });
     }
 
     if (parsed.tipo === 'troca') {

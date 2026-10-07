@@ -10011,6 +10011,7 @@ function iniciarListeners(){
         precosPorHorario: v.precosPorHorario || []
       });
     });
+    aplicarPrecosHorario(_itens);
     _itens.sort(function(a,b){
       var aO = typeof a.ordem === 'number' ? a.ordem : 999999;
       var bO = typeof b.ordem === 'number' ? b.ordem : 999999;
@@ -14705,7 +14706,7 @@ function fmtPreco(v){
 // idêntico a sempre — só lê it.preco. Aplicado no momento de adicionar o
 // item (trava o valor ali, não recalcula depois se o relógio virar).
 function precoAtualDoItem(it){
-  var base = (it && it.preco) || 0;
+  var base = (it && it._precoCad !== undefined) ? it._precoCad : ((it && it.preco) || 0);
   var faixas = it && it.precosPorHorario;
   if(!faixas || !faixas.length) return base;
   var agora = new Date();
@@ -14718,6 +14719,19 @@ function precoAtualDoItem(it){
     if(minF <= minAgora && minF > melhorMin){ melhor = f.preco; melhorMin = minF; }
   });
   return melhor !== null ? melhor : base;
+}
+
+// Aplica o preço por horário vigente em TODA a lista (cards, carrinho, conta).
+// Guarda o preço cadastrado em _precoCad (usado pra editar e como base das faixas).
+function aplicarPrecosHorario(lista){
+  var mudou = false;
+  (lista||[]).forEach(function(it){
+    if(!it) return;
+    if(it._precoCad === undefined) it._precoCad = it.preco || 0;
+    var novo = precoAtualDoItem(it);
+    if(novo !== it.preco){ it.preco = novo; mudou = true; }
+  });
+  return mudou;
 }
 function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -19639,6 +19653,7 @@ function aquecerAssistente(){
     }).catch(function(){});
   }catch(e){}
 }
+setInterval(function(){ if(aplicarPrecosHorario(_itens)){ try{ renderItens(); }catch(e){} } }, 30000);
 setTimeout(aquecerAssistente, 4000);
 setTimeout(aquecerAssistente, 15000);
 setInterval(aquecerAssistente, 4 * 60 * 1000);

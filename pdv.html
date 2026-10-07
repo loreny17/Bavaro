@@ -1492,6 +1492,7 @@ function iniciarListeners(){
         precosPorHorario: d.precosPorHorario || []
       });
     });
+    aplicarPrecosHorario(_itens);
     // Ordena por: 1) ordem (manual), 2) criadoEm desc (mais novo primeiro) como fallback
     _itens.sort(function(a,b){
       if(a.ordem !== b.ordem) return a.ordem - b.ordem;
@@ -1729,7 +1730,7 @@ function removerFaixaHorario(idx){
 // idêntico a sempre — só lê it.preco. Usado no momento de adicionar o
 // item ao pedido (trava o valor ali, não recalcula depois).
 function precoAtualDoItem(it){
-  var base = (it && it.preco) || 0;
+  var base = (it && it._precoCad !== undefined) ? it._precoCad : ((it && it.preco) || 0);
   var faixas = it && it.precosPorHorario;
   if(!faixas || !faixas.length) return base;
   var agora = new Date();
@@ -1800,6 +1801,20 @@ function abrirModalItem(){
   document.getElementById('btn-excluir').style.display = 'none';
   document.getElementById('modal-item').classList.add('show');
 }
+
+// Aplica o preço por horário vigente em TODA a lista (cards, carrinho, conta).
+// Guarda o preço cadastrado em _precoCad (usado pra editar e como base das faixas).
+function aplicarPrecosHorario(lista){
+  var mudou = false;
+  (lista||[]).forEach(function(it){
+    if(!it) return;
+    if(it._precoCad === undefined) it._precoCad = it.preco || 0;
+    var novo = precoAtualDoItem(it);
+    if(novo !== it.preco){ it.preco = novo; mudou = true; }
+  });
+  return mudou;
+}
+setInterval(function(){ if(aplicarPrecosHorario(_itens)){ try{ renderItens(); }catch(e){} } }, 30000);
 function editarItem(id){
   var i = _itens.find(function(x){ return x.id === id; });
   if(!i) return;
@@ -1810,7 +1825,7 @@ function editarItem(id){
   document.getElementById('item-nome').value = i.nome;
   var pvEd = document.getElementById('item-palavras-voz');
   if(pvEd) pvEd.value = i.palavrasVoz || '';
-  document.getElementById('item-preco').value = formatarPreco(i.preco);
+  document.getElementById('item-preco').value = formatarPreco(i._precoCad !== undefined ? i._precoCad : i.preco);
   document.getElementById('item-descricao').value = i.descricao || '';
   document.getElementById('item-ficha-tecnica').value = i.fichaTecnica || '';
   _itemFaixasHorario = (i.precosPorHorario || []).map(function(f){ return {inicio:f.inicio||'', preco:f.preco||0}; });

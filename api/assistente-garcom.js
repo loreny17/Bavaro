@@ -120,6 +120,7 @@ async function obterContexto(db, tenantId, restauranteId) {
         id: doc.id,
         nome: it.nome || '(sem nome)',
         preco: typeof it.preco === 'number' ? it.preco : 0,
+        precosPorHorario: Array.isArray(it.precosPorHorario) ? it.precosPorHorario : null,
         dica: (it.fichaTecnica || '').trim().slice(0, 100),
       });
     }
@@ -142,6 +143,31 @@ async function obterContexto(db, tenantId, restauranteId) {
   return dados;
 }
 
+// Preço vigente por horário (fuso de São Paulo — a Vercel roda em UTC).
+function precoAtualDoItem(it) {
+  const base = (it && it.preco) || 0;
+  const faixas = it && it.precosPorHorario;
+  if (!faixas || !faixas.length) return base;
+  let minAgora;
+  try {
+    const partesHora = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date()).split(':');
+    minAgora = (parseInt(partesHora[0], 10) % 24) * 60 + (parseInt(partesHora[1], 10) || 0);
+  } catch (e) {
+    const d = new Date(Date.now() - 3 * 3600 * 1000);
+    minAgora = d.getUTCHours() * 60 + d.getUTCMinutes();
+  }
+  let melhor = null, melhorMin = -1;
+  faixas.forEach((f) => {
+    if (!f || !f.inicio) return;
+    const p = String(f.inicio).split(':');
+    const minF = (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+    if (minF <= minAgora && minF > melhorMin) { melhor = f.preco; melhorMin = minF; }
+  });
+  return melhor !== null ? melhor : base;
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Use POST' });
@@ -150,6 +176,16 @@ module.exports = async (req, res) => {
   const body = req.body || {};
   const tenantId = (body.tenantId || TENANT_PADRAO).toString();
   const restauranteId = (body.restauranteId || 'default').toString();
+
+  // Aquecimento: só acorda a função e carrega o contexto no cache. Sem Gemini.
+  if (body.aquecer) {
+    try {
+      await obterContexto(getDb(), tenantId, restauranteId);
+      return res.status(200).json({ ok: true, aquecido: true });
+    } catch (e) {
+      return res.status(200).json({ ok: false });
+    }
+  }
   const texto = (body.texto || '').toString().trim();
   const historico = Array.isArray(body.historico) ? body.historico.slice(-12) : [];
 
@@ -160,7 +196,9 @@ module.exports = async (req, res) => {
 
   try {
     const db = getDb();
-    const { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos } = await obterContexto(db, tenantId, restauranteId);
+    const ctx = await obterContexto(db, tenantId, restauranteId);
+    const { documentoGeral, cardapioKg, comFicha, arquivos } = ctx;
+    const cardapioCompleto = ctx.cardapioCompleto.map((it) => Object.assign({}, it, { preco: precoAtualDoItem(it) }));
 
     const listaCardapio = cardapioCompleto.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}]${it.dica ? ` — ${it.dica}` : ''}`

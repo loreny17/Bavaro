@@ -229,7 +229,23 @@ module.exports = async (req, res) => {
   // Aquecimento: só acorda a função e carrega o contexto no cache. Sem Gemini.
   if (body.aquecer) {
     try {
-      await obterContexto(getDb(), tenantId, restauranteId);
+      // Carrega o cardápio E faz uma chamada mínima ao Gemini, pra conexão
+      // (TLS) com o Google já estar aberta quando a pergunta de verdade chegar.
+      const apiKeyW = process.env.GEMINI_API_KEY;
+      const pingGemini = apiKeyW ? (async () => {
+        try {
+          const ctl = new AbortController();
+          const to = setTimeout(() => ctl.abort(), 6000);
+          await fetch(GEMINI_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKeyW },
+            body: JSON.stringify({ contents: [{ parts: [{ text: 'ok' }] }], generationConfig: { maxOutputTokens: 4, temperature: 0 } }),
+            signal: ctl.signal,
+          }).then((r) => r.text()).catch(() => {});
+          clearTimeout(to);
+        } catch (e) {}
+      })() : Promise.resolve();
+      await Promise.all([obterContexto(getDb(), tenantId, restauranteId), pingGemini]);
       return res.status(200).json({ ok: true, aquecido: true });
     } catch (e) {
       return res.status(200).json({ ok: false });

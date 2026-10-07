@@ -10012,6 +10012,7 @@ function iniciarListeners(){
       });
     });
     aplicarPrecosHorario(_itens);
+    try{ aquecerAssistente(true); }catch(e){}
     _itens.sort(function(a,b){
       var aO = typeof a.ordem === 'number' ? a.ordem : 999999;
       var bO = typeof b.ordem === 'number' ? b.ordem : 999999;
@@ -19639,11 +19640,11 @@ var _assistenteOrigemIrmaoSeguinte = null;
 // parada (cold start = lentidão na 1ª pergunta). Um ping leve, sem Gemini,
 // mantém ela acordada e o cardápio já carregado no servidor.
 var _ultimoAquecimento = 0;
-function aquecerAssistente(){
+function aquecerAssistente(forcar){
   if(!_tenantId || !_restauranteId) return;
   if(document.visibilityState === 'hidden') return;
   var agora = Date.now();
-  if(agora - _ultimoAquecimento < 60000) return;
+  if(agora - _ultimoAquecimento < (forcar === true ? 15000 : 60000)) return;
   _ultimoAquecimento = agora;
   try{
     fetch('/api/assistente-garcom', {
@@ -19654,16 +19655,36 @@ function aquecerAssistente(){
     }).catch(function(){});
   }catch(e){}
 }
+document.addEventListener('input', function(e){
+  var id = e && e.target && e.target.id;
+  if(id === 'input-chat-assistente' || id === 'input-assistente-garcom') aquecerAssistente(true);
+});
+document.addEventListener('focusin', function(e){
+  var id = e && e.target && e.target.id;
+  if(id === 'input-chat-assistente' || id === 'input-assistente-garcom') aquecerAssistente(true);
+});
 setInterval(function(){ if(aplicarPrecosHorario(_itens)){ try{ renderItens(); }catch(e){} } }, 30000);
-setTimeout(aquecerAssistente, 4000);
-setTimeout(aquecerAssistente, 15000);
+// Na abertura do app: assim que o restaurante é identificado (logo no início,
+// junto com o carregamento das mesas e do cardápio), já acorda o assistente.
+(function(){
+  var tentativas = 0;
+  var t = setInterval(function(){
+    tentativas++;
+    if(_tenantId && _restauranteId){
+      clearInterval(t);
+      _ultimoAquecimento = 0;
+      aquecerAssistente(true);
+      setTimeout(function(){ aquecerAssistente(true); }, 20000); // reforço (cardápio já no cache)
+    } else if(tentativas > 240){ clearInterval(t); }
+  }, 250);
+})();
 setInterval(aquecerAssistente, 4 * 60 * 1000);
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'visible') aquecerAssistente();
 });
 
 function abrirAssistenteFlutuante(){
-  aquecerAssistente();
+  aquecerAssistente(true);
   var caixa = document.getElementById('caixa-assistente-garcom');
   if(!caixa || document.getElementById('overlay-assistente-flutuante')) return;
 
@@ -20024,6 +20045,7 @@ function _abrirFecharDaBusca(contaId){
 }
 
 function _resolverFecharIA(nome, mesa){
+  if(nome && /^\d{1,3}$/.test(String(nome).trim())){ mesa = parseInt(nome,10); nome = ''; }
   var caixa = document.getElementById('resposta-assistente-garcom');
   if(!caixa) return;
   if(!nome && mesa){
@@ -20394,6 +20416,7 @@ function _novoIdChat(){ return 'm' + (++_chatIdContador) + '_' + Date.now(); }
 var _chatHistoricoNavegadorAberto = false;
 
 function abrirChatAssistente(){
+  aquecerAssistente(true);
   var tela = document.getElementById('tela-chat-assistente');
   tela.style.display = 'flex';
   tela.style.height = '';
@@ -20731,6 +20754,7 @@ function enviarMensagemChat(){
       var idCarr = _novoIdChat();
       _chatHistorico.push({ id:idCarr, tipo:'carregando' });
       renderChatMensagens();
+      if(j.nome && /^\d{1,3}$/.test(String(j.nome).trim())){ j.mesa = parseInt(j.nome,10); j.nome = ''; }
       if(!j.nome && j.mesa){
         _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarr; });
         var temM = !!_contasMesaCache[String(j.mesa)];

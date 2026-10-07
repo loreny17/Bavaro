@@ -14109,6 +14109,7 @@ function _enviarPedidoConfirmado(){
           adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
           teste: _modoTeste ? true : false
         };
+        if(it.nomeCliente) item.nomeCliente = it.nomeCliente;
         if(it.tipoVenda === 'kg' && it.peso){
           item.tipoVenda = 'kg'; item.peso = it.peso; item.precoBase = it.precoBase || 0;
         }
@@ -19790,14 +19791,14 @@ function _renderDraftsPedidoIA(){
       var pesoHtml = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + '</div>' +
+        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + '</div>' +
         '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(p.obs) + '</div>' : '';
     return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + obsHtml + '</div>' +
+      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + '</div>' +
       '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -19828,9 +19829,9 @@ function confirmarEnviarPedidosIA(){
   selecionados.forEach(function(p){
     if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
     if(p.tipoVenda === 'kg'){
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco });
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '' });
+      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '', cliente:p.cliente||'' });
     }
   });
   var mesas = Object.keys(porMesa);
@@ -20101,13 +20102,13 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
           id: it.id, nome: it.nome, tipoVenda: 'kg',
           peso: it.peso || 0, precoBase: it.precoBase || 0,
           preco: it.preco || 0, extras: 0, qtd: 1, obs: it.obs || '',
-          selecoes: [], pessoa: '',
+          selecoes: [], pessoa: it.cliente || '', nomeCliente: it.cliente || '',
           itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
         };
       }
       return {
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
-        selecoes: [], precoBase: it.preco, extras: 0, pessoa: '',
+        selecoes: [], precoBase: it.preco, extras: 0, pessoa: it.cliente || '',
         itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
       };
     });
@@ -20118,7 +20119,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
     var pedido = {
       garcom: _nomeGarcom, mesa: mesaInt, restauranteId: _restauranteId,
       tenantId: _tenantId || null, contaId: contaId, tipoConta: 'mesa',
-      cliente: null, status: 'preparo', criadoEm: Date.now(),
+      cliente: (function(){ var n={}; itensPedido.forEach(function(x){ if(x.pessoa) n[x.pessoa]=1; }); var k=Object.keys(n); return k.length===1 ? k[0] : null; })(), status: 'preparo', criadoEm: Date.now(),
       itens: itensPedido, total: totalPedido,
       teste: _modoTeste ? true : false,
       imprimir: true,
@@ -20138,7 +20139,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
         var item = {
           itemKey: it.itemKey, pedidoId: pedidoId,
           id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
-          selecoes: [], pessoa: '', status: 'ativo', pagamentoId: null,
+          selecoes: [], pessoa: it.pessoa || '', status: 'ativo', pagamentoId: null,
           adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
           teste: _modoTeste ? true : false
         };
@@ -20403,14 +20404,14 @@ function _renderMsgPedidoChat(msg){
       var pesoHtml2 = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + '</div>' +
+        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + '</div>' +
         '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = p.obs ? '<div style="font-size:0.68rem;color:#f7a34f;margin-top:1px;">📝 ' + esc(p.obs) + '</div>' : '';
     return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + obsHtml + '</div>' +
+      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + '</div>' +
       '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -20444,9 +20445,9 @@ function _chatConfirmarPedido(msgId){
   selecionados.forEach(function(p){
     if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
     if(p.tipoVenda === 'kg'){
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco });
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'' });
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'' });
     }
   });
   var mesas = Object.keys(porMesa);

@@ -52,69 +52,98 @@ const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
 
 let _thinkingSuportado = true;
 const GEMINI_MODEL_RESERVA = process.env.GEMINI_MODEL_RESERVA || 'gemini-2.5-flash-lite';
-const TEMPO_MAX_TENTATIVA_MS = 9000; // chamada que "pendura" é cortada e refeita
+const TEMPO_MAX_TOTAL_MS = 28000; // limite de cada chamada (o Google às vezes demora)
 
 function _urlModelo(modelo) {
   return 'https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent';
 }
 
-// Tentativa 1 e 2: modelo principal. Tentativa 3: modelo reserva (quando o
-// principal está sobrecarregado/limitado, o reserva costuma responder).
-async function chamarGeminiComRetry(apiKey, body) {
-  let ultimoErro = null;
-  const plano = [GEMINI_MODEL, GEMINI_MODEL, GEMINI_MODEL_RESERVA];
-  for (let i = 0; i < plano.length; i++) {
-    const modelo = plano[i];
-    const principal = modelo === GEMINI_MODEL;
-    const corpo = JSON.parse(JSON.stringify(body));
-    if (i === 0) {
-      // 1ª tentativa: formato otimizado (resposta direta, pouco "raciocínio")
-      if (_thinkingSuportado) {
-        corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
+// Chamadas "em corrida": a 1ª sai na hora e NÃO é cortada cedo (o Google às
+// vezes leva 10-20s e ainda responde). Se demorar, uma 2ª (modelo reserva) e
+// depois uma 3ª saem EM PARALELO — vale quem responder primeiro. Se alguma
+// falhar antes, a próxima sai na hora, sem esperar o tempo.
+function chamarGeminiComRetry(apiKey, body) {
+  const plano = [
+    { modelo: GEMINI_MODEL, otimizado: true, atraso: 0 },
+    { modelo: GEMINI_MODEL_RESERVA, otimizado: false, atraso: 4000 },
+    { modelo: GEMINI_MODEL, otimizado: false, atraso: 8000 },
+  ];
+  const falhas = [];
+  const controles = [];
+  const timers = [];
+
+  return new Promise((resolve) => {
+    let lancadas = 0, pendentes = 0, terminou = false, ultimoErro = null;
+
+    const finalizar = (resp) => {
+      if (terminou) return;
+      terminou = true;
+      timers.forEach(clearTimeout);
+      if (resp && resp.ok) {
+        controles.forEach((c) => { if (c.resp !== resp) { try { c.ctl.abort(); } catch (e) {} } });
+        controles.forEach((c) => clearTimeout(c.to));
+        return resolve(resp);
       }
-    } else {
-      // Tentativas 2 e 3: formato SIMPLES (o mesmo que sempre funcionou) —
-      // sem ajustes extras que algum modelo possa recusar.
-      delete corpo.generationConfig;
-    }
-    const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), TEMPO_MAX_TENTATIVA_MS);
-    let resp = null;
-    try {
-      resp = await fetch(_urlModelo(modelo), {
+      const err = ultimoErro || { ok: false, status: 0, text: async () => (falhas.join(' | ') || 'sem resposta') };
+      try { err._falhas = falhas; } catch (e) {}
+      resolve(err);
+    };
+
+    const lancarProxima = () => {
+      if (terminou || lancadas >= plano.length) return false;
+      const idx = lancadas++;
+      const p = plano[idx];
+      pendentes++;
+      const corpo = JSON.parse(JSON.stringify(body));
+      if (p.otimizado) {
+        if (_thinkingSuportado) {
+          corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
+        }
+      } else {
+        delete corpo.generationConfig; // formato simples, o mesmo de sempre
+      }
+      const ctl = new AbortController();
+      const reg = { ctl, resp: null, to: setTimeout(() => ctl.abort(), TEMPO_MAX_TOTAL_MS) };
+      controles.push(reg);
+      const t0 = Date.now();
+
+      fetch(_urlModelo(p.modelo), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(corpo),
         signal: ctl.signal,
+      }).then(async (resp) => {
+        pendentes--;
+        if (terminou) return;
+        if (resp.ok) {
+          reg.resp = resp;
+          console.log('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') respondeu em ' + (Date.now() - t0) + 'ms');
+          return finalizar(resp);
+        }
+        const errTxt = await resp.clone().text().catch(() => '');
+        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') status ' + resp.status + ': ' + errTxt.slice(0, 300));
+        let msgErro = errTxt;
+        try { const je = JSON.parse(errTxt); if (je && je.error && je.error.message) msgErro = je.error.message; } catch (e) {}
+        falhas.push(p.modelo + ' ' + resp.status + ': ' + String(msgErro).replace(/\s+/g, ' ').slice(0, 140));
+        if (resp.status === 400 && p.otimizado) _thinkingSuportado = false;
+        ultimoErro = resp;
+        if (pendentes === 0 && !lancarProxima()) finalizar(null);
+      }).catch((e) => {
+        pendentes--;
+        if (terminou) return;
+        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') sem resposta após ' + (Date.now() - t0) + 'ms: ' + e.message);
+        falhas.push(p.modelo + ': sem resposta (' + e.message + ')');
+        if (pendentes === 0 && !lancarProxima()) finalizar(null);
       });
-    } catch (e) {
-      console.error('[assistente-garcom] tentativa ' + (i + 1) + ' (' + modelo + ') sem resposta: ' + e.message);
-      clearTimeout(to);
-      if (i < plano.length - 1) continue;
-      return ultimoErro || { ok: false, status: 0, text: async () => e.message };
-    }
-    clearTimeout(to);
-    if (resp.ok) {
-      if (i > 0) console.log('[assistente-garcom] respondeu na tentativa ' + (i + 1) + ' (' + modelo + ')');
-      return resp;
-    }
+      return true;
+    };
 
-    const errTxt = await resp.clone().text().catch(() => '');
-    console.error('[assistente-garcom] tentativa ' + (i + 1) + ' (' + modelo + ') status ' + resp.status + ': ' + errTxt.slice(0, 300));
-
-    if (resp.status === 400 && principal && _thinkingSuportado) {
-      _thinkingSuportado = false;
-      i--; // repete o principal sem o ajuste
-      continue;
-    }
-    ultimoErro = resp;
-    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0 && resp.status !== 404) {
-      if (principal) continue; // erro "estranho" no principal: ainda vale tentar o reserva
-      break;
-    }
-    if (i === 0) await _esperar(300);
-  }
-  return ultimoErro;
+    lancarProxima();
+    // Reforços agendados (só saem se ainda não houve resposta)
+    plano.slice(1).forEach((p) => {
+      timers.push(setTimeout(() => { if (!terminou) lancarProxima(); }, p.atraso));
+    });
+  });
 }
 
 async function textoDoGemini(apiKey, parts, maxTokens) {
@@ -127,7 +156,7 @@ async function textoDoGemini(apiKey, parts, maxTokens) {
   if (!resp.ok) {
     const errTxt = await resp.text().catch(() => '');
     console.error('[assistente-garcom] Gemini falhou mesmo após tentar de novo:', resp.status, errTxt);
-    return { ok: false };
+    return { ok: false, detalhe: ((resp._falhas || []).join(' | ') || ('status ' + resp.status)).slice(0, 380) };
   }
   const data = await resp.json();
   let texto = (data.candidates && data.candidates[0] && data.candidates[0].content &&
@@ -438,7 +467,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
 
     const r1 = await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
     if (!r1.ok) {
-      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.', detalhe: (r1 && r1.detalhe) || '' });
     }
 
     let parsed;
@@ -573,7 +602,7 @@ PERGUNTA (mensagem ATUAL do funcionário):
     const parts2 = [{ text: promptEtapa2 }, ...partesArquivos];
     const r2 = await textoDoGemini(apiKey, parts2, 700);
     if (!r2.ok) {
-      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.' });
+      return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.', detalhe: (r2 && r2.detalhe) || '' });
     }
 
     let parsed2;

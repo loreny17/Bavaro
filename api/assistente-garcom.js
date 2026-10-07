@@ -373,8 +373,21 @@ module.exports = async (req, res) => {
     const listaCardapio = cardapioCompleto.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}]${it.dica ? ` — ${it.dica}` : ''}`
     ).join('\n');
+    // Item por kg PADRÃO (o buffet): usado quando o texto não cita outro.
+    // Itens "especiais" (sorvete, açaí...) só valem se a palavra for dita.
+    const _norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const RE_ESPECIAL = /sorvet|acai|picol|doce|sobremes|gelat|frozen|iogurt|sushi|churras/;
+    const RE_BUFFET = /buffet|bufe|bufet|refei|almoc|comida|prato|self|livre/;
+    let kgPadrao = cardapioKg.find((it) => RE_BUFFET.test(_norm(it.nome)) && !RE_ESPECIAL.test(_norm(it.nome)))
+      || cardapioKg.find((it) => !RE_ESPECIAL.test(_norm(it.nome)))
+      || cardapioKg[0] || null;
+    const palavrasDoItem = (nome) => _norm(nome).split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 4 && !/^(prato|quilo|kilo|por|peso|livre|self|service)$/.test(w));
+    const textoNorm = _norm(texto);
+    const itemKgCitado = (it) => palavrasDoItem(it.nome).some((w) => textoNorm.indexOf(w.slice(0, Math.max(4, w.length - 2))) >= 0);
     const listaCardapioKg = cardapioKg.map((it, i) =>
-      `${i + 1}. ${it.nome} [id:${it.id}] — R$ ${it.precoPorKg.toFixed(2)}/kg`
+      `${i + 1}. ${it.nome} [id:${it.id}] — R$ ${it.precoPorKg.toFixed(2)}/kg` +
+      (kgPadrao && it.id === kgPadrao.id && cardapioKg.length > 1 ? '  ← PADRÃO: use ESTE quando o texto não citar o nome de outro item por kg' : '')
     ).join('\n');
     const blocoHistorico = historico.length
       ? '\n\nHISTÓRICO RECENTE DESTA CONVERSA (mais antigo primeiro):\n' +
@@ -389,7 +402,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS QUATRO COISAS:
+ser UMA DAS CINCO COISAS:
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -401,7 +414,11 @@ ser UMA DAS QUATRO COISAS:
     o número da mesa (ex: "fechar a conta da Sara", "fecha o Fernando",
     "conta da Beatriz", "onde está o João", "fechar da Maria").
 
-Decida qual das quatro é e responda SOMENTE com um JSON válido, sem texto
+(E) Um COMANDO DE TROCA de um item já lançado por outro (ex: "troca a coca
+    lata da 25 por uma coca 600", "troque o chopp da mesa 8 pra IPA",
+    "na 12 era coca zero, não coca normal").
+
+Decida qual das cinco é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -444,7 +461,12 @@ SE FOR PEDIDO:
   um número inteiro, separados por traço, vírgula, espaço ou "mesa") É um
   pedido de item por kg: o número COM decimal é o valor em reais da
   pesagem, o número INTEIRO é a mesa — NUNCA o contrário, nunca duas
-  mesas. Se a lista "CARDÁPIO POR KG" tiver exatamente UM item, SEMPRE
+  mesas. Se a lista "CARDÁPIO POR KG" tiver um item marcado como PADRÃO,
+  use SEMPRE esse item PADRÃO, a não ser que o texto cite o nome (ou uma
+  palavra do nome) de OUTRO item por kg — ex: "35,40 sorvete na 12" ou
+  "kg do sorvete" → item de sorvete; "35,40 na 12" (sem citar nada) →
+  item PADRÃO. Nunca escolha um item por kg "especial" (sorvete, açaí etc.)
+  sem que essa palavra esteja no texto. Se a lista "CARDÁPIO POR KG" tiver exatamente UM item, SEMPRE
   interprete esse padrão como pedido desse item usando "valorTotal" —
   não precisa o funcionário citar o nome do prato nenhuma vez. Se a lista
   por kg tiver mais de um item e não der pra saber qual dos dois pelo
@@ -488,6 +510,17 @@ SE FOR FECHAR CONTA POR NOME:
   isso NÃO é este caso — o app já tem outro caminho pra isso: responda
   {"tipo":"fechar","nome":"","mesa":12}.
 
+SE FOR TROCA:
+{"tipo":"troca","trocas":[{"mesa":25,"nomeAntigo":"coca lata","itemIdNovo":"abc123","obs":""}]}
+- "nomeAntigo" é só o texto do item que JÁ ESTÁ na mesa, como foi falado —
+  NÃO tente casar com id (o app confere o que realmente está na conta).
+- "itemIdNovo" é o [id:...] do NOVO item, da lista de cardápio abaixo
+  (mesmas regras de PEDIDO: nunca invente id; se não identificar o novo
+  item com segurança, use "itemIdNovo": null e "nomeNovoDigitado" com o
+  texto falado).
+- "obs" é observação de preparo pro item NOVO, se houver; senão "".
+- Cada troca (mesa + item antigo → item novo) é um objeto separado.
+
 SE FOR CANCELAMENTO:
 {"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","quantidade":1}]}
 - "nomeDigitado" é só o texto do produto como foi falado — NÃO tente casar
@@ -523,7 +556,15 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const cliente = (p.cliente || '').toString().trim().slice(0, 40);
 
         if (p.tipoVenda === 'kg') {
-          const itemKg = p.itemId ? cardapioKg.find((c) => c.id === p.itemId) : null;
+          let itemKg = p.itemId ? cardapioKg.find((c) => c.id === p.itemId) : null;
+          // Trava: escolheu um item por kg que NÃO foi citado no texto (ex: puxou
+          // o sorvete sem a palavra "sorvete") → usa o PADRÃO (buffet).
+          if (kgPadrao && cardapioKg.length > 1) {
+            if (!itemKg || (itemKg.id !== kgPadrao.id && !itemKgCitado(itemKg))) {
+              const citado = cardapioKg.find((c) => c.id !== kgPadrao.id && itemKgCitado(c));
+              itemKg = citado || kgPadrao;
+            }
+          }
           if (!itemKg) {
             return { mesa, cliente, tipoVenda: 'kg', encontrado: false, nomeDigitado: p.nomeDigitado || null };
           }
@@ -559,6 +600,26 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       }).filter((p) => p !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    if (parsed.tipo === 'troca') {
+      const brutos = Array.isArray(parsed.trocas) ? parsed.trocas : [];
+      const trocas = brutos.map((t) => {
+        const mesa = parseInt(t.mesa, 10);
+        if (isNaN(mesa)) return null;
+        const novo = t.itemIdNovo ? cardapioCompleto.find((c) => c.id === t.itemIdNovo) : null;
+        return {
+          mesa,
+          nomeAntigo: (t.nomeAntigo || '').toString().trim(),
+          encontradoNovo: !!novo,
+          itemIdNovo: novo ? novo.id : null,
+          itemNomeNovo: novo ? novo.nome : null,
+          itemPrecoNovo: novo ? novo.preco : null,
+          nomeNovoDigitado: (t.nomeNovoDigitado || '').toString(),
+          obs: (t.obs || '').toString().trim().slice(0, 140),
+        };
+      }).filter((t) => t && t.nomeAntigo);
+      return res.status(200).json({ ok: true, tipo: 'troca', trocas });
     }
 
     if (parsed.tipo === 'fechar') {

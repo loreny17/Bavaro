@@ -19779,6 +19779,15 @@ function executarAssistenteGarcom(){
     if(j.tipo === 'pedido'){
       _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
       _renderDraftsPedidoIA();
+    } else if(j.tipo === 'transferir'){
+      if(!(j.transferencias||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhuma transferência nesse texto.</div>'; return; }
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Conferindo as mesas...</div>';
+      _resolverTransferencias(j.transferencias).then(function(itens){
+        _transfBox = { id:'box', itens: itens };
+        _renderTransfBox();
+      }).catch(function(e){
+        caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro ao buscar as contas: ' + esc(e.message||'') + '</div>';
+      });
     } else if(j.tipo === 'troca'){
       if(!(j.trocas||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhuma troca nesse texto.</div>'; return; }
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando o item na conta...</div>';
@@ -20240,6 +20249,154 @@ function _executarTrocas(ctx, ctxId, sel){
   proxima(0);
 }
 
+
+// ════════════════════════════════════════
+//  TRANSFERÊNCIA (assistente): "transfere a 5 pra 8" (mesa inteira) ou
+//  "passa a coca da 5 pra 8" (um item). Usa EXATAMENTE a mesma rotina da
+//  tela Transferir (confirmarTransferencia) — mesmas proteções, sem
+//  reimpressão. Sempre com confirmação antes.
+// ════════════════════════════════════════
+var _transfBox = null;
+
+function _resolverTransferencias(lista){
+  var itensBusca = [];
+  lista.forEach(function(t, i){ if(t.nomeItem || t.itemId) itensBusca.push({ _i:i, mesa:t.origem, nomeDigitado:t.nomeItem || '', itemId:t.itemId || null }); });
+  var prom = itensBusca.length ? _resolverItensCancelamento(itensBusca) : Promise.resolve([]);
+  return prom.then(function(achados){
+    var porIndice = {};
+    itensBusca.forEach(function(b, k){ porIndice[b._i] = achados[k]; });
+    return lista.map(function(t, i){
+      var r = { origem:t.origem, destino:t.destino, nomeItem:t.nomeItem, inteira: !(t.nomeItem || t.itemId) };
+      if(String(t.origem) === String(t.destino)){ r.encontrado = false; r.motivoFalha = 'Origem e destino são a mesma mesa'; return r; }
+      if(r.inteira){
+        var conta = _contasMesaCache[String(t.origem)];
+        var ativos = conta ? (conta.itens||[]).filter(function(x){ return x.status !== 'cancelado' && x.status !== 'pago'; }) : [];
+        if(!conta || !ativos.length){ r.encontrado = false; r.motivoFalha = 'Mesa ' + t.origem + ' sem itens em aberto'; return r; }
+        r.encontrado = true;
+        r.qtdItens = ativos.length;
+        r.total = ativos.reduce(function(a,x){ return a + (x.preco||0) * (x.tipoVenda==='kg' ? 1 : (x.qtd||1)); }, 0);
+      } else {
+        var a = porIndice[i] || {};
+        if(!a.encontrado){ r.encontrado = false; r.motivoFalha = a.motivoFalha || 'Item não encontrado na mesa'; return r; }
+        r.encontrado = true;
+        r.item = a;
+      }
+      r._selecionado = r.encontrado && !(r.item && r.item.ambiguo);
+      return r;
+    });
+  });
+}
+
+function _ctxTransf(ctxId){
+  if(ctxId === 'box') return _transfBox;
+  return _chatHistorico.find(function(m){ return m.id === ctxId; });
+}
+
+function _htmlTransferencias(ctx, ctxId){
+  if(ctx.enviado) return '';
+  var linhas = ctx.itens.map(function(t, i){
+    if(!t.encontrado){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
+        '<span>⚠️</span><div style="flex:1;font-size:0.8rem;">Mesa ' + t.origem + ' → Mesa ' + t.destino + (t.nomeItem ? ' ("' + esc(t.nomeItem) + '")' : '') +
+        '<div style="font-size:0.68rem;color:var(--muted);">' + esc(t.motivoFalha) + '</div></div></div>';
+    }
+    var desc, valor;
+    if(t.inteira){
+      desc = '<b>Mesa ' + t.origem + ' inteira</b> → <b>Mesa ' + t.destino + '</b><div style="font-size:0.7rem;color:var(--muted);">' + t.qtdItens + ' item(ns) em aberto</div>';
+      valor = t.total;
+    } else {
+      var it = t.item;
+      desc = '<b>' + (it.itemQtd||1) + 'x ' + esc(it.itemNome) + '</b> · Mesa ' + t.origem + ' → <b>Mesa ' + t.destino + '</b>' +
+        (it.ambiguo ? '<div style="font-size:0.66rem;color:#f7a34f;">Havia mais de um item parecido — confere se é este</div>' : '');
+      valor = (it.itemPreco||0) * (it.tipoVenda==='kg' ? 1 : (it.itemQtd||1));
+    }
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(167,139,250,0.4);background:rgba(167,139,250,0.07);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (t._selecionado ? 'checked' : '') + ' onchange="_toggleTransf(\'' + ctxId + '\',' + i + ',this.checked)" style="width:18px;height:18px;accent-color:#a78bfa;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.82rem;">🔀 ' + desc + '</div>' +
+      '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(valor||0) + '</div>' +
+    '</label>';
+  }).join('');
+  var qtd = ctx.itens.filter(function(t){ return t.encontrado && t._selecionado; }).length;
+  var btn = '';
+  if(ctx.enviando) btn = '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Transferindo...</div>';
+  else if(qtd > 0) btn = '<button onclick="_confirmarTransf(\'' + ctxId + '\')" style="width:100%;margin-top:4px;background:#a78bfa;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar transferência (' + qtd + ')</button>';
+  return linhas + btn;
+}
+
+function _renderTransfBox(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(caixa && _transfBox) caixa.innerHTML = _htmlTransferencias(_transfBox, 'box');
+}
+function _renderMsgTransfChat(msg){
+  if(msg.enviado) return '';
+  return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+    '<div class="chat-bolha-assistente" style="width:100%;">' + _htmlTransferencias(msg, msg.id) + '</div></div>';
+}
+function _rerenderTransf(ctxId){ if(ctxId === 'box') _renderTransfBox(); else renderChatMensagens(true); }
+function _toggleTransf(ctxId, i, checked){
+  var ctx = _ctxTransf(ctxId); if(!ctx) return;
+  ctx.itens[i]._selecionado = checked;
+  _rerenderTransf(ctxId);
+}
+
+function _confirmarTransf(ctxId){
+  var ctx = _ctxTransf(ctxId);
+  if(!ctx || ctx.enviando) return;
+  var sel = ctx.itens.filter(function(t){ return t.encontrado && t._selecionado; });
+  if(!sel.length) return;
+  ctx.enviando = true;
+  _rerenderTransf(ctxId);
+  var resultados = [];
+
+  // A rotina da tela Transferir usa estado global e termina sozinha (toast);
+  // então roda UMA de cada vez e espera ela concluir antes da próxima.
+  function proxima(k){
+    if(k >= sel.length){
+      ctx.enviando = false; ctx.enviado = true;
+      var linhas = resultados;
+      if(ctxId === 'box'){
+        var caixa = document.getElementById('resposta-assistente-garcom');
+        var inp = document.getElementById('input-assistente-garcom'); if(inp) inp.value = '';
+        if(caixa) caixa.innerHTML = linhas.map(function(l){
+          return '<div style="padding:9px 10px;border-radius:9px;background:' + (l.ok?'rgba(74,222,128,0.1)':'rgba(248,113,113,0.1)') + ';border:1px solid ' + (l.ok?'rgba(74,222,128,0.3)':'rgba(248,113,113,0.3)') + ';color:' + (l.ok?'#4ade80':'#f87171') + ';font-size:0.82rem;margin-bottom:6px;">' + (l.ok?'✓ ':'❌ ') + esc(l.texto) + '</div>';
+        }).join('');
+      } else {
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: linhas });
+        _chatAdicionarContexto('sistema', 'Transferência já foi CONFIRMADA: ' + linhas.map(function(l){ return l.texto; }).join('; '));
+        renderChatMensagens();
+      }
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      return;
+    }
+    var t = sel[k];
+    var desc = (t.inteira ? 'Mesa ' + t.origem + ' inteira' : (t.item.itemNome + ' da Mesa ' + t.origem)) + ' → Mesa ' + t.destino;
+    if(!_contasMesaCache[String(t.origem)]){
+      resultados.push({ ok:false, texto: desc + ': mesa de origem sem conta aberta' });
+      return proxima(k+1);
+    }
+    _transferirOrigemNum = t.origem;
+    _transferirModo = t.inteira ? 'mesa' : 'itens';
+    _transferirItensSel = {};
+    if(!t.inteira) _transferirItensSel[t.item.itemKey] = true;
+    confirmarTransferencia(String(t.destino), true);
+    // Concluída com sucesso, a rotina zera _transferirOrigemNum
+    var inicio = Date.now();
+    var timer = setInterval(function(){
+      if(_transferirOrigemNum === null){
+        clearInterval(timer);
+        resultados.push({ ok:true, texto: desc + ' transferido' });
+        proxima(k+1);
+      } else if(Date.now() - inicio > 15000){
+        clearInterval(timer);
+        _transferirOrigemNum = null;
+        resultados.push({ ok:false, texto: desc + ': não confirmou a tempo — confira a mesa' });
+        proxima(k+1);
+      }
+    }, 300);
+  }
+  proxima(0);
+}
+
 function _resolverCancelamentosIA(itensBrutos){
   if(!itensBrutos.length){
     document.getElementById('resposta-assistente-garcom').innerHTML =
@@ -20609,7 +20766,7 @@ function abrirChatAssistente(){
   _chatHistorico = [];
   _chatContexto = [];
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-    texto:'Oi! Pode perguntar sobre um produto, lançar um pedido, cancelar ou trocar um item, ou fechar a conta de alguém. Em que posso ajudar?' });
+    texto:'Oi! Pode perguntar sobre um produto, lançar um pedido, cancelar, trocar ou transferir itens e mesas, ou fechar a conta de alguém. Em que posso ajudar?' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -20702,6 +20859,7 @@ function _renderMensagemChat(msg){
       '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'transferir') return _renderMsgTransfChat(msg);
   if(msg.tipo === 'troca') return _renderMsgTrocaChat(msg);
   if(msg.tipo === 'fechar') return '<div class="chat-bolha-assistente">' + _htmlListaFecharBusca(msg.nome, msg.matches, '_abrirFecharDaBusca') + '</div>';
   if(msg.tipo === 'cancelamento') return _renderMsgCancelamentoChat(msg);
@@ -20934,6 +21092,27 @@ function enviarMensagemChat(){
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
 
+    } else if(j.tipo === 'transferir'){
+      if(!(j.transferencias||[]).length){
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhuma transferência nesse texto.' });
+        renderChatMensagens();
+        return;
+      }
+      var idCarrTr = _novoIdChat();
+      _chatHistorico.push({ id:idCarrTr, tipo:'carregando' });
+      renderChatMensagens();
+      _resolverTransferencias(j.transferencias).then(function(itens){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrTr; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'transferir', itens: itens });
+        _chatAdicionarContexto('assistente', 'Entendi esta transferência (ainda não confirmada): ' + itens.map(function(t){
+          return t.encontrado ? ((t.inteira ? 'Mesa ' + t.origem + ' inteira' : t.item.itemNome + ' da Mesa ' + t.origem) + ' -> Mesa ' + t.destino) : ('não resolvida: ' + t.motivoFalha);
+        }).join('; '));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrTr; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar as contas: ' + e.message });
+        renderChatMensagens();
+      });
     } else if(j.tipo === 'troca'){
       if(!(j.trocas||[]).length){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhuma troca nesse texto.' });

@@ -244,6 +244,7 @@ async function obterContexto(db, tenantId, restauranteId) {
         preco: typeof it.preco === 'number' ? it.preco : 0,
         precosPorHorario: Array.isArray(it.precosPorHorario) ? it.precosPorHorario : null,
         dica: (it.fichaTecnica || '').trim().slice(0, 100),
+        voz: (it.palavrasVoz || '').toString().trim().slice(0, 120),
       });
     }
     if (it.fichaTecnica && it.fichaTecnica.trim()) {
@@ -288,6 +289,39 @@ function precoAtualDoItem(it) {
     if (minF <= minAgora && minF > melhorMin) { melhor = f.preco; melhorMin = minF; }
   });
   return melhor !== null ? melhor : base;
+}
+
+
+// Busca de reserva por nome, quando o modelo não identificar o item:
+// ignora acento/maiúscula, compara palavra por palavra com o nome E com as
+// "palavras de voz" do item. Só aceita se houver UM item claramente melhor.
+function _normTxt(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function _palavras(t) {
+  const vazias = { de: 1, da: 1, do: 1, das: 1, dos: 1, a: 1, o: 1, as: 1, os: 1, um: 1, uma: 1, na: 1, no: 1, e: 1, pra: 1, para: 1, mesa: 1 };
+  return _normTxt(t).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((w) => w && !vazias[w] && !/^\d+$/.test(w));
+}
+function _pontuar(falado, alvo) {
+  const ditas = _palavras(falado);
+  if (!ditas.length) return 0;
+  const doAlvo = _palavras(alvo);
+  let ac = 0;
+  ditas.forEach((w) => {
+    const raiz = w.length > 4 ? w.slice(0, w.length - 1) : w;
+    if (doAlvo.some((x) => x === w || x.indexOf(raiz) === 0)) ac++;
+  });
+  return ac / ditas.length;
+}
+function _acharItemPorNome(falado, lista) {
+  if (!falado) return null;
+  const ranq = lista.map((it) => {
+    const p1 = _pontuar(falado, it.nome);
+    const p2 = it.voz ? Math.max.apply(null, String(it.voz).split(/[,;\/]/).map((v) => _pontuar(falado, v)).concat([0])) : 0;
+    // também ao contrário: todas as palavras de uma "palavra de voz" estão no texto
+    const p3 = it.voz ? Math.max.apply(null, String(it.voz).split(/[,;\/]/).map((v) => v.trim() ? _pontuar(v, falado) : 0).concat([0])) : 0;
+    return { it, p: Math.max(p1, p2, p3) };
+  }).filter((o) => o.p >= 1);
+  if (ranq.length === 1) return ranq[0].it;
+  return null; // nenhum ou mais de um: melhor não chutar
 }
 
 module.exports = async (req, res) => {
@@ -371,7 +405,7 @@ module.exports = async (req, res) => {
     const cardapioCompleto = ctx.cardapioCompleto.map((it) => Object.assign({}, it, { preco: precoAtualDoItem(it) }));
 
     const listaCardapio = cardapioCompleto.map((it, i) =>
-      `${i + 1}. ${it.nome} [id:${it.id}]${it.dica ? ` — ${it.dica}` : ''}`
+      `${i + 1}. ${it.nome} [id:${it.id}]${it.voz ? ` (também chamado: ${it.voz})` : ''}${it.dica ? ` — ${it.dica}` : ''}`
     ).join('\n');
     // Item por kg PADRÃO (o buffet): usado quando o texto não cita outro.
     // Itens "especiais" (sorvete, açaí...) só valem se a palavra for dita.
@@ -592,7 +626,8 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         }
 
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
-        const item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
+        let item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
+        if (!item && p.nomeDigitado) item = _acharItemPorNome(p.nomeDigitado, cardapioCompleto);
         return {
           mesa, cliente, quantidade: qtd,
           itemId: item ? item.id : null,

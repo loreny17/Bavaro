@@ -67,8 +67,15 @@ async function chamarGeminiComRetry(apiKey, body) {
     const modelo = plano[i];
     const principal = modelo === GEMINI_MODEL;
     const corpo = JSON.parse(JSON.stringify(body));
-    if (principal && _thinkingSuportado) {
-      corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
+    if (i === 0) {
+      // 1ª tentativa: formato otimizado (resposta direta, pouco "raciocínio")
+      if (_thinkingSuportado) {
+        corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
+      }
+    } else {
+      // Tentativas 2 e 3: formato SIMPLES (o mesmo que sempre funcionou) —
+      // sem ajustes extras que algum modelo possa recusar.
+      delete corpo.generationConfig;
     }
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), TEMPO_MAX_TENTATIVA_MS);

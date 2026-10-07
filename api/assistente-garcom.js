@@ -51,31 +51,61 @@ function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
 const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
 
 let _thinkingSuportado = true;
+const GEMINI_MODEL_RESERVA = process.env.GEMINI_MODEL_RESERVA || 'gemini-2.5-flash-lite';
+const TEMPO_MAX_TENTATIVA_MS = 9000; // chamada que "pendura" é cortada e refeita
 
+function _urlModelo(modelo) {
+  return 'https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent';
+}
+
+// Tentativa 1 e 2: modelo principal. Tentativa 3: modelo reserva (quando o
+// principal está sobrecarregado/limitado, o reserva costuma responder).
 async function chamarGeminiComRetry(apiKey, body) {
   let ultimoErro = null;
-  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+  const plano = [GEMINI_MODEL, GEMINI_MODEL, GEMINI_MODEL_RESERVA];
+  for (let i = 0; i < plano.length; i++) {
+    const modelo = plano[i];
+    const principal = modelo === GEMINI_MODEL;
     const corpo = JSON.parse(JSON.stringify(body));
-    if (_thinkingSuportado) {
+    if (principal && _thinkingSuportado) {
       corpo.generationConfig = Object.assign({ thinkingConfig: { thinkingLevel: 'minimal' } }, corpo.generationConfig || {});
     }
-    const resp = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(corpo),
-    });
-    if (resp.ok) return resp;
-
-    // Se o modelo não aceitar o ajuste de "raciocínio", desliga e repete já.
-    if (resp.status === 400 && _thinkingSuportado) {
-      _thinkingSuportado = false;
-      tentativa--;
-      continue;
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), TEMPO_MAX_TENTATIVA_MS);
+    let resp = null;
+    try {
+      resp = await fetch(_urlModelo(modelo), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(corpo),
+        signal: ctl.signal,
+      });
+    } catch (e) {
+      console.error('[assistente-garcom] tentativa ' + (i + 1) + ' (' + modelo + ') sem resposta: ' + e.message);
+      clearTimeout(to);
+      if (i < plano.length - 1) continue;
+      return ultimoErro || { ok: false, status: 0, text: async () => e.message };
+    }
+    clearTimeout(to);
+    if (resp.ok) {
+      if (i > 0) console.log('[assistente-garcom] respondeu na tentativa ' + (i + 1) + ' (' + modelo + ')');
+      return resp;
     }
 
+    const errTxt = await resp.clone().text().catch(() => '');
+    console.error('[assistente-garcom] tentativa ' + (i + 1) + ' (' + modelo + ') status ' + resp.status + ': ' + errTxt.slice(0, 300));
+
+    if (resp.status === 400 && principal && _thinkingSuportado) {
+      _thinkingSuportado = false;
+      i--; // repete o principal sem o ajuste
+      continue;
+    }
     ultimoErro = resp;
-    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0) break;
-    if (tentativa < 3) await _esperar(tentativa * 400);
+    if (CODIGOS_PASSAGEIROS.indexOf(resp.status) < 0 && resp.status !== 404) {
+      if (principal) continue; // erro "estranho" no principal: ainda vale tentar o reserva
+      break;
+    }
+    if (i === 0) await _esperar(300);
   }
   return ultimoErro;
 }

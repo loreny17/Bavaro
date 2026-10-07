@@ -284,6 +284,18 @@ SE FOR PEDIDO:
   não entendeu — um item errado pode sair pra cozinha com nome e preço
   que não têm nada a ver com o que foi pedido. Na dúvida genuína, use
   "itemId": null.
+- NOME DO CLIENTE (opcional): se o funcionário disser o nome da pessoa
+  dona do pedido (ex: "um prato de 34,15 na mesa 30, nome Fernando",
+  "um na 15 de 24,15 pra Beatriz", "cliente Sara"), preencha "cliente"
+  com SÓ o primeiro nome/nome falado, com inicial maiúscula, em TODO objeto
+  de pedido ligado àquela pessoa. Funciona tanto pra item por kg quanto
+  por unidade. NUNCA invente nome; se não foi dito, omita o campo ou "".
+  O nome NÃO faz parte do item nem da mesa — não confunda número de mesa
+  com nome. Exemplo completo:
+  "um prato de 34,15 na mesa 30 nome Fernando e um na 15 de 24,15 nome Beatriz"
+  → {"tipo":"pedido","pedidos":[
+     {"mesa":30,"itemId":"xyz","tipoVenda":"kg","valorTotal":34.15,"cliente":"Fernando"},
+     {"mesa":15,"itemId":"xyz","tipoVenda":"kg","valorTotal":24.15,"cliente":"Beatriz"}]}
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",
@@ -327,11 +339,12 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const resultado = brutos.map((p) => {
         const mesa = parseInt(p.mesa, 10);
         if (isNaN(mesa)) return null;
+        const cliente = (p.cliente || '').toString().trim().slice(0, 40);
 
         if (p.tipoVenda === 'kg') {
           const itemKg = p.itemId ? cardapioKg.find((c) => c.id === p.itemId) : null;
           if (!itemKg) {
-            return { mesa, tipoVenda: 'kg', encontrado: false, nomeDigitado: p.nomeDigitado || null };
+            return { mesa, cliente, tipoVenda: 'kg', encontrado: false, nomeDigitado: p.nomeDigitado || null };
           }
           let valorTotal = null;
           let pesoGramas = null;
@@ -342,10 +355,10 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
             valorTotal = Math.round((pesoGramas / 1000) * itemKg.precoPorKg * 100) / 100;
           }
           if (valorTotal === null) {
-            return { mesa, tipoVenda: 'kg', encontrado: false, nomeDigitado: itemKg.nome };
+            return { mesa, cliente, tipoVenda: 'kg', encontrado: false, nomeDigitado: itemKg.nome };
           }
           return {
-            mesa, tipoVenda: 'kg', encontrado: true,
+            mesa, cliente, tipoVenda: 'kg', encontrado: true,
             itemId: itemKg.id, itemNome: itemKg.nome,
             precoBase: itemKg.precoPorKg, peso: pesoGramas, itemPreco: valorTotal,
           };
@@ -354,7 +367,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
         const item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
         return {
-          mesa, quantidade: qtd,
+          mesa, cliente, quantidade: qtd,
           itemId: item ? item.id : null,
           itemNome: item ? item.nome : null,
           itemPreco: item ? item.preco : null,

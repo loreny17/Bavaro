@@ -51,7 +51,39 @@ function _esperar(ms){ return new Promise((r) => setTimeout(r, ms)); }
 const CODIGOS_PASSAGEIROS = [429, 500, 502, 503, 504];
 
 let _thinkingSuportado = true;
-const GEMINI_MODEL_RESERVA = process.env.GEMINI_MODEL_RESERVA || 'gemini-2.5-flash-lite';
+const _reserva = { modelo: null, em: 0 };
+const _reservaExcluidos = new Set();
+
+// Descobre, na própria conta do Google, um modelo "flash" rápido que EXISTA
+// (nomes de modelo mudam/são aposentados com o tempo — nada de nome fixo).
+async function _resolverReserva(apiKey) {
+  if (process.env.GEMINI_MODEL_RESERVA) return process.env.GEMINI_MODEL_RESERVA;
+  if (_reserva.modelo && (Date.now() - _reserva.em) < 60 * 60 * 1000) return _reserva.modelo;
+  let escolhido = null;
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+      headers: { 'x-goog-api-key': apiKey }, signal: ctl.signal,
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    const nomes = (j.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
+      .map((m) => String(m.name || '').replace(/^models\//, ''))
+      .filter((n) => /flash/.test(n) && !/image|tts|live|audio|embedding|thinking|robotics|computer|native|exp|vision/.test(n))
+      .filter((n) => n !== GEMINI_MODEL && !_reservaExcluidos.has(n));
+    const grupo = (n) => (/lite/.test(n) ? 0 : 1) + (/preview|latest/.test(n) ? 2 : 0);
+    nomes.sort((a, b) => (grupo(a) - grupo(b)) || (a < b ? 1 : -1));
+    escolhido = nomes[0] || null;
+    console.log('[assistente-garcom] modelos reserva possíveis: ' + nomes.slice(0, 5).join(', ') + ' -> escolhido: ' + escolhido);
+  } catch (e) {
+    console.error('[assistente-garcom] não consegui listar modelos: ' + e.message);
+  }
+  if (!escolhido) escolhido = 'gemini-flash-latest';
+  _reserva.modelo = escolhido; _reserva.em = Date.now();
+  return escolhido;
+}
 const TEMPO_MAX_TOTAL_MS = 28000; // limite de cada chamada (o Google às vezes demora)
 
 function _urlModelo(modelo) {
@@ -65,8 +97,9 @@ function _urlModelo(modelo) {
 function chamarGeminiComRetry(apiKey, body) {
   const plano = [
     { modelo: GEMINI_MODEL, otimizado: true, atraso: 0 },
-    { modelo: GEMINI_MODEL_RESERVA, otimizado: false, atraso: 4000 },
-    { modelo: GEMINI_MODEL, otimizado: false, atraso: 8000 },
+    { modelo: null, reserva: true, otimizado: false, atraso: 4000 },
+    { modelo: null, reserva: true, otimizado: false, atraso: 8000 },
+    { modelo: GEMINI_MODEL, otimizado: false, atraso: 14000 },
   ];
   const falhas = [];
   const controles = [];
@@ -107,32 +140,36 @@ function chamarGeminiComRetry(apiKey, body) {
       controles.push(reg);
       const t0 = Date.now();
 
-      fetch(_urlModelo(p.modelo), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(corpo),
-        signal: ctl.signal,
+      (p.reserva ? _resolverReserva(apiKey) : Promise.resolve(p.modelo)).then((modeloUsado) => {
+        p.modeloUsado = modeloUsado;
+        return fetch(_urlModelo(modeloUsado), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(corpo),
+          signal: ctl.signal,
+        });
       }).then(async (resp) => {
         pendentes--;
         if (terminou) return;
         if (resp.ok) {
           reg.resp = resp;
-          console.log('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') respondeu em ' + (Date.now() - t0) + 'ms');
+          console.log('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + (p.modeloUsado || p.modelo) + ') respondeu em ' + (Date.now() - t0) + 'ms');
           return finalizar(resp);
         }
         const errTxt = await resp.clone().text().catch(() => '');
-        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') status ' + resp.status + ': ' + errTxt.slice(0, 300));
+        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + (p.modeloUsado || p.modelo) + ') status ' + resp.status + ': ' + errTxt.slice(0, 300));
         let msgErro = errTxt;
         try { const je = JSON.parse(errTxt); if (je && je.error && je.error.message) msgErro = je.error.message; } catch (e) {}
-        falhas.push(p.modelo + ' ' + resp.status + ': ' + String(msgErro).replace(/\s+/g, ' ').slice(0, 140));
+        falhas.push((p.modeloUsado || p.modelo) + ' ' + resp.status + ': ' + String(msgErro).replace(/\s+/g, ' ').slice(0, 140));
         if (resp.status === 400 && p.otimizado) _thinkingSuportado = false;
+        if (resp.status === 404 && p.reserva) { _reservaExcluidos.add(p.modeloUsado); _reserva.modelo = null; }
         ultimoErro = resp;
         if (pendentes === 0 && !lancarProxima()) finalizar(null);
       }).catch((e) => {
         pendentes--;
         if (terminou) return;
-        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + p.modelo + ') sem resposta após ' + (Date.now() - t0) + 'ms: ' + e.message);
-        falhas.push(p.modelo + ': sem resposta (' + e.message + ')');
+        console.error('[assistente-garcom] tentativa ' + (idx + 1) + ' (' + (p.modeloUsado || p.modelo) + ') sem resposta após ' + (Date.now() - t0) + 'ms: ' + e.message);
+        falhas.push((p.modeloUsado || p.modelo) + ': sem resposta (' + e.message + ')');
         if (pendentes === 0 && !lancarProxima()) finalizar(null);
       });
       return true;

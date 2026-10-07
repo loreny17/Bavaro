@@ -19758,6 +19758,8 @@ function executarAssistenteGarcom(){
     if(j.tipo === 'pedido'){
       _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
       _renderDraftsPedidoIA();
+    } else if(j.tipo === 'fechar'){
+      _resolverFecharIA(j.nome || '', j.mesa || null);
     } else if(j.tipo === 'cancelamento'){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando o item na conta...</div>';
       _resolverCancelamentosIA(j.itens||[]);
@@ -19923,6 +19925,119 @@ function _resolverItensCancelamento(itensBrutos){
         contaId: doc.id, ambiguo: candidatos.length > 1
       };
     });
+  });
+}
+
+
+// ════════════════════════════════════════
+//  FECHAR CONTA POR NOME (assistente)
+//  Procura o nome em TODAS as contas abertas (mesa, almoço, avulsa):
+//  no nome da comanda e no nome marcado em cada item. Se achar a mesma
+//  pessoa em mais de uma conta, mostra todas e o garçom escolhe.
+// ════════════════════════════════════════
+var _buscaFecharMatches = {};
+
+function _normNome(t){
+  return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+function _buscarContasPorNome(nome){
+  var termo = _normNome(nome);
+  if(!termo) return Promise.resolve([]);
+  return fbDb.collection('contas_mesa')
+    .where('restauranteId','==', _restauranteId)
+    .where('status','==','aberta')
+    .get().then(function(snap){
+      var achados = [];
+      snap.forEach(function(doc){
+        var c = doc.data() || {};
+        if(c.teste && !_modoTeste) return;
+        var nomes = {};
+        if(c.cliente) nomes[c.cliente] = true;
+        if(c.nomeCliente) nomes[c.nomeCliente] = true;
+        (c.itens||[]).forEach(function(it){
+          if(it.status === 'cancelado' || it.status === 'pago') return;
+          if(it.pessoa) nomes[it.pessoa] = true;
+          if(it.nomeCliente) nomes[it.nomeCliente] = true;
+        });
+        var lista = Object.keys(nomes);
+        var casados = lista.filter(function(n){ return _normNome(n).indexOf(termo) >= 0; });
+        if(!casados.length) return;
+        var ativos = (c.itens||[]).filter(function(it){ return it.status !== 'cancelado' && it.status !== 'pago'; });
+        var qtdItens = ativos.reduce(function(a,it){ return a + (it.tipoVenda==='kg' ? 1 : (it.qtd||1)); }, 0);
+        achados.push({
+          contaId: doc.id, mesa: c.mesa || null, tipoConta: c.tipoConta || 'mesa',
+          nomeAchado: casados[0], garcom: c.garcomPrincipal || '',
+          qtdItens: qtdItens, restante: (typeof c.restante === 'number' ? c.restante : (c.total||0)),
+          abertaEm: c.abertaEm || 0, dados: Object.assign({id: doc.id}, c)
+        });
+      });
+      achados.sort(function(a,b){ return (b.abertaEm||0) - (a.abertaEm||0); });
+      achados.forEach(function(m){ _buscaFecharMatches[m.contaId] = m; });
+      return achados;
+    });
+}
+
+function _rotuloContaBusca(m){
+  var onde = m.mesa ? ('Mesa ' + m.mesa) : (m.tipoConta === 'almoco' ? 'Almoço (sem mesa)' : 'Comanda avulsa');
+  return onde;
+}
+
+function _htmlListaFecharBusca(nome, matches, onclickFn){
+  if(!matches.length){
+    return '<div style="font-size:0.84rem;line-height:1.5;background:var(--surface2);border-radius:10px;padding:11px;">Não achei conta aberta no nome de <b>' + esc(nome) + '</b>.</div>';
+  }
+  var cab = matches.length > 1
+    ? '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">Achei <b>' + matches.length + ' contas</b> com esse nome — escolha qual fechar:</div>'
+    : '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">Achei esta conta:</div>';
+  return cab + matches.map(function(m){
+    return '<button onclick="' + onclickFn + '(\'' + m.contaId + '\')" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:10px;margin-bottom:7px;cursor:pointer;font-family:inherit;color:inherit;">' +
+      '<span style="font-size:1.2rem;">🧾</span>' +
+      '<span style="flex:1;font-size:0.86rem;"><b>' + esc(m.nomeAchado) + '</b> — ' + esc(_rotuloContaBusca(m)) +
+        '<span style="display:block;font-size:0.7rem;color:var(--muted);margin-top:2px;">' + m.qtdItens + ' item(ns)' + (m.garcom ? ' · garçom ' + esc(m.garcom) : '') + '</span></span>' +
+      '<span style="font-size:0.82rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(m.restante||0) + '</span>' +
+    '</button>';
+  }).join('');
+}
+
+function _abrirFecharDaBusca(contaId){
+  var m = _buscaFecharMatches[contaId];
+  if(!m) return;
+  // Sai do assistente (caixa flutuante e/ou chat) antes de abrir
+  try{ if(document.getElementById('overlay-assistente-flutuante')) fecharAssistenteFlutuante(); }catch(e){}
+  try{
+    var tela = document.getElementById('tela-chat-assistente');
+    if(tela && tela.style.display === 'flex') fecharChatAssistente();
+  }catch(e){}
+  setTimeout(function(){
+    var c = m.dados;
+    var emAvulsas = (_comandasAvulsas||[]).some(function(x){ return x.id === contaId; });
+    if(emAvulsas){ abrirFecharContaComanda(contaId); return; }
+    if(m.mesa && _contasMesaCache[String(m.mesa)] && _contasMesaCache[String(m.mesa)].id === contaId){
+      abrirFecharConta(String(m.mesa));
+      return;
+    }
+    var chaveTemp = 'busca_' + contaId;
+    _contasMesaCache[chaveTemp] = c;
+    abrirFecharConta(chaveTemp);
+  }, 250);
+}
+
+function _resolverFecharIA(nome, mesa){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(!caixa) return;
+  if(!nome && mesa){
+    // Pediu por número de mesa: abre direto
+    caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Abrindo a mesa ' + mesa + '...</div>';
+    if(_contasMesaCache[String(mesa)]){ try{ fecharAssistenteFlutuante(); }catch(e){} setTimeout(function(){ abrirFecharConta(String(mesa)); }, 250); }
+    else caixa.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">A mesa ' + mesa + ' não tem conta aberta.</div>';
+    return;
+  }
+  caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando ' + esc(nome) + ' nas contas abertas...</div>';
+  _buscarContasPorNome(nome).then(function(matches){
+    caixa.innerHTML = _htmlListaFecharBusca(nome, matches, '_abrirFecharDaBusca');
+  }).catch(function(e){
+    caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">Erro ao buscar as contas: ' + esc(e.message||'') + '</div>';
   });
 }
 
@@ -20381,6 +20496,7 @@ function _renderMensagemChat(msg){
       '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'fechar') return '<div class="chat-bolha-assistente">' + _htmlListaFecharBusca(msg.nome, msg.matches, '_abrirFecharDaBusca') + '</div>';
   if(msg.tipo === 'cancelamento') return _renderMsgCancelamentoChat(msg);
   if(msg.tipo === 'resultado'){
     return msg.linhas.map(function(l){
@@ -20611,6 +20727,28 @@ function enviarMensagemChat(){
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
 
+    } else if(j.tipo === 'fechar'){
+      var idCarr = _novoIdChat();
+      _chatHistorico.push({ id:idCarr, tipo:'carregando' });
+      renderChatMensagens();
+      if(!j.nome && j.mesa){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarr; });
+        var temM = !!_contasMesaCache[String(j.mesa)];
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto: temM ? ('Abrindo a mesa ' + j.mesa + '...') : ('A mesa ' + j.mesa + ' não tem conta aberta.') });
+        renderChatMensagens();
+        if(temM){ var tl = document.getElementById('tela-chat-assistente'); try{ if(tl && tl.style.display==='flex') fecharChatAssistente(); }catch(e){} setTimeout(function(){ abrirFecharConta(String(j.mesa)); }, 250); }
+        return;
+      }
+      _buscarContasPorNome(j.nome).then(function(matches){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarr; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'fechar', nome:j.nome, matches:matches.map(function(m){ return {contaId:m.contaId, mesa:m.mesa, tipoConta:m.tipoConta, nomeAchado:m.nomeAchado, garcom:m.garcom, qtdItens:m.qtdItens, restante:m.restante}; }) });
+        _chatAdicionarContexto('assistente', matches.length ? ('Achei ' + matches.length + ' conta(s) de ' + j.nome + ': ' + matches.map(function(m){ return _rotuloContaBusca(m); }).join(', ')) : ('Não achei conta aberta de ' + j.nome));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarr; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar as contas: ' + e.message });
+        renderChatMensagens();
+      });
     } else if(j.tipo === 'cancelamento'){
       var itensCancel = j.itens || [];
       if(!itensCancel.length){

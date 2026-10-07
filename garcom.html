@@ -19620,7 +19620,34 @@ function _resetarAssistenteGarcomAoSair(){
 var _assistenteOrigemParent = null;
 var _assistenteOrigemIrmaoSeguinte = null;
 
+// Aquecimento do assistente: a Vercel "adormece" a função depois de um tempo
+// parada (cold start = lentidão na 1ª pergunta). Um ping leve, sem Gemini,
+// mantém ela acordada e o cardápio já carregado no servidor.
+var _ultimoAquecimento = 0;
+function aquecerAssistente(){
+  if(!_tenantId || !_restauranteId) return;
+  if(document.visibilityState === 'hidden') return;
+  var agora = Date.now();
+  if(agora - _ultimoAquecimento < 60000) return;
+  _ultimoAquecimento = agora;
+  try{
+    fetch('/api/assistente-garcom', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tenantId: _tenantId, restauranteId: _restauranteId, aquecer: true }),
+      keepalive: true
+    }).catch(function(){});
+  }catch(e){}
+}
+setTimeout(aquecerAssistente, 4000);
+setTimeout(aquecerAssistente, 15000);
+setInterval(aquecerAssistente, 4 * 60 * 1000);
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible') aquecerAssistente();
+});
+
 function abrirAssistenteFlutuante(){
+  aquecerAssistente();
   var caixa = document.getElementById('caixa-assistente-garcom');
   if(!caixa || document.getElementById('overlay-assistente-flutuante')) return;
 

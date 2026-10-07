@@ -19779,6 +19779,15 @@ function executarAssistenteGarcom(){
     if(j.tipo === 'pedido'){
       _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
       _renderDraftsPedidoIA();
+    } else if(j.tipo === 'troca'){
+      if(!(j.trocas||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhuma troca nesse texto.</div>'; return; }
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Procurando o item na conta...</div>';
+      _resolverTrocas(j.trocas).then(function(itens){
+        _trocaBox = { id:'box', itens: itens };
+        _renderTrocaBox();
+      }).catch(function(e){
+        caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro ao buscar as contas: ' + esc(e.message||'') + '</div>';
+      });
     } else if(j.tipo === 'fechar'){
       _resolverFecharIA(j.nome || '', j.mesa || null);
     } else if(j.tipo === 'cancelamento'){
@@ -19943,6 +19952,8 @@ function _resolverItensCancelamento(itensBrutos){
         _idx:i, mesa:it.mesa, encontrado:true, _selecionado:false,
         itemKey: alvo.itemKey, itemNome: alvo.nome, itemQtd: alvo.qtd||1,
         itemId: alvo.id, itemPreco: alvo.preco, pedidoId: alvo.pedidoId||null,
+        pessoa: alvo.pessoa || alvo.nomeCliente || '', obs: alvo.obs || '',
+        tipoVenda: alvo.tipoVenda || '',
         contaId: doc.id, ambiguo: candidatos.length > 1
       };
     });
@@ -20063,6 +20074,146 @@ function _resolverFecharIA(nome, mesa){
   });
 }
 
+
+// ════════════════════════════════════════
+//  TROCA DE ITEM (assistente): "troca a coca lata da 25 por coca 600"
+//  = cancela o item antigo (mesmas travas do cancelamento: senha de
+//  gerente, se configurada) + lança o novo, com a mesma quantidade e o
+//  mesmo nome de cliente. NÃO imprime nada (nem o novo, nem reimpressão).
+// ════════════════════════════════════════
+var _trocaBox = null;
+
+function _resolverTrocas(trocasBrutas){
+  var brutosCancel = trocasBrutas.map(function(t){ return { mesa: t.mesa, nomeDigitado: t.nomeAntigo }; });
+  return _resolverItensCancelamento(brutosCancel).then(function(antigos){
+    return trocasBrutas.map(function(t, i){
+      var a = antigos[i] || {};
+      var ok = !!(a.encontrado && t.encontradoNovo && a.tipoVenda !== 'kg');
+      var falha = '';
+      if(!a.encontrado) falha = a.motivoFalha || 'Item antigo não encontrado na mesa';
+      else if(a.tipoVenda === 'kg') falha = 'Item por kg — troque manualmente';
+      else if(!t.encontradoNovo) falha = 'Não reconheci o item novo "' + (t.nomeNovoDigitado||'') + '"';
+      return { mesa: t.mesa, nomeAntigo: t.nomeAntigo, antigo: a, novo: t, encontrado: ok,
+               motivoFalha: falha, _selecionado: ok && !a.ambiguo };
+    });
+  });
+}
+
+function _ctxTroca(ctxId){
+  if(ctxId === 'box') return _trocaBox;
+  return _chatHistorico.find(function(m){ return m.id === ctxId; });
+}
+
+function _htmlTrocas(ctx, ctxId){
+  if(ctx.enviado) return '';
+  var linhas = ctx.itens.map(function(t, i){
+    if(!t.encontrado){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
+        '<span>⚠️</span><div style="flex:1;font-size:0.8rem;">Troca na Mesa ' + t.mesa + ': "' + esc(t.nomeAntigo) + '"' +
+        '<div style="font-size:0.68rem;color:var(--muted);">' + esc(t.motivoFalha) + '</div></div></div>';
+    }
+    var a = t.antigo, n = t.novo;
+    var aviso = a.ambiguo ? '<div style="font-size:0.66rem;color:#f7a34f;">Havia mais de um item parecido — confere se é este</div>' : '';
+    var quem = a.pessoa ? ' · 👤 ' + esc(a.pessoa) : '';
+    var obsN = n.obs ? '<div style="font-size:0.7rem;color:#f7a34f;">📝 ' + esc(n.obs) + '</div>' : '';
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(96,165,250,0.35);background:rgba(96,165,250,0.06);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (t._selecionado ? 'checked' : '') + ' onchange="_toggleTroca(\'' + ctxId + '\',' + i + ',this.checked)" style="width:18px;height:18px;accent-color:#60a5fa;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.82rem;">🔄 Mesa ' + t.mesa + quem +
+        '<div style="margin-top:3px;"><span style="text-decoration:line-through;color:var(--muted);">' + (a.itemQtd||1) + 'x ' + esc(a.itemNome) + '</span>' +
+        ' → <b>' + (a.itemQtd||1) + 'x ' + esc(n.itemNomeNovo) + '</b> <span style="color:var(--accent);font-weight:700;">R$ ' + fmtPreco((n.itemPrecoNovo||0) * (a.itemQtd||1)) + '</span></div>' +
+        obsN + aviso + '</div>' +
+    '</label>';
+  }).join('');
+  var qtd = ctx.itens.filter(function(t){ return t.encontrado && t._selecionado; }).length;
+  var btn = '';
+  if(ctx.enviando) btn = '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Trocando...</div>';
+  else if(qtd > 0) btn = '<button onclick="_confirmarTrocas(\'' + ctxId + '\')" style="width:100%;margin-top:4px;background:#60a5fa;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar troca (' + qtd + ')</button>';
+  return linhas + btn;
+}
+
+function _renderTrocaBox(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(caixa && _trocaBox) caixa.innerHTML = _htmlTrocas(_trocaBox, 'box');
+}
+
+function _renderMsgTrocaChat(msg){
+  if(msg.enviado) return '';
+  return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
+    '<div class="chat-bolha-assistente" style="width:100%;">' + _htmlTrocas(msg, msg.id) + '</div></div>';
+}
+
+function _rerenderTroca(ctxId){
+  if(ctxId === 'box') _renderTrocaBox(); else renderChatMensagens(true);
+}
+
+function _toggleTroca(ctxId, i, checked){
+  var ctx = _ctxTroca(ctxId);
+  if(!ctx) return;
+  ctx.itens[i]._selecionado = checked;
+  _rerenderTroca(ctxId);
+}
+
+function _confirmarTrocas(ctxId){
+  var ctx = _ctxTroca(ctxId);
+  if(!ctx || ctx.enviando) return;
+  var sel = ctx.itens.filter(function(t){ return t.encontrado && t._selecionado; });
+  if(!sel.length) return;
+  // Troca cancela um item: mesma trava de senha de gerente do cancelamento
+  fbDb.collection('restaurantes_publicos').doc(_restauranteId).get().then(function(doc){
+    var pedeSenha = false, senhaCorreta = '';
+    if(doc.exists){ var c = doc.data(); pedeSenha = !!c.cancelSenha; senhaCorreta = c.cancelSenhaValor || ''; }
+    if(pedeSenha){
+      var s = prompt('Senha do gerente pra confirmar a troca:');
+      if(s === null) return;
+      if(s !== senhaCorreta){ showToast('❌ Senha incorreta', '#f87171'); return; }
+    }
+    _executarTrocas(ctx, ctxId, sel);
+  }).catch(function(){ _executarTrocas(ctx, ctxId, sel); });
+}
+
+function _executarTrocas(ctx, ctxId, sel){
+  ctx.enviando = true;
+  _rerenderTroca(ctxId);
+  var resultados = [];
+  function proxima(i){
+    if(i >= sel.length){
+      ctx.enviando = false;
+      ctx.enviado = true;
+      var linhas = resultados.map(function(r){ return { ok: r.ok, texto: r.texto }; });
+      if(ctxId === 'box'){
+        var caixa = document.getElementById('resposta-assistente-garcom');
+        var inp = document.getElementById('input-assistente-garcom'); if(inp) inp.value = '';
+        if(caixa) caixa.innerHTML = linhas.map(function(l){
+          var cor = l.ok ? '#4ade80' : '#f87171';
+          return '<div style="padding:9px 10px;border-radius:9px;background:' + (l.ok?'rgba(74,222,128,0.1)':'rgba(248,113,113,0.1)') + ';border:1px solid ' + (l.ok?'rgba(74,222,128,0.3)':'rgba(248,113,113,0.3)') + ';color:' + cor + ';font-size:0.82rem;margin-bottom:6px;">' + (l.ok?'✓ ':'❌ ') + esc(l.texto) + '</div>';
+        }).join('');
+      } else {
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: linhas });
+        _chatAdicionarContexto('sistema', 'Troca já foi CONFIRMADA: ' + linhas.map(function(l){ return l.texto; }).join('; '));
+        renderChatMensagens();
+      }
+      if(resultados.some(function(r){ return r.ok; })) showToast('🔄 Troca feita', '#60a5fa');
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      return;
+    }
+    var t = sel[i], a = t.antigo, n = t.novo;
+    var desc = a.itemNome + ' → ' + n.itemNomeNovo + ' (Mesa ' + t.mesa + ')';
+    _cancelarItemPorKey(Object.assign({}, a, { motivo: 'Troca por ' + n.itemNomeNovo + ' (via assistente)' })).then(function(){
+      return _lancarPedidoEmMesa(t.mesa, [{
+        id: n.itemIdNovo, nome: n.itemNomeNovo, preco: n.itemPrecoNovo,
+        qtd: a.itemQtd || 1, obs: n.obs || '', cliente: a.pessoa || ''
+      }], { semImprimir: true, troca: true });
+    }).then(function(numero){
+      resultados.push({ ok: true, texto: desc + ' trocado' + (numero ? ' — pedido #' + numero : '') });
+      proxima(i + 1);
+    }).catch(function(e){
+      resultados.push({ ok: false, texto: desc + ': ' + (e && e.message || 'erro') });
+      proxima(i + 1);
+    });
+  }
+  proxima(0);
+}
+
 function _resolverCancelamentosIA(itensBrutos){
   if(!itensBrutos.length){
     document.getElementById('resposta-assistente-garcom').innerHTML =
@@ -20168,7 +20319,7 @@ function _cancelarItemPorKey(p){
         return Object.assign({}, it, {
           status: 'cancelado', canceladoEm: agora,
           canceladoPor: _nomeGarcom || 'Garçom',
-          motivoCancelamento: 'Cancelado via assistente de IA'
+          motivoCancelamento: (p.motivo || 'Cancelado via assistente de IA')
         });
       }
       return it;
@@ -20188,7 +20339,7 @@ function _cancelarItemPorKey(p){
           var ped = pedDoc.data();
           var itensP = (ped.itens||[]).map(function(it){
             if(it.itemKey === p.itemKey && it.status !== 'cancelado'){
-              return Object.assign({}, it, {status:'cancelado', canceladoEm:agora, canceladoPor:_nomeGarcom||'Garçom', motivoCancelamento:'Cancelado via assistente de IA'});
+              return Object.assign({}, it, {status:'cancelado', canceladoEm:agora, canceladoPor:_nomeGarcom||'Garçom', motivoCancelamento:(p.motivo || 'Cancelado via assistente de IA')});
             }
             return it;
           });
@@ -20221,7 +20372,8 @@ function _mostrarResultadoCancelamentosIA(resultados, pedidosAfetados){
 // formato do fluxo manual (_enviarPedidoConfirmado) — mesma coleção
 // 'pedidos', mesmo jeito de somar itens em 'contas_mesa', mesmo desconto de
 // estoque. Devolve o número sequencial (ou null) quando concluir.
-function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
+function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
+  opcoes = opcoes || {};
   var mesaInt = parseInt(mesaNum, 10);
 
   function escreverPedido(contaId){
@@ -20235,9 +20387,13 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
       // formato exato usado quando o garçom pesa na balança manualmente,
       // pra relatório/impressão/fechamento tratarem igual os dois casos.
       if(it.tipoVenda === 'kg'){
+        // Valor informado sem peso ("34,15 na 30"): calcula o peso a partir do
+        // preço/kg — igual à pesagem manual. Sem peso, o prato deixava de ser
+        // reconhecido como "por kg" e acabava AGRUPADO no Fechar Conta.
+        var pesoKg = it.peso || ((it.precoBase > 0 && it.preco > 0) ? Math.round((it.preco * 1000) / it.precoBase) : 0);
         return {
           id: it.id, nome: it.nome, tipoVenda: 'kg',
-          peso: it.peso || 0, precoBase: it.precoBase || 0,
+          peso: pesoKg || 0, precoBase: it.precoBase || 0,
           preco: it.preco || 0, extras: 0, qtd: 1, obs: it.obs || '',
           selecoes: [], pessoa: it.cliente || '', nomeCliente: it.cliente || '',
           itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
@@ -20259,7 +20415,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
       cliente: (function(){ var n={}; itensPedido.forEach(function(x){ if(x.pessoa) n[x.pessoa]=1; }); var k=Object.keys(n); return k.length===1 ? k[0] : null; })(), status: 'preparo', criadoEm: Date.now(),
       itens: itensPedido, total: totalPedido,
       teste: _modoTeste ? true : false,
-      imprimir: true,
+      imprimir: opcoes.semImprimir ? false : true,
       origemIA: true // marca de onde veio, útil pra diagnóstico/histórico
     };
 
@@ -20282,10 +20438,11 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho){
         };
         // Mesmo tratamento do fluxo manual: preserva peso/preço-por-kg pra
         // relatório e fechamento de conta reconhecerem como item por kg.
-        if(it.tipoVenda === 'kg' && it.peso){
+        if(it.tipoVenda === 'kg'){
           item.tipoVenda = 'kg';
-          item.peso = it.peso;
+          item.peso = it.peso || 0;
           item.precoBase = it.precoBase || 0;
+          item.qtd = 1;
         }
         return item;
       });
@@ -20426,7 +20583,7 @@ function abrirChatAssistente(){
   _chatHistorico = [];
   _chatContexto = [];
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-    texto:'Oi! Pode perguntar sobre um produto, pedir pra lançar um pedido, ou cancelar um item. Em que posso ajudar?' });
+    texto:'Oi! Pode perguntar sobre um produto, lançar um pedido, cancelar ou trocar um item, ou fechar a conta de alguém. Em que posso ajudar?' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -20519,6 +20676,7 @@ function _renderMensagemChat(msg){
       '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'troca') return _renderMsgTrocaChat(msg);
   if(msg.tipo === 'fechar') return '<div class="chat-bolha-assistente">' + _htmlListaFecharBusca(msg.nome, msg.matches, '_abrirFecharDaBusca') + '</div>';
   if(msg.tipo === 'cancelamento') return _renderMsgCancelamentoChat(msg);
   if(msg.tipo === 'resultado'){
@@ -20750,6 +20908,27 @@ function enviarMensagemChat(){
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
 
+    } else if(j.tipo === 'troca'){
+      if(!(j.trocas||[]).length){
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhuma troca nesse texto.' });
+        renderChatMensagens();
+        return;
+      }
+      var idCarrT = _novoIdChat();
+      _chatHistorico.push({ id:idCarrT, tipo:'carregando' });
+      renderChatMensagens();
+      _resolverTrocas(j.trocas).then(function(itens){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrT; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'troca', itens: itens });
+        _chatAdicionarContexto('assistente', 'Entendi esta troca (ainda não confirmada): ' + itens.map(function(t){
+          return t.encontrado ? ((t.antigo.itemNome) + ' -> ' + t.novo.itemNomeNovo + ' - Mesa ' + t.mesa) : ('troca não resolvida na Mesa ' + t.mesa + ': ' + t.motivoFalha);
+        }).join('; '));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrT; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar as contas: ' + e.message });
+        renderChatMensagens();
+      });
     } else if(j.tipo === 'fechar'){
       var idCarr = _novoIdChat();
       _chatHistorico.push({ id:idCarr, tipo:'carregando' });

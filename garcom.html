@@ -19920,6 +19920,23 @@ var _draftsCancelamentoIA = [];
 // REALMENTE ativos naquela conta. Devolve uma Promise com a lista
 // resolvida; quem chama decide onde guardar/renderizar o resultado (a
 // caixa da tela de mesas e o chat usam esta mesma função).
+
+// Compara o nome falado com o nome do item na conta: ignora acento e
+// maiúscula, e confere palavra por palavra (ordem não importa). Devolve a
+// fração das palavras faladas que aparecem no nome (1 = todas).
+function _pontuarNomeItem(falado, nomeItem){
+  var limpa = function(t){ return _normNome(t).replace(/[^a-z0-9 ]/g,' ').split(' ').filter(Boolean); };
+  var vazias = { de:1, da:1, do:1, das:1, dos:1, a:1, o:1, as:1, os:1, um:1, uma:1, na:1, no:1, e:1, pra:1, para:1 };
+  var ditas = limpa(falado).filter(function(w){ return !vazias[w]; });
+  if(!ditas.length) return 0;
+  var doItem = limpa(nomeItem);
+  var acertos = 0;
+  ditas.forEach(function(w){
+    var raiz = w.length > 4 ? w.slice(0, w.length - 1) : w; // "cocas" acha "coca"
+    if(doItem.some(function(x){ return x === w || x.indexOf(raiz) === 0; })) acertos++;
+  });
+  return acertos / ditas.length;
+}
 function _resolverItensCancelamento(itensBrutos){
   var mesasUnicas = itensBrutos.map(function(it){ return it.mesa; })
     .filter(function(m, i, arr){ return arr.indexOf(m) === i; });
@@ -19941,9 +19958,18 @@ function _resolverItensCancelamento(itensBrutos){
         return { _idx:i, mesa:it.mesa, nomeDigitado:it.nomeDigitado, encontrado:false, motivoFalha:'Mesa sem conta aberta' };
       }
       var conta = doc.data();
-      var termo = it.nomeDigitado.toLowerCase();
       var ativos = (conta.itens||[]).filter(function(x){ return x.status !== 'cancelado' && x.status !== 'pago'; });
-      var candidatos = ativos.filter(function(x){ return (x.nome||'').toLowerCase().indexOf(termo) >= 0; });
+      // 1º: pelo item do cardápio que o assistente identificou (igual ao pedido)
+      var candidatos = it.itemId ? ativos.filter(function(x){ return x.id === it.itemId; }) : [];
+      // 2º: pelo nome falado, sem acento e palavra por palavra ("sem gás" acha "AGUA SEM GAS")
+      if(!candidatos.length){
+        var pontuados = ativos.map(function(x){ return { x: x, p: _pontuarNomeItem(it.nomeDigitado, x.nome) }; })
+          .filter(function(o){ return o.p > 0; });
+        var completos = pontuados.filter(function(o){ return o.p >= 1; });
+        var usar = completos.length ? completos : pontuados.filter(function(o){ return o.p > 0.6; });
+        usar.sort(function(a,b){ return b.p - a.p; });
+        candidatos = usar.map(function(o){ return o.x; });
+      }
       if(!candidatos.length){
         return { _idx:i, mesa:it.mesa, nomeDigitado:it.nomeDigitado, encontrado:false, motivoFalha:'Não encontrei esse item na conta da mesa' };
       }
@@ -20084,7 +20110,7 @@ function _resolverFecharIA(nome, mesa){
 var _trocaBox = null;
 
 function _resolverTrocas(trocasBrutas){
-  var brutosCancel = trocasBrutas.map(function(t){ return { mesa: t.mesa, nomeDigitado: t.nomeAntigo }; });
+  var brutosCancel = trocasBrutas.map(function(t){ return { mesa: t.mesa, nomeDigitado: t.nomeAntigo, itemId: t.itemIdAntigo || null }; });
   return _resolverItensCancelamento(brutosCancel).then(function(antigos){
     return trocasBrutas.map(function(t, i){
       var a = antigos[i] || {};

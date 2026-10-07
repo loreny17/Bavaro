@@ -268,7 +268,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS TRÊS COISAS:
+ser UMA DAS QUATRO COISAS:
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -276,8 +276,11 @@ ser UMA DAS TRÊS COISAS:
     chopp mesa 12 e 1 coca na 8").
 (C) Um COMANDO DE CANCELAMENTO de item já pedido (ex: "cancelar 1 pilsen
     da mesa 10", "tira a coca da 15", "cancela o chopp mesa 8").
+(D) Um COMANDO PRA FECHAR/ABRIR A CONTA DE UMA PESSOA pelo NOME, sem dizer
+    o número da mesa (ex: "fechar a conta da Sara", "fecha o Fernando",
+    "conta da Beatriz", "onde está o João", "fechar da Maria").
 
-Decida qual das três é e responda SOMENTE com um JSON válido, sem texto
+Decida qual das quatro é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -356,6 +359,14 @@ SE FOR PEDIDO:
   separados pro Bacon, um com quantidade 1 e obs "sem salada", outro com
   quantidade 1 e obs "").
 
+SE FOR FECHAR CONTA POR NOME:
+{"tipo":"fechar","nome":"Sara"}
+- "nome" é SÓ o nome da pessoa como foi falado (primeiro nome ou nome
+  completo), com inicial maiúscula, sem "conta da", "mesa" ou outras
+  palavras. Se o funcionário já falou o NÚMERO DA MESA ("fechar a mesa 12"),
+  isso NÃO é este caso — o app já tem outro caminho pra isso: responda
+  {"tipo":"fechar","nome":"","mesa":12}.
+
 SE FOR CANCELAMENTO:
 {"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","quantidade":1}]}
 - "nomeDigitado" é só o texto do produto como foi falado — NÃO tente casar
@@ -427,6 +438,12 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       }).filter((p) => p !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    if (parsed.tipo === 'fechar') {
+      const nome = (parsed.nome || '').toString().trim().slice(0, 60);
+      const mesaF = parseInt(parsed.mesa, 10);
+      return res.status(200).json({ ok: true, tipo: 'fechar', nome, mesa: isNaN(mesaF) ? null : mesaF });
     }
 
     if (parsed.tipo === 'cancelamento') {

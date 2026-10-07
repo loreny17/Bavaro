@@ -511,9 +511,12 @@ SE FOR FECHAR CONTA POR NOME:
   {"tipo":"fechar","nome":"","mesa":12}.
 
 SE FOR TROCA:
-{"tipo":"troca","trocas":[{"mesa":25,"nomeAntigo":"coca lata","itemIdNovo":"abc123","obs":""}]}
-- "nomeAntigo" é só o texto do item que JÁ ESTÁ na mesa, como foi falado —
-  NÃO tente casar com id (o app confere o que realmente está na conta).
+{"tipo":"troca","trocas":[{"mesa":25,"nomeAntigo":"coca lata","itemIdAntigo":"id-da-coca-lata","itemIdNovo":"abc123","obs":""}]}
+- "nomeAntigo" é o texto do item que JÁ ESTÁ na mesa, como foi falado.
+- "itemIdAntigo" é o [id:...] do cardápio que corresponde a esse item
+  antigo — identifique do MESMO jeito que num pedido (abreviação, sem
+  acento, erro de voz: "sem gás" = "AGUA SEM GAS", "coca lata" = "COCA
+  COLA LATA"). Se não der pra saber com segurança, use null.
 - "itemIdNovo" é o [id:...] do NOVO item, da lista de cardápio abaixo
   (mesmas regras de PEDIDO: nunca invente id; se não identificar o novo
   item com segurança, use "itemIdNovo": null e "nomeNovoDigitado" com o
@@ -522,10 +525,12 @@ SE FOR TROCA:
 - Cada troca (mesa + item antigo → item novo) é um objeto separado.
 
 SE FOR CANCELAMENTO:
-{"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","quantidade":1}]}
-- "nomeDigitado" é só o texto do produto como foi falado — NÃO tente casar
-  com um id do cardápio aqui (o app faz essa checagem depois, olhando o que
-  realmente está na conta daquela mesa agora).
+{"tipo":"cancelamento","itens":[{"mesa":10,"nomeDigitado":"pilsen","itemId":"id-da-pilsen","quantidade":1}]}
+- "nomeDigitado" é o texto do produto como foi falado.
+- "itemId" é o [id:...] do cardápio que corresponde a esse produto,
+  identificado do MESMO jeito que num pedido (abreviação, sem acento, erro
+  de voz). Se não der pra saber com segurança, use null. (O app ainda
+  confere o que realmente está na conta daquela mesa.)
 - Cada combinação mesa+item é um objeto separado.
 
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
@@ -611,6 +616,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         return {
           mesa,
           nomeAntigo: (t.nomeAntigo || '').toString().trim(),
+          itemIdAntigo: (t.itemIdAntigo && (cardapioCompleto.some((c) => c.id === t.itemIdAntigo) || cardapioKg.some((c) => c.id === t.itemIdAntigo))) ? t.itemIdAntigo : null,
           encontradoNovo: !!novo,
           itemIdNovo: novo ? novo.id : null,
           itemNomeNovo: novo ? novo.nome : null,
@@ -633,7 +639,8 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const resultado = brutos.map((p) => {
         const mesa = parseInt(p.mesa, 10);
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
-        return { mesa: isNaN(mesa) ? null : mesa, nomeDigitado: (p.nomeDigitado || '').toString(), quantidade: qtd };
+        const idOk = p.itemId && (cardapioCompleto.some((c) => c.id === p.itemId) || cardapioKg.some((c) => c.id === p.itemId));
+        return { mesa: isNaN(mesa) ? null : mesa, nomeDigitado: (p.nomeDigitado || '').toString(), itemId: idOk ? p.itemId : null, quantidade: qtd };
       }).filter((p) => p.mesa !== null && p.nomeDigitado);
 
       return res.status(200).json({ ok: true, tipo: 'cancelamento', itens: resultado });

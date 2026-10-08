@@ -436,7 +436,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS SEIS COISAS:
+ser UMA DAS NOVE COISAS:
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -456,7 +456,18 @@ ser UMA DAS SEIS COISAS:
     mesa pra outra (ex: "transfere a 5 pra 8", "muda a mesa 12 para a 20",
     "passa a coca da 5 pra 8", "muda o chopp da mesa 3 para a 4").
 
-Decida qual das seis é e responda SOMENTE com um JSON válido, sem texto
+(G) Uma CONSULTA da conta de uma mesa (ex: "quanto tá a 12?", "o que tem
+    na mesa 12?", "qual o total da 8?", "conta da 5" — SEM a palavra fechar).
+(H) Um aviso de que um item ACABOU ou VOLTOU (ex: "acabou a costela", "não
+    tem mais coca zero", "pausa a picanha", "voltou a costela", "chegou
+    coca zero de novo").
+(I) Um pedido pra REPETIR o que a mesa já pediu (ex: "mais uma rodada na
+    15", "repete o pedido da 15", "a mesma coisa na 15", "repete o chopp da
+    15", "mais um igual da coca na 8"). ATENÇÃO: "mais 2 chopp na 15" (com
+    o item e a quantidade, sem "repete/igual/rodada/mesma coisa") é PEDIDO
+    normal, não repetir.
+
+Decida qual das nove é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -547,6 +558,23 @@ SE FOR FECHAR CONTA POR NOME:
   palavras. Se o funcionário já falou o NÚMERO DA MESA ("fechar a mesa 12"),
   isso NÃO é este caso — o app já tem outro caminho pra isso: responda
   {"tipo":"fechar","nome":"","mesa":12}.
+
+SE FOR CONSULTA DE CONTA:
+{"tipo":"consulta","mesa":12}
+
+SE FOR ITEM QUE ACABOU / VOLTOU:
+{"tipo":"pausar","itens":[{"itemId":"abc123","nomeDigitado":"costela","pausar":true}]}
+- "pausar": true quando ACABOU (pausar o item), false quando VOLTOU.
+- "itemId" é o [id:...] do item no cardápio (lista normal ou por kg),
+  identificado como num pedido; se não souber com segurança, null.
+
+SE FOR REPETIR:
+{"tipo":"repetir","mesa":15,"itemId":null,"nomeItem":null,"quantidade":null}
+- Rodada/pedido inteiro (nenhum item citado): itemId e nomeItem null.
+- Um item específico ("repete o chopp da 15"): "nomeItem" é o texto falado
+  e "itemId" o [id:...] do cardápio (ou null se não souber).
+- "quantidade": só se o funcionário disser quantas vezes ("repete 2 chopp
+  da 15" → 2); senão null (repete a mesma quantidade de antes).
 
 SE FOR TRANSFERÊNCIA:
 {"tipo":"transferir","transferencias":[{"origem":5,"destino":8,"nomeItem":null,"itemId":null}]}
@@ -653,6 +681,38 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       }).filter((p) => p !== null);
 
       return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+    }
+
+    const _idValido = (id) => !!(id && (cardapioCompleto.some((c) => c.id === id) || cardapioKg.some((c) => c.id === id)));
+
+    if (parsed.tipo === 'consulta') {
+      const mesaC = parseInt(parsed.mesa, 10);
+      return res.status(200).json({ ok: true, tipo: 'consulta', mesa: isNaN(mesaC) ? null : mesaC });
+    }
+
+    if (parsed.tipo === 'pausar') {
+      const brutos = Array.isArray(parsed.itens) ? parsed.itens : [];
+      const itens = brutos.map((p) => {
+        let id = _idValido(p.itemId) ? p.itemId : null;
+        if (!id && p.nomeDigitado) {
+          const achado = _acharItemPorNome(p.nomeDigitado, cardapioCompleto.concat(cardapioKg));
+          if (achado) id = achado.id;
+        }
+        const it = id ? (cardapioCompleto.find((c) => c.id === id) || cardapioKg.find((c) => c.id === id)) : null;
+        return { itemId: id, itemNome: it ? it.nome : null, nomeDigitado: (p.nomeDigitado || '').toString(), pausar: p.pausar !== false, encontrado: !!it };
+      });
+      return res.status(200).json({ ok: true, tipo: 'pausar', itens });
+    }
+
+    if (parsed.tipo === 'repetir') {
+      const mesaR = parseInt(parsed.mesa, 10);
+      const qtdR = parseInt(parsed.quantidade, 10);
+      return res.status(200).json({
+        ok: true, tipo: 'repetir', mesa: isNaN(mesaR) ? null : mesaR,
+        itemId: _idValido(parsed.itemId) ? parsed.itemId : null,
+        nomeItem: (parsed.nomeItem || '').toString().trim() || null,
+        quantidade: isNaN(qtdR) || qtdR < 1 ? null : qtdR,
+      });
     }
 
     if (parsed.tipo === 'transferir') {

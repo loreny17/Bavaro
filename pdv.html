@@ -8968,6 +8968,32 @@ function processarComandoImpressao(cmdId, cmd){
     }
     return;
   }
+  if(cmd.tipo === 'recado'){
+    // Recado do garçom (pelo assistente) pra cozinha / salão
+    var impRec = _impressoras.find(function(i){ return i.id === cmd.impressoraId; });
+    if(!impRec){
+      showToast('⚠️ Recado: impressora não encontrada','#f7a34f', 5000);
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      return;
+    }
+    if(!_qzPronto){ showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000); return; }
+    var Lr = Math.max(20, (impRec.largura||48) - 2);
+    var sr = escposInit();
+    sr += linha('=', Lr) + '\n';
+    sr += escposCenter() + escposBold(true) + escposSize('grande') + '** RECADO **\n' + escposSize('normal') + escposBold(false);
+    if(cmd.destinoNome) sr += 'Para: ' + removerAcentosImpressao(String(cmd.destinoNome)).toUpperCase() + '\n';
+    sr += escposLeft() + linha('-', Lr) + '\n';
+    if(cmd.mesa){ sr += escposBold(true) + escposSize('grande') + 'MESA ' + cmd.mesa + '\n' + escposSize('normal') + escposBold(false); }
+    sr += escposBold(true) + escposSize('alto') + removerAcentosImpressao(String(cmd.mensagem||'')) + '\n' + escposSize('normal') + escposBold(false);
+    sr += linha('-', Lr) + '\n';
+    if(cmd.garcom) sr += 'Garcom: ' + removerAcentosImpressao(String(cmd.garcom)) + '\n';
+    var dRc = new Date(cmd.criadoEm || Date.now());
+    sr += dRc.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '\n';
+    sr += '\n\n\n' + escposCut();
+    enviarParaImpressora(impRec, sr).then(function(){ showToast('📣 Recado impresso em ' + impRec.nome, '#4ade80'); });
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    return;
+  }
   if(cmd.tipo === 'pedido_avulso'){
     // (Garçom de versão antiga.) Se a impressora tem modelo de pedido, o item
     // avulso JÁ sai pelo fluxo normal do pedido (mesmo layout/papel) — aqui

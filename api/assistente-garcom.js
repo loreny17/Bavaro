@@ -56,13 +56,16 @@ const _reservaExcluidos = new Set();
 
 // Descobre, na própria conta do Google, um modelo "flash" rápido que EXISTA
 // (nomes de modelo mudam/são aposentados com o tempo — nada de nome fixo).
-async function _resolverReserva(apiKey) {
-  if (process.env.GEMINI_MODEL_RESERVA) return process.env.GEMINI_MODEL_RESERVA;
-  if (_reserva.modelo && (Date.now() - _reserva.em) < 60 * 60 * 1000) return _reserva.modelo;
-  let escolhido = null;
+// Monta uma lista VARIADA de modelos reserva que existem na conta: primeiro
+// um "flash" comum (outra fila de capacidade do Google, costuma aguentar o
+// pico quando os "lite" estão sobrecarregados), depois um "lite" diferente.
+async function _listaReservas(apiKey) {
+  if (process.env.GEMINI_MODEL_RESERVA) return process.env.GEMINI_MODEL_RESERVA.split(',').map((x) => x.trim()).filter(Boolean);
+  if (_reserva.lista && (Date.now() - _reserva.em) < 60 * 60 * 1000) return _reserva.lista.filter((n) => !_reservaExcluidos.has(n));
+  let lista = [];
   try {
     const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), 5000);
+    const to = setTimeout(() => ctl.abort(), 4000);
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
       headers: { 'x-goog-api-key': apiKey }, signal: ctl.signal,
     });
@@ -72,17 +75,25 @@ async function _resolverReserva(apiKey) {
       .filter((m) => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
       .map((m) => String(m.name || '').replace(/^models\//, ''))
       .filter((n) => /flash/.test(n) && !/image|tts|live|audio|embedding|thinking|robotics|computer|native|exp|vision/.test(n))
-      .filter((n) => n !== GEMINI_MODEL && !_reservaExcluidos.has(n));
-    const grupo = (n) => (/lite/.test(n) ? 0 : 1) + (/preview|latest/.test(n) ? 2 : 0);
-    nomes.sort((a, b) => (grupo(a) - grupo(b)) || (a < b ? 1 : -1));
-    escolhido = nomes[0] || null;
-    console.log('[assistente-garcom] modelos reserva possíveis: ' + nomes.slice(0, 5).join(', ') + ' -> escolhido: ' + escolhido);
+      .filter((n) => n !== GEMINI_MODEL);
+    const ord = (arr) => arr.sort((a, b) => ((/preview/.test(a) ? 1 : 0) - (/preview/.test(b) ? 1 : 0)) || (a < b ? 1 : -1));
+    const lites = ord(nomes.filter((n) => /lite/.test(n)));
+    const flashes = ord(nomes.filter((n) => !/lite/.test(n)));
+    for (let i = 0; i < Math.max(lites.length, flashes.length); i++) {
+      if (flashes[i]) lista.push(flashes[i]);
+      if (lites[i]) lista.push(lites[i]);
+    }
+    console.log('[assistente-garcom] reservas: ' + lista.slice(0, 6).join(', '));
   } catch (e) {
     console.error('[assistente-garcom] não consegui listar modelos: ' + e.message);
   }
-  if (!escolhido) escolhido = 'gemini-flash-latest';
-  _reserva.modelo = escolhido; _reserva.em = Date.now();
-  return escolhido;
+  if (!lista.length) lista = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+  _reserva.lista = lista; _reserva.em = Date.now();
+  return lista.filter((n) => !_reservaExcluidos.has(n));
+}
+async function _resolverReserva(apiKey, n) {
+  const l = await _listaReservas(apiKey);
+  return l[Math.min(n || 0, l.length - 1)] || 'gemini-flash-latest';
 }
 const TEMPO_MAX_TOTAL_MS = 28000; // limite de cada chamada (o Google às vezes demora)
 
@@ -97,9 +108,9 @@ function _urlModelo(modelo) {
 function chamarGeminiComRetry(apiKey, body) {
   const plano = [
     { modelo: GEMINI_MODEL, otimizado: true, atraso: 0 },
-    { modelo: null, reserva: true, otimizado: false, atraso: 4000 },
-    { modelo: null, reserva: true, otimizado: false, atraso: 8000 },
-    { modelo: GEMINI_MODEL, otimizado: false, atraso: 14000 },
+    { modelo: null, reserva: true, nReserva: 0, otimizado: false, atraso: 2500 },
+    { modelo: null, reserva: true, nReserva: 1, otimizado: false, atraso: 5500 },
+    { modelo: GEMINI_MODEL, otimizado: false, atraso: 10000 },
   ];
   const falhas = [];
   const controles = [];
@@ -140,7 +151,7 @@ function chamarGeminiComRetry(apiKey, body) {
       controles.push(reg);
       const t0 = Date.now();
 
-      (p.reserva ? _resolverReserva(apiKey) : Promise.resolve(p.modelo)).then((modeloUsado) => {
+      (p.reserva ? _resolverReserva(apiKey, p.nReserva) : Promise.resolve(p.modelo)).then((modeloUsado) => {
         p.modeloUsado = modeloUsado;
         return fetch(_urlModelo(modeloUsado), {
           method: 'POST',
@@ -162,7 +173,7 @@ function chamarGeminiComRetry(apiKey, body) {
         try { const je = JSON.parse(errTxt); if (je && je.error && je.error.message) msgErro = je.error.message; } catch (e) {}
         falhas.push((p.modeloUsado || p.modelo) + ' ' + resp.status + ': ' + String(msgErro).replace(/\s+/g, ' ').slice(0, 140));
         if (resp.status === 400 && p.otimizado) _thinkingSuportado = false;
-        if (resp.status === 404 && p.reserva) { _reservaExcluidos.add(p.modeloUsado); _reserva.modelo = null; }
+        if (resp.status === 404 && p.reserva) { _reservaExcluidos.add(p.modeloUsado); }
         ultimoErro = resp;
         if (pendentes === 0 && !lancarProxima()) finalizar(null);
       }).catch((e) => {
@@ -322,6 +333,60 @@ function _acharItemPorNome(falado, lista) {
   }).filter((o) => o.p >= 1);
   if (ranq.length === 1) return ranq[0].it;
   return null; // nenhum ou mais de um: melhor não chutar
+}
+
+
+// ═══ ATALHO LOCAL (sem IA) pra pedidos SIMPLES ═══
+// "1 coca na 13", "2 chopp e 1 agua sem gas na 5", "34,15 na 30".
+// Resolve na hora, sem depender do Google (que fica sobrecarregado no
+// horário de almoço). Só é usado quando TODOS os itens batem com UM único
+// item do cardápio; qualquer dúvida (nome ambíguo, observação, nome de
+// cliente, outra ação) cai pra IA normalmente.
+// Mais rígido que _acharItemPorNome: TODAS as palavras ditas têm que estar no
+// nome do item (ou numa palavra de voz dele), e só UM item pode bater.
+function _acharItemRapido(falado, lista) {
+  const ok = lista.filter((it) => {
+    if (_pontuar(falado, it.nome) >= 1) return true;
+    return it.voz ? String(it.voz).split(/[,;\/]/).some((v) => v.trim() && _pontuar(falado, v) >= 1) : false;
+  });
+  return ok.length === 1 ? ok[0] : null;
+}
+const _NUM_PALAVRA = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };
+function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao) {
+  let t = _normTxt(texto).replace(/[!?.]+$/g, '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 120) return null;
+  // verbos de "lançar" no começo
+  t = t.replace(/^(lanca|lance|manda|mande|traz|traga|poe|coloca|bota|desce|pede|pedido de|pedido)\s+/, '');
+  // qualquer palavra de outra ação → deixa pra IA
+  if (/\b(cancel|tira|troc|transf|passa|muda|fecha|conta|quanto|acabou|voltou|pausa|avisa|recado|repet|rodada|igual|mesma|nome|cliente|pra o|pro |bem |mal |obs|separad|depois|tambem|gelad|quente)/.test(t)) return null;
+  const partes = t.split(/\s+e\s+/).map((x) => x.trim()).filter(Boolean);
+  if (!partes.length || partes.length > 6) return null;
+  const pedidos = [];
+  for (const parte of partes) {
+    // prato por kg: "34,15 na 30", "prato de 34,15 na 30", "34,15 - 30"
+    let m = parte.match(/^(?:um |1 )?(?:prato de |prato |de )?(\d{1,3}[.,]\d{2})\s*(?:-|\/)?\s*(?:na |no |pra |para )?(?:mesa )?(\d{1,3})?$/);
+    if (m) {
+      const kg = kgPadrao || (cardapioKg.length === 1 ? cardapioKg[0] : null);
+      if (!kg) return null;
+      pedidos.push({ mesa: m[2] ? parseInt(m[2], 10) : null, itemId: kg.id, tipoVenda: 'kg', valorTotal: parseFloat(m[1].replace(',', '.')) });
+      continue;
+    }
+    // "2 chopp na 5", "coca na 13", "uma agua sem gas mesa 4"
+    m = parte.match(/^(?:(\d{1,2}|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+)?(.+?)(?:\s+(?:na|no|pra|para a|para)?\s*(?:mesa\s*)?(\d{1,3}))?$/);
+    if (!m || !m[2]) return null;
+    const qtd = m[1] ? (_NUM_PALAVRA[m[1]] || parseInt(m[1], 10)) : 1;
+    let nome = m[2].replace(/\s+(na|no|pra|para|mesa)$/, '').trim();
+    if (!nome || /\d/.test(nome)) return null;
+    const item = _acharItemRapido(nome, cardapio);
+    if (!item) return null;
+    pedidos.push({ mesa: m[3] ? parseInt(m[3], 10) : null, itemId: item.id, quantidade: qtd, obs: '' });
+  }
+  // mesa dita só no fim vale pras partes anteriores ("2 chopp e 1 coca na 5")
+  for (let i = pedidos.length - 1, ultima = null; i >= 0; i--) {
+    if (pedidos[i].mesa) ultima = pedidos[i].mesa; else pedidos[i].mesa = ultima;
+  }
+  if (pedidos.some((p) => !p.mesa)) return null;
+  return { tipo: 'pedido', pedidos };
 }
 
 module.exports = async (req, res) => {
@@ -637,7 +702,9 @@ ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM P
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
-    const r1 = await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
+    const rapido = _interpretarRapido(texto, cardapioCompleto, cardapioKg, kgPadrao);
+    if (rapido) console.log('[assistente-garcom] atalho local (sem IA): ' + texto);
+    const r1 = rapido ? { ok: true, texto: JSON.stringify(rapido) } : await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
     if (!r1.ok) {
       return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.', detalhe: (r1 && r1.detalhe) || '' });
     }

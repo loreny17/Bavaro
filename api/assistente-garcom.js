@@ -74,7 +74,7 @@ async function _listaReservas(apiKey) {
     const nomes = (j.models || [])
       .filter((m) => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
       .map((m) => String(m.name || '').replace(/^models\//, ''))
-      .filter((n) => /flash/.test(n) && !/image|tts|live|audio|embedding|thinking|robotics|computer|native|exp|vision/.test(n))
+      .filter((n) => /^gemini-\d+(\.\d+)?-flash(-lite)?(-\d{3})?$/.test(n) || /^gemini-flash(-lite)?-latest$/.test(n))
       .filter((n) => n !== GEMINI_MODEL);
     const ord = (arr) => arr.sort((a, b) => ((/preview/.test(a) ? 1 : 0) - (/preview/.test(b) ? 1 : 0)) || (a < b ? 1 : -1));
     const lites = ord(nomes.filter((n) => /lite/.test(n)));
@@ -91,8 +91,16 @@ async function _listaReservas(apiKey) {
   _reserva.lista = lista; _reserva.em = Date.now();
   return lista.filter((n) => !_reservaExcluidos.has(n));
 }
+// Modelo que acabou de falhar fica "de castigo" por um tempo: sobrecarga (503)
+// 2 min; sem cota (429) 15 min. Assim o próximo pedido já vai direto no
+// modelo que está respondendo, sem perder tempo tentando o que está caído.
+const _esfriando = {};
+function _esfriar(modelo, ms) { if (modelo) _esfriando[modelo] = Date.now() + ms; }
+function _estaEsfriando(modelo) { return (_esfriando[modelo] || 0) > Date.now(); }
+
 async function _resolverReserva(apiKey, n) {
-  const l = await _listaReservas(apiKey);
+  const todas = await _listaReservas(apiKey);
+  const l = todas.filter((m) => !_estaEsfriando(m)).concat(todas.filter((m) => _estaEsfriando(m)));
   return l[Math.min(n || 0, l.length - 1)] || 'gemini-flash-latest';
 }
 const TEMPO_MAX_TOTAL_MS = 28000; // limite de cada chamada (o Google às vezes demora)
@@ -106,7 +114,12 @@ function _urlModelo(modelo) {
 // depois uma 3ª saem EM PARALELO — vale quem responder primeiro. Se alguma
 // falhar antes, a próxima sai na hora, sem esperar o tempo.
 function chamarGeminiComRetry(apiKey, body) {
-  const plano = [
+  const plano = _estaEsfriando(GEMINI_MODEL) ? [
+    // Principal sobrecarregado agora há pouco: começa pelo reserva
+    { modelo: null, reserva: true, nReserva: 0, otimizado: false, atraso: 0 },
+    { modelo: null, reserva: true, nReserva: 1, otimizado: false, atraso: 2500 },
+    { modelo: GEMINI_MODEL, otimizado: true, atraso: 5000 },
+  ] : [
     { modelo: GEMINI_MODEL, otimizado: true, atraso: 0 },
     { modelo: null, reserva: true, nReserva: 0, otimizado: false, atraso: 2500 },
     { modelo: null, reserva: true, nReserva: 1, otimizado: false, atraso: 5500 },
@@ -174,6 +187,8 @@ function chamarGeminiComRetry(apiKey, body) {
         falhas.push((p.modeloUsado || p.modelo) + ' ' + resp.status + ': ' + String(msgErro).replace(/\s+/g, ' ').slice(0, 140));
         if (resp.status === 400 && p.otimizado) _thinkingSuportado = false;
         if (resp.status === 404 && p.reserva) { _reservaExcluidos.add(p.modeloUsado); }
+        if (resp.status === 503 || resp.status === 500) _esfriar(p.modeloUsado || p.modelo, 2 * 60 * 1000);
+        if (resp.status === 429) _esfriar(p.modeloUsado || p.modelo, 15 * 60 * 1000);
         ultimoErro = resp;
         if (pendentes === 0 && !lancarProxima()) finalizar(null);
       }).catch((e) => {

@@ -10079,7 +10079,8 @@ function iniciarListeners(){
   if(!_ehAdmin){
     if(_unsubPedidosCozinha){ _unsubPedidosCozinha(); _unsubPedidosCozinha = null; }
     if(_unsubModelosCozinha){ _unsubModelosCozinha(); _unsubModelosCozinha = null; }
-    if(_unsubImpressorasCozinha){ _unsubImpressorasCozinha(); _unsubImpressorasCozinha = null; }
+    // (lista de impressoras continua ativa pra todos: o garçom comum também
+    //  escolhe a impressora no Item Avulso)
     var btnSininho = document.getElementById('btn-sininho-cozinha');
     if(btnSininho) btnSininho.style.display = 'none';
   }
@@ -13953,7 +13954,10 @@ function _enviarPedidoConfirmado(){
     itens: itensPedido,
     total: totalPedido,
     teste: _modoTeste ? true : false,
-    imprimir: _deveImprimir   // false = não imprime na cozinha
+    imprimir: _deveImprimir,   // false = não imprime na cozinha
+    // Itens avulsos são roteados pelo PDV junto com o pedido (mesmo layout
+    // do modelo da impressora e no mesmo papel dos outros itens dela)
+    avulsoRoteadoNoPdv: true
   };
   // 1. Gera número sequencial e cria pedido
   gerarNumeroSequencial().then(function(numero){
@@ -14033,7 +14037,7 @@ function _enviarPedidoConfirmado(){
     // Se tem itens avulsos com impressora definida, envia comando direto
     // O PDV não consegue rotear itens avulsos pelos modelos normais (sem categoria)
     var itensAvulsos = itensPedido.filter(function(it){ return it.avulso && it.impressoraForcada; });
-    if(itensAvulsos.length && _deveImprimir){
+    if(itensAvulsos.length && _deveImprimir && !pedido.avulsoRoteadoNoPdv){
       // Agrupa por impressora (pode ter avulsos em impressoras diferentes)
       var porImpressora = {};
       itensAvulsos.forEach(function(it){
@@ -19777,8 +19781,23 @@ function executarAssistenteGarcom(){
       return;
     }
     if(j.tipo === 'pedido'){
-      _draftsPedidoIA = (j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; });
+      _draftsPedidoIA = _marcarEsgotados((j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; }));
       _renderDraftsPedidoIA();
+    } else if(j.tipo === 'consulta'){
+      if(!j.mesa){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Qual mesa?</div>'; return; }
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando a conta da Mesa ' + j.mesa + '...</div>';
+      _contaAbertaDaMesa(j.mesa).then(function(conta){ caixa.innerHTML = _htmlConsultaConta(j.mesa, conta); })
+        .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
+    } else if(j.tipo === 'pausar'){
+      if(!(j.itens||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei o item.</div>'; return; }
+      _pausaBox = { id:'box', itens: _montarPausa(j.itens) };
+      _rerenderPausa('box');
+    } else if(j.tipo === 'repetir'){
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando o último pedido...</div>';
+      _montarRepeticao(j).then(function(itens){
+        _draftsPedidoIA = _marcarEsgotados(itens.map(function(p, i){ p._idx = i; return p; }));
+        _renderDraftsPedidoIA();
+      }).catch(function(e){ caixa.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(e.message||'') + '</div>'; });
     } else if(j.tipo === 'transferir'){
       if(!(j.transferencias||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei nenhuma transferência nesse texto.</div>'; return; }
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Conferindo as mesas...</div>';
@@ -19825,7 +19844,7 @@ function _renderDraftsPedidoIA(){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
         '<span style="font-size:1rem;">⚠️</span>' +
-        '<div style="flex:1;font-size:0.8rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div></div>' +
+        '<div style="flex:1;font-size:0.8rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : 'Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div>') + '</div>' +
       '</div>';
     }
     if(p.tipoVenda === 'kg'){
@@ -19872,7 +19891,7 @@ function confirmarEnviarPedidosIA(){
     if(p.tipoVenda === 'kg'){
       porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '', cliente:p.cliente||'' });
+      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
     }
   });
   var mesas = Object.keys(porMesa);
@@ -20397,6 +20416,168 @@ function _confirmarTransf(ctxId){
   proxima(0);
 }
 
+
+// ════════════════════════════════════════
+//  CONSULTA / ACABOU-VOLTOU / REPETIR (assistente)
+// ════════════════════════════════════════
+
+// Conta ABERTA da mesa, direto do servidor (número gravado como número OU texto)
+function _contaAbertaDaMesa(mesa){
+  var base = fbDb.collection('contas_mesa').where('restauranteId','==', _restauranteId).where('status','==','aberta');
+  return Promise.all([
+    base.where('mesa','==', parseInt(mesa,10)).get(),
+    base.where('mesa','==', String(mesa)).get().catch(function(){ return { forEach:function(){} }; })
+  ]).then(function(r){
+    var lista = [];
+    r.forEach(function(snap){ snap.forEach(function(d){
+      if(!lista.some(function(x){ return x.id === d.id; })) lista.push(Object.assign({id:d.id}, d.data()));
+    }); });
+    lista = lista.filter(function(c){ return c.tipoConta !== 'almoco'; });
+    lista.sort(function(a,b){
+      var ca = (a.itens||[]).length ? 0 : 1, cb = (b.itens||[]).length ? 0 : 1;
+      return (ca - cb) || ((a.abertaEm||0) - (b.abertaEm||0));
+    });
+    return lista[0] || null;
+  });
+}
+
+function _ativosDaConta(conta){
+  return (conta && conta.itens || []).filter(function(i){ return i.status !== 'cancelado' && i.status !== 'pago'; });
+}
+
+// ── "quanto tá a 12?" ──
+function _htmlConsultaConta(mesa, conta){
+  if(!conta) return '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">A Mesa ' + mesa + ' não tem conta aberta.</div>';
+  var ativos = _ativosDaConta(conta);
+  var t = calcularTotaisConta({ itens: conta.itens||[], pagamentos: conta.pagamentos||[] });
+  // agrupa iguais (menos kg)
+  var linhas = [], idx = {};
+  ativos.forEach(function(it){
+    var ehKg = it.tipoVenda === 'kg';
+    var chave = ehKg ? ('kg_' + (it.itemKey||Math.random())) : ((it.id||it.nome) + '|' + (it.preco||0) + '|' + (it.obs||''));
+    var valor = (it.preco||0) * (ehKg ? 1 : (it.qtd||1));
+    if(idx[chave] === undefined){ idx[chave] = linhas.length; linhas.push({ nome: it.nome, qtd: ehKg ? 1 : (it.qtd||1), valor: valor, kg: ehKg, peso: it.peso, pessoa: it.pessoa || '' }); }
+    else { linhas[idx[chave]].qtd += (it.qtd||1); linhas[idx[chave]].valor += valor; }
+  });
+  var corpo = linhas.map(function(l){
+    return '<div style="display:flex;gap:8px;font-size:0.8rem;padding:3px 0;border-bottom:1px dashed var(--border2);">' +
+      '<span style="flex:1;">' + (l.kg ? '⚖️ ' : '<b>' + l.qtd + 'x</b> ') + esc(l.nome) + (l.kg && l.peso ? ' <span style="color:var(--muted);">(' + l.peso + 'g)</span>' : '') + (l.pessoa ? ' <span style="color:var(--muted);">· ' + esc(l.pessoa) + '</span>' : '') + '</span>' +
+      '<span style="color:var(--accent);font-weight:600;">R$ ' + fmtPreco(l.valor) + '</span></div>';
+  }).join('');
+  var rod = '<div style="margin-top:8px;font-size:0.8rem;line-height:1.6;">' +
+    '<div style="display:flex;"><span style="flex:1;color:var(--muted);">Subtotal</span><span>R$ ' + fmtPreco(t.subtotal||0) + '</span></div>' +
+    ((t.taxa10||0) > 0 ? '<div style="display:flex;"><span style="flex:1;color:var(--muted);">10%</span><span>R$ ' + fmtPreco(t.taxa10) + '</span></div>' : '') +
+    '<div style="display:flex;font-weight:800;font-size:0.92rem;"><span style="flex:1;">Total</span><span style="color:var(--accent);">R$ ' + fmtPreco(t.total||0) + '</span></div>' +
+    ((t.pagoTotal||0) > 0 ? '<div style="display:flex;color:#4ade80;"><span style="flex:1;">Já pago</span><span>R$ ' + fmtPreco(t.pagoTotal) + '</span></div>' +
+      '<div style="display:flex;font-weight:700;"><span style="flex:1;">Falta</span><span>R$ ' + fmtPreco(t.restante||0) + '</span></div>' : '') +
+  '</div>';
+  return '<div style="background:var(--surface2);border-radius:10px;padding:11px;">' +
+    '<div style="font-weight:800;margin-bottom:6px;">🧾 Mesa ' + mesa + (conta.garcomPrincipal ? ' <span style="font-weight:400;font-size:0.72rem;color:var(--muted);">· ' + esc(conta.garcomPrincipal) + '</span>' : '') + '</div>' +
+    (corpo || '<div style="font-size:0.8rem;color:var(--muted);">Sem itens em aberto.</div>') + rod + '</div>';
+}
+
+// ── "acabou a costela" / "voltou a costela" ──
+var _pausaBox = null;
+function _ctxPausa(ctxId){ return ctxId === 'box' ? _pausaBox : _chatHistorico.find(function(m){ return m.id === ctxId; }); }
+function _htmlPausa(ctx, ctxId){
+  if(ctx.enviado) return '';
+  var linhas = ctx.itens.map(function(p, i){
+    if(!p.encontrado){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;"><span>⚠️</span><div style="flex:1;font-size:0.8rem;">Não achei "' + esc(p.nomeDigitado) + '" no cardápio</div></div>';
+    }
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid ' + (p.pausar ? 'rgba(251,191,36,0.45)' : 'rgba(74,222,128,0.4)') + ';background:' + (p.pausar ? 'rgba(251,191,36,0.07)' : 'rgba(74,222,128,0.07)') + ';border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (p._selecionado ? 'checked' : '') + ' onchange="_togglePausa(\'' + ctxId + '\',' + i + ',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.84rem;">' + (p.pausar ? '⏸️ <b>Acabou:</b> ' : '▶️ <b>Voltou:</b> ') + esc(p.itemNome) +
+      '<div style="font-size:0.68rem;color:var(--muted);">' + (p.pausar ? 'Fica esgotado no garçom e some do totem' : 'Volta a aparecer pra pedir') + '</div></div></label>';
+  }).join('');
+  var qtd = ctx.itens.filter(function(p){ return p.encontrado && p._selecionado; }).length;
+  var btn = ctx.enviando ? '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Salvando...</div>'
+    : (qtd ? '<button onclick="_confirmarPausa(\'' + ctxId + '\')" style="width:100%;margin-top:4px;background:#fbbf24;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar (' + qtd + ')</button>' : '');
+  return linhas + btn;
+}
+function _rerenderPausa(ctxId){
+  if(ctxId === 'box'){ var c = document.getElementById('resposta-assistente-garcom'); if(c && _pausaBox) c.innerHTML = _htmlPausa(_pausaBox, 'box'); }
+  else renderChatMensagens(true);
+}
+function _togglePausa(ctxId, i, v){ var ctx = _ctxPausa(ctxId); if(!ctx) return; ctx.itens[i]._selecionado = v; _rerenderPausa(ctxId); }
+function _confirmarPausa(ctxId){
+  var ctx = _ctxPausa(ctxId);
+  if(!ctx || ctx.enviando) return;
+  var sel = ctx.itens.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!sel.length) return;
+  ctx.enviando = true; _rerenderPausa(ctxId);
+  Promise.all(sel.map(function(p){
+    return fbColCardapio('itens').doc(p.itemId).update({
+      pausado: p.pausar, pausadoAte: null, atualizadoEm: Date.now(),
+      pausadoPor: p.pausar ? (_nomeGarcom || 'Garçom') : null
+    }).then(function(){ return { ok:true, texto: (p.pausar ? 'Pausado: ' : 'Liberado: ') + p.itemNome }; })
+      .catch(function(e){ return { ok:false, texto: p.itemNome + ': ' + (e.message || 'erro') }; });
+  })).then(function(res){
+    ctx.enviando = false; ctx.enviado = true;
+    if(ctxId === 'box'){
+      var c = document.getElementById('resposta-assistente-garcom');
+      var inp = document.getElementById('input-assistente-garcom'); if(inp) inp.value = '';
+      if(c) c.innerHTML = res.map(function(l){ return '<div style="padding:9px 10px;border-radius:9px;margin-bottom:6px;font-size:0.82rem;color:' + (l.ok?'#4ade80':'#f87171') + ';background:' + (l.ok?'rgba(74,222,128,0.1)':'rgba(248,113,113,0.1)') + ';">' + (l.ok?'✓ ':'❌ ') + esc(l.texto) + '</div>'; }).join('');
+    } else {
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: res });
+      _chatAdicionarContexto('sistema', res.map(function(l){ return l.texto; }).join('; '));
+      renderChatMensagens();
+    }
+  });
+}
+function _montarPausa(itens){
+  return itens.map(function(p){ p._selecionado = p.encontrado; return p; });
+}
+
+// ── "repete o pedido da 15" / "repete o chopp da 15" ──
+// Monta rascunhos no MESMO formato de um pedido do assistente — a
+// confirmação e o lançamento são exatamente os do pedido normal.
+
+// Item pausado no cardápio ("acabou") não pode ser lançado pelo assistente
+function _marcarEsgotados(lista){
+  (lista||[]).forEach(function(p){
+    if(!p || !p.encontrado || !p.itemId) return;
+    var it = (_itens||[]).find(function(x){ return x.id === p.itemId; });
+    if(it && pausaAtiva(it)){ p.encontrado = false; p.esgotado = true; p._selecionado = false; }
+  });
+  return lista;
+}
+function _montarRepeticao(r){
+  if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
+  return _contaAbertaDaMesa(r.mesa).then(function(conta){
+    if(!conta) throw new Error('A Mesa ' + r.mesa + ' não tem conta aberta');
+    var ativos = _ativosDaConta(conta).filter(function(it){ return it.tipoVenda !== 'kg' && !(String(it.id||'').indexOf('avulso_') === 0); });
+    if(!ativos.length) throw new Error('A Mesa ' + r.mesa + ' não tem itens pra repetir');
+    var escolhidos;
+    if(r.itemId || r.nomeItem){
+      var porId = r.itemId ? ativos.filter(function(it){ return it.id === r.itemId; }) : [];
+      var lista = porId.length ? porId : ativos.filter(function(it){ return _pontuarNomeItem(r.nomeItem || '', it.nome) >= 1; });
+      if(!lista.length) throw new Error('Não achei "' + (r.nomeItem || 'esse item') + '" na Mesa ' + r.mesa);
+      lista.sort(function(a,b){ return (b.adicionadoEm||0) - (a.adicionadoEm||0); });
+      escolhidos = [lista[0]];
+    } else {
+      // Última rodada = itens do pedido mais recente da conta
+      var maisRecente = ativos.reduce(function(m, it){ return (it.adicionadoEm||0) > (m.adicionadoEm||0) ? it : m; }, ativos[0]);
+      var chave = maisRecente.pedidoId || null;
+      escolhidos = chave ? ativos.filter(function(it){ return it.pedidoId === chave; })
+                         : ativos.filter(function(it){ return Math.abs((it.adicionadoEm||0) - (maisRecente.adicionadoEm||0)) < 5000; });
+    }
+    return escolhidos.map(function(it){
+      var temOpcoes = (it.selecoes||[]).length > 0 || (it.extras||0) > 0;
+      var doCardapio = _itens.find(function(x){ return x.id === it.id; });
+      // Preço: o de AGORA (respeita preço por horário); com opções/adicionais, repete o valor da conta
+      var preco = (!temOpcoes && doCardapio) ? doCardapio.preco : (it.preco||0);
+      return {
+        mesa: r.mesa, quantidade: r.quantidade || it.qtd || 1,
+        itemId: it.id, itemNome: it.nome, itemPreco: preco,
+        precoBase: temOpcoes ? it.precoBase : preco, extras: temOpcoes ? (it.extras||0) : 0,
+        selecoes: it.selecoes || [], obs: it.obs || '', cliente: it.pessoa || '',
+        encontrado: true, _selecionado: true, repeticao: true
+      };
+    });
+  });
+}
+
 function _resolverCancelamentosIA(itensBrutos){
   if(!itensBrutos.length){
     document.getElementById('resposta-assistente-garcom').innerHTML =
@@ -20584,7 +20765,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
       }
       return {
         id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
-        selecoes: [], precoBase: it.preco, extras: 0, pessoa: it.cliente || '',
+        selecoes: it.selecoes || [], precoBase: (typeof it.precoBase === 'number' ? it.precoBase : it.preco), extras: it.extras || 0, pessoa: it.cliente || '',
         itemKey: chaveItem, cozinhaCriadoEm: _agoraPedido
       };
     });
@@ -20615,7 +20796,8 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
         var item = {
           itemKey: it.itemKey, pedidoId: pedidoId,
           id: it.id, nome: it.nome, preco: it.preco, qtd: it.qtd, obs: it.obs || '',
-          selecoes: [], pessoa: it.pessoa || '', status: 'ativo', pagamentoId: null,
+          selecoes: it.selecoes || [], precoBase: it.precoBase, extras: it.extras || 0,
+          pessoa: it.pessoa || '', status: 'ativo', pagamentoId: null,
           adicionadoEm: Date.now(), adicionadoPor: _nomeGarcom,
           teste: _modoTeste ? true : false
         };
@@ -20766,7 +20948,7 @@ function abrirChatAssistente(){
   _chatHistorico = [];
   _chatContexto = [];
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-    texto:'Oi! Pode perguntar sobre um produto, lançar um pedido, cancelar, trocar ou transferir itens e mesas, ou fechar a conta de alguém. Em que posso ajudar?' });
+    texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém ou tirar dúvidas de produto. Em que posso ajudar?' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -20859,6 +21041,8 @@ function _renderMensagemChat(msg){
       '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'pausar') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausa(msg, msg.id) + '</div></div>';
+  if(msg.tipo === 'html') return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + msg.html + '</div></div>';
   if(msg.tipo === 'transferir') return _renderMsgTransfChat(msg);
   if(msg.tipo === 'troca') return _renderMsgTrocaChat(msg);
   if(msg.tipo === 'fechar') return '<div class="chat-bolha-assistente">' + _htmlListaFecharBusca(msg.nome, msg.matches, '_abrirFecharDaBusca') + '</div>';
@@ -20879,7 +21063,7 @@ function _renderMsgPedidoChat(msg){
   var linhas = msg.itens.map(function(p, i){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
-        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '</div></div>';
+        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : 'Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa) + '</div></div>';
     }
     if(p.tipoVenda === 'kg'){
       var pesoHtml2 = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
@@ -20928,7 +21112,7 @@ function _chatConfirmarPedido(msgId){
     if(p.tipoVenda === 'kg'){
       porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'' });
+      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
     }
   });
   var mesas = Object.keys(porMesa);
@@ -21080,7 +21264,7 @@ function enviarMensagemChat(){
     }
 
     if(j.tipo === 'pedido'){
-      var itensPedido = (j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; });
+      var itensPedido = _marcarEsgotados((j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; }));
       _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: itensPedido });
       // Resumo em texto puro — é isso que a próxima pergunta vai "ver"
       // como contexto, pra entender "muda pra 3" se referindo a isto.
@@ -21092,6 +21276,43 @@ function enviarMensagemChat(){
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
 
+    } else if(j.tipo === 'consulta'){
+      if(!j.mesa){ _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'De qual mesa?' }); renderChatMensagens(); return; }
+      var idCarrC = _novoIdChat();
+      _chatHistorico.push({ id:idCarrC, tipo:'carregando' });
+      renderChatMensagens();
+      _contaAbertaDaMesa(j.mesa).then(function(conta){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrC; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html: _htmlConsultaConta(j.mesa, conta) });
+        var t = conta ? calcularTotaisConta({ itens: conta.itens||[], pagamentos: conta.pagamentos||[] }) : null;
+        _chatAdicionarContexto('assistente', conta ? ('Conta da Mesa ' + j.mesa + ': total R$ ' + fmtPreco(t.total||0) + ', ' + _ativosDaConta(conta).length + ' itens') : ('Mesa ' + j.mesa + ' sem conta aberta'));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrC; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar a conta: ' + e.message });
+        renderChatMensagens();
+      });
+    } else if(j.tipo === 'pausar'){
+      if(!(j.itens||[]).length){
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei o item.' });
+      } else {
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'pausar', itens: _montarPausa(j.itens) });
+      }
+      renderChatMensagens();
+    } else if(j.tipo === 'repetir'){
+      var idCarrR = _novoIdChat();
+      _chatHistorico.push({ id:idCarrR, tipo:'carregando' });
+      renderChatMensagens();
+      _montarRepeticao(j).then(function(itens){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrR; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: _marcarEsgotados(itens) });
+        _chatAdicionarContexto('assistente', 'Entendi esta repetição (ainda não confirmada): ' + itens.map(function(p){ return p.quantidade + 'x ' + p.itemNome + ' - Mesa ' + p.mesa; }).join('; '));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrR; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto: e.message || 'Não consegui repetir.' });
+        renderChatMensagens();
+      });
     } else if(j.tipo === 'transferir'){
       if(!(j.transferencias||[]).length){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei nenhuma transferência nesse texto.' });

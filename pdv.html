@@ -7362,15 +7362,56 @@ function expandirCombosParaImpressao(itens){
 }
 
 // ─── FILTRAR ITENS POR MODELO ───
+// Cupom simples de item avulso (só usado quando a impressora escolhida
+// não tem nenhum modelo de pedido configurado).
+function _cupomAvulsoSimples(imp, info){
+  var L = Math.max(20, (imp.largura||48) - 2);
+  var s = escposInit();
+  s += linha('=', L) + '\n';
+  s += escposCenter() + escposBold(true) + 'ITEM AVULSO\n' + escposBold(false) + escposLeft();
+  s += linha('-', L) + '\n';
+  if(info.mesa) s += 'Mesa: ' + info.mesa + '\n';
+  if(info.garcom) s += 'Garcom: ' + removerAcentosImpressao(String(info.garcom)) + '\n';
+  if(info.pedidoNumero) s += 'Pedido #' + info.pedidoNumero + '\n';
+  var d = new Date(info.criadoEm || Date.now());
+  s += d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
+  s += linha('-', L) + '\n';
+  (info.itens||[]).forEach(function(it){
+    s += escposBold(true) + (it.qtd||1) + 'x ' + removerAcentosImpressao(String(it.nome||'')).toUpperCase() + '\n' + escposBold(false);
+    if(it.obs) s += '   Obs: ' + removerAcentosImpressao(String(it.obs)) + '\n';
+  });
+  s += linha('-', L) + '\n\n\n\n';
+  s += escposCut();
+  return s;
+}
+
+// Item AVULSO (criado na hora pelo garçom, com impressora escolhida): vai
+// pro modelo de pedido DAQUELA impressora — sai com o mesmo layout e no mesmo
+// papel dos outros itens dela. Se houver mais de um modelo na mesma
+// impressora, usa só o primeiro (pra não imprimir duas vezes).
+function _modeloDoAvulso(impressoraId){
+  if(!impressoraId) return null;
+  var doTipo = _modelos.filter(function(m){ return (m.tipo||'pedido') === 'pedido' && m.impressoraId === impressoraId; });
+  return doTipo.find(function(m){ return !m.apenasAlmoco; }) || doTipo[0] || null;
+}
+
 function filtrarItensPorModelo(itens, modelo){
   itens = expandirCombosParaImpressao(itens);
+  var _ehDoModeloAvulso = function(it){
+    var dono = _modeloDoAvulso(it.impressoraForcada);
+    return !!(dono && dono.id === modelo.id);
+  };
   if(modelo.filtro === 'item'){
     var ids = modelo.itens || [];
-    return itens.filter(function(it){ return ids.indexOf(it.id) >= 0; });
+    return itens.filter(function(it){
+      if(it.avulso) return _ehDoModeloAvulso(it);
+      return ids.indexOf(it.id) >= 0;
+    });
   } else {
     var cats = modelo.categorias || [];
     var catsTotem = modelo.categoriasTotem || [];
     return itens.filter(function(it){
+      if(it.avulso) return _ehDoModeloAvulso(it);
       // Se o item já traz a categoria embutida (caso do totem), usa direto
       if(it.origemTotem && it.categoriaTotemId){
         return catsTotem.indexOf(it.categoriaTotemId) >= 0;
@@ -8320,6 +8361,29 @@ function imprimirPedidoAutomatico(pedido, opts){
     }
   });
 
+  // ── AVULSO SEM MODELO: impressora escolhida não tem modelo de pedido
+  // (ou o modelo não vale pra este tipo de pedido) → cupom simples, como antes.
+  if(pedido && pedido.avulsoRoteadoNoPdv){
+    var semModelo = {};
+    (pedido.itens||[]).forEach(function(it){
+      if(!it.avulso || !it.impressoraForcada || it.status === 'cancelado') return;
+      var dono = _modeloDoAvulso(it.impressoraForcada);
+      var coberto = dono && modelosPedido.some(function(m){ return m.id === dono.id; });
+      if(coberto) return;
+      if(!semModelo[it.impressoraForcada]) semModelo[it.impressoraForcada] = [];
+      semModelo[it.impressoraForcada].push(it);
+    });
+    Object.keys(semModelo).forEach(function(impId){
+      var impAv = _impressoras.find(function(i){ return i.id === impId; });
+      if(!impAv){ console.warn('[AVULSO] impressora não encontrada:', impId); return; }
+      enviarParaImpressora(impAv, _cupomAvulsoSimples(impAv, {
+        mesa: pedido.mesa, garcom: pedido.garcom,
+        pedidoNumero: pedido.numeroSequencial || (pedido.id||'').slice(-4).toUpperCase(),
+        criadoEm: pedido.criadoEm, itens: semModelo[impId]
+      }));
+    });
+  }
+
   // ── CUPOM CLIENTE DO TOTEM (só pra pedidos do totem) ──
   // Imprime o ticket com a senha pro cliente esperar ser chamado.
   if(pedido && pedido.origemTotem){
@@ -8905,7 +8969,13 @@ function processarComandoImpressao(cmdId, cmd){
     return;
   }
   if(cmd.tipo === 'pedido_avulso'){
-    // Item avulso com impressora específica — imprime direto na impressora escolhida
+    // (Garçom de versão antiga.) Se a impressora tem modelo de pedido, o item
+    // avulso JÁ sai pelo fluxo normal do pedido (mesmo layout/papel) — aqui
+    // só apaga o comando, senão imprimiria duas vezes.
+    if(_modeloDoAvulso(cmd.impressoraId)){
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      return;
+    }
     var impAvulso = _impressoras.find(function(i){ return i.id === cmd.impressoraId; });
     if(!impAvulso){
       console.warn('[AVULSO] Impressora não encontrada:', cmd.impressoraId);
@@ -8917,32 +8987,7 @@ function processarComandoImpressao(cmdId, cmd){
       showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
       return;
     }
-    // Gera cupom com largura da impressora e corte de papel
-    var L = Math.max(20, (impAvulso.largura||48) - 2);
-    var s = escposInit();
-    s += linha('=', L) + '\n';
-    s += escposCenter();
-    s += escposBold(true);
-    s += 'ITEM AVULSO\n';
-    s += escposBold(false);
-    s += escposLeft();
-    s += linha('-', L) + '\n';
-    if(cmd.mesa) s += 'Mesa: ' + cmd.mesa + '\n';
-    if(cmd.garcom) s += 'Garcom: ' + cmd.garcom + '\n';
-    if(cmd.pedidoNumero) s += 'Pedido #' + cmd.pedidoNumero + '\n';
-    var dAv = new Date(cmd.criadoEm || Date.now());
-    s += dAv.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n';
-    s += linha('-', L) + '\n';
-    (cmd.itens||[]).forEach(function(it){
-      s += escposBold(true);
-      s += (it.qtd||1) + 'x ' + (it.nome||'').toUpperCase() + '\n';
-      s += escposBold(false);
-      if(it.obs) s += '   Obs: ' + it.obs + '\n';
-    });
-    s += linha('-', L) + '\n';
-    s += '\n\n\n';
-    s += escposCut(); // corte de papel
-    enviarParaImpressora(impAvulso, s).then(function(){
+    enviarParaImpressora(impAvulso, _cupomAvulsoSimples(impAvulso, cmd)).then(function(){
       showToast('🖨️ Item avulso impresso em ' + impAvulso.nome, '#4ade80');
     });
     fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});

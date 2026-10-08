@@ -436,7 +436,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS NOVE COISAS:
+ser UMA DAS DEZ COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -467,7 +467,11 @@ ser UMA DAS NOVE COISAS:
     o item e a quantidade, sem "repete/igual/rodada/mesma coisa") é PEDIDO
     normal, não repetir.
 
-Decida qual das nove é e responda SOMENTE com um JSON válido, sem texto
+(J) Um RECADO pra cozinha ou pro salão/bar (ex: "avisa a cozinha que a 10
+    tá com pressa", "recado pro bar: mesa 4 quer o chopp sem colarinho",
+    "fala pra cozinha caprichar no prato da 7").
+
+Decida qual das dez é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -559,6 +563,24 @@ SE FOR FECHAR CONTA POR NOME:
   isso NÃO é este caso — o app já tem outro caminho pra isso: responda
   {"tipo":"fechar","nome":"","mesa":12}.
 
+SE FOR RECADO:
+{"tipo":"recado","destino":"cozinha","mensagem":"Mesa 10 com pressa","mesa":10}
+- "destino": "cozinha" ou "salao" (salão, bar, bebidas, copa), ou o nome
+  da impressora se o funcionário disser outro lugar.
+- "mensagem": o recado em si, curto e claro, como deve sair impresso
+  (sem "avisa a cozinha que"). Inclua a mesa no texto se ela foi dita.
+- "mesa": número da mesa se foi dita; senão null.
+
+AÇÕES MISTURADAS: se o texto tiver ações de TIPOS DIFERENTES (ex: "2 chopp
+na 5 e fecha a 8", "lança uma coca na 3 e avisa a cozinha que a 3 tá com
+pressa"), responda:
+{"tipo":"multiplo","acoes":[ {ação 1 completa}, {ação 2 completa} ]}
+- Cada ação é um objeto COMPLETO no mesmo formato descrito pro seu tipo.
+- Ações do MESMO tipo vão juntas num ÚNICO objeto (ex: vários itens de
+  pedido ficam todos dentro de um só {"tipo":"pedido","pedidos":[...]}).
+- Coloque as ações na ordem em que foram faladas.
+- Se for um tipo só, NÃO use "multiplo" — responda o objeto normal.
+
 SE FOR CONSULTA DE CONTA:
 {"tipo":"consulta","mesa":12}
 
@@ -628,6 +650,10 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return res.status(200).json({ ok: true, tipo: 'pergunta', resposta: 'Não consegui entender. Tenta reformular.' });
     }
 
+    // Interpreta UMA ação (já classificada) e devolve o JSON de resposta,
+    // ou null se for dúvida (aí segue pra Etapa 2).
+    const _idValido = (id) => !!(id && (cardapioCompleto.some((c) => c.id === id) || cardapioKg.some((c) => c.id === id)));
+    const despachar = (parsed) => {
     if (parsed.tipo === 'pedido') {
       const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
       const resultado = brutos.map((p) => {
@@ -680,14 +706,13 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         };
       }).filter((p) => p !== null);
 
-      return res.status(200).json({ ok: true, tipo: 'pedido', pedidos: resultado });
+      return ({ ok: true, tipo: 'pedido', pedidos: resultado });
     }
 
-    const _idValido = (id) => !!(id && (cardapioCompleto.some((c) => c.id === id) || cardapioKg.some((c) => c.id === id)));
 
     if (parsed.tipo === 'consulta') {
       const mesaC = parseInt(parsed.mesa, 10);
-      return res.status(200).json({ ok: true, tipo: 'consulta', mesa: isNaN(mesaC) ? null : mesaC });
+      return ({ ok: true, tipo: 'consulta', mesa: isNaN(mesaC) ? null : mesaC });
     }
 
     if (parsed.tipo === 'pausar') {
@@ -701,13 +726,13 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const it = id ? (cardapioCompleto.find((c) => c.id === id) || cardapioKg.find((c) => c.id === id)) : null;
         return { itemId: id, itemNome: it ? it.nome : null, nomeDigitado: (p.nomeDigitado || '').toString(), pausar: p.pausar !== false, encontrado: !!it };
       });
-      return res.status(200).json({ ok: true, tipo: 'pausar', itens });
+      return ({ ok: true, tipo: 'pausar', itens });
     }
 
     if (parsed.tipo === 'repetir') {
       const mesaR = parseInt(parsed.mesa, 10);
       const qtdR = parseInt(parsed.quantidade, 10);
-      return res.status(200).json({
+      return ({
         ok: true, tipo: 'repetir', mesa: isNaN(mesaR) ? null : mesaR,
         itemId: _idValido(parsed.itemId) ? parsed.itemId : null,
         nomeItem: (parsed.nomeItem || '').toString().trim() || null,
@@ -724,7 +749,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const nomeItem = (t.nomeItem || '').toString().trim();
         return { origem, destino, nomeItem: nomeItem || null, itemId: idOk ? t.itemId : null };
       }).filter((t) => t);
-      return res.status(200).json({ ok: true, tipo: 'transferir', transferencias });
+      return ({ ok: true, tipo: 'transferir', transferencias });
     }
 
     if (parsed.tipo === 'troca') {
@@ -745,13 +770,13 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           obs: (t.obs || '').toString().trim().slice(0, 140),
         };
       }).filter((t) => t && t.nomeAntigo);
-      return res.status(200).json({ ok: true, tipo: 'troca', trocas });
+      return ({ ok: true, tipo: 'troca', trocas });
     }
 
     if (parsed.tipo === 'fechar') {
       const nome = (parsed.nome || '').toString().trim().slice(0, 60);
       const mesaF = parseInt(parsed.mesa, 10);
-      return res.status(200).json({ ok: true, tipo: 'fechar', nome, mesa: isNaN(mesaF) ? null : mesaF });
+      return ({ ok: true, tipo: 'fechar', nome, mesa: isNaN(mesaF) ? null : mesaF });
     }
 
     if (parsed.tipo === 'cancelamento') {
@@ -763,7 +788,26 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         return { mesa: isNaN(mesa) ? null : mesa, nomeDigitado: (p.nomeDigitado || '').toString(), itemId: idOk ? p.itemId : null, quantidade: qtd };
       }).filter((p) => p.mesa !== null && p.nomeDigitado);
 
-      return res.status(200).json({ ok: true, tipo: 'cancelamento', itens: resultado });
+      return ({ ok: true, tipo: 'cancelamento', itens: resultado });
+    }
+
+    if (parsed.tipo === 'recado') {
+      const mesaRc = parseInt(parsed.mesa, 10);
+      return ({ ok: true, tipo: 'recado', destino: (parsed.destino || '').toString().trim().toLowerCase(),
+        mensagem: (parsed.mensagem || '').toString().trim().slice(0, 200), mesa: isNaN(mesaRc) ? null : mesaRc });
+    }
+    return null;
+    };
+
+    if (parsed.tipo === 'multiplo') {
+      const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : [])
+        .filter((x) => x && x.tipo && x.tipo !== 'multiplo' && x.tipo !== 'pergunta')
+        .map((x) => despachar(x)).filter((x) => x);
+      if (acoes.length === 1) return res.status(200).json(acoes[0]);
+      if (acoes.length > 1) return res.status(200).json({ ok: true, tipo: 'multiplo', acoes });
+    } else {
+      const saida = despachar(parsed);
+      if (saida) return res.status(200).json(saida);
     }
 
     // ═══ ETAPA 2 — só roda aqui: era dúvida de verdade. Agora sim busca

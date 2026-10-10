@@ -481,8 +481,15 @@ module.exports = async (req, res) => {
   try {
     const db = getDb();
     const ctx = await obterContexto(db, tenantId, restauranteId);
-    const { documentoGeral, cardapioKg, comFicha, arquivos } = ctx;
-    const cardapioCompleto = ctx.cardapioCompleto.map((it) => Object.assign({}, it, { preco: precoAtualDoItem(it) }));
+    const { documentoGeral, comFicha, arquivos } = ctx;
+    // Itens pausados ou de categoria pausada (lista mandada pelo app, sempre
+    // atualizada): NÃO entram nas opções de pedido — assim, com o mesmo nome
+    // em várias categorias, o assistente só enxerga o que está disponível.
+    const indisponiveis = new Set(Array.isArray(body.indisponiveis) ? body.indisponiveis.map(String) : []);
+    const cardapioCompletoTodos = ctx.cardapioCompleto.map((it) => Object.assign({}, it, { preco: precoAtualDoItem(it) }));
+    const cardapioKgTodos = ctx.cardapioKg;
+    const cardapioCompleto = cardapioCompletoTodos.filter((it) => !indisponiveis.has(String(it.id)));
+    const cardapioKg = cardapioKgTodos.filter((it) => !indisponiveis.has(String(it.id)));
 
     const listaCardapio = cardapioCompleto.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}]${it.voz ? ` (também chamado: ${it.voz})` : ''}${it.dica ? ` — ${it.dica}` : ''}`
@@ -499,6 +506,9 @@ module.exports = async (req, res) => {
       .filter((w) => w.length >= 4 && !/^(prato|quilo|kilo|por|peso|livre|self|service)$/.test(w));
     const textoNorm = _norm(texto);
     const itemKgCitado = (it) => palavrasDoItem(it.nome).some((w) => textoNorm.indexOf(w.slice(0, Math.max(4, w.length - 2))) >= 0);
+    const listaPausados = cardapioCompletoTodos.concat(cardapioKgTodos)
+      .filter((it) => indisponiveis.has(String(it.id)))
+      .slice(0, 80).map((it) => `- ${it.nome} [id:${it.id}]`).join('\n');
     const listaCardapioKg = cardapioKg.map((it, i) =>
       `${i + 1}. ${it.nome} [id:${it.id}] — R$ ${it.precoPorKg.toFixed(2)}/kg` +
       (kgPadrao && it.id === kgPadrao.id && cardapioKg.length > 1 ? '  ← PADRÃO: use ESTE quando o texto não citar o nome de outro item por kg' : '')
@@ -516,7 +526,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS DEZ COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
+ser UMA DAS ONZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -551,7 +561,12 @@ ser UMA DAS DEZ COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
     tá com pressa", "recado pro bar: mesa 4 quer o chopp sem colarinho",
     "fala pra cozinha caprichar no prato da 7").
 
-Decida qual das dez é e responda SOMENTE com um JSON válido, sem texto
+(K) PAUSAR ou LIBERAR uma CATEGORIA INTEIRA do cardápio (ex: "pausa a
+    categoria grelhados", "pausar categoria executivos", "libera a categoria
+    porções", "volta a categoria sobremesas"). Só quando a palavra
+    "categoria" (ou "a seção", "o grupo") for dita.
+
+Decida qual das onze é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -664,6 +679,11 @@ pressa"), responda:
 SE FOR CONSULTA DE CONTA:
 {"tipo":"consulta","mesa":12}
 
+SE FOR PAUSAR/LIBERAR CATEGORIA:
+{"tipo":"pausarCategoria","nomeCategoria":"grelhados","pausar":true}
+- "nomeCategoria": o nome da categoria como foi falado.
+- "pausar": true pra pausar, false pra liberar/voltar.
+
 SE FOR ITEM QUE ACABOU / VOLTOU:
 {"tipo":"pausar","itens":[{"itemId":"abc123","nomeDigitado":"costela","pausar":true}]}
 - "pausar": true quando ACABOU (pausar o item), false quando VOLTOU.
@@ -711,7 +731,7 @@ SE FOR CANCELAMENTO:
 - Cada combinação mesa+item é um objeto separado.
 
 CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
-${listaCardapio}
+${listaCardapio}${listaPausados ? `\n\nITENS PAUSADOS AGORA (NUNCA use em PEDIDO — só pra "voltou"/liberar):\n${listaPausados}` : ''}
 ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
 
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
@@ -734,7 +754,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
 
     // Interpreta UMA ação (já classificada) e devolve o JSON de resposta,
     // ou null se for dúvida (aí segue pra Etapa 2).
-    const _idValido = (id) => !!(id && (cardapioCompleto.some((c) => c.id === id) || cardapioKg.some((c) => c.id === id)));
+    const _idValido = (id) => !!(id && (cardapioCompletoTodos.some((c) => c.id === id) || cardapioKgTodos.some((c) => c.id === id)));
     const despachar = (parsed) => {
     if (parsed.tipo === 'pedido') {
       const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
@@ -802,10 +822,10 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const itens = brutos.map((p) => {
         let id = _idValido(p.itemId) ? p.itemId : null;
         if (!id && p.nomeDigitado) {
-          const achado = _acharItemPorNome(p.nomeDigitado, cardapioCompleto.concat(cardapioKg));
+          const achado = _acharItemPorNome(p.nomeDigitado, cardapioCompletoTodos.concat(cardapioKgTodos));
           if (achado) id = achado.id;
         }
-        const it = id ? (cardapioCompleto.find((c) => c.id === id) || cardapioKg.find((c) => c.id === id)) : null;
+        const it = id ? (cardapioCompletoTodos.find((c) => c.id === id) || cardapioKgTodos.find((c) => c.id === id)) : null;
         return { itemId: id, itemNome: it ? it.nome : null, nomeDigitado: (p.nomeDigitado || '').toString(), pausar: p.pausar !== false, encontrado: !!it };
       });
       return ({ ok: true, tipo: 'pausar', itens });
@@ -827,7 +847,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const transferencias = brutos.map((t) => {
         const origem = parseInt(t.origem, 10), destino = parseInt(t.destino, 10);
         if (isNaN(origem) || isNaN(destino)) return null;
-        const idOk = t.itemId && (cardapioCompleto.some((c) => c.id === t.itemId) || cardapioKg.some((c) => c.id === t.itemId));
+        const idOk = _idValido(t.itemId);
         const nomeItem = (t.nomeItem || '').toString().trim();
         return { origem, destino, nomeItem: nomeItem || null, itemId: idOk ? t.itemId : null };
       }).filter((t) => t);
@@ -843,7 +863,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         return {
           mesa,
           nomeAntigo: (t.nomeAntigo || '').toString().trim(),
-          itemIdAntigo: (t.itemIdAntigo && (cardapioCompleto.some((c) => c.id === t.itemIdAntigo) || cardapioKg.some((c) => c.id === t.itemIdAntigo))) ? t.itemIdAntigo : null,
+          itemIdAntigo: _idValido(t.itemIdAntigo) ? t.itemIdAntigo : null,
           encontradoNovo: !!novo,
           itemIdNovo: novo ? novo.id : null,
           itemNomeNovo: novo ? novo.nome : null,
@@ -866,13 +886,16 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const resultado = brutos.map((p) => {
         const mesa = parseInt(p.mesa, 10);
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
-        const idOk = p.itemId && (cardapioCompleto.some((c) => c.id === p.itemId) || cardapioKg.some((c) => c.id === p.itemId));
+        const idOk = _idValido(p.itemId);
         return { mesa: isNaN(mesa) ? null : mesa, nomeDigitado: (p.nomeDigitado || '').toString(), itemId: idOk ? p.itemId : null, quantidade: qtd };
       }).filter((p) => p.mesa !== null && p.nomeDigitado);
 
       return ({ ok: true, tipo: 'cancelamento', itens: resultado });
     }
 
+    if (parsed.tipo === 'pausarCategoria') {
+      return ({ ok: true, tipo: 'pausarCategoria', nomeCategoria: (parsed.nomeCategoria || '').toString().trim(), pausar: parsed.pausar !== false });
+    }
     if (parsed.tipo === 'recado') {
       const mesaRc = parseInt(parsed.mesa, 10);
       return ({ ok: true, tipo: 'recado', destino: (parsed.destino || '').toString().trim().toLowerCase(),

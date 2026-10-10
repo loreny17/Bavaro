@@ -965,6 +965,13 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
           </button>
         </div>
       </div>
+      <div class="f-grupo">
+        <div class="f-toggle" id="cat-pausada-toggle" onclick="this.classList.toggle('active')" style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.3);">
+          <span class="f-toggle-label" style="color:#fbbf24;">⏸️ Categoria pausada</span>
+          <div class="f-toggle-switch"></div>
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Pausada, todos os itens dela ficam esgotados no garçom, somem do totem e o assistente/voz deixa de achar esses itens (ele usa o item igual de outra categoria).</div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="f-btn danger" id="btn-excluir-cat" onclick="excluirCategoria()" style="display:none;flex:0 0 auto;padding:11px 14px;">Excluir</button>
@@ -1460,7 +1467,7 @@ function iniciarListeners(){
     _categorias = [];
     snap.forEach(function(doc){
       var d = doc.data();
-      _categorias.push({id:doc.id, nome:d.nome, emoji:d.emoji||'📂', ordem:d.ordem||0, criadoEm:d.criadoEm||0});
+      _categorias.push({id:doc.id, nome:d.nome, emoji:d.emoji||'📂', ordem:d.ordem||0, criadoEm:d.criadoEm||0, tipo:d.tipo||'', pausada:d.pausada===true});
     });
     _categorias.sort(function(a,b){
       if(a.ordem !== b.ordem) return a.ordem - b.ordem;
@@ -1538,7 +1545,7 @@ function renderCategorias(){
     var qtd = _itens.filter(function(i){ return i.categoria === c.id; }).length;
     html += '<button class="cat-pill '+(_catAtiva===c.id?'active':'')+'" onclick="selecionarCategoria(\''+c.id+'\')" oncontextmenu="event.preventDefault();editarCategoria(\''+c.id+'\');return false;">'
       +'<span class="cat-emoji">'+escapeHtml(c.emoji)+'</span>'
-      +'<span>'+escapeHtml(c.nome)+'</span>'
+      +'<span>'+escapeHtml(c.nome)+(c.pausada?' ⏸️':'')+'</span>'
       +'<span class="cat-count">'+qtd+'</span>'
     +'</button>';
   });
@@ -1602,7 +1609,7 @@ function renderItens(){
         (_modoReordenar?'<div class="cat-drag-handle">⋮⋮</div>':'')+
         '<div class="cat-card-emoji">'+escapeHtml(c.emoji)+'</div>'+
         '<div class="cat-card-nome">'+escapeHtml(c.nome)+'</div>'+
-        '<div class="cat-card-meta">'+qtd+' '+(qtd===1?'item':'itens')+'</div>'+
+        '<div class="cat-card-meta">'+qtd+' '+(qtd===1?'item':'itens')+(c.pausada?' · <span style="color:#fbbf24;font-weight:700;">⏸️ PAUSADA</span>':'')+'</div>'+
         (_modoReordenar?'<button class="cat-card-edit" onclick="event.stopPropagation();editarCategoria(\''+c.id+'\')">✏️</button>':'')+
       '</div>';
     });
@@ -2789,6 +2796,7 @@ function abrirModalCat(){
   emo.value = '';
   del.style.display = 'none';
   setCatTipo('');
+  var tgP = document.getElementById('cat-pausada-toggle'); if(tgP) tgP.classList.remove('active');
   mod.classList.add('show');
   setTimeout(function(){ try{ nom.focus(); }catch(e){} }, 150);
 }
@@ -2802,6 +2810,7 @@ function editarCategoria(id){
   document.getElementById('cat-emoji').value = c.emoji;
   document.getElementById('btn-excluir-cat').style.display = 'block';
   setCatTipo(c.tipo || '');
+  var tgP = document.getElementById('cat-pausada-toggle'); if(tgP) tgP.classList.toggle('active', c.pausada === true);
   document.getElementById('modal-cat').classList.add('show');
 }
 function fecharModalCat(){
@@ -2813,7 +2822,8 @@ function salvarCategoria(){
   var tipoBtn = document.getElementById('cat-tipo-normal');
   var tipo = tipoBtn ? (tipoBtn._valor || '') : '';
   if(!nome){ showToast('⚠️ Digite um nome','#f7a34f'); return; }
-  var dados = {nome:nome, emoji:emoji, tipo:tipo, atualizadoEm:Date.now()};
+  var tgP = document.getElementById('cat-pausada-toggle');
+  var dados = {nome:nome, emoji:emoji, tipo:tipo, pausada: !!(tgP && tgP.classList.contains('active')), atualizadoEm:Date.now()};
   var col = fbColCardapio('categorias');
   var prom;
   if(_catEditando){

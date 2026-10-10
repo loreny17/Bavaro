@@ -9976,7 +9976,7 @@ function iniciarListeners(){
     _categorias = [];
     snap.forEach(function(d){
       var v = d.data();
-      _categorias.push({id:d.id, nome:v.nome||'', emoji:v.emoji||'📂', ordem: (typeof v.ordem === 'number') ? v.ordem : 999999, criadoEm:v.criadoEm||0});
+      _categorias.push({id:d.id, nome:v.nome||'', emoji:v.emoji||'📂', ordem: (typeof v.ordem === 'number') ? v.ordem : 999999, criadoEm:v.criadoEm||0, pausada: v.pausada === true});
     });
     _categorias.sort(function(a,b){
       if(a.ordem!==b.ordem) return a.ordem-b.ordem;
@@ -10908,7 +10908,7 @@ function chavesDoItem(it){
 function _buscarItemExato(termo){
   termo = _normalizarVoz(termo);
   if(!termo) return null;
-  var disp = _itens.filter(function(i){ return i.disponivel; });
+  var disp = _itens.filter(function(i){ return i.disponivel && !pausaAtiva(i); });
   if(!disp.length) return null;
 
   // Nível 1: match exato
@@ -10944,7 +10944,7 @@ function _buscarItemExato(termo){
 
 // Fuzzy: tolera erro de digitação/fala — "piusen" acha "Pilsen"
 function _buscarItemFuzzy(termo){
-  var disp = _itens.filter(function(i){ return i.disponivel; });
+  var disp = _itens.filter(function(i){ return i.disponivel && !pausaAtiva(i); });
   if(!disp.length) return null;
   var palavrasTermo = termo.split(/\s+/).filter(function(w){ return w.length >= 3; });
   if(!palavrasTermo.length) return null;
@@ -11151,6 +11151,11 @@ function _adicionarItensVoz(itens){
 
 // Pausa com prazo (mesma regra do PDV/totem): vencido o prazo, volta sozinho
 function pausaAtiva(o){
+  // Item de categoria pausada no PDV conta como pausado (esgotado)
+  if(o && o.categoriaId && o.pausado !== true){
+    var catP = (_categorias||[]).find(function(c){ return c.id === o.categoriaId; });
+    if(catP && catP.pausada === true) return true;
+  }
   if(!o || o.pausado !== true) return false;
   if(o.pausadoAte && o.pausadoAte <= Date.now()) return false;
   return true;
@@ -19774,7 +19779,7 @@ function executarAssistenteGarcom(){
   fetch('/api/assistente-garcom', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto })
+    body: JSON.stringify({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto, indisponiveis: _idsIndisponiveisAssistente() })
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + (j.detalhe ? '<div style="font-size:0.62rem;color:var(--muted);margin-top:5px;word-break:break-word;">' + esc(j.detalhe) + '</div>' : '') + '</div>';
@@ -19798,6 +19803,9 @@ function executarAssistenteGarcom(){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando a conta da Mesa ' + j.mesa + '...</div>';
       _contaAbertaDaMesa(j.mesa).then(function(conta){ caixa.innerHTML = _htmlConsultaConta(j.mesa, conta); })
         .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
+    } else if(j.tipo === 'pausarCategoria'){
+      _pausaCatBox = Object.assign({ id:'box' }, _montarPausaCategoria(j));
+      _rerenderPausaCat('box');
     } else if(j.tipo === 'pausar'){
       if(!(j.itens||[]).length){ caixa.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);">Não identifiquei o item.</div>'; return; }
       _pausaBox = { id:'box', itens: _montarPausa(j.itens) };
@@ -20552,6 +20560,65 @@ function _marcarEsgotados(lista){
   });
   return lista;
 }
+
+// Itens que o assistente NÃO pode usar pra lançar pedido: pausados ou de
+// categoria pausada. Vai junto em cada pergunta, sempre atualizado.
+function _idsIndisponiveisAssistente(){
+  return (_itens||[]).filter(function(it){ return pausaAtiva(it); }).map(function(it){ return it.id; });
+}
+
+// ── "pausa a categoria tal" / "libera a categoria tal" ──
+var _pausaCatBox = null;
+function _ctxPausaCat(ctxId){ return ctxId === 'box' ? _pausaCatBox : _chatHistorico.find(function(m){ return m.id === ctxId; }); }
+function _montarPausaCategoria(j){
+  var nome = j.nomeCategoria || '';
+  var cands = (_categorias||[]).map(function(c){ return { c:c, p: Math.max(_pontuarNomeItem(nome, c.nome), _pontuarNomeItem(c.nome, nome)) }; })
+    .filter(function(o){ return o.p >= 1; });
+  return { nome: nome, pausar: j.pausar !== false, cats: cands.map(function(o){ return { id:o.c.id, nome:o.c.nome, emoji:o.c.emoji, pausadaAgora:o.c.pausada === true, _selecionado: cands.length === 1 }; }) };
+}
+function _htmlPausaCat(ctx, ctxId){
+  if(ctx.enviado) return '';
+  if(!ctx.cats.length) return '<div style="font-size:0.84rem;">Não achei a categoria "' + esc(ctx.nome) + '".</div>';
+  var linhas = ctx.cats.map(function(c, i){
+    var qtd = (_itens||[]).filter(function(it){ return it.categoriaId === c.id; }).length;
+    return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid ' + (ctx.pausar ? 'rgba(251,191,36,0.45)' : 'rgba(74,222,128,0.4)') + ';border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
+      '<input type="checkbox" ' + (c._selecionado ? 'checked' : '') + ' onchange="_togglePausaCat(\'' + ctxId + '\',' + i + ',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' +
+      '<div style="flex:1;font-size:0.84rem;">' + (ctx.pausar ? '⏸️ <b>Pausar categoria:</b> ' : '▶️ <b>Liberar categoria:</b> ') + esc(c.emoji || '') + ' ' + esc(c.nome) +
+      '<div style="font-size:0.68rem;color:var(--muted);">' + qtd + ' item(ns)' + (c.pausadaAgora ? ' · já está pausada' : '') + '</div></div></label>';
+  }).join('');
+  var qtdSel = ctx.cats.filter(function(c){ return c._selecionado; }).length;
+  var btn = ctx.enviando ? '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Salvando...</div>'
+    : (qtdSel ? '<button onclick="_confirmarPausaCat(\'' + ctxId + '\')" style="width:100%;margin-top:4px;background:#fbbf24;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar (' + qtdSel + ')</button>' : '');
+  return (ctx.cats.length > 1 ? '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;">Mais de uma categoria parecida — marque qual:</div>' : '') + linhas + btn;
+}
+function _rerenderPausaCat(ctxId){
+  if(ctxId === 'box'){ var c = document.getElementById('resposta-assistente-garcom'); if(c && _pausaCatBox) c.innerHTML = _htmlPausaCat(_pausaCatBox, 'box'); }
+  else renderChatMensagens(true);
+}
+function _togglePausaCat(ctxId, i, v){ var ctx = _ctxPausaCat(ctxId); if(!ctx) return; ctx.cats[i]._selecionado = v; _rerenderPausaCat(ctxId); }
+function _confirmarPausaCat(ctxId){
+  var ctx = _ctxPausaCat(ctxId);
+  if(!ctx || ctx.enviando) return;
+  var sel = ctx.cats.filter(function(c){ return c._selecionado; });
+  if(!sel.length) return;
+  ctx.enviando = true; _rerenderPausaCat(ctxId);
+  Promise.all(sel.map(function(c){
+    return fbColCardapio('categorias').doc(c.id).update({ pausada: ctx.pausar, atualizadoEm: Date.now(), pausadaPor: ctx.pausar ? (_nomeGarcom || 'Garçom') : null })
+      .then(function(){ return { ok:true, texto: (ctx.pausar ? 'Categoria pausada: ' : 'Categoria liberada: ') + c.nome }; })
+      .catch(function(e){ return { ok:false, texto: c.nome + ': ' + (e.message || 'erro') }; });
+  })).then(function(res){
+    ctx.enviando = false; ctx.enviado = true;
+    if(ctxId === 'box'){
+      var cx = document.getElementById('resposta-assistente-garcom');
+      var inp = document.getElementById('input-assistente-garcom'); if(inp) inp.value = '';
+      if(cx) cx.innerHTML = res.map(function(l){ return '<div style="padding:9px 10px;border-radius:9px;margin-bottom:6px;font-size:0.82rem;color:' + (l.ok?'#4ade80':'#f87171') + ';background:' + (l.ok?'rgba(74,222,128,0.1)':'rgba(248,113,113,0.1)') + ';">' + (l.ok?'✓ ':'❌ ') + esc(l.texto) + '</div>'; }).join('');
+    } else {
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: res });
+      _chatAdicionarContexto('sistema', res.map(function(l){ return l.texto; }).join('; '));
+      renderChatMensagens();
+    }
+  });
+}
 function _montarRepeticao(r){
   if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
   return _contaAbertaDaMesa(r.mesa).then(function(conta){
@@ -21127,6 +21194,7 @@ function _renderMensagemChat(msg){
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
   if(msg.tipo === 'recado') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlRecado(msg, msg.id) + '</div></div>';
+  if(msg.tipo === 'pausarCategoria') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausaCat(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'pausar') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausa(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'html') return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + msg.html + '</div></div>';
   if(msg.tipo === 'transferir') return _renderMsgTransfChat(msg);
@@ -21339,7 +21407,7 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   (respostaPronta ? Promise.resolve({ json: function(){ return respostaPronta; } }) : fetch('/api/assistente-garcom', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar })
+    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar, indisponiveis: _idsIndisponiveisAssistente() })
   })).then(function(r){ return r.json(); }).then(function _tratarJ(j){
     _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
 
@@ -21387,6 +21455,9 @@ function enviarMensagemChat(textoForcado, respostaPronta){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar a conta: ' + e.message });
         renderChatMensagens();
       });
+    } else if(j.tipo === 'pausarCategoria'){
+      _chatHistorico.push(Object.assign({ id:_novoIdChat(), tipo:'pausarCategoria' }, _montarPausaCategoria(j)));
+      renderChatMensagens();
     } else if(j.tipo === 'pausar'){
       if(!(j.itens||[]).length){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Não identifiquei o item.' });

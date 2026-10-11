@@ -681,7 +681,7 @@ ${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') 
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS DEZESSEIS COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
+ser UMA DAS DEZESSETE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -737,7 +737,12 @@ ser UMA DAS DEZESSEIS COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
     só o que é dela", "separa 2 chopp e a porção pra cobrar"). Diferente
     de só "fechar a conta" (que não fala em dividir/quem paga o quê).
 
-Decida qual das dezesseis é e responda SOMENTE com um JSON válido, sem texto
+(Q) Um RECADO PRA OUTRA LOJA/RESTAURANTE da rede (ex: "manda um recado pra
+    loja do centro: preciso de 2 caixas de chopp", "avisa o Bávaro Shopping
+    que vou passar lá às 15h", "recado pra outra unidade: ..."). Diferente
+    do recado pra cozinha/salão DESTA loja.
+
+Decida qual das dezessete é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -866,6 +871,11 @@ pressa"), responda:
 
 SE FOR CONSULTA DE CONTA:
 {"tipo":"consulta","mesa":12}
+
+SE FOR RECADO PRA OUTRA LOJA:
+{"tipo":"recadoLoja","loja":"centro","mensagem":"Preciso de 2 caixas de chopp"}
+- "loja": o nome da loja/restaurante como foi falado.
+- "mensagem": o recado em si, claro e completo, como deve sair impresso.
 
 SE FOR TEMPO DO PRATO:
 {"tipo":"tempoPrato","mesa":8,"nomeItem":"picanha","itemId":"id-ou-null"}
@@ -1166,6 +1176,9 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return ({ ok: true, tipo: 'lembrete', minutos: min, texto: (parsed.texto || '').toString().trim().slice(0, 160) });
     }
     if (parsed.tipo === 'resumoTurno') return ({ ok: true, tipo: 'resumoTurno' });
+    if (parsed.tipo === 'recadoLoja') {
+      return ({ ok: true, tipo: 'recadoLoja', loja: (parsed.loja || '').toString().trim(), mensagem: (parsed.mensagem || '').toString().trim().slice(0, 400) });
+    }
     if (parsed.tipo === 'tempoPrato') {
       const mT = parseInt(parsed.mesa, 10);
       return ({ ok: true, tipo: 'tempoPrato', mesa: isNaN(mT) ? null : mT,

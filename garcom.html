@@ -19278,6 +19278,12 @@ window.addEventListener('popstate', function(e){
   if(_historyStack.length > 0){
     _historyStack.pop();
   }
+  // Comanda ao vivo aberta? Voltar = sair dela (pergunta se tiver itens)
+  if(document.getElementById('tela-ao-vivo')){
+    fecharComandaAoVivo();
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(e){}
+    return;
+  }
   // 0. Modais dinâmicos criados via JS (cozinha, aparência, gestos, etc)?
   // Fecha o topo deles antes de qualquer outra coisa.
   var modaisDinamicos = ['modal-cozinha', 'modal-cozinha-geral', 'modal-aparencia',
@@ -19773,6 +19779,8 @@ function executarAssistenteGarcom(){
   var texto = input.value.trim();
   if(!texto) return;
   // "confirma" / "pode mandar": confirma o que está na tela, sem ir ao servidor
+  var mesaAoVivo = _pedidoAbrirAoVivo(texto);
+  if(mesaAoVivo){ input.value = ''; abrirComandaAoVivo(mesaAoVivo); return; }
   if(_ehConfirmacaoVoz(texto) && _confirmarPendenteBox()){ input.value = ''; return; }
   var cmdAuto = _comandoAutoEnvio(texto);
   if(cmdAuto){ input.value = ''; document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + cmdAuto + '</div>'; return; }
@@ -20649,10 +20657,12 @@ function _htmlSelecoesDraft(p){
 // ════════════════════════════════════════
 function _draftsDoCtx(ctxId){
   if(ctxId === 'box') return _draftsPedidoIA;
+  if(ctxId === 'aovivo') return _aoVivo ? _aoVivo.itens : null;
   var m = _chatHistorico.find(function(x){ return x.id === ctxId; });
   return m ? m.itens : null;
 }
 function _rerenderDrafts(ctxId){
+  if(ctxId === 'aovivo'){ _renderAoVivo(); return; }
   if(ctxId === 'box'){ _renderDraftsPedidoIA(); } else { renderChatMensagens(true); }
 }
 function _htmlCandidatos(p, ctxId, idx){
@@ -20919,6 +20929,233 @@ function _comandoAutoEnvio(texto){
   if(/(desliga|desativa|tira).*(envio|enviar) automatic/.test(t)){ try{ localStorage.setItem('assistente_auto_envio','0'); }catch(e){} return '⏸️ Envio automático <b>desligado</b>. Todo pedido vai esperar você confirmar.'; }
   if(/(liga|ativa|volta).*(envio|enviar) automatic/.test(t)){ try{ localStorage.setItem('assistente_auto_envio','1'); }catch(e){} return '▶️ Envio automático <b>ligado</b>. Pedido simples entendido com certeza sai sozinho em 5s (dá pra desfazer).'; }
   return null;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  🔴 COMANDA AO VIVO — o garçom fala com o cliente e os itens vão
+//  aparecendo na hora. Microfone contínuo; cada pausa na fala vira um
+//  trecho processado. "Fecha"/"manda" envia tudo de uma vez.
+// ════════════════════════════════════════════════════════════════
+var _aoVivo = null;
+var RE_AOVIVO_ABRIR = /^(anota|anotar|anote|comanda ao vivo|modo ao vivo|ao vivo|pedido ao vivo)( (na|a|da|pra|para|mesa|no))* ?(\d{1,3})$/;
+function _pedidoAbrirAoVivo(texto){
+  var t = _normNome(texto).replace(/[!.?,]+/g,'').replace(/\s+/g,' ').trim();
+  var m = t.match(RE_AOVIVO_ABRIR);
+  return m ? parseInt(m[4], 10) : null;
+}
+function abrirComandaAoVivoPerguntando(){
+  var n = prompt('Comanda ao vivo — qual mesa?');
+  var mesa = parseInt(n, 10);
+  if(mesa) abrirComandaAoVivo(mesa);
+}
+function abrirComandaAoVivo(mesa){
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Recon){ showToast('Reconhecimento de voz não disponível neste aparelho', '#f7a34f', 4000); return; }
+  if(_aoVivo) fecharComandaAoVivo(true);
+  try{ var tl = document.getElementById('tela-chat-assistente'); if(tl && tl.style.display === 'flex') _fecharChatAssistenteDeVerdade(); }catch(e){}
+  try{ if(document.getElementById('overlay-assistente-flutuante')) fecharAssistenteFlutuante(); }catch(e){}
+  _aoVivo = { mesa: mesa, itens: [], ativo: true, pausado: false, fila: [], processando: 0, historico: [], parcial: '', recon: null, wake: null };
+  var ov = document.createElement('div');
+  ov.id = 'tela-ao-vivo';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99990;background:var(--bg);display:flex;flex-direction:column;';
+  ov.innerHTML =
+    '<style>@keyframes pulsoAoVivo{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}</style>' +
+    '<div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border2);">' +
+      '<span id="aovivo-dot" style="width:12px;height:12px;border-radius:50%;background:#ef4444;animation:pulsoAoVivo 1.2s infinite;"></span>' +
+      '<div style="flex:1;"><div style="font-family:Bebas Neue,sans-serif;font-size:1.35rem;color:var(--accent);letter-spacing:.03em;">MESA ' + mesa + ' · AO VIVO</div>' +
+      '<div id="aovivo-status" style="font-size:0.72rem;color:var(--muted);">Ouvindo… fale os itens. Diga "fecha" pra enviar.</div></div>' +
+      '<button onclick="fecharComandaAoVivo()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:8px 12px;font-family:inherit;cursor:pointer;">✕ Sair</button>' +
+    '</div>' +
+    '<div id="aovivo-parcial" style="min-height:22px;padding:8px 16px;font-size:0.86rem;color:var(--muted);font-style:italic;"></div>' +
+    '<div id="aovivo-lista" style="flex:1;overflow-y:auto;padding:4px 14px 14px;"></div>' +
+    '<div style="padding:12px 14px;border-top:1px solid var(--border2);display:flex;gap:8px;align-items:center;">' +
+      '<div style="flex:1;"><div style="font-size:0.7rem;color:var(--muted);">Total</div><div id="aovivo-total" style="font-family:Bebas Neue,sans-serif;font-size:1.5rem;color:var(--accent);">R$ 0,00</div></div>' +
+      '<button id="aovivo-btn-mic" onclick="_aoVivoAlternarMic()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:12px 14px;font-family:inherit;font-weight:700;cursor:pointer;">⏸ Pausar</button>' +
+      '<button onclick="_aoVivoEnviar()" style="background:var(--accent);border:none;color:#000;border-radius:10px;padding:12px 16px;font-family:inherit;font-weight:800;cursor:pointer;">✓ Enviar</button>' +
+    '</div>';
+  document.body.appendChild(ov);
+  try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(function(w){ if(_aoVivo) _aoVivo.wake = w; }).catch(function(){}); }catch(e){}
+  try{ pushHistory('aovivo'); }catch(e){}
+  _renderAoVivo();
+  _aoVivoIniciarMic();
+}
+function fecharComandaAoVivo(silencioso){
+  if(!_aoVivo) return;
+  var pend = _aoVivo.itens.filter(function(p){ return p.encontrado; }).length;
+  if(!silencioso && pend && !_aoVivo.enviado && !confirm('Sair sem enviar? ' + pend + ' item(ns) anotado(s) serão descartados.')) return;
+  _aoVivo.ativo = false;
+  try{ if(_aoVivo.recon) _aoVivo.recon.stop(); }catch(e){}
+  try{ if(_aoVivo.wake) _aoVivo.wake.release(); }catch(e){}
+  var ov = document.getElementById('tela-ao-vivo'); if(ov) ov.remove();
+  _aoVivo = null;
+}
+function _aoVivoStatus(txt){ var el = document.getElementById('aovivo-status'); if(el) el.textContent = txt; }
+function _aoVivoIniciarMic(){
+  if(!_aoVivo || !_aoVivo.ativo || _aoVivo.pausado) return;
+  var Recon = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var r = new Recon();
+  r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
+  r.onresult = function(ev){
+    if(!_aoVivo) return;
+    var parcial = '';
+    for(var i = ev.resultIndex; i < ev.results.length; i++){
+      var txt = ev.results[i][0].transcript;
+      if(ev.results[i].isFinal){ if(txt.trim()) _aoVivoEnfileirar(txt.trim()); }
+      else parcial += txt;
+    }
+    var el = document.getElementById('aovivo-parcial'); if(el) el.textContent = parcial ? '“' + parcial + '”' : '';
+  };
+  r.onerror = function(e){
+    if(e && (e.error === 'not-allowed' || e.error === 'service-not-allowed')){
+      showToast('Permita o microfone pra usar o modo ao vivo', '#f87171', 5000);
+      if(_aoVivo){ _aoVivo.pausado = true; _renderAoVivo(); }
+    }
+  };
+  // O Android desliga o reconhecimento depois de um silêncio: religa sozinho
+  r.onend = function(){ if(_aoVivo && _aoVivo.ativo && !_aoVivo.pausado) setTimeout(_aoVivoIniciarMic, 250); };
+  _aoVivo.recon = r;
+  try{ r.start(); }catch(e){ setTimeout(_aoVivoIniciarMic, 800); }
+}
+function _aoVivoAlternarMic(){
+  if(!_aoVivo) return;
+  _aoVivo.pausado = !_aoVivo.pausado;
+  if(_aoVivo.pausado){ try{ _aoVivo.recon && _aoVivo.recon.stop(); }catch(e){} }
+  else _aoVivoIniciarMic();
+  _renderAoVivo();
+}
+function _aoVivoEnfileirar(txt){
+  if(!_aoVivo) return;
+  _aoVivo.fila.push(txt);
+  _aoVivoProcessarFila();
+}
+function _aoVivoProcessarFila(){
+  if(!_aoVivo || _aoVivo.processando || !_aoVivo.fila.length) return;
+  var txt = _aoVivo.fila.shift();
+  var t = _normNome(txt).replace(/[!.?,]+/g,'').trim();
+  // comandos da própria comanda (sem ir ao servidor)
+  if(/^(fecha|fechar|fecha ai|fecha o pedido|manda|mande|pode mandar|envia|enviar|pode enviar|finaliza|finalizar|so isso|e so isso|confirma)$/.test(t)){ _aoVivoEnviar(); return; }
+  if(/^(pausa|pausar|para de ouvir|parar)$/.test(t)){ _aoVivoAlternarMic(); return _aoVivoProcessarFila(); }
+  if(/^(cancela tudo|cancelar tudo|esquece tudo|limpa tudo|apaga tudo)$/.test(t)){ _aoVivo.itens = []; _renderAoVivo(); return _aoVivoProcessarFila(); }
+  _aoVivo.processando++;
+  _aoVivoStatus('Entendendo: “' + txt + '”…');
+  var snapshot = _aoVivo.itens.filter(function(p){ return p.encontrado; });
+  var listaTexto = snapshot.map(function(p){
+    var sel = (p.selecoes||[]).map(function(x){ return x.opcao; }).join(', ');
+    return (p.tipoVenda === 'kg' ? '⚖️ ' + p.itemNome + ' R$ ' + fmtPreco(p.itemPreco||0) : p.quantidade + 'x ' + p.itemNome) + (sel ? ' (+ ' + sel + ')' : '') + (p.obs ? ' [' + p.obs + ']' : '');
+  });
+  fetch('/api/assistente-garcom', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, texto: txt,
+      historico: _aoVivo.historico.slice(-6), modoComanda: { mesa: _aoVivo.mesa, itens: listaTexto } }, _contextoAssistente()))
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(!_aoVivo) return;
+    _aoVivo.historico.push({ autor:'usuario', texto: txt });
+    _aoVivoAplicar(j, snapshot);
+  }).catch(function(){
+    showToast('Sem conexão com o assistente — fale de novo', '#f87171');
+  }).then(function(){
+    if(!_aoVivo) return;
+    _aoVivo.processando--;
+    _aoVivoStatus(_aoVivo.pausado ? 'Microfone pausado' : 'Ouvindo… diga "fecha" pra enviar.');
+    _renderAoVivo();
+    _aoVivoProcessarFila();
+  });
+}
+function _aoVivoAplicar(j, snapshot){
+  if(!j || !j.ok){ if(j && j.error) showToast(j.error, '#f87171'); return; }
+  if(j.tipo === 'multiplo'){ (j.acoes||[]).forEach(function(a){ _aoVivoAplicar(Object.assign({ ok:true }, a), snapshot); }); return; }
+  if(j.tipo === 'pedido'){
+    var novos = _prepararDrafts(_marcarEsgotados((j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; })));
+    novos.forEach(function(p){ _aoVivo.itens.push(p); });
+    if(novos.length) _aoVivo.historico.push({ autor:'assistente', texto: 'Anotei: ' + novos.map(function(p){ return (p.quantidade||1) + 'x ' + (p.itemNome || p.nomeDigitado); }).join('; ') });
+    return;
+  }
+  if(j.tipo === 'ajusteComanda'){
+    var remover = [];
+    (j.acoes||[]).forEach(function(a){
+      var p = snapshot[a.indice - 1]; if(!p) return;
+      if(a.acao === 'remover') remover.push(p);
+      else if(a.acao === 'quantidade' && a.quantidade > 0 && p.tipoVenda !== 'kg'){
+        var base = (typeof p.precoBase === 'number') ? p.precoBase : (p.itemPreco||0);
+        p.quantidade = a.quantidade;
+        p.itemPreco = Math.round(((base * a.quantidade + (p.extras||0)) / a.quantidade) * 100) / 100;
+      } else if(a.acao === 'obs'){ p.obs = [p.obs, a.obs].filter(Boolean).join(', '); }
+    });
+    _aoVivo.itens = _aoVivo.itens.filter(function(p){ return remover.indexOf(p) < 0; });
+    return;
+  }
+  if(j.tipo === 'pergunta' && j.resposta){ showToast(j.resposta, '#60a5fa', 6000); return; }
+  showToast('No modo ao vivo eu só anoto pedidos desta mesa', '#f7a34f');
+}
+function _aoVivoRemover(i){ if(!_aoVivo) return; _aoVivo.itens.splice(i, 1); _renderAoVivo(); }
+function _aoVivoToggle(i, v){ if(!_aoVivo || !_aoVivo.itens[i]) return; _aoVivo.itens[i]._selecionado = v; _renderAoVivo(); }
+function _renderAoVivo(){
+  if(!_aoVivo) return;
+  var lista = document.getElementById('aovivo-lista');
+  var btnMic = document.getElementById('aovivo-btn-mic');
+  var dot = document.getElementById('aovivo-dot');
+  if(btnMic) btnMic.textContent = _aoVivo.pausado ? '▶ Ouvir' : '⏸ Pausar';
+  if(dot) dot.style.background = _aoVivo.pausado ? 'var(--muted)' : '#ef4444';
+  if(!lista) return;
+  if(!_aoVivo.itens.length){
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px 10px;font-size:0.86rem;line-height:1.6;">Pode falar os itens.<br>Ex: “duas brahma”, “uma picanha com palito”, “tira a coca”, “na verdade são três”.<br><br>Diga <b>“fecha”</b> pra enviar.</div>' +
+      (_aoVivo.processando ? '<div style="text-align:center;color:var(--muted);">⏳</div>' : '');
+  } else {
+    lista.innerHTML = _aoVivo.itens.map(function(p, i){
+      if(!p.encontrado){
+        return '<div style="padding:10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:10px;margin-top:8px;font-size:0.82rem;">' +
+          '<div style="display:flex;gap:8px;"><span style="flex:1;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado' : ((p.candidatos||[]).length ? 'Qual item é “' : 'Não reconheci “') + esc(p.nomeDigitado||'item') + '”?') + '</span>' +
+          '<button onclick="_aoVivoRemover(' + i + ')" style="background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;">✕</button></div>' +
+          (p.esgotado ? '' : _htmlCandidatos(p, 'aovivo', i)) + '</div>';
+      }
+      var desc = p.tipoVenda === 'kg' ? '⚖️ ' + esc(p.itemNome) + (p.peso ? ' (' + p.peso + 'g)' : '') : '<b>' + p.quantidade + 'x</b> ' + esc(p.itemNome);
+      var valor = p.tipoVenda === 'kg' ? (p.itemPreco||0) : (p.itemPreco||0) * (p.quantidade||1);
+      return '<div style="display:flex;align-items:center;gap:9px;padding:10px;border:1px solid var(--border2);background:var(--surface2);border-radius:10px;margin-top:8px;' + (p._selecionado ? '' : 'opacity:.55;') + '">' +
+        '<input type="checkbox" ' + (p._selecionado ? 'checked' : '') + ' onchange="_aoVivoToggle(' + i + ',this.checked)" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
+        '<div style="flex:1;font-size:0.88rem;">' + desc + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') +
+          (p.mesa && p.mesa !== _aoVivo.mesa ? ' <span style="color:#f7a34f;">(Mesa ' + p.mesa + ')</span>' : '') +
+          (p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;">📝 ' + esc(p.obs) + '</div>' : '') + _htmlSelecoesDraft(p) + _htmlAlertaDraft(p, 'aovivo', i) + '</div>' +
+        '<div style="font-size:0.82rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(valor) + '</div>' +
+        '<button onclick="_aoVivoRemover(' + i + ')" style="background:none;border:none;color:var(--muted);font-size:1.05rem;cursor:pointer;padding:0 2px;">✕</button>' +
+      '</div>';
+    }).join('') + (_aoVivo.processando ? '<div style="text-align:center;color:var(--muted);padding:8px;">⏳ entendendo…</div>' : '');
+    lista.scrollTop = lista.scrollHeight;
+  }
+  var total = _aoVivo.itens.filter(function(p){ return p.encontrado && p._selecionado; })
+    .reduce(function(a, p){ return a + (p.tipoVenda === 'kg' ? (p.itemPreco||0) : (p.itemPreco||0) * (p.quantidade||1)); }, 0);
+  var tEl = document.getElementById('aovivo-total'); if(tEl) tEl.textContent = 'R$ ' + fmtPreco(total);
+}
+function _aoVivoEnviar(){
+  if(!_aoVivo) return;
+  if(_aoVivo.processando || _aoVivo.fila.length){ _aoVivoStatus('Terminando de entender… envio em seguida'); setTimeout(_aoVivoEnviar, 600); return; }
+  var sel = _aoVivo.itens.filter(function(p){ return p.encontrado && p._selecionado; });
+  if(!sel.length){ showToast('Nenhum item anotado pra enviar', '#f7a34f'); return; }
+  var pendentes = _aoVivo.itens.filter(function(p){ return !p.encontrado && !p.esgotado; }).length;
+  if(pendentes && !confirm(pendentes + ' item(ns) ficaram sem identificar e NÃO vão. Enviar o resto?')) return;
+  var porMesa = {};
+  sel.forEach(function(p){
+    var m = p.mesa || _aoVivo.mesa;
+    if(!porMesa[m]) porMesa[m] = [];
+    if(p.tipoVenda === 'kg') porMesa[m].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
+    else porMesa[m].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
+  });
+  _aoVivo.ativo = false;
+  try{ _aoVivo.recon && _aoVivo.recon.stop(); }catch(e){}
+  _aoVivoStatus('Enviando…');
+  var mesas = Object.keys(porMesa), res = [];
+  (function prox(k){
+    if(k >= mesas.length){
+      var ok = res.every(function(r){ return r.ok; });
+      showToast(ok ? ('✓ Pedido enviado: ' + res.map(function(r){ return 'Mesa ' + r.mesa + (r.n ? ' #' + r.n : ''); }).join(', ')) : ('❌ ' + res.filter(function(r){ return !r.ok; }).map(function(r){ return 'Mesa ' + r.mesa + ': ' + r.erro; }).join('; ')), ok ? '#4ade80' : '#f87171', 5000);
+      try{ if(ok && window.speechSynthesis){ var u = new SpeechSynthesisUtterance('Pedido da mesa ' + mesas.join(' e ') + ' enviado'); u.lang = 'pt-BR'; speechSynthesis.speak(u); } }catch(e){}
+      if(_aoVivo) _aoVivo.enviado = true;
+      fecharComandaAoVivo(true);
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      return;
+    }
+    _lancarPedidoEmMesa(mesas[k], porMesa[mesas[k]]).then(function(n){ res.push({ mesa:mesas[k], ok:true, n:n }); prox(k+1); })
+      .catch(function(e){ res.push({ mesa:mesas[k], ok:false, erro:e.message }); prox(k+1); });
+  })(0);
 }
 function _montarRepeticao(r){
   if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
@@ -21349,6 +21586,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
   <div style="padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
     <div style="display:flex;gap:8px;">
       <input type="text" id="input-chat-assistente" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:22px;padding:11px 16px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key==='Enter')enviarMensagemChat()">
+      <button onclick="abrirComandaAoVivoPerguntando()" title="Comanda ao vivo" style="flex-shrink:0;height:44px;border-radius:22px;padding:0 12px;background:rgba(239,68,68,0.12);border:1.5px solid rgba(239,68,68,0.5);color:#f87171;cursor:pointer;font-weight:800;font-size:0.72rem;font-family:inherit;white-space:nowrap;">🔴 Ao vivo</button>
       <button id="btn-voz-chat-assistente" onclick="iniciarVozChatAssistente()" title="Falar" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
       </button>
@@ -21697,6 +21935,8 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   var texto = (typeof textoForcado === 'string' && textoForcado) ? textoForcado : input.value.trim();
   if(!texto) return;
   if(!respostaPronta){
+    var mesaAoVivoC = _pedidoAbrirAoVivo(texto);
+    if(mesaAoVivoC){ input.value = ''; abrirComandaAoVivo(mesaAoVivoC); return; }
     var cmdAutoC = _comandoAutoEnvio(texto);
     if(cmdAutoC){
       input.value = '';

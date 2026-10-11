@@ -19809,6 +19809,10 @@ function executarAssistenteGarcom(){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando a conta da Mesa ' + j.mesa + '...</div>';
       _contaAbertaDaMesa(j.mesa).then(function(conta){ caixa.innerHTML = _htmlConsultaConta(j.mesa, conta); })
         .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
+    } else if(j.tipo === 'recadoLoja'){
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando as lojas...</div>';
+      _montarRecadoLoja(j).then(function(r){ _recadoLojaBox = Object.assign({ id:'box' }, r); caixa.innerHTML = _htmlRecadoLoja(_recadoLojaBox, 'box'); })
+        .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
     } else if(j.tipo === 'tempoPrato'){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Vendo os pedidos da mesa...</div>';
       _tempoPratoHtml(j).then(function(h){ caixa.innerHTML = '<div style="background:var(--surface2);border-radius:10px;padding:11px;font-size:0.84rem;">' + h + '</div>'; })
@@ -20774,7 +20778,7 @@ function _ehConfirmacaoVoz(texto){
 // Confirma o rascunho pendente mais recente do CHAT. Devolve true se havia um.
 function _confirmarPendenteChat(){
   var mapa = { pedido: _chatConfirmarPedido, cancelamento: _chatConfirmarCancelamento, troca: _confirmarTrocas,
-    transferir: _confirmarTransf, pausar: _confirmarPausa, pausarCategoria: _confirmarPausaCat, recado: _enviarRecado };
+    transferir: _confirmarTransf, pausar: _confirmarPausa, pausarCategoria: _confirmarPausaCat, recado: _enviarRecado, recadoLoja: _enviarRecadoLoja };
   for(var i = _chatHistorico.length - 1; i >= 0; i--){
     var m = _chatHistorico[i];
     if(m.tipo === 'usuario') continue;
@@ -20793,7 +20797,7 @@ function _confirmarPendenteBox(){
   if(b && !b.disabled && b.style.display !== 'none'){ confirmarCancelamentosIA(); return true; }
   var pares = [["_confirmarTrocas('box')", function(){ _confirmarTrocas('box'); }], ["_confirmarTransf('box')", function(){ _confirmarTransf('box'); }],
     ["_confirmarPausa('box')", function(){ _confirmarPausa('box'); }], ["_confirmarPausaCat('box')", function(){ _confirmarPausaCat('box'); }],
-    ["_enviarRecado('box')", function(){ _enviarRecado('box'); }]];
+    ["_enviarRecado('box')", function(){ _enviarRecado('box'); }], ["_enviarRecadoLoja('box')", function(){ _enviarRecadoLoja('box'); }]];
   for(var i = 0; i < pares.length; i++){ if(html.indexOf(pares[i][0]) >= 0){ pares[i][1](); return true; } }
   return false;
 }
@@ -21027,6 +21031,77 @@ function _selecionarParaPessoa(j){
   var total = escolhidos.reduce(function(a,i){ return a + (i.preco||0) * (i.tipoVenda === 'kg' ? 1 : (i.qtd||1)); }, 0);
   if(escolhidos.length) showToast('✓ ' + escolhidos.length + ' item(ns)' + (j.pessoa ? ' de ' + j.pessoa : '') + ' marcados — R$ ' + fmtPreco(total) + '. Confira e cobre.', '#60a5fa', 5000);
   else showToast('Não achei esses itens' + (j.pessoa ? ' de ' + j.pessoa : '') + ' — marque na tela', '#f7a34f', 5000);
+}
+
+// ════════════════════════════════════════
+//  RECADO PRA OUTRA LOJA: "manda um recado pra loja do centro: ..."
+//  Sai na impressora do caixa da outra loja + aviso na tela do PDV dela.
+// ════════════════════════════════════════
+var _lojasRede = null, _recadoLojaBox = null;
+function _carregarLojas(){
+  if(_lojasRede) return Promise.resolve(_lojasRede);
+  return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').get().then(function(snap){
+    var l = [];
+    snap.forEach(function(d){ var v = d.data() || {}; if(d.id !== _restauranteId) l.push({ id: d.id, nome: v.nome || d.id }); });
+    _lojasRede = l;
+    return l;
+  });
+}
+function _montarRecadoLoja(j){
+  return _carregarLojas().then(function(lojas){
+    var alvo = '';
+    var falada = j.loja || '';
+    if(falada){
+      var pont = lojas.map(function(l){ return { l:l, p: Math.max(_pontuarNomeItem(falada, l.nome), _pontuarNomeItem(l.nome, falada)) }; })
+        .filter(function(o){ return o.p >= 0.5; }).sort(function(a,b){ return b.p - a.p; });
+      if(pont.length && (pont.length === 1 || pont[0].p > pont[1].p)) alvo = pont[0].l.id;
+    }
+    if(!alvo && lojas.length === 1) alvo = lojas[0].id;
+    return { lojas: lojas, lojaId: alvo, mensagem: j.mensagem || '' };
+  });
+}
+function _ctxRecadoLoja(ctxId){ return ctxId === 'box' ? _recadoLojaBox : _chatHistorico.find(function(m){ return m.id === ctxId; }); }
+function _htmlRecadoLoja(ctx, ctxId){
+  if(ctx.enviado) return '';
+  if(!ctx.lojas.length) return '<div style="font-size:0.84rem;">Não achei outras lojas cadastradas na rede.</div>';
+  var op = '<option value="">Escolha a loja…</option>' + ctx.lojas.map(function(l){ return '<option value="' + l.id + '"' + (l.id === ctx.lojaId ? ' selected' : '') + '>' + esc(l.nome) + '</option>'; }).join('');
+  return '<div style="font-size:0.8rem;margin-bottom:6px;">📨 <b>Recado pra outra loja</b></div>' +
+    '<select id="rl-loja-' + ctxId + '" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.84rem;">' + op + '</select>' +
+    '<textarea id="rl-txt-' + ctxId + '" rows="3" style="width:100%;box-sizing:border-box;margin-top:6px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;font-size:0.86rem;resize:none;">' + esc(ctx.mensagem) + '</textarea>' +
+    (ctx.enviando ? '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Enviando...</div>'
+      : '<button onclick="_enviarRecadoLoja(\'' + ctxId + '\')" style="width:100%;margin-top:7px;background:#60a5fa;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">📨 Enviar pra impressora da loja</button>') +
+    '<div style="font-size:0.66rem;color:var(--muted);margin-top:5px;">Sai na impressora do caixa da outra loja e aparece um aviso no PDV dela (o PDV precisa estar aberto).</div>';
+}
+function _enviarRecadoLoja(ctxId){
+  var ctx = _ctxRecadoLoja(ctxId);
+  if(!ctx || ctx.enviando || ctx.enviado) return;
+  var lojaId = (document.getElementById('rl-loja-' + ctxId) || {}).value || ctx.lojaId;
+  var txt = String((document.getElementById('rl-txt-' + ctxId) || {}).value || ctx.mensagem || '').trim();
+  if(!lojaId){ showToast('Escolha a loja', '#f7a34f'); return; }
+  if(!txt){ showToast('Escreva o recado', '#f7a34f'); return; }
+  var loja = ctx.lojas.find(function(l){ return l.id === lojaId; }) || {};
+  ctx.enviando = true;
+  fbDb.collection('comandos_impressao').add({
+    tipo: 'recado_loja', restauranteId: lojaId, tenantId: _tenantId || null,
+    origemRestauranteId: _restauranteId, origemNome: _nomeRestauranteG || _restauranteId,
+    mensagem: txt, solicitadoPor: _nomeGarcom || '', criadoEm: Date.now()
+  }).then(function(){
+    ctx.enviando = false; ctx.enviado = true;
+    var feito = 'Recado enviado pra ' + (loja.nome || 'loja') + ': "' + txt + '"';
+    if(ctxId === 'box'){
+      var c = document.getElementById('resposta-assistente-garcom');
+      var inp = document.getElementById('input-assistente-garcom'); if(inp) inp.value = '';
+      if(c) c.innerHTML = '<div style="padding:9px 10px;border-radius:9px;font-size:0.82rem;color:#4ade80;background:rgba(74,222,128,0.1);">✓ ' + esc(feito) + '</div>';
+    } else {
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas:[{ ok:true, texto: feito }] });
+      _chatAdicionarContexto('sistema', feito);
+      renderChatMensagens();
+    }
+  }).catch(function(e){
+    ctx.enviando = false;
+    showToast('❌ Não enviou: ' + e.message, '#f87171', 5000);
+    if(ctxId === 'box'){ var c2 = document.getElementById('resposta-assistente-garcom'); if(c2) c2.innerHTML = _htmlRecadoLoja(ctx, 'box'); } else renderChatMensagens(true);
+  });
 }
 function _montarRepeticao(r){
   if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
@@ -21602,6 +21677,7 @@ function _renderMensagemChat(msg){
       '<div class="chat-bolha-assistente">' + esc(msg.texto) + arquivoBtn + '</div></div>';
   }
   if(msg.tipo === 'pedido') return _renderMsgPedidoChat(msg);
+  if(msg.tipo === 'recadoLoja') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlRecadoLoja(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'recado') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlRecado(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'pausarCategoria') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausaCat(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'pausar') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausa(msg, msg.id) + '</div></div>';
@@ -21882,6 +21958,14 @@ function enviarMensagemChat(textoForcado, respostaPronta){
       }).catch(function(e){
         _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrC; });
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar a conta: ' + e.message });
+        renderChatMensagens();
+      });
+    } else if(j.tipo === 'recadoLoja'){
+      _montarRecadoLoja(j).then(function(r){
+        _chatHistorico.push(Object.assign({ id:_novoIdChat(), tipo:'recadoLoja' }, r));
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar as lojas: ' + e.message });
         renderChatMensagens();
       });
     } else if(j.tipo === 'tempoPrato'){

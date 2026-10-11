@@ -8940,6 +8940,19 @@ function _reimprimirInsumos(cmdJson){
   }
 }
 
+
+// Aviso grande na tela do PDV quando chega recado de outra loja
+function _mostrarRecadoLoja(cmd){
+  if(cmd && cmd._jaMostrado) return;
+  try{ var a = new AudioContext(), o = a.createOscillator(); o.frequency.value = 880; o.connect(a.destination); o.start(); setTimeout(function(){ o.stop(); a.close(); }, 350); }catch(e){}
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:999999;width:min(520px,92vw);background:#1e293b;border:2px solid #60a5fa;border-radius:16px;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,0.6);color:#fff;font-family:inherit;';
+  d.innerHTML = '<div style="font-size:0.8rem;color:#93c5fd;font-weight:800;letter-spacing:.05em;">📨 RECADO DE ' + escapeHtml(String(cmd.origemNome||'OUTRA LOJA')).toUpperCase() + '</div>' +
+    '<div style="font-size:1.15rem;font-weight:700;margin:10px 0 6px;line-height:1.4;">' + escapeHtml(String(cmd.mensagem||'')) + '</div>' +
+    '<div style="font-size:0.75rem;color:#94a3b8;">' + (cmd.solicitadoPor ? 'Enviado por ' + escapeHtml(String(cmd.solicitadoPor)) + ' · ' : '') + new Date(cmd.criadoEm||Date.now()).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '</div>' +
+    '<button onclick="this.parentNode.remove()" style="margin-top:12px;width:100%;background:#60a5fa;border:none;color:#000;border-radius:10px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;">OK, recebido</button>';
+  document.body.appendChild(d);
+}
 function processarComandoImpressao(cmdId, cmd){
   if(cmd.tipo === 'insumos'){
     console.log('[INSUMOS] recebido pedido de', cmd.origemNome, '— itens:', (cmd.itens||[]).length);
@@ -8976,6 +8989,35 @@ function processarComandoImpressao(cmdId, cmd){
         }).catch(function(){});
       }, 10000);
     }
+    return;
+  }
+  if(cmd.tipo === 'recado_loja'){
+    // Recado vindo de OUTRA loja da rede: aviso na tela + impressão na
+    // impressora do caixa (modelo de fechamento) ou, se não houver, na primeira.
+    _mostrarRecadoLoja(cmd);
+    var modFech = _modelos.find(function(m){ return m.tipo === 'fechamento'; });
+    var impRL = (modFech && _impressoras.find(function(i){ return i.id === modFech.impressoraId; })) || _impressoras[0];
+    if(!impRL || !_qzPronto){
+      // Sem impressora agora: o aviso já está na tela; tenta imprimir de novo em 15s
+      _comandosImpProcessados[cmdId] = false;
+      setTimeout(function(){
+        fbDb.collection('comandos_impressao').doc(cmdId).get().then(function(d){
+          if(d.exists && !_comandosImpProcessados[cmdId]){ _comandosImpProcessados[cmdId] = true; d.data()._jaMostrado = true; processarComandoImpressao(cmdId, Object.assign({}, d.data(), { _jaMostrado: true })); }
+        }).catch(function(){});
+      }, 15000);
+      return;
+    }
+    var Lq = Math.max(20, (impRL.largura||48) - 2);
+    var sq = escposInit() + linha('=', Lq) + '\n';
+    sq += escposCenter() + escposBold(true) + escposSize('grande') + 'RECADO\n' + escposSize('normal') + escposBold(false);
+    sq += 'de: ' + removerAcentosImpressao(String(cmd.origemNome||'outra loja')).toUpperCase() + '\n';
+    sq += escposLeft() + linha('-', Lq) + '\n';
+    sq += escposBold(true) + escposSize('alto') + removerAcentosImpressao(String(cmd.mensagem||'')) + '\n' + escposSize('normal') + escposBold(false);
+    sq += linha('-', Lq) + '\n';
+    if(cmd.solicitadoPor) sq += 'Enviado por: ' + removerAcentosImpressao(String(cmd.solicitadoPor)) + '\n';
+    sq += new Date(cmd.criadoEm || Date.now()).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n\n\n\n' + escposCut();
+    enviarParaImpressora(impRL, sq);
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
     return;
   }
   if(cmd.tipo === 'recado'){

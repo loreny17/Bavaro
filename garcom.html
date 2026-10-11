@@ -21040,9 +21040,17 @@ function _selecionarParaPessoa(j){
 var _lojasRede = null, _recadoLojaBox = null;
 function _carregarLojas(){
   if(_lojasRede) return Promise.resolve(_lojasRede);
-  return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').get().then(function(snap){
+  // Mesma fonte e mesmas regras da tela "Escolher Restaurante" do PDV
+  // (restaurantes_publicos do mesmo tenant + o Bávaro 'default').
+  return fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
     var l = [];
-    snap.forEach(function(d){ var v = d.data() || {}; if(d.id !== _restauranteId) l.push({ id: d.id, nome: v.nome || d.id }); });
+    snap.forEach(function(d){
+      var v = d.data() || {};
+      if(v.tenantId && v.tenantId === _tenantId) l.push({ id: d.id, nome: (d.id === 'default' && (!v.nome || v.nome === 'Meu Restaurante')) ? 'Bávaro' : (v.nome || d.id) });
+    });
+    if(!l.some(function(r){ return r.id === 'default'; })) l.unshift({ id: 'default', nome: 'Bávaro' });
+    l = l.filter(function(r){ return r.id !== _restauranteId; });
+    l.sort(function(a,b){ return a.id === 'default' ? -1 : b.id === 'default' ? 1 : a.nome.localeCompare(b.nome); });
     _lojasRede = l;
     return l;
   });

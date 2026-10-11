@@ -229,6 +229,47 @@ async function textoDoGemini(apiKey, parts, maxTokens) {
   return { ok: true, texto };
 }
 
+
+// Chamada direta a UM modelo específico (usada pro "modelo esperto").
+async function textoDoModelo(apiKey, parts, maxTokens, modelo, tempoMs) {
+  const t0 = Date.now();
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), tempoMs || 15000);
+  try {
+    const resp = await fetch(_urlModelo(modelo), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, maxOutputTokens: maxTokens || 1500 } }),
+      signal: ctl.signal,
+    });
+    clearTimeout(to);
+    if (!resp.ok) {
+      if (resp.status === 503 || resp.status === 500) _esfriar(modelo, 2 * 60 * 1000);
+      if (resp.status === 429) _esfriar(modelo, 15 * 60 * 1000);
+      console.error('[assistente-garcom] modelo esperto ' + modelo + ' status ' + resp.status);
+      return { ok: false };
+    }
+    const data = await resp.json();
+    let texto = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+      data.candidates[0].content.parts && data.candidates[0].content.parts.map((p) => p.text || '').join('')) || '';
+    texto = texto.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+    console.log('[assistente-garcom] modelo esperto ' + modelo + ' levou ' + (Date.now() - t0) + 'ms');
+    return { ok: true, texto };
+  } catch (e) {
+    clearTimeout(to);
+    console.error('[assistente-garcom] modelo esperto ' + modelo + ' sem resposta: ' + e.message);
+    return { ok: false };
+  }
+}
+
+// Modelo "mais inteligente" pros casos difíceis: um flash COMUM (não lite)
+// que exista na conta e não esteja de castigo.
+async function _modeloEsperto(apiKey) {
+  if (process.env.GEMINI_MODEL_ESPERTO) return process.env.GEMINI_MODEL_ESPERTO;
+  const lista = await _listaReservas(apiKey);
+  return lista.find((n) => !/lite/.test(n) && !_estaEsfriando(n)) || lista.find((n) => !_estaEsfriando(n)) || null;
+}
+
 // ─── CACHE EM MEMÓRIA (por instância do servidor, curta duração) ───
 const _cacheContexto = {};
 const _cacheArquivos = {};
@@ -242,7 +283,7 @@ async function obterContexto(db, tenantId, restauranteId) {
     return cacheado.dados;
   }
 
-  const [restDoc, itensSnap, arquivosSnap, gruposSnap] = await Promise.all([
+  const [restDoc, itensSnap, arquivosSnap, gruposSnap, apelidosSnap] = await Promise.all([
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
       .collection('cardapio').doc('data').collection('itens').get(),
@@ -250,7 +291,15 @@ async function obterContexto(db, tenantId, restauranteId) {
       .collection('assistente_arquivos').get(),
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
       .collection('cardapio').doc('data').collection('grupos_opcoes').get().catch(() => null),
+    db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
+      .collection('assistente_apelidos').get().catch(() => null),
   ]);
+  // Apelidos aprendidos (quando o garçom escolhe o item certo na confirmação)
+  const apelidos = [];
+  if (apelidosSnap) apelidosSnap.forEach((d) => {
+    const a = d.data() || {};
+    if (a.texto && a.itemId) apelidos.push({ texto: String(a.texto), itemId: String(a.itemId), garcom: a.garcom || '', em: a.em || 0 });
+  });
 
   // Grupos de opções/adicionais (ex: "Trocar por batata palito +4,90")
   const grupos = {};
@@ -303,7 +352,7 @@ async function obterContexto(db, tenantId, restauranteId) {
     if (a.url && a.nome) arquivos.push({ nome: a.nome, url: a.url, tipo: a.tipo || 'image/png' });
   });
 
-  const dados = { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos, grupos };
+  const dados = { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos, grupos, apelidos };
   _cacheContexto[chave] = { em: agora, dados };
   return dados;
 }
@@ -456,6 +505,19 @@ function _resolverAdicionais(textos, item, grupos) {
   return { selecoes, extras: Math.round(extras * 100) / 100, naoAchados };
 }
 
+
+// Itens mais parecidos com o texto falado (pra mostrar como botões)
+function _candidatosParecidos(falado, lista) {
+  if (!falado) return [];
+  return lista.map((it) => {
+    const vozes = it.voz ? String(it.voz).split(/[,;\/]/) : [];
+    const p = Math.max(_pontuar(falado, it.nome), _pontuar(it.nome, falado) * 0.8,
+      ...vozes.map((v) => (v.trim() ? _pontuar(falado, v) : 0)));
+    return { it, p };
+  }).filter((r) => r.p >= 0.5).sort((a, b) => b.p - a.p).slice(0, 5)
+    .map((r) => ({ itemId: r.it.id, itemNome: r.it.nome, itemPreco: r.it.preco }));
+}
+
 module.exports = async (req, res) => {
   // GET ?aquecer=1 — pra um "despertador" externo (cron-job.org / UptimeRobot)
   // chamar de 5 em 5 minutos, com o app fechado. Só acorda o servidor, abre
@@ -499,6 +561,7 @@ module.exports = async (req, res) => {
 
   // Aquecimento: só acorda a função e carrega o contexto no cache. Sem Gemini.
   if (body.aquecer) {
+    if (body.limparCache) delete _cacheContexto[tenantId + '|' + restauranteId];
     try {
       // Carrega o cardápio E faz uma chamada mínima ao Gemini, pra conexão
       // (TLS) com o Google já estar aberta quando a pergunta de verdade chegar.
@@ -538,7 +601,24 @@ module.exports = async (req, res) => {
     // atualizada): NÃO entram nas opções de pedido — assim, com o mesmo nome
     // em várias categorias, o assistente só enxerga o que está disponível.
     const indisponiveis = new Set(Array.isArray(body.indisponiveis) ? body.indisponiveis.map(String) : []);
-    const cardapioCompletoTodos = ctx.cardapioCompleto.map((it) => Object.assign({}, it, { preco: precoAtualDoItem(it) }));
+    // Apelidos aprendidos viram "palavras de voz" do item (os DESTE garçom
+    // têm prioridade quando o mesmo apelido aponta pra itens diferentes)
+    const garcomAtual = (body.garcom || '').toString();
+    const apelidoPorTexto = {};
+    (ctx.apelidos || []).slice().sort((a, b) => (a.em || 0) - (b.em || 0)).forEach((a) => {
+      const k = _normTxt(a.texto);
+      const atual = apelidoPorTexto[k];
+      if (!atual || a.garcom === garcomAtual || atual.garcom !== garcomAtual) apelidoPorTexto[k] = a;
+    });
+    const vozExtra = {};
+    Object.keys(apelidoPorTexto).forEach((k) => {
+      const a = apelidoPorTexto[k];
+      (vozExtra[a.itemId] = vozExtra[a.itemId] || []).push(a.texto);
+    });
+    const cardapioCompletoTodos = ctx.cardapioCompleto.map((it) => Object.assign({}, it, {
+      preco: precoAtualDoItem(it),
+      voz: [it.voz || ''].concat(vozExtra[it.id] || []).filter(Boolean).join(', '),
+    }));
     const cardapioKgTodos = ctx.cardapioKg;
     const cardapioCompleto = cardapioCompletoTodos.filter((it) => !indisponiveis.has(String(it.id)));
     const cardapioKg = cardapioKgTodos.filter((it) => !indisponiveis.has(String(it.id)));
@@ -558,6 +638,12 @@ module.exports = async (req, res) => {
       .filter((w) => w.length >= 4 && !/^(prato|quilo|kilo|por|peso|livre|self|service)$/.test(w));
     const textoNorm = _norm(texto);
     const itemKgCitado = (it) => palavrasDoItem(it.nome).some((w) => textoNorm.indexOf(w.slice(0, Math.max(4, w.length - 2))) >= 0);
+    const mesasClientes = Array.isArray(body.mesasClientes) ? body.mesasClientes.slice(0, 60) : [];
+    const blocoClientes = mesasClientes.length
+      ? 'CLIENTES NAS MESAS ABERTAS AGORA (pra entender "pro Fernando" sem o número da mesa):\n' +
+        mesasClientes.map((m) => `Mesa ${parseInt(m.mesa, 10)}: ${(m.nomes || []).slice(0, 8).join(', ')}`).join('\n') +
+        '\n- Se o funcionário citar um cliente SEM dizer a mesa, use a mesa onde esse nome está, e ponha o nome em "cliente". Se o nome estiver em MAIS DE UMA mesa, não escolha: use "mesa": null.\n\n'
+      : '';
     const listaPausados = cardapioCompletoTodos.concat(cardapioKgTodos)
       .filter((it) => indisponiveis.has(String(it.id)))
       .slice(0, 80).map((it) => `- ${it.nome} [id:${it.id}]`).join('\n');
@@ -578,7 +664,7 @@ module.exports = async (req, res) => {
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS ONZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
+ser UMA DAS QUATORZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -618,7 +704,15 @@ ser UMA DAS ONZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
     porções", "volta a categoria sobremesas"). Só quando a palavra
     "categoria" (ou "a seção", "o grupo") for dita.
 
-Decida qual das onze é e responda SOMENTE com um JSON válido, sem texto
+(L) Um LEMBRETE pro próprio garçom (ex: "me lembra de levar a sobremesa
+    da 8 em 10 minutos", "daqui 5 minutos me avisa de ver a 12").
+(M) Um RESUMO DO TURNO do garçom (ex: "quanto eu vendi hoje?", "meu total
+    de hoje", "quanto dá meus 10%?").
+(N) Um pedido de TRADUÇÃO pra falar com cliente estrangeiro (ex: "como digo
+    'o prato demora 20 minutos' em inglês?", "traduz pro espanhol: aceita
+    cartão?").
+
+Decida qual das quatorze é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -672,6 +766,11 @@ SE FOR PEDIDO:
   por kg tiver mais de um item e não der pra saber qual dos dois pelo
   texto, retorne com itemId null e nomeDigitado "valor da pesagem sem
   produto identificado" em vez de chutar qual dos dois é.
+- AMBIGUIDADE: se o que foi falado puder ser MAIS DE UM item do cardápio
+  com a mesma chance (ex: "coca" e existem Coca Lata, Coca 600 e Coca Zero;
+  "alcatra" em duas versões), NÃO escolha: use "itemId": null e
+  "nomeDigitado" com o texto falado. O app mostra as opções pro garçom
+  tocar na certa (e aprende pra próxima vez).
 - NUNCA ESCOLHA UM ITEM (por unidade OU por kg) QUE NÃO FOI CLARAMENTE
   MENCIONADO NO TEXTO, só porque "tem que escolher algum". Isso vale
   mesmo quando o texto é confuso ou só tem números (fora do atalho de kg
@@ -743,6 +842,16 @@ pressa"), responda:
 SE FOR CONSULTA DE CONTA:
 {"tipo":"consulta","mesa":12}
 
+SE FOR LEMBRETE:
+{"tipo":"lembrete","minutos":10,"texto":"levar a sobremesa da 8"}
+
+SE FOR RESUMO DO TURNO:
+{"tipo":"resumoTurno"}
+
+SE FOR TRADUÇÃO:
+{"tipo":"traducao","texto":"o prato demora 20 minutos","idioma":"inglês","codigoIdioma":"en-US"}
+- "codigoIdioma": código BCP-47 do idioma de destino (en-US, es-ES, fr-FR, it-IT, de-DE...).
+
 SE FOR PAUSAR/LIBERAR CATEGORIA:
 {"tipo":"pausarCategoria","nomeCategoria":"grelhados","pausar":true}
 - "nomeCategoria": o nome da categoria como foi falado.
@@ -794,7 +903,7 @@ SE FOR CANCELAMENTO:
   confere o que realmente está na conta daquela mesa.)
 - Cada combinação mesa+item é um objeto separado.
 
-CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
+${blocoClientes}CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
 ${listaCardapio}${listaPausados ? `\n\nITENS PAUSADOS AGORA (NUNCA use em PEDIDO — só pra "voltou"/liberar):\n${listaPausados}` : ''}
 ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
 
@@ -851,10 +960,21 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           if (valorTotal === null) {
             return { mesa, cliente, tipoVenda: 'kg', encontrado: false, nomeDigitado: itemKg.nome };
           }
+          // Valor fora do normal (ex: "341,5" em vez de "34,15")
+          let alerta = null, sugestaoValor = null;
+          if (valorTotal > 150) {
+            alerta = 'Valor alto pra um prato: R$ ' + valorTotal.toFixed(2).replace('.', ',') + ' — confira';
+            if (valorTotal / 10 >= 8 && valorTotal / 10 <= 150) sugestaoValor = Math.round(valorTotal * 10) / 100;
+          } else if (pesoGramas && pesoGramas > 3000) {
+            alerta = 'Peso alto: ' + pesoGramas + 'g — confira';
+          } else if (valorTotal < 3) {
+            alerta = 'Valor muito baixo: R$ ' + valorTotal.toFixed(2).replace('.', ',') + ' — confira';
+          }
           return {
             mesa, cliente, tipoVenda: 'kg', encontrado: true,
             itemId: itemKg.id, itemNome: itemKg.nome,
             precoBase: itemKg.precoPorKg, peso: pesoGramas, itemPreco: valorTotal,
+            alerta, sugestaoValor,
           };
         }
 
@@ -903,6 +1023,9 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           extras: ad.extras,
           selecoes: ad.selecoes,
           adicionaisNaoAchados: ad.naoAchados,
+          alerta: (item && qtd > 10) ? ('Quantidade alta: ' + qtd + 'x — confira') : null,
+          // Não reconheceu: manda os itens mais parecidos pro garçom escolher
+          candidatos: item ? [] : _candidatosParecidos(p.nomeDigitado, cardapioCompleto),
           encontrado: !!item,
           nomeDigitado: p.nomeDigitado || null,
           obs: obsFinal.slice(0, 140),
@@ -994,6 +1117,11 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return ({ ok: true, tipo: 'cancelamento', itens: resultado });
     }
 
+    if (parsed.tipo === 'lembrete') {
+      const min = Math.max(1, Math.min(240, parseInt(parsed.minutos, 10) || 5));
+      return ({ ok: true, tipo: 'lembrete', minutos: min, texto: (parsed.texto || '').toString().trim().slice(0, 160) });
+    }
+    if (parsed.tipo === 'resumoTurno') return ({ ok: true, tipo: 'resumoTurno' });
     if (parsed.tipo === 'pausarCategoria') {
       return ({ ok: true, tipo: 'pausarCategoria', nomeCategoria: (parsed.nomeCategoria || '').toString().trim(), pausar: parsed.pausar !== false });
     }
@@ -1005,15 +1133,51 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
     return null;
     };
 
-    if (parsed.tipo === 'multiplo') {
-      const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : [])
-        .filter((x) => x && x.tipo && x.tipo !== 'multiplo' && x.tipo !== 'pergunta')
-        .map((x) => despachar(x)).filter((x) => x);
-      if (acoes.length === 1) return res.status(200).json(acoes[0]);
-      if (acoes.length > 1) return res.status(200).json({ ok: true, tipo: 'multiplo', acoes });
-    } else {
-      const saida = despachar(parsed);
-      if (saida) return res.status(200).json(saida);
+    const resolverTudo = (pp) => {
+      if (pp.tipo === 'multiplo') {
+        const acoes = (Array.isArray(pp.acoes) ? pp.acoes : [])
+          .filter((x) => x && x.tipo && x.tipo !== 'multiplo' && x.tipo !== 'pergunta' && x.tipo !== 'traducao')
+          .map((x) => despachar(x)).filter((x) => x);
+        if (acoes.length === 1) return acoes[0];
+        if (acoes.length > 1) return { ok: true, tipo: 'multiplo', acoes };
+        return null;
+      }
+      return despachar(pp);
+    };
+    const naoAchados = (sd) => {
+      if (!sd) return 0;
+      const lista = sd.tipo === 'multiplo' ? sd.acoes : [sd];
+      return lista.reduce((n, a) => n + (a.tipo === 'pedido' ? (a.pedidos || []).filter((p) => !p.encontrado && !p.esgotado && !(p.candidatos || []).length).length : 0), 0);
+    };
+
+    // ── Tradução (precisa de uma chamada a mais, então fica fora do despachar)
+    if (parsed.tipo === 'traducao' && parsed.texto) {
+      const pT = `Traduza para ${parsed.idioma || 'inglês'} o texto abaixo, do jeito natural que um garçom falaria com um cliente, educado e curto. Responda SOMENTE com JSON: {"traducao":"...","pronuncia":"como ler em português, aproximado"}\n\nTEXTO: "${String(parsed.texto).slice(0, 300)}"`;
+      const rt = await textoDoGemini(apiKey, [{ text: pT }], 400);
+      let jt = {};
+      try { jt = JSON.parse(rt.texto || '{}'); } catch (e) { jt = { traducao: rt.texto || '' }; }
+      return res.status(200).json({ ok: true, tipo: 'traducao', original: parsed.texto, idioma: parsed.idioma || 'inglês',
+        codigoIdioma: parsed.codigoIdioma || 'en-US', traducao: jt.traducao || '', pronuncia: jt.pronuncia || '' });
+    }
+
+    let saida = resolverTudo(parsed);
+    // ── Modelo esperto: o rápido não reconheceu algum item → pergunta de novo
+    // pra um modelo mais inteligente e fica com a resposta que acertar mais.
+    if (saida && !rapido && naoAchados(saida) > 0) {
+      const esperto = await _modeloEsperto(apiKey);
+      if (esperto) {
+        const rE = await textoDoModelo(apiKey, [{ text: promptEtapa1 }], 1500, esperto, 12000);
+        if (rE.ok) {
+          try {
+            const sE = resolverTudo(JSON.parse(rE.texto));
+            if (sE && naoAchados(sE) < naoAchados(saida)) { console.log('[assistente-garcom] modelo esperto resolveu'); saida = sE; }
+          } catch (e) { /* resposta inválida: fica com a primeira */ }
+        }
+      }
+    }
+    if (saida) {
+      if (rapido) saida.rapido = true;
+      return res.status(200).json(saida);
     }
 
     // ═══ ETAPA 2 — só roda aqui: era dúvida de verdade. Agora sim busca
@@ -1063,7 +1227,13 @@ PDF), é OBRIGATÓRIO citar o nome dele EXATAMENTE como foi dado no texto
 "Arquivo anexado: ..." — sem alterar maiúscula/minúscula, sem abreviar,
 em algum ponto da resposta.
 
-Responda em português do Brasil, em até 2 frases, direto ao ponto.
+PERGUNTAS DE ALERGIA/RESTRIÇÃO (ex: "tem algo sem glúten?", "o que não
+leva lactose?", "opção vegana?"): liste SÓ os itens cuja ficha técnica ou
+base de conhecimento CONFIRMA a resposta, e avise que os outros itens não
+têm essa informação cadastrada. Nunca suponha ingrediente.
+
+Responda em português do Brasil, em até 2 frases, direto ao ponto (em
+listas de itens, pode usar até 4 frases).
 Responda SOMENTE com um JSON válido, sem texto antes ou depois, sem
 marcação de código: {"resposta":"texto da resposta"}
 
@@ -1075,7 +1245,14 @@ PERGUNTA (mensagem ATUAL do funcionário):
 "${texto}"`;
 
     const parts2 = [{ text: promptEtapa2 }, ...partesArquivos];
-    const r2 = await textoDoGemini(apiKey, parts2, 700);
+    // Dúvida: tenta primeiro o modelo mais inteligente; se falhar, o normal
+    let r2 = null;
+    const espertoQ = await _modeloEsperto(apiKey);
+    if (espertoQ) {
+      const rq = await textoDoModelo(apiKey, parts2, 900, espertoQ, 15000);
+      if (rq.ok && rq.texto) r2 = rq;
+    }
+    if (!r2) r2 = await textoDoGemini(apiKey, parts2, 700);
     if (!r2.ok) {
       return res.status(502).json({ ok: false, error: 'Assistente indisponível no momento — tenta de novo em alguns segundos.', detalhe: (r2 && r2.detalhe) || '' });
     }

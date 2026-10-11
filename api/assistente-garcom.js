@@ -440,12 +440,15 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao, mesaPadrao) {
   t = t.replace(/^(lanca|lance|manda|mande|traz|traga|poe|coloca|bota|desce|pede|pedido de|pedido)\s+/, '');
   // qualquer palavra de outra ação → deixa pra IA
   if (/\b(cancel|tira|troc|transf|passa|muda|fecha|conta|quanto|acabou|voltou|pausa|avisa|recado|repet|rodada|igual|mesma|nome|cliente|pra o|pro |bem |mal |obs|separad|depois|tambem|gelad|quente)/.test(t)) return null;
-  const partes = t.split(/\s+e\s+/).map((x) => x.trim()).filter(Boolean);
+  const partes = t.split(/\s+(?:e|mais|\+)\s+|\s*\+\s*/).map((x) => x.trim()).filter(Boolean);
   if (!partes.length || partes.length > 6) return null;
   const pedidos = [];
   for (const parte of partes) {
     // prato por kg: "34,15 na 30", "prato de 34,15 na 30", "34,15 - 30"
     let m = parte.match(/^(?:um |1 )?(?:prato de |prato |de )?(\d{1,3}[.,]\d{2})\s*(?:-|\/)?\s*(?:na |no |pra |para )?(?:mesa )?(\d{1,3})?$/);
+    // "prato de 1514" (sem vírgula) = 15,14 — só com a palavra "prato"
+    const mc = !m && parte.match(/^(?:um |1 )?prato (?:de )?(\d{3,5})\s*(?:(?:na |no |pra |para )(?:mesa )?(\d{1,3}))?$/);
+    if (mc && parseInt(mc[1], 10) / 100 >= 3 && parseInt(mc[1], 10) / 100 <= 150) m = [mc[0], (parseInt(mc[1], 10) / 100).toFixed(2), mc[2]];
     if (m) {
       const kg = kgPadrao || (cardapioKg.length === 1 ? cardapioKg[0] : null);
       if (!kg) return null;
@@ -467,7 +470,8 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao, mesaPadrao) {
     if (pedidos[i].mesa) ultima = pedidos[i].mesa; else pedidos[i].mesa = ultima;
   }
   if (mesaPadrao) pedidos.forEach((p) => { if (!p.mesa) { p.mesa = mesaPadrao; p._doFoco = true; } });
-  if (pedidos.some((p) => !p.mesa)) return null;
+  // Nenhuma mesa dita = vai tudo pra fila sem mesa. Misturado = deixa pra IA.
+  if (pedidos.some((p) => !p.mesa) && pedidos.some((p) => p.mesa)) return null;
   return { tipo: 'pedido', pedidos };
 }
 
@@ -669,7 +673,7 @@ ${rascunho.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 `
       : '';
     const blocoFoco = (mesaFoco && !modoComanda)
-      ? `MESA EM FOCO NA CONVERSA: ${mesaFoco}. Se o funcionário não disser a mesa e o contexto indicar que é a mesma ("e mais uma coca", "pra ela uma salada", "fecha ela"), use a mesa ${mesaFoco}.\n\n`
+      ? `MESA EM FOCO NA CONVERSA: ${mesaFoco}. Se o funcionário não disser a mesa e o contexto indicar que é a mesma ("e mais uma coca", "pra ela uma salada", "fecha ela"), use a mesa ${mesaFoco}. Mas um PRATO NOVO da balança (valor em reais) sem mesa dita NÃO é da mesa em foco: use "mesa": null (vai pra fila sem mesa).\n\n`
       : '';
     const mesasClientes = Array.isArray(body.mesasClientes) ? body.mesasClientes.slice(0, 60) : [];
     const blocoClientes = mesasClientes.length
@@ -768,6 +772,12 @@ seguinte, com mais informação disponível — aqui é só classificar):
 
 SE FOR PEDIDO:
 {"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":"","adicionais":[]}]}
+- PEDIDO SEM MESA É VÁLIDO: se o funcionário não disser a mesa (ex: "um
+  prato de 15,14 mais 1 coca", "prato de 32,10 e uma água nome Ana"),
+  responda o pedido normalmente com "mesa": null em todos os itens — o app
+  guarda na FILA SEM MESA e a mesa é escolhida depois. NÃO invente mesa.
+- VALOR DE PRATO SEM VÍRGULA: "prato de 1514" ou "1514 de buffet" = R$ 15,14
+  (os 2 últimos dígitos são os centavos). Use "valorTotal": 15.14.
 - "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
   NUNCA invente um id que não esteja na lista.
 - O texto pode vir de reconhecimento de voz, então pode ter erros de
@@ -998,8 +1008,8 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       const resultado = brutos.map((p) => {
         const semNumero = !/\d/.test(texto);
         const mesaVeioDoFoco = !parseInt(p.mesa, 10) && !mesaPadrao && semNumero && !!mesaFoco;
-        const mesa = parseInt(p.mesa, 10) || mesaPadrao || (mesaVeioDoFoco ? mesaFoco : NaN);
-        if (isNaN(mesa)) return null;
+        // Sem mesa: vai pra FILA SEM MESA (o app guarda e a mesa vem depois)
+        const mesa = parseInt(p.mesa, 10) || mesaPadrao || (mesaVeioDoFoco ? mesaFoco : null);
         const cliente = (p.cliente || '').toString().trim().slice(0, 40);
 
         if (p.tipoVenda === 'kg') {
@@ -1019,6 +1029,11 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
           let pesoGramas = null;
           if (typeof p.valorTotal === 'number' && p.valorTotal > 0) {
             valorTotal = Math.round(p.valorTotal * 100) / 100;
+            // "prato de 1514" = 15,14 (digitado sem vírgula): só quando o número
+            // aparece assim no texto e o resultado é um valor normal de prato
+            if (valorTotal >= 300 && Number.isInteger(valorTotal) && new RegExp('(^|[^\\d,.])' + valorTotal + '(?![\\d,.])').test(texto) && valorTotal / 100 >= 3 && valorTotal / 100 <= 150) {
+              valorTotal = Math.round(valorTotal) / 100;
+            }
           } else if (typeof p.pesoGramas === 'number' && p.pesoGramas > 0) {
             pesoGramas = Math.round(p.pesoGramas);
             valorTotal = Math.round((pesoGramas / 1000) * itemKg.precoPorKg * 100) / 100;

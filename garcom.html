@@ -1133,7 +1133,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       </div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="input-assistente-garcom" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
-        <button id="btn-balanca-box" onclick="_balAbrirNoChat()" title="Modo Balança"
+        <button id="btn-balanca-box" onclick="_bzAbrir()" title="Balança"
           style="position:relative;flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">⚖️
           <span id="btn-balanca-box-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#fbbf24;color:#000;font-size:0.66rem;font-weight:800;align-items:center;justify-content:center;"></span>
         </button>
@@ -3069,14 +3069,14 @@ function escutarConfigMesas(){
     _registrarLeitura('config-mesas', 1);
     if(!doc.exists) return;
     var d = doc.data();
-    // Permissão do Modo Balança atualizada ao vivo (o admin pode bloquear no PDV)
+    // Permissão da Balança atualizada ao vivo (o admin pode bloquear no PDV)
     try{
       var _eu = _normNome(_nomeGarcom || '');
       var _meu = (d.garcons || []).filter(function(g){ return _normNome(g.apelido) === _eu || _normNome(g.nome) === _eu || _normNome((g.nome||'').split(' ')[0]) === _eu; })[0];
       if(_meu && typeof _podeBalanca !== 'undefined'){
         _podeBalanca = _meu.semBalanca !== true;
         localStorage.setItem('garcom_sem_balanca', _podeBalanca ? '0' : '1');
-        if(!_podeBalanca && typeof _bal !== 'undefined' && _bal.ativo) _balAtivar(false, true);
+        if(!_podeBalanca && typeof _bz !== 'undefined' && _bz.aberto) _bzFechar();
       }
     }catch(e){}
     var novo = parseInt(d.totalMesas) || 99;
@@ -19787,7 +19787,6 @@ function executarAssistenteGarcom(){
     document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">🧹 Pronto, comecei uma conversa nova.</div>';
     return;
   }
-  if(typeof _balTratarBox === 'function' && _balTratarBox(texto)){ input.value = ''; return; }
   var cmdAuto = _comandoAutoEnvio(texto);
   if(cmdAuto){ input.value = ''; document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + cmdAuto + '</div>'; return; }
   _cancelarAutoEnvio();
@@ -21519,8 +21518,8 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
       imprimir: opcoes.semImprimir ? false : true,
       origemIA: true // marca de onde veio, útil pra diagnóstico/histórico
     };
-    // Modo Balança: o pedido leva os ids das pesagens — é a prova de que elas
-    // já viraram venda (trava contra lançar o mesmo prato duas vezes).
+    // Balança: o pedido leva os ids dos tickets — prova de que já viraram
+    // venda (trava contra lançar o mesmo prato duas vezes).
     if(opcoes.balancaIds && opcoes.balancaIds.length){ pedido.balancaIds = opcoes.balancaIds.slice(); pedido.origemBalanca = true; }
 
     return gerarNumeroSequencial().then(function(numero){
@@ -21619,27 +21618,6 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
   .chat-digitando span:nth-child(2){animation-delay:0.15s;}
   .chat-digitando span:nth-child(3){animation-delay:0.3s;}
   @keyframes chatPulso{0%,60%,100%{opacity:0.3;transform:translateY(0);}30%{opacity:1;transform:translateY(-3px);}}
-  /* ⚖️ Modo Balança */
-  #bal-painel{background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
-  .bal-topo{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;user-select:none;}
-  .bal-lista{max-height:34vh;overflow-y:auto;padding:0 10px 4px;-webkit-overflow-scrolling:touch;}
-  .bal-card{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:11px;padding:8px 8px 8px 9px;margin-bottom:6px;cursor:pointer;}
-  .bal-card.bal-sel{border-color:var(--accent);background:rgba(212,168,67,0.10);}
-  .bal-card.bal-fim{opacity:0.55;cursor:default;}
-  .bal-ck{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:900;color:#000;flex-shrink:0;}
-  .bal-sel .bal-ck{background:var(--accent);border-color:var(--accent);}
-  .bal-num{font-family:'Bebas Neue',sans-serif;font-size:1.25rem;color:var(--accent);min-width:34px;letter-spacing:0.02em;}
-  .bal-nome{font-size:0.84rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .bal-sub{font-size:0.68rem;color:var(--muted);margin-top:2px;}
-  .bal-chip{border-radius:20px;padding:1px 7px;font-weight:700;white-space:nowrap;display:inline-block;}
-  .bal-valor{font-weight:800;font-size:0.95rem;white-space:nowrap;}
-  .bal-ico{background:none;border:none;color:var(--muted);font-size:0.95rem;padding:6px 4px;cursor:pointer;flex-shrink:0;}
-  .bal-alerta{font-size:0.74rem;background:rgba(251,191,36,0.10);border:1px solid rgba(251,191,36,0.35);border-radius:9px;padding:7px 9px;margin:-2px 0 7px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
-  .bal-barra{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 10px 9px;}
-  .bal-btn{background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:9px;padding:8px 11px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:inherit;}
-  .bal-btn-pri{background:var(--accent);border-color:var(--accent);color:#000;}
-  .bal-msg .bal-ok{font-size:0.84rem;margin:2px 0;}
-  .bal-msg .bal-aviso,.bal-aviso{font-size:0.8rem;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:9px;padding:7px 9px;margin:4px 0;}
 </style>
 
 <div id="tela-chat-assistente" style="display:none;position:fixed;inset:0;z-index:999000;background:var(--bg);flex-direction:column;">
@@ -21648,22 +21626,18 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
     <img src="/assistente-avatar.png" style="width:42px;height:42px;border-radius:50%;border:1.5px solid var(--accent);flex-shrink:0;" onerror="this.style.display='none'">
     <div style="flex:1;min-width:0;">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:0.03em;">ASSISTENTE BÁVARO</div>
-      <div id="chat-subtitulo" style="font-size:0.72rem;color:var(--muted);">Pergunte, peça ou cancele um item</div>
+      <div style="font-size:0.72rem;color:var(--muted);">Pergunte, peça ou cancele um item</div>
     </div>
     <button onclick="fecharChatAssistente()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:8px 13px;border-radius:20px;font-size:0.82rem;font-weight:700;cursor:pointer;flex-shrink:0;display:flex;align-items:center;gap:5px;font-family:inherit;">‹ Voltar</button>
   </div>
 
   <div id="chat-mensagens" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch;"></div>
 
-  <!-- ⚖️ Fila do Modo Balança (só aparece com o modo ligado) -->
-  <div id="bal-painel" style="display:none;"></div>
-
   <div style="padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
     <div style="display:flex;gap:8px;">
       <input type="text" id="input-chat-assistente" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;min-width:0;background:var(--surface2);border:1.5px solid var(--border2);border-radius:22px;padding:11px 16px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key==='Enter')enviarMensagemChat()">
-      <button id="btn-bal-teclado" onclick="_balTrocarTeclado()" title="Trocar teclado (letras / números)" style="display:none;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);cursor:pointer;align-items:center;justify-content:center;font-weight:800;font-size:0.8rem;font-family:inherit;">Aa</button>
-      <button id="btn-balanca-chat" onclick="_balAlternar()" title="Modo Balança" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">⚖️</button>
-      <button id="btn-enviar-chat" onclick="enviarMensagemChat()" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--accent);color:#000;border:none;font-size:1.1rem;cursor:pointer;white-space:nowrap;font-family:inherit;">➤</button>
+      <button id="btn-balanca-chat" onclick="_bzAbrirDoChat()" title="Balança" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">⚖️</button>
+      <button onclick="enviarMensagemChat()" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--accent);color:#000;border:none;font-size:1.1rem;cursor:pointer;">➤</button>
     </div>
   </div>
 </div>
@@ -21736,7 +21710,6 @@ function abrirChatAssistente(){
   if(_chatContexto.length) _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html:'<div style="font-size:0.74rem;color:var(--muted);">🧠 Lembro da nossa conversa dos últimos minutos' + (_mesaEmFoco ? ' (mesa em foco: ' + _mesaEmFoco + ')' : '') + '. Diga <b>“nova conversa”</b> pra começar do zero.</div>' });
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
     texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém, criar lembretes, ver seu resumo do dia, traduzir pra cliente estrangeiro ou tirar dúvidas de produto. Depois de um pedido, é só falar "confirma".' });
-  if(typeof _balAoAbrirChat === 'function') _balAoAbrirChat();
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -21835,7 +21808,6 @@ function _renderMensagemChat(msg){
   if(msg.tipo === 'pausar') return msg.enviado ? '' : '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + _htmlPausa(msg, msg.id) + '</div></div>';
   if(msg.tipo === 'html') return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + msg.html + '</div></div>';
   if(msg.tipo === 'transferir') return _renderMsgTransfChat(msg);
-  if(msg.tipo === 'balLanc') return _balHtmlCard(msg);
   if(msg.tipo === 'troca') return _renderMsgTrocaChat(msg);
   if(msg.tipo === 'fechar') return '<div class="chat-bolha-assistente">' + _htmlListaFecharBusca(msg.nome, msg.matches, '_abrirFecharDaBusca') + '</div>';
   if(msg.tipo === 'cancelamento') return _renderMsgCancelamentoChat(msg);
@@ -22040,8 +22012,6 @@ function enviarMensagemChat(textoForcado, respostaPronta){
     renderChatMensagens();
     return;
   }
-  // ⚖️ Modo Balança: valores e comandos da fila são tratados no aparelho (sem IA)
-  if(!respostaPronta && typeof _balTratarChat === 'function' && _balTratarChat(texto)) return;
   if(!respostaPronta){
     var cmdAutoC = _comandoAutoEnvio(texto);
     if(cmdAutoC){
@@ -22344,313 +22314,409 @@ function iniciarVozChatAssistente(){
   };
   try{ recon.start(); } catch(e){ _reconhecimentoVozChat = null; showToast('Erro ao iniciar voz', '#f87171'); }
 }
+</script>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     ⚖️ BALANÇA — tela de registro rápido do buffet (botão ⚖️ no lugar
+     do microfone). Ticket na fila não é venda; só vira pedido ao lançar.
+═══════════════════════════════════════════════════════════════ -->
+<style>
+  #tela-balanca{position:fixed;inset:0;z-index:999100;background:var(--bg);display:none;flex-direction:column;}
+  .bz-top{display:flex;align-items:center;gap:10px;padding:10px 14px;padding-top:max(10px,env(safe-area-inset-top));border-bottom:1px solid var(--border);background:rgba(10,10,10,0.96);flex-shrink:0;}
+  .bz-voltar{width:40px;height:40px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:1.5rem;line-height:1;cursor:pointer;flex-shrink:0;font-family:inherit;}
+  .bz-titulo{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--accent);letter-spacing:0.04em;line-height:1;}
+  .bz-sync{font-size:0.66rem;margin-top:3px;font-weight:700;}
+  .bz-resumo{margin-left:auto;font-size:0.84rem;text-align:right;line-height:1.3;}
+  .bz-lista{flex:1;overflow-y:auto;padding:10px 12px 4px;-webkit-overflow-scrolling:touch;}
+  .bz-t{display:flex;align-items:center;gap:9px;background:var(--surface);border:1.5px solid var(--border2);border-radius:13px;padding:10px 4px 10px 10px;margin-bottom:7px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .bz-t.bz-sel{border-color:var(--accent);background:rgba(212,168,67,0.11);}
+  .bz-t.bz-fim{opacity:0.5;}
+  .bz-ck{width:24px;height:24px;border-radius:7px;border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:900;color:#000;flex-shrink:0;}
+  .bz-sel .bz-ck{background:var(--accent);border-color:var(--accent);}
+  .bz-fim .bz-ck{visibility:hidden;}
+  .bz-num{font-family:'Bebas Neue',sans-serif;font-size:1.35rem;color:var(--accent);min-width:36px;letter-spacing:0.02em;}
+  .bz-itens{font-size:0.86rem;display:flex;flex-wrap:wrap;gap:2px 6px;line-height:1.3;}
+  .bz-itens span{white-space:nowrap;}
+  .bz-itens small{color:var(--muted);font-weight:700;font-size:0.76rem;}
+  .bz-info{font-size:0.68rem;color:var(--muted);margin-top:3px;}
+  .bz-tag{font-weight:800;margin-left:3px;}
+  .bz-tot{font-weight:800;font-size:1.02rem;white-space:nowrap;}
+  .bz-mais{background:none;border:none;color:var(--muted);font-size:1.3rem;padding:6px 10px;cursor:pointer;flex-shrink:0;}
+  .bz-vazio{text-align:center;color:var(--muted);font-size:0.86rem;padding:34px 12px;line-height:1.6;}
+  .bz-link{background:none;border:none;color:var(--muted);font-size:0.76rem;padding:2px 2px 9px;cursor:pointer;font-family:inherit;}
+  .bz-barra{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
+  .bz-b{background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:11px;padding:11px 14px;font-size:0.86rem;font-weight:700;cursor:pointer;font-family:inherit;}
+  .bz-b:disabled{opacity:0.45;}
+  .bz-b-pri{background:var(--accent);border-color:var(--accent);color:#000;}
+  .bz-b-mesa{padding:14px 18px;font-size:1rem;font-weight:900;letter-spacing:0.02em;}
+  .bz-entrada{background:var(--surface);border-top:1px solid var(--border);padding:8px 10px;padding-bottom:max(10px,env(safe-area-inset-bottom));flex-shrink:0;}
+  .bz-chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none;}
+  .bz-chips::-webkit-scrollbar{display:none;}
+  .bz-chip{flex-shrink:0;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:20px;padding:9px 13px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit;}
+  .bz-chip:disabled{opacity:0.4;}
+  .bz-chip-kg{color:var(--accent);border-color:rgba(212,168,67,0.45);}
+  .bz-display{text-align:right;font-size:2.4rem;font-weight:800;padding:0 6px 8px;font-variant-numeric:tabular-nums;line-height:1.1;}
+  .bz-rs{font-size:1rem;color:var(--muted);margin-right:8px;font-weight:700;}
+  .bz-pad{display:grid;grid-template-columns:1fr 1fr 1fr 1.35fr;grid-auto-rows:54px;gap:7px;}
+  .bz-k{border-radius:12px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:1.45rem;font-weight:700;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;}
+  .bz-k:active{background:var(--border2);}
+  .bz-k2{color:var(--muted);font-size:1.15rem;}
+  .bz-buffet{grid-column:4;grid-row:1 / span 4;border-radius:14px;background:rgba(212,168,67,0.22);border:none;color:var(--accent);cursor:pointer;padding:8px;font-family:inherit;transition:background 0.15s;}
+  .bz-buffet.bz-pronto{background:var(--accent);color:#000;}
+  .bz-bb1{font-weight:900;font-size:1.02rem;line-height:1.15;word-break:break-word;}
+  .bz-bb2{font-size:0.68rem;margin-top:5px;opacity:0.8;font-weight:700;}
+  .bz-kp{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:52px;gap:7px;}
+  .bz-sheet-bg{position:absolute;inset:0;background:rgba(0,0,0,0.62);display:none;align-items:flex-end;z-index:5;}
+  .bz-sh{width:100%;background:var(--surface);border-radius:18px 18px 0 0;padding:16px 14px;padding-bottom:max(14px,env(safe-area-inset-bottom));max-height:90%;overflow-y:auto;box-sizing:border-box;}
+  .bz-sh-tit{font-weight:800;font-size:1rem;margin-bottom:10px;}
+  .bz-mesa-disp{text-align:center;font-size:1rem;color:var(--muted);margin:2px 0 10px;font-weight:700;}
+  #bz-mesa-num{font-size:2.6rem;font-weight:900;color:var(--text);margin-left:8px;vertical-align:middle;}
+  .bz-in{width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);border-radius:11px;padding:12px;color:var(--text);font-size:0.95rem;margin-top:10px;outline:none;font-family:inherit;}
+  .bz-linha{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:11px;padding:13px;color:var(--text);font-size:0.9rem;margin-bottom:7px;text-align:left;cursor:pointer;font-family:inherit;}
+  .bz-hist{font-size:0.7rem;color:var(--muted);line-height:1.6;margin-top:8px;}
+</style>
+<div id="tela-balanca">
+  <div class="bz-top">
+    <button class="bz-voltar" onclick="_bzFechar()" title="Voltar">‹</button>
+    <div>
+      <div class="bz-titulo">⚖️ BALANÇA</div>
+      <div id="bz-sync" class="bz-sync"></div>
+    </div>
+    <div id="bz-resumo" class="bz-resumo"></div>
+  </div>
+  <div id="bz-lista" class="bz-lista"></div>
+  <div id="bz-barra" class="bz-barra"></div>
+  <div class="bz-entrada">
+    <div id="bz-chips" class="bz-chips"></div>
+    <div id="bz-display" class="bz-display"></div>
+    <div class="bz-pad">
+      <button id="bz-btn-buffet" class="bz-buffet" onclick="_bzPesar()"></button>
+      <button class="bz-k" onclick="_bzTecla('1')">1</button><button class="bz-k" onclick="_bzTecla('2')">2</button><button class="bz-k" onclick="_bzTecla('3')">3</button>
+      <button class="bz-k" onclick="_bzTecla('4')">4</button><button class="bz-k" onclick="_bzTecla('5')">5</button><button class="bz-k" onclick="_bzTecla('6')">6</button>
+      <button class="bz-k" onclick="_bzTecla('7')">7</button><button class="bz-k" onclick="_bzTecla('8')">8</button><button class="bz-k" onclick="_bzTecla('9')">9</button>
+      <button class="bz-k bz-k2" onclick="_bzTecla('C')">C</button><button class="bz-k" onclick="_bzTecla('0')">0</button><button class="bz-k bz-k2" onclick="_bzTecla('<')">⌫</button>
+    </div>
+  </div>
+  <div id="bz-sheet" class="bz-sheet-bg" onclick="_bzFecharSheet()"></div>
+</div>
+
+<script>
 // ═══════════════════════════════════════════════════════════════
-//  ⚖️ MODO BALANÇA
-//  Registro rápido de pratos (e bebidas) SEM mesa → fila de pendentes →
-//  associação às mesas → lançamento pela MESMA função do assistente
-//  (_lancarPedidoEmMesa). Um pendente NÃO é venda: só vira pedido/conta
-//  no lançamento, e só fica "lançado" depois que ele deu certo.
+//  ⚖️ BALANÇA — tela própria, só toques (sem comandos de texto)
 //
-//  Onde fica:   tenants/{t}/restaurantes/{r}/balanca_pendentes/{id}
-//  No aparelho: localStorage "balanca_{restaurante}_{garcom}" (sobrevive a
-//               queda de internet / app fechado; sincroniza quando volta).
-//  Anti-duplicidade: (1) status local, (2) trava em transação no servidor,
-//  (3) o pedido gravado leva "balancaIds" — antes de lançar, procura se já
-//  existe pedido com aquele id (cobre app que caiu no meio do lançamento).
-//  A IA não escreve nada aqui: os comandos são interpretados no aparelho e
-//  passam pelas validações abaixo.
+//  Fluxo: digita o valor no teclado → BUFFET → vira um "ticket" na fila.
+//  Bebida: toque no chip → entra no ticket selecionado (ou vira ticket
+//  sozinha). Selecione 1 ou vários tickets → MESA → número → LANÇAR.
+//
+//  Fila COMPARTILHADA do restaurante (quem pesa e quem leva à mesa podem
+//  ser pessoas diferentes), ao vivo pelo Firestore:
+//    tenants/{t}/restaurantes/{r}/balanca_pendentes/{id}
+//  Ticket na fila NÃO é venda: só vira pedido/conta no lançamento, que usa
+//  a mesma função do assistente (_lancarPedidoEmMesa).
+//  Sem internet: tudo fica salvo no aparelho e sobe quando a conexão volta.
+//  Nunca lança 2×: trava em transação + o pedido leva "balancaIds".
 // ═══════════════════════════════════════════════════════════════
-var BAL_MAX_KG = 150, BAL_MIN_KG = 3, BAL_AUTO_SEG = 5, BAL_LOCK_MS = 90000, BAL_PRAZO_SYNC = 8000;
-var _bal = {
-  ativo:false, registros:[], sel:{}, desfazer:[], seq:0, dia:null, sessaoId:null, carregadoChave:null,
-  verTodos:false, aberto:true, teclado:'num', offline:false, emVoo:{}, timerSync:null,
-  lancando:{}, perg:{}, pergSeq:0, relogio:null, msgsExtra:[]
-};
+var BZ_MAX = 150, BZ_MIN = 3, BZ_LOCK_MS = 90000, BZ_PRAZO = 8000;
+var _bz = { t:{}, sel:{}, cent:'', editando:null, aberto:false, unsub:null, chaveEscuta:null, chaveLocal:null, dia:null,
+  offline:false, emVoo:{}, timerSync:null, lancando:{}, verLancados:false, sheet:null, mesaDig:'', busca:'', enviando:false };
 var _podeBalanca = true;
 try{ _podeBalanca = localStorage.getItem('garcom_sem_balanca') !== '1'; }catch(e){}
 
-var BAL_UN = { um:1, uma:1, dois:2, duas:2, tres:3, quatro:4, cinco:5, seis:6, sete:7, oito:8, nove:9, dez:10,
-  onze:11, doze:12, treze:13, quatorze:14, catorze:14, quinze:15, dezesseis:16, dezessete:17, dezoito:18, dezenove:19,
-  vinte:20, trinta:30, quarenta:40, cinquenta:50, sessenta:60, setenta:70, oitenta:80, noventa:90 };
-var BAL_NUMW = '(?:\\d{1,3}|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa)';
-var BAL_PRATO = '(?:pratos?|itens?|item|bebidas?|numeros?|registros?|pesagens?)';
-var BAL_LISTA = BAL_NUMW + '(?:\\s+(?:e\\s+|a\\s+|ao\\s+|ate\\s+)?' + BAL_NUMW + ')*';
-var BAL_MESA = '\\s*(?:(?:na|pra|para|para a|pra a|a|no|em|da)\\s+)?mesa\\s+(' + BAL_NUMW + ')\\s*$|\\s+(?:na|pra|para|para a|pra a)\\s+(' + BAL_NUMW + ')\\s*$';
-var BAL_FILLER = { prato:1, pratos:1, de:1, do:1, da:1, um:1, uma:1, registra:1, registrar:1, registre:1, pesa:1, pesou:1,
-  pesagem:1, peso:1, valor:1, e:1, mais:1, o:1, a:1, os:1, as:1, valendo:1, deu:1, ficou:1, reais:1, real:1, rs:1, mesmo:1,
-  outro:1, outra:1, novo:1, nova:1, anota:1, anotar:1, coloca:1, poe:1, bota:1, lanca:1, adiciona:1, add:1, com:1, so:1, aqui:1 };
-var BAL_RE_ESPECIAL = /sorvet|acai|picol|doce|sobremes|gelat|frozen|iogurt/;
-
 // ── utilidades ──
-function _balDia(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
-function _balChave(){ return 'balanca_' + (_restauranteId || 'x') + '_' + _normNome(_nomeGarcom || '').replace(/\s+/g,'_'); }
-function _balFmt(v){ return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ','); }
-function _bal3(n){ return String(n).padStart(3, '0'); }
-function _balHora(ms){ var d = new Date(ms); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
-function _balR2(v){ return Math.round((Number(v) || 0) * 100) / 100; }
-function _balRec(id){ for(var i = 0; i < _bal.registros.length; i++){ if(_bal.registros[i].id === id) return _bal.registros[i]; } return null; }
-function _balPorNumero(n){ return _bal.registros.filter(function(r){ return r.numero === n && r.dia === _bal.dia; })[0] || _bal.registros.filter(function(r){ return r.numero === n; })[0] || null; }
-function _balEhPendente(r){ return r.status === 'aguardando' || r.status === 'associado'; }
-function _balPendentes(){ return _bal.registros.filter(_balEhPendente).sort(function(a,b){ return a.numero - b.numero; }); }
-function _balAguardando(){ return _bal.registros.filter(function(r){ return r.status === 'aguardando'; }).sort(function(a,b){ return a.numero - b.numero; }); }
-function _balTotal(r){ return _balR2((r.valor || 0) * (r.qtd || 1)); }
-function _balSoma(lista){ return _balR2(lista.reduce(function(s, r){ return s + _balTotal(r); }, 0)); }
-function _balRotulo(r){ return (r.tipo === 'kg' ? 'Prato ' : 'Item ') + _bal3(r.numero); }
-function _balRotulos(lista){ return lista.map(function(r){ return _bal3(r.numero); }).join(', '); }
-function _balN(tok){ tok = String(tok || '').trim(); if(/^\d+$/.test(tok)) return parseInt(tok, 10); return BAL_UN[tok] || null; }
-function _balLista(txt){
-  var toks = String(txt || '').split(/\s+/).filter(Boolean), out = [], range = false;
-  toks.forEach(function(tk){
-    if(tk === 'e') return;
-    if(tk === 'a' || tk === 'ao' || tk === 'ate'){ range = true; return; }
-    var n = _balN(tk); if(!n) return;
-    if(range && out.length){ var ini = out[out.length - 1]; for(var k = ini + 1; k <= n && k - ini <= 50; k++) out.push(k); }
-    else out.push(n);
-    range = false;
-  });
-  return out.filter(function(n, i){ return out.indexOf(n) === i; });
-}
-function _balComPrazo(p, ms){
+function _bzDia(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function _bzR2(v){ return Math.round((Number(v) || 0) * 100) / 100; }
+function _bzFmt(v){ return (Number(v) || 0).toFixed(2).replace('.', ','); }
+function _bzHora(ms){ var d = new Date(ms); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+function _bzRand(){ return Math.random().toString(36).slice(2, 8); }
+function _bzLista(){ return Object.keys(_bz.t).map(function(k){ return _bz.t[k]; }); }
+function _bzPendentes(){ return _bzLista().filter(function(t){ return t.status === 'pendente'; }).sort(function(a, b){ return a.criadoEm - b.criadoEm; }); }
+function _bzTotal(t){ return _bzR2((t.itens || []).reduce(function(s, i){ return s + (i.valor || 0) * (i.qtd || 1); }, 0)); }
+function _bzSoma(l){ return _bzR2(l.reduce(function(s, t){ return s + _bzTotal(t); }, 0)); }
+function _bzNum(t){ return t.numero ? '#' + String(t.numero).padStart(2, '0') : '#··'; }
+function _bzSelPend(){ return _bzPendentes().filter(function(t){ return _bz.sel[t.id]; }); }
+function _bzItem(id){ return (_itens || []).filter(function(i){ return i.id === id; })[0] || null; }
+function _bzComPrazo(p, ms){
   return new Promise(function(res, rej){
-    var t = setTimeout(function(){ rej(new Error('timeout')); }, ms);
-    p.then(function(v){ clearTimeout(t); res(v); }, function(e){ clearTimeout(t); rej(e); });
+    var x = setTimeout(function(){ rej(new Error('sem conexão')); }, ms);
+    p.then(function(v){ clearTimeout(x); res(v); }, function(e){ clearTimeout(x); rej(e); });
   });
 }
-function _balPrep(texto){
-  var t = _normNome(texto);
-  t = t.replace(/r\$\s*/g, ' ');
-  t = t.replace(/[.,]/g, function(m, off, s){ return (/\d/.test(s.charAt(off - 1)) && /\d/.test(s.charAt(off + 1))) ? ',' : ' '; });
-  t = t.replace(/[!?;:"'()]/g, ' ');
-  t = t.replace(/\b(vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa) e (um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove)\b/g, function(m, a, b){ return String(BAL_UN[a] + BAL_UN[b]); });
-  t = t.replace(/\bn[ºo°]\s*(?=\d)/g, ' ').replace(/\bnumero\s+(?=\d)/g, ' ');
-  t = t.replace(/(^|[^\d,])0+(\d)/g, '$1$2');           // "prato 001" → 1 (não mexe em "34,05")
-  t = t.replace(/(\d{1,4})\s*(?:reais|real)?\s+e\s+(\d{1,2})\s*centavos?/g, '$1,$2');
-  t = t.replace(/(\d{1,4})\s*(?:reais|real)\s+e\s+(\d{1,2})\b/g, '$1,$2');
-  t = t.replace(/(\d)\s*(?:reais|real)\b/g, '$1');
-  return t.replace(/\s+/g, ' ').trim();
+function _bzVibrar(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms || 25); }catch(e){} }
+function _bzCol(){
+  if(_tenantId) return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId).collection('balanca_pendentes');
+  return fbDb.collection('balanca_pendentes');
 }
-function _balMesaValida(m){ var max = (typeof _TOTAL_MESAS === 'number' && _TOTAL_MESAS > 0) ? _TOTAL_MESAS : 999; return m >= 1 && m <= max; }
+function _bzContadorRef(dia){
+  if(_tenantId) return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId).collection('contadores').doc('balanca_' + dia);
+  return fbDb.collection('balanca_contadores').doc(_restauranteId + '_' + dia);
+}
+// Atualiza o ticket NO MESMO objeto (quem está no meio de uma operação continua
+// segurando a referência certa)
+function _bzAdotar(id, s){
+  var l = _bz.t[id];
+  if(!l){ s._sync = 'ok'; s._rev = 1; _bz.t[id] = s; return s; }
+  Object.keys(l).forEach(function(k){ if(k.charAt(0) !== '_') delete l[k]; });
+  Object.keys(s).forEach(function(k){ if(k.charAt(0) !== '_') l[k] = s[k]; });
+  l._sync = 'ok'; l._rev = (l._rev || 0) + 1;
+  return l;
+}
+function _bzDoc(t){ var o = {}; Object.keys(t).forEach(function(k){ if(k.charAt(0) !== '_' && t[k] !== undefined) o[k] = t[k]; }); return JSON.parse(JSON.stringify(o)); }
 
-// ── itens do cardápio ──
-function _balBuffetPadrao(){
-  // Mesma regra da tela "Pesagem/almoço": item por kg com buffet/almoço no
-  // nome; senão o primeiro por kg (evitando sorvete/açaí); nunca um pausado
-  // se houver outro.
+// ── cardápio ──
+function _bzBuffet(){
+  // Mesma regra da tela "Pesagem/almoço": item por kg com buffet/almoço no nome
   var kg = (_itens || []).filter(function(i){ return i.tipoVenda === 'kg' && i.disponivel !== false; });
+  var buf = kg.filter(function(i){ return /buffet|almoco/.test(_normNome(i.nome)); });
+  var bufLivre = buf.filter(function(i){ return !pausaAtiva(i); })[0];
+  if(buf.length) return bufLivre || buf[0];
   var livres = kg.filter(function(i){ return !pausaAtiva(i); });
   var base = livres.length ? livres : kg;
-  return base.filter(function(i){ return /buffet|almoco/.test(_normNome(i.nome)); })[0]
-    || base.filter(function(i){ return !BAL_RE_ESPECIAL.test(_normNome(i.nome)); })[0]
+  return base.filter(function(i){ return !/sorvet|acai|picol|doce|sobremes|gelat|frozen|iogurt/.test(_normNome(i.nome)); })[0]
     || base[0] || null;
 }
-function _balAcharItens(texto, tipo){
-  var t = String(texto || '').trim();
-  if(!t) return { unico:null, cands:[] };
-  var lista = (_itens || []).filter(function(i){ return i.disponivel !== false && (tipo === 'kg' ? i.tipoVenda === 'kg' : i.tipoVenda !== 'kg'); });
-  var nPal = t.split(' ').length;
-  var pont = [];
-  lista.forEach(function(i){
-    var p = _pontuarNomeItem(t, i.nome), vozExata = false;
-    if(i.palavrasVoz){
-      String(i.palavrasVoz).split(/[,;\/]/).forEach(function(v){
-        v = v.trim(); if(!v) return;
-        if(_normNome(v) === t){ p = 1; vozExata = true; }      // palavra de voz idêntica = item certo
-        else if(p < 1 && _pontuarNomeItem(t, v) >= 1) p = 1;
-      });
-    }
-    if(p >= 1) pont.push({ i:i, extra: Math.max(0, _normNome(i.nome).split(' ').length - nPal), exato: _normNome(i.nome) === t || vozExata });
+function _bzOutrosKg(){
+  var b = _bzBuffet();
+  return (_itens || []).filter(function(i){ return i.tipoVenda === 'kg' && i.disponivel !== false && (!b || i.id !== b.id); });
+}
+function _bzUso(){ try{ return JSON.parse(localStorage.getItem('balanca_uso_' + _restauranteId) || '{}'); }catch(e){ return {}; } }
+function _bzContarUso(id){ try{ var u = _bzUso(); u[id] = (u[id] || 0) + 1; localStorage.setItem('balanca_uso_' + _restauranteId, JSON.stringify(u)); }catch(e){} }
+function _bzBebidas(){
+  var cats = (typeof _almCatsSelecionadas !== 'undefined' && _almCatsSelecionadas) ? _almCatsSelecionadas : [];
+  if(!cats.length){
+    cats = (_categorias || []).filter(function(c){ return /bebid|refri|suco|cervej|agua|drink|vinho|cafe/.test(_normNome(c.nome)); }).map(function(c){ return c.id; });
+  }
+  var u = _bzUso();
+  return (_itens || []).filter(function(i){ return i.tipoVenda !== 'kg' && i.disponivel !== false && !pausaAtiva(i) && cats.indexOf(i.categoriaId) >= 0; })
+    .sort(function(a, b){ return ((u[b.id] || 0) - (u[a.id] || 0)) || String(a.nome).localeCompare(String(b.nome)); });
+}
+function _bzNomeCurto(n){ n = String(n || ''); return n.length > 16 ? n.slice(0, 15) + '…' : n; }
+
+// ── estado local (aparelho) ──
+function _bzChave(){ return 'balanca_fila_' + (_restauranteId || 'x'); }
+function _bzSalvar(){
+  try{
+    var guardar = _bzLista().filter(function(t){ return t.dia === _bz.dia || t._sync !== 'ok' || t.status === 'pendente'; });
+    localStorage.setItem(_bzChave(), JSON.stringify({ dia:_bz.dia, t:guardar }));
+  }catch(e){}
+}
+function _bzCarregar(){
+  var d = null; try{ d = JSON.parse(localStorage.getItem(_bzChave()) || 'null'); }catch(e){}
+  _bz.t = {}; _bz.sel = {}; _bz.editando = null;
+  _bz.dia = _bzDia();
+  (d && d.t || []).forEach(function(t){
+    // de outro dia, só o que ainda não terminou ou não subiu
+    if(t.dia === _bz.dia || t.status === 'pendente' || t.status === 'lancando' || t._sync !== 'ok') _bz.t[t.id] = t;
   });
-  if(!pont.length) return { unico:null, cands:[] };
-  // Bebidas: se o admin configurou as categorias de bebida, elas têm prioridade
-  if(tipo !== 'kg' && typeof _almCatsSelecionadas !== 'undefined' && _almCatsSelecionadas && _almCatsSelecionadas.length){
-    var beb = pont.filter(function(o){ return _almCatsSelecionadas.indexOf(o.i.categoriaId) >= 0; });
-    if(beb.length) pont = beb;
-  }
-  var exato = pont.filter(function(o){ return o.exato; });
-  if(exato.length === 1) return { unico: exato[0].i, cands:[exato[0].i] };
-  pont.sort(function(a, b){ return a.extra - b.extra; });
-  var menor = pont[0].extra;
-  var top = pont.filter(function(o){ return o.extra === menor; });
-  if(top.length === 1) return { unico: top[0].i, cands: pont.map(function(o){ return o.i; }) };
-  return { unico:null, cands: pont.slice(0, 6).map(function(o){ return o.i; }) };
+  _bz.chaveLocal = _bzChave();
 }
-
-// Alerta de valor estranho — o registro é criado (nada se perde), mas fica
-// travado para lançamento até alguém confirmar ou corrigir.
-function _balAlertaKg(valor, decimal){
-  if(valor > BAL_MAX_KG){
-    var sug = null;
-    if(!decimal && valor >= 100 && valor / 100 >= BAL_MIN_KG && valor / 100 <= BAL_MAX_KG) sug = _balR2(valor / 100);
-    else if(valor / 10 >= 8 && valor / 10 <= BAL_MAX_KG) sug = _balR2(valor / 10);
-    return { tipo:'alto', msg:'Valor alto para um prato', sugestao: sug };
-  }
-  if(valor < BAL_MIN_KG) return { tipo:'baixo', msg:'Valor muito baixo para um prato', sugestao:null };
-  return null;
-}
-function _balMontarKg(item, valor, decimal){
-  var pb = item.preco || 0;
-  return { tipo:'kg', item:item, valor:_balR2(valor), qtd:1, precoBase:pb,
-    peso: pb > 0 ? Math.round(valor * 1000 / pb) : 0, alerta:_balAlertaKg(valor, decimal) };
-}
-function _balMontarUn(item, num, decimal){
-  var preco = _balR2(item.preco || 0), qtd = 1, alerta = null;
-  if(num != null){
-    if(!decimal && num >= 1 && num <= 20 && Math.round(num) === num && Math.abs(num - preco) > 0.004) qtd = num;
-    else if(Math.abs(num - preco) <= 0.004) qtd = 1;
-    else {
-      var k = preco > 0 ? Math.round(num / preco) : 0;
-      if(k >= 1 && k <= 20 && Math.abs(k * preco - num) <= 0.004) qtd = k;
-      else alerta = { tipo:'preco', msg:'Você disse ' + _balFmt(num) + ', mas no cardápio ' + item.nome + ' custa ' + _balFmt(preco), sugestao:null, informado:_balR2(num) };
-    }
-  }
-  return { tipo:'unidade', item:item, valor:preco, qtd:qtd, precoBase:preco, peso:0, alerta:alerta };
-}
-
-// Quebra "34,15 28,90 sorvete 35,40 2 coca lata" em entradas
-function _balNumerosDeNome(){
-  var set = {};
-  (_itens || []).forEach(function(i){ if(i.tipoVenda !== 'kg') _normNome(i.nome).split(/[^a-z0-9]+/).forEach(function(w){ if(/^\d+$/.test(w)) set[w] = 1; }); });
-  return set;
-}
-function _balEntradas(t){
-  var toks = t.split(/\s+/).filter(Boolean), ent = [], pre = [], numNome = _balNumerosDeNome();
-  toks.forEach(function(tk, i){
-    // "coca 600": o 600 é parte do nome do item, não valor
-    var anterior = toks[i - 1];
-    if(/^\d+$/.test(tk) && numNome[tk] && anterior && !/^\d/.test(anterior) && !BAL_FILLER[anterior]){ (ent.length ? ent[ent.length - 1].pal : pre).push(tk); return; }
-    if(/^\d{1,5}(,\d{1,2})?$/.test(tk)) ent.push({ num: parseFloat(tk.replace(',', '.')), decimal: tk.indexOf(',') >= 0, pal: [] });
-    else if(!BAL_FILLER[tk]) (ent.length ? ent[ent.length - 1].pal : pre).push(tk);
-  });
-  if(pre.length){
-    if(ent.length && !ent[0].pal.length) ent[0].pal = pre;
-    else ent.unshift({ num:null, decimal:false, pal:pre });
-  }
-  return ent;
-}
-// Resolve uma entrada → {ok:spec} | {pergunta:{texto, opcoes}} | {erro} | {estranho:true}
-function _balResolver(e){
-  var txt = e.pal.join(' ');
-  if(!txt){
-    if(e.num == null) return { estranho:true };
-    var buf = _balBuffetPadrao();
-    if(!buf) return { erro:'Não há item por kg (buffet) no cardápio.' };
-    return { ok:_balMontarKg(buf, e.num, e.decimal) };
-  }
-  var kg = _balAcharItens(txt, 'kg'), un = _balAcharItens(txt, 'un');
-  var querKg = e.num != null && (e.decimal || e.num > 20);
-  if(kg.unico && (!un.cands.length || querKg)){
-    if(e.num == null) return { erro:'Qual o valor do ' + kg.unico.nome + '? Ex.: “35,40 ' + txt + '”.' };
-    return { ok:_balMontarKg(kg.unico, e.num, e.decimal) };
-  }
-  if(un.unico && (!kg.cands.length || !querKg)) return { ok:_balMontarUn(un.unico, e.num, e.decimal) };
-  var cands = (querKg ? kg.cands.concat(un.cands) : un.cands.concat(kg.cands)).slice(0, 6);
-  if(cands.length){
-    return { pergunta:{ texto:'Qual desses' + (e.num != null ? ' (' + (e.decimal ? _balFmt(e.num) : e.num) + ')' : '') + '?',
-      opcoes: cands.map(function(it){ return { rotulo: it.nome, spec: it.tipoVenda === 'kg' ? (e.num != null ? _balMontarKg(it, e.num, e.decimal) : null) : _balMontarUn(it, e.num, e.decimal) }; }).filter(function(o){ return o.spec; }) } };
-  }
-  if(e.num != null && e.decimal){
-    var b2 = _balBuffetPadrao();
-    return { pergunta:{ texto:'Não achei “' + txt + '” no cardápio. Registrar ' + _balFmt(e.num) + ' como?',
-      opcoes: b2 ? [{ rotulo: b2.nome, spec:_balMontarKg(b2, e.num, true) }] : [] } };
-  }
-  return { estranho:true };
-}
-
-// ── estado local + sincronização ──
-function _balSalvarLocal(){
-  try{ localStorage.setItem(_balChave(), JSON.stringify({ dia:_bal.dia, seq:_bal.seq, sessaoId:_bal.sessaoId, registros:_bal.registros, desfazer:_bal.desfazer.slice(-30) })); }catch(e){}
-}
-function _balCarregarLocal(){
-  var hoje = _balDia(), d = null;
-  try{ d = JSON.parse(localStorage.getItem(_balChave()) || 'null'); }catch(e){}
-  if(d && d.dia === hoje){
-    _bal.seq = d.seq || 0; _bal.sessaoId = d.sessaoId || null; _bal.registros = d.registros || []; _bal.desfazer = d.desfazer || [];
-  } else {
-    // Dia novo: numeração recomeça; só fica o que ainda não terminou
-    var sobra = d ? (d.registros || []).filter(function(r){ return _balEhPendente(r) || r.status === 'lancando' || r._sync !== 'ok'; }) : [];
-    _bal.registros = sobra; _bal.desfazer = []; _bal.sessaoId = null;
-    _bal.seq = sobra.reduce(function(m, r){ return Math.max(m, r.numero || 0); }, 0);
-  }
-  _bal.dia = hoje;
-  if(!_bal.sessaoId) _bal.sessaoId = 'bs_' + hoje.replace(/-/g, '') + '_' + Math.random().toString(36).slice(2, 8);
-  _bal.carregadoChave = _balChave();
-  _bal.sel = {};
-}
-function _balGarantirCarregado(){
-  if(!_nomeGarcom || !_restauranteId) return false;
-  if(_bal.carregadoChave !== _balChave() || _bal.dia !== _balDia()) _balCarregarLocal();
+function _bzGarantir(){
+  if(!_restauranteId || typeof fbDb === 'undefined' || !fbDb) return false;
+  if(_bz.chaveLocal !== _bzChave() || _bz.dia !== _bzDia()) _bzCarregar();
+  _bzEscutar();
   return true;
 }
-function _balCol(){
-  if(_tenantId) return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId).collection('balanca_pendentes');
-  return fbDb.collection('balanca_pendentes'); // sem tenant: coleção raiz, isolada por restauranteId
+
+// ── ao vivo (fila compartilhada) ──
+function _bzEscutar(){
+  var chave = (_tenantId || '') + '|' + _restauranteId + '|' + _bz.dia;
+  if(_bz.chaveEscuta === chave) return;
+  if(_bz.unsub){ try{ _bz.unsub(); }catch(e){} _bz.unsub = null; }
+  _bz.chaveEscuta = chave;
+  try{
+    var q = _bzCol().where('dia', '==', _bz.dia);
+    if(!_tenantId) q = q.where('restauranteId', '==', _restauranteId);
+    _bz.unsub = q.onSnapshot(function(snap){
+      _bz.offline = false;
+      snap.forEach(function(d){
+        var s = d.data() || {};
+        if(s.restauranteId && s.restauranteId !== _restauranteId) return;
+        var l = _bz.t[d.id];
+        var finalServidor = s.status === 'lancado' || s.status === 'cancelado' || (s.status === 'lancando' && !_bz.lancando[d.id] && !(l && l._tokenFalho && s.lancandoToken === l._tokenFalho));
+        if(_bz.lancando[d.id]) return; // este aparelho está lançando: ele mesmo atualiza
+        if(!l || (l._sync === 'ok' && (s.atualizadoEm || 0) >= (l.atualizadoEm || 0)) || (l.status === 'pendente' && finalServidor)){
+          _bzAdotar(d.id, s);
+          if(s.status !== 'pendente') delete _bz.sel[d.id];
+        }
+      });
+      _bzSalvar(); _bzRender();
+    }, function(){ _bz.offline = true; _bz.chaveEscuta = null; _bzRenderStatus(); });
+  }catch(e){ _bz.chaveEscuta = null; }
 }
-function _balDoc(r){ var o = {}; Object.keys(r).forEach(function(k){ if(k.charAt(0) !== '_' && r[k] !== undefined) o[k] = r[k]; }); return JSON.parse(JSON.stringify(o)); }
-function _balAgendarSync(ms){ clearTimeout(_bal.timerSync); _bal.timerSync = setTimeout(_balSincronizar, ms || 0); }
-function _balSincronizar(){
+
+// ── sincronização (aparelho → servidor) ──
+function _bzAgendar(ms){ clearTimeout(_bz.timerSync); _bz.timerSync = setTimeout(_bzSync, ms || 0); }
+function _bzSync(){
   if(typeof fbDb === 'undefined' || !fbDb || !_restauranteId) return;
-  var pend = _bal.registros.filter(function(r){ return r._sync !== 'ok'; });
-  if(!pend.length){ _bal.offline = false; _balRenderStatus(); return; }
-  pend.forEach(function(r){
-    var rev = r._rev || 0;
-    if(_bal.emVoo[r.id] === rev) return;
-    _bal.emVoo[r.id] = rev;
-    _balComPrazo(_balCol().doc(r.id).set(_balDoc(r)), BAL_PRAZO_SYNC).then(function(){
-      if(_bal.emVoo[r.id] === rev) delete _bal.emVoo[r.id];
-      var atual = _balRec(r.id);
-      if(atual && (atual._rev || 0) === rev) atual._sync = 'ok';
-      _bal.offline = false;
-      _balSalvarLocal(); _balRenderPainel();
-      if(_bal.registros.some(function(x){ return x._sync !== 'ok'; })) _balAgendarSync(300);
+  if(Object.keys(_bz.emVoo).length) return; // um por vez: o próximo sai quando este terminar
+  _bzLista().filter(function(t){ return t._sync !== 'ok'; }).sort(function(a, b){ return a.criadoEm - b.criadoEm; }).slice(0, 1).forEach(function(t){
+    var rev = t._rev || 0;
+    _bz.emVoo[t.id] = rev;
+    var ref = _bzCol().doc(t.id), cref = _bzContadorRef(t.dia);
+    var p = fbDb.runTransaction(function(tx){
+      return tx.get(ref).then(function(d){
+        var s = d.exists ? d.data() : null;
+        // Já lançado/cancelado em outro aparelho: o servidor manda
+        var lockMeuQueFalhou = s && s.status === 'lancando' && t._tokenFalho && s.lancandoToken === t._tokenFalho;
+        if(s && t.status === 'pendente' && !lockMeuQueFalhou && (s.status === 'lancado' || s.status === 'lancando' || s.status === 'cancelado')) return { adotar:s };
+        var num = (s && s.numero) || t.numero || null;
+        return (num ? Promise.resolve(null) : tx.get(cref)).then(function(c){
+          if(!num){ num = ((c && c.exists && c.data().ultimo) || 0) + 1; tx.set(cref, { ultimo:num, dia:t.dia, atualizadoEm:Date.now() }, { merge:true }); }
+          var doc = _bzDoc(_bz.t[t.id] || t); doc.numero = num;
+          tx.set(ref, doc);
+          return { numero:num };
+        });
+      });
+    });
+    _bzComPrazo(p, BZ_PRAZO).then(function(r){
+      delete _bz.emVoo[t.id];
+      _bz.offline = false;
+      var a = _bz.t[t.id];
+      if(r.adotar){ _bzAdotar(t.id, r.adotar); delete _bz.sel[t.id]; }
+      else if(a){ a.numero = r.numero; if((a._rev || 0) === rev) a._sync = 'ok'; }
+      _bzSalvar(); _bzRender();
+      if(_bzLista().some(function(x){ return x._sync !== 'ok'; })) _bzAgendar(0);
     }).catch(function(){
-      if(_bal.emVoo[r.id] === rev) delete _bal.emVoo[r.id];
-      _bal.offline = true; _balRenderStatus();
-      _balAgendarSync(5000);
+      delete _bz.emVoo[t.id];
+      _bz.offline = true; _bzRenderStatus();
+      _bzAgendar(5000);
     });
   });
-  _balRenderStatus();
+  _bzRenderStatus();
 }
-function _balEsperarSync(ids, prazo){
-  _balAgendarSync(0);
-  var ate = Date.now() + (prazo || BAL_PRAZO_SYNC);
+function _bzEsperarSync(ids){
+  _bzAgendar(0);
+  var ate = Date.now() + BZ_PRAZO;
   return new Promise(function(res, rej){
     (function checar(){
-      var falta = ids.some(function(id){ var r = _balRec(id); return r && (r._sync !== 'ok' || _bal.emVoo[id] !== undefined); });
+      var falta = ids.some(function(id){ var t = _bz.t[id]; return t && (t._sync !== 'ok' || _bz.emVoo[id] !== undefined); });
       if(!falta) return res();
       if(Date.now() > ate) return rej(new Error('sem conexão para salvar'));
       setTimeout(checar, 150);
     })();
   });
 }
-function _balCarregarRemoto(){
-  if(!_nomeGarcom || !_restauranteId || typeof fbDb === 'undefined' || !fbDb) return Promise.resolve();
-  var q; try{ q = _balCol().where('garcom', '==', _nomeGarcom).where('dia', '==', _bal.dia).get(); }catch(e){ return Promise.resolve(); }
-  return _balComPrazo(q, 10000).then(function(snap){
-    var mudou = false;
-    snap.forEach(function(d){
-      var s = d.data() || {}; if(s.restauranteId && s.restauranteId !== _restauranteId) return;
-      var l = _balRec(d.id);
-      if(!l){ s._rev = 1; s._sync = 'ok'; _bal.registros.push(s); mudou = true; }
-      else if(l._sync === 'ok' && (s.atualizadoEm || 0) > (l.atualizadoEm || 0)){ var rv = l._rev; Object.keys(s).forEach(function(k){ l[k] = s[k]; }); l._rev = rv; l._sync = 'ok'; mudou = true; }
-      if((s.numero || 0) > _bal.seq) _bal.seq = s.numero;
-    });
-    if(mudou){ _balSalvarLocal(); _balRenderPainel(); }
-  }).catch(function(e){ console.warn('[Balança] recuperação remota falhou:', e && e.message); });
+
+// ── mudanças (sempre com histórico) ──
+function _bzMudar(t, fn, acao, extra){
+  fn(t);
+  t.historico = (t.historico || []).concat([Object.assign({ acao:acao, em:Date.now(), por:_nomeGarcom || '' }, extra || {})]).slice(-40);
+  t.atualizadoEm = Date.now(); t._rev = (t._rev || 0) + 1; t._sync = 'pendente';
 }
-// App caiu no meio de um lançamento? Descobre se o pedido chegou a ser gravado.
-function _balRecuperarTravados(){
-  var trav = _bal.registros.filter(function(r){ return r.status === 'lancando'; });
-  if(!trav.length) return Promise.resolve();
-  return _balPedidosComIds(trav.map(function(r){ return r.id; })).then(function(ja){
-    trav.forEach(function(r){
-      if(ja[r.id]) _balMudar(r, { status:'lancado', pedidoId:ja[r.id], lancandoToken:null }, 'lancado', { obs:'confirmado após queda', pedidoId:ja[r.id] });
-      else if(Date.now() - (r.lancandoEm || 0) > BAL_LOCK_MS) _balMudar(r, { status:'associado', lancandoToken:null }, 'recuperado', { obs:'lançamento interrompido; voltou para associado' });
-    });
-    _balSalvarLocal(); _balAgendarSync(0); _balRenderPainel();
-  }).catch(function(){});
+function _bzPersistir(){ _bzSalvar(); _bzAgendar(0); _bzRender(); }
+function _bzItemKg(item, valor){
+  var pb = item.preco || 0;
+  return { k:_bzRand(), id:item.id, nome:item.nome, tipo:'kg', valor:_bzR2(valor), precoBase:pb, peso: pb > 0 ? Math.round(valor * 1000 / pb) : 0, qtd:1 };
 }
-function _balPedidosComIds(ids){
+function _bzItemUn(item){ return { k:_bzRand(), id:item.id, nome:item.nome, tipo:'unidade', valor:_bzR2(item.preco || 0), precoBase:_bzR2(item.preco || 0), peso:0, qtd:1 }; }
+function _bzCriar(itens){
+  var agora = Date.now();
+  var t = { id:'bz_' + agora.toString(36) + '_' + _bzRand(), numero:null, restauranteId:_restauranteId, tenantId:_tenantId || null,
+    dia:_bz.dia, criadoPor:_nomeGarcom || '', criadoEm:agora, atualizadoEm:agora, status:'pendente', itens:itens, nome:'',
+    mesa:null, pedidoId:null, teste:(typeof _modoTeste !== 'undefined' && _modoTeste) ? true : false,
+    historico:[{ acao:'criado', em:agora, por:_nomeGarcom || '', total:_bzR2(itens.reduce(function(s, i){ return s + i.valor * i.qtd; }, 0)) }],
+    _rev:1, _sync:'pendente' };
+  _bz.t[t.id] = t;
+  _bz.sel = {}; _bz.sel[t.id] = true; // o novo fica selecionado: a bebida seguinte cai nele
+  _bzPersistir();
+  return t;
+}
+function _bzConfirmaValor(v){
+  if(v > BZ_MAX) return confirm('R$ ' + _bzFmt(v) + ' em um prato? Toque OK só se estiver certo.');
+  if(v < BZ_MIN) return confirm('Só R$ ' + _bzFmt(v) + '? Toque OK só se estiver certo.');
+  return true;
+}
+
+// ── ações dos botões ──
+function _bzTecla(k){
+  if(k === 'C') _bz.cent = '';
+  else if(k === '<') _bz.cent = _bz.cent.slice(0, -1);
+  else if(_bz.cent.length < 6) _bz.cent = (_bz.cent + k).replace(/^0+/, '');
+  _bzVibrar(8);
+  _bzRenderDisplay();
+}
+function _bzValor(){ return _bz.cent ? parseInt(_bz.cent, 10) / 100 : 0; }
+function _bzPesar(itemId){
+  if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
+  var item = itemId ? _bzItem(itemId) : _bzBuffet();
+  if(!item){ showToast('Nenhum item por kg no cardápio', '#f87171'); return; }
+  var v = _bzValor();
+  if(!(v > 0)){ _bzVibrar(60); showToast('Digite o valor da balança', '#f7a34f'); return; }
+  if(_bz.editando){ _bzSalvarEdicao(v); return; }
+  if(pausaAtiva(item)){ showToast('⏸️ ' + item.nome + ' está pausado', '#f87171'); return; }
+  if(!_bzConfirmaValor(v)) return;
+  _bzCriar([_bzItemKg(item, v)]);
+  _bz.cent = ''; _bzVibrar(30);
+  _bzRender(true);
+}
+function _bzBebida(itemId){
+  if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
+  var item = _bzItem(itemId); if(!item) return;
+  if(pausaAtiva(item)){ showToast('⏸️ ' + item.nome + ' está pausado', '#f87171'); return; }
+  _bzContarUso(itemId);
+  var sel = _bzSelPend();
+  if(sel.length === 1){
+    var t = sel[0];
+    _bzMudar(t, function(x){
+      var ja = x.itens.filter(function(i){ return i.tipo !== 'kg' && i.id === item.id; })[0];
+      if(ja) ja.qtd += 1; else x.itens.push(_bzItemUn(item));
+    }, 'bebida', { item:item.nome });
+    _bzPersistir();
+    showToast('🥤 ' + item.nome + ' → ' + _bzNum(t), '#4ade80');
+  } else {
+    _bzCriar([_bzItemUn(item)]);
+    showToast('🥤 ' + item.nome + ' (ticket novo)', '#4ade80');
+  }
+  _bzVibrar(30);
+  if(_bz.sheet === 'bebidas') _bzFecharSheet();
+  _bzRender(true);
+}
+function _bzToggle(id){
+  var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
+  if(_bz.sel[id]) delete _bz.sel[id]; else _bz.sel[id] = true;
+  _bzVibrar(10); _bzRender();
+}
+function _bzLimparSel(){ _bz.sel = {}; _bzRender(); }
+function _bzEditar(id){
+  var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
+  var kg = t.itens.filter(function(i){ return i.tipo === 'kg'; })[0]; if(!kg) return;
+  _bz.editando = id; _bz.cent = String(Math.round(kg.valor * 100));
+  _bzFecharSheet(); _bzRender();
+}
+function _bzCancelarEdicao(){ _bz.editando = null; _bz.cent = ''; _bzRender(); }
+function _bzSalvarEdicao(v){
+  var t = _bz.t[_bz.editando]; _bz.editando = null;
+  if(!t || t.status !== 'pendente'){ _bz.cent = ''; _bzRender(); showToast('Esse ticket já foi lançado', '#f87171'); return; }
+  if(!_bzConfirmaValor(v)){ _bz.editando = t.id; return; }
+  var kg = t.itens.filter(function(i){ return i.tipo === 'kg'; })[0];
+  var de = kg.valor;
+  _bzMudar(t, function(){ kg.valor = _bzR2(v); kg.peso = kg.precoBase > 0 ? Math.round(v * 1000 / kg.precoBase) : 0; }, 'corrigido', { de:de, para:_bzR2(v) });
+  _bz.cent = ''; _bzPersistir();
+  showToast('✏️ ' + _bzNum(t) + ': ' + _bzFmt(de) + ' → ' + _bzFmt(v), '#4ade80');
+}
+function _bzRemoverItem(id, k){
+  var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
+  var it = t.itens.filter(function(i){ return i.k === k; })[0]; if(!it) return;
+  if(t.itens.length === 1){ _bzCancelar(id); return; }
+  _bzMudar(t, function(x){ if(it.qtd > 1) it.qtd -= 1; else x.itens = x.itens.filter(function(i){ return i.k !== k; }); }, 'removido', { item:it.nome });
+  _bzPersistir(); _bzMenu(id);
+}
+function _bzCancelar(id){
+  var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
+  if(!confirm('Cancelar ' + _bzNum(t) + ' (R$ ' + _bzFmt(_bzTotal(t)) + ')?')) return;
+  _bzMudar(t, function(x){ x.status = 'cancelado'; }, 'cancelado', { total:_bzTotal(t) });
+  delete _bz.sel[id]; if(_bz.editando === id) _bz.editando = null;
+  _bzFecharSheet(); _bzPersistir();
+}
+function _bzNome(id){
+  var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
+  var n = prompt('Nome do cliente', t.nome || '');
+  if(n === null) return;
+  _bzMudar(t, function(x){ x.nome = String(n).trim().slice(0, 40); }, 'nome', { nome:String(n).trim() });
+  _bzPersistir(); _bzMenu(id);
+}
+
+// ── lançar na mesa ──
+function _bzPedidosComIds(ids){
   var blocos = [];
   for(var i = 0; i < ids.length; i += 10) blocos.push(ids.slice(i, i + 10));
   return Promise.all(blocos.map(function(b){ return fbDb.collection('pedidos').where('balancaIds', 'array-contains-any', b).get(); })).then(function(snaps){
@@ -22659,702 +22725,331 @@ function _balPedidosComIds(ids){
     return ja;
   });
 }
-
-// ── mutações (sempre com histórico e versão) ──
-var _BAL_DESF = ['status','mesa','valor','itemId','nome','tipo','precoBase','peso','qtd','alerta','categoriaId'];
-function _balFoto(r){ var o = {}; _BAL_DESF.forEach(function(k){ o[k] = (r[k] === undefined ? null : r[k]); }); return JSON.parse(JSON.stringify(o)); }
-function _balMudar(r, mud, acao, extra){
-  Object.keys(mud).forEach(function(k){ r[k] = mud[k]; });
-  r.historico = (r.historico || []).concat([Object.assign({ acao:acao, em:Date.now(), por:_nomeGarcom || '' }, extra || {})]).slice(-40);
-  r.atualizadoEm = Date.now(); r._rev = (r._rev || 0) + 1; r._sync = 'pendente';
-}
-function _balEmpilhar(desc, recs, novos){
-  _bal.desfazer.push({ desc:desc, itens: recs.map(function(r){ return { id:r.id, antes: novos ? null : _balFoto(r) }; }) });
-  if(_bal.desfazer.length > 30) _bal.desfazer.shift();
-}
-function _balPersistir(){ _balSalvarLocal(); _balAgendarSync(0); _balRenderPainel(); }
-
-function _balCriar(spec, textoOrig){
-  _bal.seq++;
-  var agora = Date.now();
-  var r = { id: 'bal_' + agora.toString(36) + '_' + Math.random().toString(36).slice(2, 8), numero:_bal.seq,
-    restauranteId:_restauranteId, tenantId:_tenantId || null, garcom:_nomeGarcom || '', sessaoId:_bal.sessaoId, dia:_bal.dia,
-    tipo:spec.tipo, itemId:spec.item.id, nome:spec.item.nome, categoriaId:spec.item.categoriaId || null,
-    valor:spec.valor, precoBase:spec.precoBase, peso:spec.peso || 0, qtd:spec.qtd || 1,
-    status:'aguardando', mesa:null, alerta:spec.alerta || null, textoOriginal:String(textoOrig || '').slice(0, 120),
-    criadoEm:agora, atualizadoEm:agora, pedidoId:null, teste: (typeof _modoTeste !== 'undefined' && _modoTeste) ? true : false,
-    historico:[{ acao:'criado', em:agora, por:_nomeGarcom || '', valor:spec.valor, item:spec.item.nome }], _rev:1, _sync:'pendente' };
-  _bal.registros.push(r);
-  return r;
-}
-function _balRegistrar(specs, textoOrig, mesa){
-  var novos = specs.map(function(s){ return _balCriar(s, textoOrig); });
-  _balEmpilhar('registro de ' + novos.map(_balRotulo).join(', '), novos, true);
-  try{ if(navigator.vibrate) navigator.vibrate(25); }catch(e){}
-  var html = novos.map(_balHtmlLinhaRegistro).join('');
-  if(mesa){ var a = _balAssociar(novos, mesa, true); html += a.html; }
-  _balPersistir();
-  return html;
-}
-function _balAssociar(recs, mesa, semEmpilhar){
-  if(!_balMesaValida(mesa)) return { html:'<div class="bal-aviso">⚠️ Mesa ' + mesa + ' não existe (vai de 1 a ' + ((typeof _TOTAL_MESAS === 'number' && _TOTAL_MESAS) || 999) + '). Nada foi alterado.</div>' };
-  var ok = recs.filter(_balEhPendente), fora = recs.filter(function(r){ return !_balEhPendente(r); });
-  var html = '';
-  if(ok.length){
-    if(!semEmpilhar) _balEmpilhar(ok.map(_balRotulo).join(', ') + ' → mesa ' + mesa, ok);
-    ok.forEach(function(r){ var de = r.mesa || null; _balMudar(r, { status:'associado', mesa:mesa }, 'associado', { mesa:mesa, de:de }); delete _bal.sel[r.id]; });
-    html += '<div class="bal-ok">📌 ' + ok.map(_balRotulo).join(', ') + ' → <b>Mesa ' + mesa + '</b> · ' + _balFmt(_balSoma(ok)) + '</div>';
-    _balCardLancamento(mesa);
-  }
-  if(fora.length) html += '<div class="bal-aviso">⚠️ ' + fora.map(function(r){ return _balRotulo(r) + ' (' + _balStatusTxt(r) + ')'; }).join(', ') + ' não ' + (fora.length > 1 ? 'foram associados' : 'foi associado') + '.</div>';
-  if(!semEmpilhar) _balPersistir();
-  return { html:html, ok:ok };
-}
-
-// ── lançamento (validações + travas + função existente) ──
-function _balLancar(mesa, abrirSeFechada){
-  if(!_podeBalanca) return Promise.resolve({ ok:false, texto:'🔒 Seu usuário não tem permissão para o Modo Balança.' });
-  var recs = _bal.registros.filter(function(r){ return r.status === 'associado' && r.mesa === mesa; }).sort(function(a, b){ return a.numero - b.numero; });
-  if(!recs.length) return Promise.resolve({ ok:false, vazio:true, texto:'Nenhum prato associado à Mesa ' + mesa + ' esperando lançamento.' });
+function _bzLancar(ids, mesa, nome, abrir){
+  if(!_podeBalanca) return Promise.resolve({ ok:false, texto:'🔒 Balança não liberada para você.' });
+  var tks = ids.map(function(id){ return _bz.t[id]; }).filter(function(t){ return t && t.status === 'pendente'; });
+  if(!tks.length) return Promise.resolve({ ok:false, texto:'Nada para lançar.' });
+  var max = (typeof _TOTAL_MESAS === 'number' && _TOTAL_MESAS > 0) ? _TOTAL_MESAS : 999;
+  if(!(mesa >= 1 && mesa <= max)) return Promise.resolve({ ok:false, texto:'Mesa ' + mesa + ' não existe (1 a ' + max + ').' });
   var probs = [];
-  recs.forEach(function(r){
-    var rot = _balRotulo(r);
-    if(_bal.lancando[r.id]) probs.push(rot + ' já está sendo lançado');
-    if(r.alerta) probs.push(rot + ': confirme o valor antes (' + r.alerta.msg + ')');
-    if(!(r.valor > 0) || !(r.qtd >= 1) || (r.tipo !== 'kg' && r.tipo !== 'unidade')) probs.push(rot + ': valor/tipo inválido');
-    var it = (_itens || []).filter(function(i){ return i.id === r.itemId; })[0];
-    if(!it) probs.push(rot + ': “' + r.nome + '” não existe mais no cardápio');
-    else if(pausaAtiva(it)) probs.push(rot + ': ' + it.nome + ' está pausado');
+  tks.forEach(function(t){
+    if(_bz.lancando[t.id]) probs.push(_bzNum(t) + ' já está sendo lançado');
+    t.itens.forEach(function(i){
+      var it = _bzItem(i.id);
+      if(!it) probs.push(i.nome + ' saiu do cardápio');
+      else if(pausaAtiva(it)) probs.push(it.nome + ' está pausado');
+      if(!(i.valor > 0) || !(i.qtd >= 1)) probs.push(_bzNum(t) + ': valor inválido');
+    });
   });
-  if(!_balMesaValida(mesa)) probs.push('Mesa ' + mesa + ' não existe');
-  if(probs.length) return Promise.resolve({ ok:false, texto:'⚠️ Não lancei a Mesa ' + mesa + ':<br>• ' + probs.join('<br>• ') });
-  if(typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve({ ok:false, texto:'📴 Sem internet — os pratos continuam associados à Mesa ' + mesa + '. Lance quando a conexão voltar.' });
+  if(probs.length) return Promise.resolve({ ok:false, texto:'Não lancei: ' + probs.join('; ') + '.' });
+  if(typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve({ ok:false, texto:'Sem internet. Os tickets continuam na fila.' });
 
-  var ids = recs.map(function(r){ return r.id; });
-  ids.forEach(function(id){ _bal.lancando[id] = true; });
-  function liberar(){ ids.forEach(function(id){ delete _bal.lancando[id]; }); }
-  var falhouAntes = function(e){ liberar(); return { ok:false, texto:'❌ Não consegui lançar a Mesa ' + mesa + ' (' + esc(e && e.message || e) + '). Os pratos continuam associados — nada foi vendido ainda.' }; };
+  ids = tks.map(function(t){ return t.id; });
+  ids.forEach(function(id){ _bz.lancando[id] = true; });
+  function liberar(){ ids.forEach(function(id){ delete _bz.lancando[id]; }); }
 
-  return _balEsperarSync(ids).then(function(){
+  return _bzEsperarSync(ids).then(function(){
     return _contaAbertaDaMesa(mesa);
   }).then(function(conta){
-    if(!conta && !abrirSeFechada){ liberar(); return { ok:false, precisaAbrir:true, texto:'A Mesa ' + mesa + ' não está aberta.' }; }
-    return _balPedidosComIds(ids).then(function(ja){
-      var dup = recs.filter(function(r){ return ja[r.id]; });
-      dup.forEach(function(r){ _balMudar(r, { status:'lancado', pedidoId:ja[r.id] }, 'lancado', { obs:'já constava em pedido — não lançado de novo', pedidoId:ja[r.id] }); });
-      var resto = recs.filter(function(r){ return !ja[r.id]; });
-      if(!resto.length){ _balPersistir(); liberar(); return { ok:false, dup:true, texto:'🛡️ ' + dup.map(_balRotulo).join(', ') + ' já tinham sido lançados — não lancei de novo.' }; }
-      var token = 'lk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      var refs = resto.map(function(r){ return _balCol().doc(r.id); });
+    if(!conta && !abrir){ liberar(); return { ok:false, precisaAbrir:true, texto:'A mesa ' + mesa + ' não está aberta.' }; }
+    return _bzPedidosComIds(ids).then(function(ja){
+      var dup = tks.filter(function(t){ return ja[t.id]; });
+      dup.forEach(function(t){ _bzMudar(t, function(x){ x.status = 'lancado'; x.pedidoId = ja[t.id]; }, 'lancado', { obs:'já estava em um pedido — não repeti', pedidoId:ja[t.id] }); });
+      var resto = tks.filter(function(t){ return !ja[t.id]; });
+      if(!resto.length){ _bzPersistir(); liberar(); return { ok:false, texto:'🛡️ Esses tickets já tinham sido lançados — não lancei de novo.' }; }
+      var token = 'lk_' + Date.now().toString(36) + _bzRand();
+      var refs = resto.map(function(t){ return _bzCol().doc(t.id); });
       return fbDb.runTransaction(function(tx){
-        return Promise.all(refs.map(function(rf){ return tx.get(rf); })).then(function(docs){
+        return Promise.all(refs.map(function(r){ return tx.get(r); })).then(function(docs){
           var bloq = [];
           docs.forEach(function(d, i){
-            var s = d.exists ? d.data() : null;
-            if(!s) return;
-            if(s.status === 'lancado') bloq.push({ r:resto[i], motivo:'já lançado', pedidoId:s.pedidoId || null, status:'lancado' });
-            else if(s.status === 'cancelado') bloq.push({ r:resto[i], motivo:'cancelado em outro aparelho', status:'cancelado' });
-            else if(s.status === 'lancando' && s.lancandoToken !== token && Date.now() - (s.lancandoEm || 0) < BAL_LOCK_MS) bloq.push({ r:resto[i], motivo:'sendo lançado em outro aparelho' });
+            var s = d.exists ? d.data() : null; if(!s) return;
+            if(s.status === 'lancado') bloq.push({ t:resto[i], s:s, motivo:'já lançado na mesa ' + s.mesa });
+            else if(s.status === 'cancelado') bloq.push({ t:resto[i], s:s, motivo:'foi cancelado' });
+            else if(s.status === 'lancando' && s.lancandoToken !== token && Date.now() - (s.lancandoEm || 0) < BZ_LOCK_MS) bloq.push({ t:resto[i], motivo:'está sendo lançado por ' + (s.lancandoPor || 'outro garçom') });
           });
           if(bloq.length) return bloq;
           var agora = Date.now();
-          resto.forEach(function(r, i){ var doc = _balDoc(r); doc.status = 'lancando'; doc.lancandoEm = agora; doc.lancandoToken = token; doc.lancandoPor = _nomeGarcom || ''; tx.set(refs[i], doc); });
+          resto.forEach(function(t, i){ var doc = _bzDoc(t); doc.status = 'lancando'; doc.lancandoEm = agora; doc.lancandoToken = token; doc.lancandoPor = _nomeGarcom || ''; tx.set(refs[i], doc); });
           return [];
         });
       }).then(function(bloq){
         if(bloq.length){
-          bloq.forEach(function(b){ if(b.status) _balMudar(b.r, { status:b.status, pedidoId:b.pedidoId || b.r.pedidoId || null }, b.status === 'lancado' ? 'lancado' : 'cancelado', { obs:b.motivo }); });
-          _balPersistir(); liberar();
-          return { ok:false, dup:true, texto:'🛡️ Não lancei a Mesa ' + mesa + ': ' + bloq.map(function(b){ return _balRotulo(b.r) + ' ' + b.motivo; }).join('; ') + '.' };
+          bloq.forEach(function(b){ if(b.s){ _bzAdotar(b.t.id, b.s); delete _bz.sel[b.t.id]; } });
+          _bzSalvar(); _bzRender(); liberar();
+          return { ok:false, texto:'🛡️ Não lancei: ' + bloq.map(function(b){ return _bzNum(b.t) + ' ' + b.motivo; }).join('; ') + '.' };
         }
         var agoraL = Date.now();
-        resto.forEach(function(r){ r.status = 'lancando'; r.lancandoEm = agoraL; r.lancandoToken = token; r.lancandoPor = _nomeGarcom || ''; r._rev = (r._rev || 0) + 1; r._sync = 'ok'; });
-        _balSalvarLocal(); _balRenderPainel();
-        // Monta o carrinho no MESMO formato que o assistente já usa
-        var itens = [], porItem = {};
-        resto.forEach(function(r){
-          if(r.tipo === 'kg') itens.push({ id:r.itemId, nome:r.nome, tipoVenda:'kg', peso:r.peso, precoBase:r.precoBase, preco:r.valor, qtd:1, obs:'' });
-          else {
-            var k = r.itemId + '|' + r.valor;
-            if(porItem[k]) porItem[k].qtd += (r.qtd || 1);
-            else { porItem[k] = { id:r.itemId, nome:r.nome, preco:r.valor, precoBase:r.valor, extras:0, selecoes:[], qtd:r.qtd || 1, obs:'' }; itens.push(porItem[k]); }
-          }
+        resto.forEach(function(t){ t.status = 'lancando'; t.lancandoEm = agoraL; t.lancandoToken = token; t.lancandoPor = _nomeGarcom || ''; t._rev = (t._rev || 0) + 1; t._sync = 'ok'; });
+        _bzSalvar(); _bzRender();
+        // Carrinho no MESMO formato do assistente
+        var itens = [], junta = {};
+        resto.forEach(function(t){
+          var cli = nome || t.nome || '';
+          t.itens.forEach(function(i){
+            if(i.tipo === 'kg') itens.push({ id:i.id, nome:i.nome, tipoVenda:'kg', peso:i.peso, precoBase:i.precoBase, preco:i.valor, qtd:1, obs:'', cliente:cli });
+            else {
+              var k = i.id + '|' + i.valor + '|' + cli;
+              if(junta[k]) junta[k].qtd += i.qtd;
+              else { junta[k] = { id:i.id, nome:i.nome, preco:i.valor, precoBase:i.valor, extras:0, selecoes:[], qtd:i.qtd, obs:'', cliente:cli }; itens.push(junta[k]); }
+            }
+          });
         });
-        var op = { balancaIds: resto.map(function(r){ return r.id; }) };
+        var op = { balancaIds: resto.map(function(t){ return t.id; }) };
         return _lancarPedidoEmMesa(mesa, itens, op).then(function(numero){
-          resto.forEach(function(r){ _balMudar(r, { status:'lancado', pedidoId:op._pedidoId || null, numeroPedido:numero || null, lancadoEm:Date.now(), lancadoPor:_nomeGarcom || '', lancandoToken:null }, 'lancado', { mesa:mesa, pedidoId:op._pedidoId || null }); });
-          _balPersistir(); liberar();
-          var t = '✅ <b>Mesa ' + mesa + '</b>: ' + resto.map(_balRotulo).join(', ') + ' lançado' + (resto.length > 1 ? 's' : '') + ' · ' + _balFmt(_balSoma(resto)) + (numero ? ' · pedido #' + numero : '');
-          if(dup.length) t += '<br>🛡️ ' + dup.map(_balRotulo).join(', ') + ' já estava' + (dup.length > 1 ? 'm' : '') + ' lançado' + (dup.length > 1 ? 's' : '') + ' (não repeti).';
-          return { ok:true, texto:t };
+          resto.forEach(function(t){ _bzMudar(t, function(x){ x.status = 'lancado'; x.mesa = mesa; x.nome = nome || x.nome || ''; x.pedidoId = op._pedidoId || null; x.numeroPedido = numero || null; x.lancadoEm = Date.now(); x.lancadoPor = _nomeGarcom || ''; x.lancandoToken = null; }, 'lancado', { mesa:mesa, pedidoId:op._pedidoId || null }); delete _bz.sel[t.id]; });
+          _bzPersistir(); liberar();
+          return { ok:true, texto:'✅ Mesa ' + mesa + ' · ' + resto.length + ' ticket' + (resto.length > 1 ? 's' : '') + ' · R$ ' + _bzFmt(_bzSoma(resto)) + (numero ? ' · pedido #' + numero : '') + (dup.length ? ' (' + dup.length + ' já estava lançado)' : '') };
         }, function(err){
-          // Pedido pode ter sido gravado e a conta não: tira a "prova" dele pra não bloquear o relançamento
+          // pedido pode ter sido gravado e a conta não: tira a "prova" pra não travar a nova tentativa
           if(op._pedidoId) fbDb.collection('pedidos').doc(op._pedidoId).update({ balancaIds:[], balancaFalhou:true }).catch(function(){});
-          resto.forEach(function(r){ _balMudar(r, { status:'associado', lancandoToken:null }, 'falha', { erro:String(err && err.message || err).slice(0, 140) }); });
-          _balPersistir(); liberar();
-          return { ok:false, texto:'❌ Não consegui lançar a Mesa ' + mesa + ' (' + esc(err && err.message || err) + '). Os pratos continuam associados — tente de novo.' };
+          resto.forEach(function(t){ _bzMudar(t, function(x){ x._tokenFalho = token; x.status = 'pendente'; x.lancandoToken = null; }, 'falha', { mesa:mesa, erro:String(err && err.message || err).slice(0, 140) }); });
+          _bzPersistir(); liberar();
+          return { ok:false, texto:'❌ Não consegui lançar (' + (err && err.message || err) + '). Os tickets continuam na fila.' };
         });
       });
     });
-  }).catch(falhouAntes);
+  }).catch(function(e){ liberar(); return { ok:false, texto:'❌ ' + (e && e.message || e) + '. Os tickets continuam na fila.' }; });
 }
-
-// ── cartão de lançamento por mesa (no chat) ──
-function _balCardLancamento(mesa){
-  var auto = (typeof _autoEnvioLigado === 'function') ? _autoEnvioLigado() : false;
-  var temAlerta = _bal.registros.some(function(r){ return r.status === 'associado' && r.mesa === mesa && r.alerta; });
-  var ex = _chatHistorico.filter(function(m){ return m.tipo === 'balLanc' && m.mesa === mesa && m.estado === 'pronto'; })[0];
-  var autoAte = (auto && !temAlerta) ? Date.now() + BAL_AUTO_SEG * 1000 : null;
-  if(ex){ _chatHistorico = _chatHistorico.filter(function(m){ return m !== ex; }); ex.autoAte = autoAte; _chatHistorico.push(ex); }
-  else { ex = { id:_novoIdChat(), tipo:'balLanc', mesa:mesa, estado:'pronto', autoAte:autoAte }; _chatHistorico.push(ex); }
-  _balRelogio();
-  return ex;
-}
-function _balRelogio(){
-  if(_bal.relogio) return;
-  _bal.relogio = setInterval(function(){
-    var agora = Date.now(), algum = false, mudou = false;
-    _chatHistorico.forEach(function(m){
-      if(m.tipo !== 'balLanc' || m.estado !== 'pronto' || !m.autoAte) return;
-      algum = true;
-      if(agora >= m.autoAte){ m.autoAte = null; _balExecCard(m.id, false); }
-      else mudou = true;
+// App fechou no meio de um lançamento? Descobre se o pedido chegou a ser gravado.
+function _bzRecuperar(){
+  var trav = _bzLista().filter(function(t){ return t.status === 'lancando' && !_bz.lancando[t.id] && Date.now() - (t.lancandoEm || 0) > BZ_LOCK_MS; });
+  if(!trav.length) return;
+  _bzPedidosComIds(trav.map(function(t){ return t.id; })).then(function(ja){
+    trav.forEach(function(t){
+      if(ja[t.id]) _bzMudar(t, function(x){ x.status = 'lancado'; x.pedidoId = ja[t.id]; x.lancandoToken = null; }, 'lancado', { obs:'confirmado depois de queda' });
+      else _bzMudar(t, function(x){ x._tokenFalho = x.lancandoToken; x.status = 'pendente'; x.lancandoToken = null; }, 'recuperado', { obs:'lançamento interrompido — voltou pra fila' });
     });
-    if(mudou) _balRenderCards();
-    if(!algum){ clearInterval(_bal.relogio); _bal.relogio = null; }
-  }, 1000);
-}
-function _balMsgCard(id){ return _chatHistorico.filter(function(m){ return m.id === id; })[0]; }
-function _balExecCard(id, abrir){
-  var m = _balMsgCard(id); if(!m || m.estado === 'lancando') return;
-  m.autoAte = null; m.estado = 'lancando'; renderChatMensagens(true);
-  _balLancar(m.mesa, abrir).then(function(r){
-    m.estado = r.ok ? 'ok' : (r.precisaAbrir ? 'abrir' : (r.vazio ? 'vazio' : 'erro'));
-    m.texto = r.texto;
-    renderChatMensagens(true); _balRenderPainel();
-  });
-}
-function _balEsperarCard(id){ var m = _balMsgCard(id); if(m){ m.autoAte = null; renderChatMensagens(true); } }
-function _balDispensarCard(id){ var m = _balMsgCard(id); if(m){ m.estado = 'dispensado'; renderChatMensagens(true); } }
-function _balHtmlCard(m){
-  if(m.estado === 'dispensado') return '';
-  var recs = _bal.registros.filter(function(r){ return r.status === 'associado' && r.mesa === m.mesa; }).sort(function(a, b){ return a.numero - b.numero; });
-  var corpo = '';
-  if(m.estado === 'pronto'){
-    if(!recs.length) return '';
-    var alerta = recs.some(function(r){ return r.alerta; });
-    corpo = '<div style="font-weight:800;margin-bottom:4px;">🍽️ Mesa ' + m.mesa + ' · ' + recs.length + ' ' + (recs.length > 1 ? 'itens' : 'item') + ' · ' + _balFmt(_balSoma(recs)) + '</div>' +
-      '<div style="font-size:0.74rem;color:var(--muted);margin-bottom:8px;">' + recs.map(function(r){ return _bal3(r.numero) + ' ' + esc(r.nome) + (r.qtd > 1 ? ' ×' + r.qtd : '') + ' ' + _balFmt(_balTotal(r)); }).join(' · ') + '</div>' +
-      (alerta ? '<div class="bal-aviso" style="margin-bottom:8px;">⚠️ Tem valor para confirmar na fila antes de lançar.</div>' : '') +
-      '<div style="display:flex;gap:7px;flex-wrap:wrap;">' +
-        '<button class="bal-btn bal-btn-pri" onclick="_balExecCard(\'' + m.id + '\')">🚀 Lançar agora</button>' +
-        (m.autoAte ? '<button class="bal-btn" onclick="_balEsperarCard(\'' + m.id + '\')">⏸ Esperar (' + Math.max(0, Math.ceil((m.autoAte - Date.now()) / 1000)) + 's)</button>' : '') +
-      '</div>' +
-      (m.autoAte ? '<div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">Lança sozinho em ' + Math.max(0, Math.ceil((m.autoAte - Date.now()) / 1000)) + 's (envio automático ligado).</div>' : '');
-  } else if(m.estado === 'lancando'){
-    corpo = '<div style="font-size:0.84rem;">⏳ Lançando na Mesa ' + m.mesa + '…</div>';
-  } else if(m.estado === 'abrir'){
-    corpo = '<div style="font-size:0.84rem;margin-bottom:8px;">' + m.texto + ' Quer abrir e lançar ' + recs.length + ' ' + (recs.length > 1 ? 'itens' : 'item') + ' (' + _balFmt(_balSoma(recs)) + ')?</div>' +
-      '<div style="display:flex;gap:7px;"><button class="bal-btn bal-btn-pri" onclick="_balExecCard(\'' + m.id + '\', true)">Abrir mesa e lançar</button>' +
-      '<button class="bal-btn" onclick="_balDispensarCard(\'' + m.id + '\')">Agora não</button></div>';
-  } else if(m.estado === 'erro'){
-    corpo = '<div style="font-size:0.84rem;margin-bottom:8px;">' + m.texto + '</div>' +
-      (recs.length ? '<button class="bal-btn bal-btn-pri" onclick="_balExecCard(\'' + m.id + '\')">Tentar de novo</button>' : '');
-  } else {
-    corpo = '<div style="font-size:0.84rem;">' + (m.texto || '') + '</div>';
-  }
-  return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'"><div class="chat-bolha-assistente" style="width:100%;">' + corpo + '</div></div>';
-}
-function _balRenderCards(){ if(typeof renderChatMensagens === 'function') renderChatMensagens(true); }
-
-// ── outras ações ──
-function _balCancelar(recs){
-  var ok = recs.filter(_balEhPendente), fora = recs.filter(function(r){ return !_balEhPendente(r); });
-  var html = '';
-  if(ok.length){
-    _balEmpilhar('cancelamento de ' + ok.map(_balRotulo).join(', '), ok);
-    ok.forEach(function(r){ _balMudar(r, { status:'cancelado' }, 'cancelado', { valor:r.valor, mesa:r.mesa || null }); delete _bal.sel[r.id]; });
-    html += '<div class="bal-ok">🗑️ ' + ok.map(_balRotulo).join(', ') + ' cancelado' + (ok.length > 1 ? 's' : '') + '.</div>';
-    _balPersistir();
-  }
-  fora.forEach(function(r){
-    html += '<div class="bal-aviso">⚠️ ' + _balRotulo(r) + ' está ' + _balStatusTxt(r) + (r.status === 'lancado' ? ' — para tirar, cancele o item na conta da Mesa ' + r.mesa + '.' : '.') + '</div>';
-  });
-  return html;
-}
-function _balDesassociar(recs){
-  var ok = recs.filter(function(r){ return r.status === 'associado'; });
-  if(!ok.length) return '<div class="bal-aviso">Nenhum desses está associado (sem lançar) a uma mesa.</div>';
-  _balEmpilhar('tirar ' + ok.map(_balRotulo).join(', ') + ' da mesa', ok);
-  ok.forEach(function(r){ var de = r.mesa; _balMudar(r, { status:'aguardando', mesa:null }, 'desassociado', { de:de }); });
-  _balPersistir();
-  return '<div class="bal-ok">↩️ ' + ok.map(_balRotulo).join(', ') + ' voltou para a fila (sem mesa).</div>';
-}
-function _balCorrigir(r, restoTxt){
-  if(!r) return '<div class="bal-aviso">Não achei esse prato.</div>';
-  if(!_balEhPendente(r)) return '<div class="bal-aviso">⚠️ ' + _balRotulo(r) + ' está ' + _balStatusTxt(r) + ' — não dá pra corrigir aqui.</div>';
-  var ent = _balEntradas(restoTxt);
-  var e = ent[0];
-  if(!e) return '<div class="bal-aviso">Para quanto? Ex.: “corrige o prato ' + r.numero + ' para 29,80”.</div>';
-  var item = (_itens || []).filter(function(i){ return i.id === r.itemId; })[0] || { id:r.itemId, nome:r.nome, preco:r.precoBase, categoriaId:r.categoriaId, tipoVenda:r.tipo === 'kg' ? 'kg' : 'unidade' };
-  var spec = null;
-  if(e.pal.length){
-    var res = _balResolver(e.num == null && r.tipo === 'kg' ? { num:r.valor, decimal:true, pal:e.pal } : e);
-    if(!res.ok) return '<div class="bal-aviso">' + (res.erro || (res.pergunta ? 'Não ficou claro qual item (' + res.pergunta.opcoes.map(function(o){ return esc(o.rotulo); }).join(', ') + ').' : 'Não entendi a correção.')) + '</div>';
-    spec = res.ok;
-  } else if(r.tipo === 'kg'){
-    spec = _balMontarKg(Object.assign({}, item, { preco:r.precoBase || item.preco }), e.num, e.decimal);
-  } else {
-    spec = _balMontarUn(item, e.num, e.decimal);
-  }
-  var antes = _balTotal(r), antesNome = r.nome;
-  _balEmpilhar('correção do ' + _balRotulo(r), [r]);
-  _balMudar(r, { tipo:spec.tipo, itemId:spec.item.id, nome:spec.item.nome, categoriaId:spec.item.categoriaId || null, valor:spec.valor, precoBase:spec.precoBase, peso:spec.peso || 0, qtd:spec.qtd || 1, alerta:spec.alerta || null },
-    'corrigido', { de:antesNome + ' ' + antes, para:spec.item.nome + ' ' + _balR2(spec.valor * (spec.qtd || 1)) });
-  _balPersistir();
-  return '<div class="bal-ok">✏️ ' + _balRotulo(r) + ': ' + (antesNome !== r.nome ? esc(antesNome) + ' → ' + esc(r.nome) + ' · ' : '') + _balFmt(antes) + ' → <b>' + _balFmt(_balTotal(r)) + '</b></div>' +
-    (r.alerta ? '<div class="bal-aviso">⚠️ ' + esc(r.alerta.msg) + ' — confirme na fila.</div>' : '');
-}
-function _balDesfazer(){
-  var op = _bal.desfazer[_bal.desfazer.length - 1];
-  if(!op) return '<div class="bal-aviso">↩️ Nada para desfazer.</div>';
-  var bloq = op.itens.map(function(x){ return _balRec(x.id); }).filter(function(r){ return r && (r.status === 'lancado' || r.status === 'lancando'); });
-  if(bloq.length) return '<div class="bal-aviso">⚠️ Não dá pra desfazer “' + esc(op.desc) + '”: ' + bloq.map(_balRotulo).join(', ') + ' já foi lançado. Para tirar, cancele o item na conta da mesa.</div>';
-  _bal.desfazer.pop();
-  op.itens.forEach(function(x){
-    var r = _balRec(x.id); if(!r) return;
-    if(x.antes === null) _balMudar(r, { status:'cancelado' }, 'desfeito', { obs:'registro desfeito' });
-    else { var de = _balFoto(r); _balMudar(r, x.antes, 'desfeito', { de:de.status + (de.mesa ? ' m' + de.mesa : '') + ' ' + de.valor, para:x.antes.status + (x.antes.mesa ? ' m' + x.antes.mesa : '') + ' ' + x.antes.valor }); }
-  });
-  _balPersistir();
-  return '<div class="bal-ok">↩️ Desfeito: ' + esc(op.desc) + '.</div>';
-}
-function _balResolverAlerta(id, acao){
-  var r = _balRec(id); if(!r || !r.alerta || !_balEhPendente(r)) return;
-  var h = '';
-  if(acao === 'manter'){ _balEmpilhar('confirmação do ' + _balRotulo(r), [r]); _balMudar(r, { alerta:null }, 'valor confirmado', { valor:r.valor }); h = '<div class="bal-ok">👍 ' + _balRotulo(r) + ': ' + _balFmt(_balTotal(r)) + ' confirmado.</div>'; _balPersistir(); }
-  else if(acao === 'sugestao' && r.alerta.sugestao) h = _balCorrigir(r, String(r.alerta.sugestao).replace('.', ','));
-  else if(acao === 'cardapio'){ _balEmpilhar('confirmação do ' + _balRotulo(r), [r]); _balMudar(r, { alerta:null }, 'preço do cardápio aceito', { valor:r.valor }); h = '<div class="bal-ok">👍 ' + _balRotulo(r) + ' fica com o preço do cardápio: ' + _balFmt(_balTotal(r)) + '.</div>'; _balPersistir(); }
-  if(h){ _balMsg(h); renderChatMensagens(); }
-  _balAtualizarCardsDaMesa(r.mesa);
-}
-function _balAtualizarCardsDaMesa(mesa){
-  if(!mesa) return;
-  var temAlerta = _bal.registros.some(function(r){ return r.status === 'associado' && r.mesa === mesa && r.alerta; });
-  if(!temAlerta && _chatHistorico.some(function(m){ return m.tipo === 'balLanc' && m.mesa === mesa && m.estado === 'pronto'; })) _balCardLancamento(mesa);
-  renderChatMensagens(true);
-}
-function _balStatusTxt(r){
-  return { aguardando:'aguardando mesa', associado:'na Mesa ' + r.mesa + ' (não lançado)', lancando:'sendo lançado', lancado:'lançado na Mesa ' + r.mesa, cancelado:'cancelado' }[r.status] || r.status;
-}
-function _balHtmlLinhaRegistro(r){
-  return '<div class="bal-ok">⚖️ <b>' + _balRotulo(r) + '</b> · ' + esc(r.nome) + (r.qtd > 1 ? ' ×' + r.qtd : '') + ' · <b>' + _balFmt(_balTotal(r)) + '</b></div>' +
-    (r.alerta ? '<div class="bal-aviso">⚠️ ' + esc(r.alerta.msg) + '. Confira na fila (fica travado até confirmar).</div>' : '');
-}
-function _balHtmlFila(){
-  var pend = _balPendentes();
-  if(!pend.length) return '📭 Nenhum prato pendente.';
-  var ag = pend.filter(function(r){ return r.status === 'aguardando'; });
-  var porMesa = {};
-  pend.filter(function(r){ return r.status === 'associado'; }).forEach(function(r){ (porMesa[r.mesa] = porMesa[r.mesa] || []).push(r); });
-  var h = '<b>' + pend.length + ' pendente' + (pend.length > 1 ? 's' : '') + ' · ' + _balFmt(_balSoma(pend)) + '</b>';
-  if(ag.length) h += '<div style="margin-top:6px;">⏳ <b>Sem mesa:</b> ' + ag.map(function(r){ return _bal3(r.numero) + ' ' + esc(r.nome) + ' ' + _balFmt(_balTotal(r)); }).join(' · ') + '</div>';
-  Object.keys(porMesa).sort(function(a, b){ return a - b; }).forEach(function(m){
-    h += '<div style="margin-top:4px;">📌 <b>Mesa ' + m + '</b> (não lançado): ' + porMesa[m].map(function(r){ return _bal3(r.numero) + ' ' + _balFmt(_balTotal(r)); }).join(' · ') + '</div>';
-  });
-  return h;
-}
-function _balAjuda(){
-  return '⚖️ <b>Modo Balança ligado.</b> Digite só o valor e envie: <b>34,15</b> vira Prato 001 (buffet). Também dá:' +
-    '<div style="font-size:0.76rem;color:var(--muted);margin-top:6px;line-height:1.6;">' +
-    '• <b>35,40 sorvete</b> · <b>coca lata</b> · <b>2 água</b> · <b>34,15 28,90</b> (vários)<br>' +
-    '• <b>prato 1 na mesa 12</b> · <b>pratos 2 e 3 na mesa 8</b> · <b>próximos 3 na mesa 15</b><br>' +
-    '• <b>34,15 na mesa 12</b> (registra e já associa)<br>' +
-    '• <b>corrige o prato 2 para 29,80</b> · <b>cancela o prato 3</b> · <b>desfazer</b><br>' +
-    '• <b>lança a mesa 12</b> · <b>mostra os pendentes</b> · <b>desliga a balança</b><br>' +
-    'Toque nos pratos da fila para selecionar vários e associar de uma vez.</div>';
-}
-function _balMsg(html){ _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html:'<div class="bal-msg">' + html + '</div>' }); }
-
-// ── interpretação (sem IA) ──
-// Devolve {cmd, ...} ou null (null = não é da balança → segue pro assistente normal)
-function _balClassificar(texto){
-  var t = _balPrep(texto);
-  if(!t) return null;
-  var semPont = t.replace(/\s+/g, ' ');
-  if(/\b(modo )?balanca\b/.test(semPont) && semPont.split(' ').length <= 6 && !/\d/.test(semPont)){
-    if(/\b(desliga|desligar|desativa|desativar|sai|sair|fecha|fechar|parar|encerra|encerrar)\b/.test(semPont)) return { cmd:'toggle', ligar:false };
-    if(/\b(liga|ligar|ativa|ativar|abre|abrir|entra|entrar|modo|inicia|comeca|usa)\b/.test(semPont) || semPont === 'balanca') return { cmd:'toggle', ligar:true };
-  }
-  var temPend = _bal.registros.some(_balEhPendente);
-  if(!_bal.ativo){
-    if(temPend && /\b(mostra|mostrar|ver|veja|lista|listar|quais|quantos)\b.*\b(pratos?|pendentes?|pesagens?)\b/.test(t) && /pendent|balanca|sem mesa|fila/.test(t)) return { cmd:'mostrar' };
-    return null;
-  }
-  // Daqui pra baixo, só com o modo ligado
-  if(/^(ajuda|comandos|como funciona|o que (eu )?posso fazer)\b/.test(t)) return { cmd:'ajuda' };
-  if(/^(pendentes|fila|a fila|pratos pendentes|os pendentes)$/.test(t) || (/\b(mostra|mostrar|ver|veja|lista|listar|quais|quantos)\b/.test(t) && /\b(pratos?|pendentes?|fila|itens|pesagens?)\b/.test(t) && !/\d/.test(t))) return { cmd:'mostrar' };
-  if(/^(desfaz|desfazer|desfaca|desfiz|volta|voltar|desfaz isso|desfaz a ultima|desfazer ultima)( (isso|a ultima|o ultimo|acao|a acao))?$/.test(t)) return { cmd:'desfazer' };
-  var m;
-  var reVerbo = /^(?:coloca|coloque|poe|ponha|bota|joga|leva|associa|associar|vincula|passa|manda|joga)\s+/;
-  var t2 = t.replace(reVerbo, '');
-  // tirar da mesa (volta pra fila)
-  if((m = t.match(new RegExp('^(?:tira|remove|solta|desassocia|desvincula)\\s+(?:o\\s+|os\\s+)?' + BAL_PRATO + '\\s+(' + BAL_LISTA + ')\\s+da\\s+mesa(?:\\s+\\S+)?$')))) return { cmd:'desassociar', nums:_balLista(m[1]) };
-  // cancelar
-  if((m = t.match(/^(?:cancela|cancelar|cancele|apaga|apagar|apague|exclui|excluir|exclua|remove|remover|tira|deleta|deletar)\s+(?:o\s+|os\s+)?(?:ultimo|ultima)(?:\s+(?:prato|item|registro|pesagem))?$/))) return { cmd:'cancelar', ultimo:true };
-  if((m = t.match(new RegExp('^(?:cancela|cancelar|cancele|apaga|apagar|apague|exclui|excluir|exclua|remove|remover|tira|deleta|deletar)\\s+(?:o\\s+|os\\s+|a\\s+)?' + BAL_PRATO + '\\s+(' + BAL_LISTA + ')$')))) return { cmd:'cancelar', nums:_balLista(m[1]) };
-  // corrigir
-  if((m = t.match(new RegExp('^(?:corrige|corrigir|corrija|muda|mudar|mude|altera|alterar|altere|troca|trocar|arruma|acerta)\\s+(?:o\\s+|a\\s+)?(?:(ultimo|ultima)(?:\\s+(?:prato|item|registro))?|' + BAL_PRATO + '\\s+(' + BAL_NUMW + '))\\s+(?:para|pra|por|pro|p)\\s+(.+)$')))) return { cmd:'corrigir', ultimo:!!m[1], num: m[2] ? _balN(m[2]) : null, resto:m[3] };
-  if((m = t.match(new RegExp('^(?:o\\s+)?' + BAL_PRATO + '\\s+(' + BAL_NUMW + ')\\s+(?:e|era|vale|fica|ficou|deu|na verdade e)\\s+(\\d{1,4},\\d{1,2})$')))) return { cmd:'corrigir', num:_balN(m[1]), resto:m[2] };
-  // lançar
-  if((m = t.match(/^(?:lanca|lancar|lance|envia|enviar|envie|confirma|confirmar|finaliza|finalizar|pode lancar|manda bala)\b\s*(.*)$/))){
-    var resto = m[1].trim();
-    var mm = resto.match(new RegExp('(?:^|\\s)mesa\\s+(' + BAL_NUMW + ')\\s*$')) || resto.match(new RegExp('^(?:(?:os\\s+)?(?:pratos?|itens?)\\s+)?(?:da|na|pra|a|de)\\s+(' + BAL_NUMW + ')\\s*$')) || resto.match(new RegExp('^(' + BAL_NUMW + ')$'));
-    var semValor = !/\d,\d/.test(resto);
-    if(mm && semValor) return { cmd:'lancar', mesa:_balN(mm[1]) };
-    if(!resto || /^(tudo|todos|todas|os pratos|os associados|tudo que (ta|esta) associado|as mesas|os itens|todos os pratos)$/.test(resto)) return { cmd:'lancar', todos:true, soConfirma: /^confirma/.test(t) && !resto };
-  }
-  // associar
-  var reMesa = new RegExp(BAL_MESA);
-  var mesaM = t2.match(reMesa);
-  if(mesaM){
-    var mesa = _balN(mesaM[1] || mesaM[2]);
-    var antes = t2.slice(0, mesaM.index).trim();
-    if((m = antes.match(new RegExp('^(?:os\\s+|o\\s+|as\\s+|a\\s+)?(?:proximos?|proximas?|primeiros?|primeiras?)(?:\\s+(' + BAL_NUMW + '))?(?:\\s+' + BAL_PRATO + ')?$')))) return { cmd:'associar', mesa:mesa, proximos: m[1] ? _balN(m[1]) : 1 };
-    if((m = antes.match(new RegExp('^(?:os\\s+|o\\s+|as\\s+|a\\s+)?(?:ultimos?|ultimas?)(?:\\s+(' + BAL_NUMW + '))?(?:\\s+' + BAL_PRATO + ')?$')))) return { cmd:'associar', mesa:mesa, ultimos: m[1] ? _balN(m[1]) : 1 };
-    if(/^(?:os\s+|as\s+)?(?:selecionados?|selecionadas?|marcados?|esses|estes|essas|estas|eles|esse|este)$/.test(antes)) return { cmd:'associar', mesa:mesa, selecionados:true };
-    if(/^(?:todos|todas|tudo)(?:\s+os)?(?:\s+(?:pratos|itens))?(?:\s+(?:pendentes|sem mesa|que estao sem mesa))?$/.test(antes)) return { cmd:'associar', mesa:mesa, todos:true };
-    if((m = antes.match(new RegExp('^(?:o\\s+|os\\s+|a\\s+|as\\s+)?' + BAL_PRATO + '\\s+(?:do\\s+)?(' + BAL_LISTA + ')$')))) return { cmd:'associar', mesa:mesa, nums:_balLista(m[1]) };
-  }
-  if((m = t2.match(new RegExp('^mesa\\s+(' + BAL_NUMW + ')\\s+(?:com\\s+|recebe\\s+|leva\\s+)?(?:o\\s+|os\\s+)?' + BAL_PRATO + '\\s+(' + BAL_LISTA + ')$')))) return { cmd:'associar', mesa:_balN(m[1]), nums:_balLista(m[2]) };
-  // registrar (valor e/ou item) — opcionalmente já com a mesa no fim
-  var tReg = t, mesaReg = null;
-  var mr = t.match(/\s+(?:(?:na|pra|para|para a|pra a|no|da)\s+)?mesa\s+(\d{1,3})\s*$/) || t.match(/\s+(?:na|pra|para)\s+(\d{1,3})\s*$/);
-  if(mr){ mesaReg = parseInt(mr[1], 10); tReg = t.slice(0, mr.index).trim(); }
-  // "prato 3" sozinho ou números com "prato" na frente (sem "de"): não é valor
-  if(new RegExp('^(?:o\\s+|os\\s+)?' + BAL_PRATO + '\\s+' + BAL_LISTA + '$').test(tReg) && !/,/.test(tReg)) return { cmd:'naoEntendi' };
-  tReg = tReg.replace(/(\d{1,4})\s+e\s+(\d{1,2})\b(?!\s*,)/g, function(x, a, b){ return /,/.test(tReg) ? x : a + ',' + b; }); // "34 e 15" → 34,15
-  var ent = _balEntradas(tReg);
-  if(!ent.length) return /\bprato/.test(t) ? { cmd:'naoEntendi' } : null;
-  var temDecimal = ent.some(function(e){ return e.decimal; });
-  var res = ent.map(_balResolver);
-  if(res.some(function(r){ return r.estranho; })){
-    if(temDecimal || /\bprato/.test(t)) return { cmd:'naoEntendi' };
-    return null;
-  }
-  return { cmd:'registrar', resultados:res, mesa:mesaReg };
+    _bzPersistir();
+  }).catch(function(){});
 }
 
-function _balExecutar(c, textoOrig){
-  if(c.cmd === 'toggle'){ _balAtivar(c.ligar); return null; }
-  if(c.cmd !== 'mostrar' && !_podeBalanca) return '🔒 Seu usuário não tem permissão para o Modo Balança. Fale com o administrador.';
-  _balGarantirCarregado();
-  if(c.cmd === 'ajuda') return _balAjuda();
-  if(c.cmd === 'mostrar'){ _bal.aberto = true; _balRenderPainel(); return _balHtmlFila(); }
-  if(c.cmd === 'desfazer') return _balDesfazer();
-  if(c.cmd === 'naoEntendi') return '🤔 Não entendi. Exemplos: <b>34,15</b> · <b>prato 1 na mesa 12</b> · <b>corrige o prato 2 para 29,80</b> · <b>cancela o prato 3</b>. Diga <b>ajuda</b> pra ver tudo.';
-  function porNums(nums){
-    var achados = [], falta = [];
-    nums.forEach(function(n){ var r = _balPorNumero(n); if(r) achados.push(r); else falta.push(n); });
-    return { recs:achados, falta:falta, avisoFalta: falta.length ? '<div class="bal-aviso">Não existe ' + falta.map(function(n){ return 'prato ' + _bal3(n); }).join(', ') + ' hoje.</div>' : '' };
-  }
-  if(c.cmd === 'cancelar'){
-    if(c.ultimo){ var ult = _balPendentes().slice(-1)[0]; return ult ? _balCancelar([ult]) : '<div class="bal-aviso">Nenhum pendente para cancelar.</div>'; }
-    var pc = porNums(c.nums); return pc.avisoFalta + (pc.recs.length ? _balCancelar(pc.recs) : '');
-  }
-  if(c.cmd === 'desassociar'){ var pd = porNums(c.nums); return pd.avisoFalta + (pd.recs.length ? _balDesassociar(pd.recs) : ''); }
-  if(c.cmd === 'corrigir'){
-    var alvo = c.ultimo ? _balPendentes().slice(-1)[0] : _balPorNumero(c.num);
-    if(!alvo) return '<div class="bal-aviso">Não achei ' + (c.ultimo ? 'o último prato' : 'o prato ' + _bal3(c.num)) + '.</div>';
-    return _balCorrigir(alvo, c.resto);
-  }
-  if(c.cmd === 'associar'){
-    var recs = [], aviso = '';
-    if(c.nums){ var pa = porNums(c.nums); recs = pa.recs; aviso = pa.avisoFalta; }
-    else if(c.proximos){ var ag = _balAguardando(); recs = ag.slice(0, c.proximos); if(ag.length < c.proximos) aviso = '<div class="bal-aviso">Só ' + (ag.length === 1 ? 'havia 1 prato' : 'havia ' + ag.length + ' pratos') + ' sem mesa.</div>'; }
-    else if(c.ultimos){ var ag2 = _balAguardando(); recs = ag2.slice(-c.ultimos); }
-    else if(c.selecionados){ recs = _bal.registros.filter(function(r){ return _bal.sel[r.id]; }); if(!recs.length) aviso = '<div class="bal-aviso">Nenhum prato selecionado na fila. Toque nos pratos para selecionar.</div>'; }
-    else if(c.todos){ recs = _balAguardando(); }
-    if(!recs.length) return aviso || '<div class="bal-aviso">Nenhum prato sem mesa para associar.</div>';
-    return aviso + _balAssociar(recs, c.mesa).html;
-  }
-  if(c.cmd === 'lancar'){
-    if(c.soConfirma){
-      var card = _chatHistorico.filter(function(m){ return m.tipo === 'balLanc' && (m.estado === 'pronto' || m.estado === 'erro'); }).slice(-1)[0];
-      if(!card) return null; // deixa o "confirma" normal do assistente agir
-      _balExecCard(card.id); return '';
-    }
-    var mesas = c.todos ? _bal.registros.filter(function(r){ return r.status === 'associado'; }).map(function(r){ return r.mesa; }) : [c.mesa];
-    mesas = mesas.filter(function(m, i){ return mesas.indexOf(m) === i; });
-    if(!mesas.length) return '<div class="bal-aviso">Nenhum prato associado esperando lançamento. Primeiro: <b>prato 1 na mesa 12</b>.</div>';
-    mesas.forEach(function(ms){ var cd = _balCardLancamento(ms); cd.autoAte = null; _balExecCard(cd.id); });
-    return '';
-  }
-  if(c.cmd === 'registrar'){
-    var specs = [], html = '', perguntas = [];
-    c.resultados.forEach(function(r){
-      if(r.ok) specs.push(r.ok);
-      else if(r.erro) html += '<div class="bal-aviso">' + esc(r.erro) + '</div>';
-      else if(r.pergunta) perguntas.push(r.pergunta);
-    });
-    if(c.mesa && !_balMesaValida(c.mesa)){ html += '<div class="bal-aviso">⚠️ Mesa ' + c.mesa + ' não existe — registrei sem mesa.</div>'; c.mesa = null; }
-    if(specs.length) html = _balRegistrar(specs, textoOrig, c.mesa) + html;
-    perguntas.forEach(function(p){
-      var tok = 'p' + (++_bal.pergSeq);
-      _bal.perg[tok] = { opcoes:p.opcoes, mesa:c.mesa, texto:textoOrig };
-      _bal.msgsExtra.push({ id:_novoIdChat(), tipo:'html', balPerg:tok, html: '<div class="bal-msg"><div class="bal-aviso">' + esc(p.texto) + '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">' +
-        p.opcoes.map(function(o, i){ return '<button class="bal-btn" onclick="_balEscolher(\'' + tok + '\',' + i + ')">' + esc(o.rotulo) + (o.spec.tipo === 'kg' ? ' · ' + _balFmt(o.spec.valor) : (o.spec.qtd > 1 ? ' ×' + o.spec.qtd : '') + ' · ' + _balFmt(o.spec.valor * o.spec.qtd)) + '</button>'; }).join('') +
-        '<button class="bal-btn" onclick="_balEscolher(\'' + tok + '\',-1)">✕ Nenhum</button></div></div></div>' });
-    });
-    return html;
-  }
-  return null;
+// ── tela ──
+function _bzAbrir(){
+  if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
+  if(!_bzGarantir()){ showToast('Aguarde o app carregar', '#f7a34f'); return; }
+  if(typeof _almCatsSelecionadas !== 'undefined' && !_almCatsSelecionadas.length && typeof _almCarregarConfig === 'function') _almCarregarConfig();
+  _bz.aberto = true; _bz.sheet = null;
+  var tela = document.getElementById('tela-balanca');
+  if(tela) tela.style.display = 'flex';
+  _bzRecuperar(); _bzAgendar(0);
+  _bzRender(true);
+  setTimeout(function(){ _bzRender(true); }, 1200); // categorias de bebida podem chegar depois
 }
-function _balEscolher(tok, i){
-  var p = _bal.perg[tok]; if(!p) return;
-  delete _bal.perg[tok];
-  var h = i >= 0 && p.opcoes[i] ? _balRegistrar([p.opcoes[i].spec], p.texto, p.mesa) : '<div class="bal-aviso">Ok, não registrei.</div>';
-  // troca os botões da pergunta pelo resultado
-  _chatHistorico.forEach(function(m){ if(m.balPerg === tok) m.html = '<div class="bal-msg">' + h + '</div>'; });
-  _balMoverCardsProFim();
-  renderChatMensagens(); _balRenderPainel();
+function _bzAbrirDoChat(){
+  if(typeof fecharChatAssistente === 'function') fecharChatAssistente();
+  setTimeout(_bzAbrir, 150);
 }
+function _bzFechar(){
+  _bz.aberto = false; _bz.sheet = null; _bz.editando = null;
+  var tela = document.getElementById('tela-balanca'); if(tela) tela.style.display = 'none';
+  _bzRenderBadge();
+}
+window.addEventListener('popstate', function(){
+  if(!_bz.aberto) return;
+  if(_bz.sheet) _bzFecharSheet(); else _bzFechar();
+});
 
-// Ponto de entrada do chat: true = a balança tratou a mensagem
-function _balMoverCardsProFim(){
-  // o cartão de lançamento fica por último, logo acima do campo
-  var cards = _chatHistorico.filter(function(m){ return m.tipo === 'balLanc' && m.estado === 'pronto'; });
-  cards.forEach(function(cd){ var i = _chatHistorico.indexOf(cd); if(i >= 0 && i < _chatHistorico.length - 1){ _chatHistorico.splice(i, 1); _chatHistorico.push(cd); } });
+function _bzRenderStatus(){
+  var el = document.getElementById('bz-sync'); if(!el) return;
+  var pend = _bzLista().filter(function(t){ return t._sync !== 'ok'; }).length;
+  if(!pend){ el.textContent = '● ao vivo'; el.style.color = '#4ade80'; }
+  else if(_bz.offline || (typeof navigator !== 'undefined' && navigator.onLine === false)){ el.textContent = '● sem internet · ' + pend + ' no aparelho'; el.style.color = '#f87171'; }
+  else { el.textContent = '● salvando…'; el.style.color = '#fbbf24'; }
 }
-function _balTratarChat(texto){
-  var c = _balClassificar(texto);
-  if(!c) return false;
-  var bolha = { id:_novoIdChat(), tipo:'usuario', texto:texto };
-  _chatHistorico.push(bolha);
-  _bal.msgsExtra = [];
-  var out = _balExecutar(c, texto);
-  if(out === null && c.cmd === 'lancar'){ _chatHistorico = _chatHistorico.filter(function(m){ return m !== bolha; }); return false; } // "confirma" sem cartão → fluxo normal
-  var input = document.getElementById('input-chat-assistente'); if(input) input.value = '';
-  if(out) _balMsg(out);
-  _bal.msgsExtra.forEach(function(m){ _chatHistorico.push(m); }); _bal.msgsExtra = [];
-  _balMoverCardsProFim();
-  if(_chatHistorico.length > 160) _chatHistorico = _chatHistorico.slice(-120); // pico de movimento: não deixa a tela pesar
-  renderChatMensagens();
-  _balRenderPainel();
-  return true;
-}
-// Caixa da tela de mesas: se for coisa da balança, abre o chat e manda lá
-function _balTratarBox(texto){
-  var c = _balClassificar(texto);
-  if(!c) return false;
-  abrirChatAssistente();
-  if(c.cmd === 'toggle' && c.ligar){ if(!_bal.ativo) _balAtivar(true); return true; }
-  setTimeout(function(){ enviarMensagemChat(texto); }, 50);
-  return true;
-}
-function _balAbrirNoChat(){
-  if(!_podeBalanca){ showToast('🔒 Modo Balança não liberado para você', '#f7a34f'); return; }
-  abrirChatAssistente();
-  if(!_bal.ativo) _balAtivar(true);
-}
-function _balAlternar(){ _balAtivar(!_bal.ativo); }
-
-function _balAtivar(ligar, silencioso){
-  if(ligar && !_podeBalanca){
-    if(!silencioso){ _balMsg('🔒 Seu usuário não tem permissão para o Modo Balança. Fale com o administrador.'); renderChatMensagens(); }
-    return;
-  }
-  _bal.ativo = !!ligar;
-  try{ localStorage.setItem('assistente_balanca_ativo', _bal.ativo ? '1' : '0'); }catch(e){}
-  if(_bal.ativo){
-    _balGarantirCarregado();
-    _bal.aberto = true;
-    _balCarregarRemoto().then(_balRecuperarTravados);
-    _balAgendarSync(0);
-  }
-  _balAplicarUI(); _balRenderPainel();
-  if(!silencioso){
-    if(_bal.ativo){ var p = _balPendentes(); _balMsg(_balAjuda() + (p.length ? '<div style="margin-top:6px;">📋 Você tem <b>' + p.length + '</b> pendente' + (p.length > 1 ? 's' : '') + ' (' + _balFmt(_balSoma(p)) + ').</div>' : '')); }
-    else _balMsg('⚖️ Modo Balança <b>desligado</b>.' + (_balPendentes().length ? ' Os ' + _balPendentes().length + ' pendentes continuam guardados.' : ''));
-    renderChatMensagens();
-  }
-  setTimeout(function(){ var el = document.getElementById('input-chat-assistente'); if(el && document.getElementById('tela-chat-assistente').style.display === 'flex') el.focus(); }, 100);
-}
-function _balAoAbrirChat(){
-  var querAtivo = false;
-  try{ querAtivo = localStorage.getItem('assistente_balanca_ativo') === '1'; }catch(e){}
-  if(querAtivo && _podeBalanca){
-    _bal.ativo = true; _balGarantirCarregado(); _balCarregarRemoto().then(_balRecuperarTravados); _balAgendarSync(0);
-    var p = _balPendentes();
-    _chatHistorico = _chatHistorico.filter(function(m){ return m.tipo !== 'texto-assistente'; });
-    _balMsg('⚖️ <b>Modo Balança ligado.</b> Digite o valor do prato e envie.' + (p.length ? ' Você tem <b>' + p.length + '</b> pendente' + (p.length > 1 ? 's' : '') + ' (' + _balFmt(_balSoma(p)) + ').' : '') + ' Diga <b>ajuda</b> para ver os comandos.');
-    renderChatMensagens();
-  } else _bal.ativo = false;
-  _balAplicarUI(); _balRenderPainel();
-}
-function _balTrocarTeclado(){
-  _bal.teclado = _bal.teclado === 'num' ? 'txt' : 'num';
-  _balAplicarUI();
-  var el = document.getElementById('input-chat-assistente');
-  if(el){ el.blur(); setTimeout(function(){ el.focus(); }, 60); }
-}
-function _balAplicarUI(){
-  var on = _bal.ativo;
-  var b = document.getElementById('btn-balanca-chat');
-  if(b){ b.style.background = on ? 'var(--accent)' : 'var(--surface2)'; b.style.color = on ? '#000' : 'var(--accent)'; b.style.borderColor = on ? 'var(--accent)' : 'var(--border2)'; }
-  var inp = document.getElementById('input-chat-assistente');
-  if(inp){
-    inp.placeholder = on ? 'Valor (34,15) ou comando' : 'Pergunte, peça ou cancele um item...';
-    inp.setAttribute('inputmode', on && _bal.teclado === 'num' ? 'decimal' : 'text');
-  }
-  var kb = document.getElementById('btn-bal-teclado');
-  if(kb){ kb.style.display = on ? 'flex' : 'none'; kb.textContent = _bal.teclado === 'num' ? 'Aa' : '123'; }
-  var env = document.getElementById('btn-enviar-chat');
-  if(env){ env.textContent = on ? '＋ Prato' : '➤'; env.style.width = on ? 'auto' : '44px'; env.style.padding = on ? '0 16px' : '0'; env.style.borderRadius = on ? '22px' : '50%'; env.style.fontWeight = on ? '800' : ''; env.style.fontSize = on ? '0.9rem' : '1.1rem'; }
-  var sub = document.getElementById('chat-subtitulo');
-  if(sub) sub.textContent = on ? '⚖️ Modo Balança ligado' : 'Pergunte, peça ou cancele um item';
-}
-
-// ── painel da fila ──
-function _balEstadoSync(){
-  var pend = _bal.registros.filter(function(r){ return r._sync !== 'ok'; }).length;
-  if(!pend) return { ic:'🟢', txt:'Salvo' };
-  if(_bal.offline || (typeof navigator !== 'undefined' && navigator.onLine === false)) return { ic:'🔴', txt:pend + ' só no aparelho' };
-  return { ic:'🟡', txt:'Salvando…' };
-}
-function _balRenderStatus(){
-  var el = document.getElementById('bal-sync'); if(!el) return;
-  var s = _balEstadoSync(); el.textContent = s.ic + ' ' + s.txt;
-}
-function _balRenderBadge(){
+function _bzRenderBadge(){
   var b = document.getElementById('btn-balanca-box-badge'); if(!b) return;
-  var n = _bal.registros.filter(_balEhPendente).length;
+  var n = _bzPendentes().length;
   b.textContent = n; b.style.display = n ? 'flex' : 'none';
 }
-function _balToggleSel(id){ var r = _balRec(id); if(!r || !_balEhPendente(r)) return; if(_bal.sel[id]) delete _bal.sel[id]; else _bal.sel[id] = true; _balRenderPainel(); }
-function _balSelTodos(){
-  var ag = _balPendentes(); var todos = ag.every(function(r){ return _bal.sel[r.id]; });
-  _bal.sel = {}; if(!todos) ag.forEach(function(r){ _bal.sel[r.id] = true; });
-  _balRenderPainel();
+function _bzRenderDisplay(){
+  var el = document.getElementById('bz-display'); if(!el) return;
+  var v = _bzValor();
+  el.innerHTML = '<span class="bz-rs">R$</span>' + (_bz.cent ? _bzFmt(v) : '<span style="opacity:0.3">0,00</span>');
+  var b = document.getElementById('bz-btn-buffet');
+  if(b) b.classList.toggle('bz-pronto', v > 0);
 }
-function _balAcaoSel(acao){
-  var recs = _bal.registros.filter(function(r){ return _bal.sel[r.id]; });
-  if(!recs.length) return;
+function _bzRender(rolarFim){
+  _bzRenderBadge();
+  if(!_bz.aberto) return;
+  var lista = document.getElementById('bz-lista'); if(!lista) return;
+  var pend = _bzPendentes();
+  var feitos = _bzLista().filter(function(t){ return t.dia === _bz.dia && (t.status === 'lancado' || t.status === 'cancelado' || t.status === 'lancando'); })
+    .sort(function(a, b){ return (a.atualizadoEm || 0) - (b.atualizadoEm || 0); });
+  // topo
+  var res = document.getElementById('bz-resumo');
+  if(res) res.innerHTML = '<b>' + pend.length + '</b> na fila · <b style="color:var(--accent)">R$ ' + _bzFmt(_bzSoma(pend)) + '</b>';
+  _bzRenderStatus();
+  // lista
   var h = '';
-  if(acao === 'associar'){
-    var inp = document.getElementById('bal-mesa-sel');
-    var mesa = parseInt(inp && inp.value, 10);
-    if(!mesa){ showToast('Digite o número da mesa', '#f7a34f'); if(inp) inp.focus(); return; }
-    h = _balAssociar(recs, mesa).html;
-  } else if(acao === 'cancelar'){
-    if(!confirm('Cancelar ' + recs.length + ' registro' + (recs.length > 1 ? 's' : '') + '?')) return;
-    h = _balCancelar(recs);
-  } else if(acao === 'desassociar') h = _balDesassociar(recs);
-  _bal.sel = {};
-  if(h) _balMsg(h);
-  _balMoverCardsProFim();
-  renderChatMensagens(); _balRenderPainel();
-}
-function _balEditar(id){
-  var r = _balRec(id); if(!r) return;
-  var inp = document.getElementById('input-chat-assistente');
-  if(!inp) return;
-  inp.value = 'corrige o prato ' + r.numero + ' para ';
-  _bal.teclado = 'num'; _balAplicarUI();
-  inp.focus();
-  try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){}
-}
-function _balCancelarUm(id){
-  var r = _balRec(id); if(!r) return;
-  _balMsg(_balCancelar([r])); renderChatMensagens(); _balRenderPainel();
-}
-function _balDesfazerBtn(){ _balMsg(_balDesfazer()); renderChatMensagens(); _balRenderPainel(); }
-function _balLancarTodosBtn(){ _balTratarChat('lança tudo'); }
-function _balHistorico(id){
-  var r = _balRec(id); if(!r) return;
-  var nomes = { criado:'Registrado', associado:'Associado', desassociado:'Tirado da mesa', corrigido:'Corrigido', cancelado:'Cancelado', desfeito:'Desfeito', lancado:'Lançado', falha:'Falha ao lançar', recuperado:'Recuperado', 'valor confirmado':'Valor confirmado', 'preço do cardápio aceito':'Preço do cardápio aceito' };
-  _balMsg('<b>🕓 ' + _balRotulo(r) + '</b> · ' + esc(r.nome) + ' · ' + _balFmt(_balTotal(r)) + ' · ' + _balStatusTxt(r) +
-    '<div style="font-size:0.74rem;color:var(--muted);margin-top:6px;line-height:1.55;">' +
-    (r.historico || []).map(function(h){ return _balHora(h.em) + ' — ' + (nomes[h.acao] || h.acao) + (h.mesa ? ' (mesa ' + h.mesa + ')' : '') + (h.de != null && h.para != null ? ': ' + esc(h.de) + ' → ' + esc(h.para) : '') + (h.erro ? ': ' + esc(h.erro) : '') + (h.obs ? ' · ' + esc(h.obs) : '') + ' · ' + esc(h.por || ''); }).join('<br>') + '</div>');
-  renderChatMensagens();
-}
-function _balRenderPainel(){
-  _balRenderBadge();
-  var p = document.getElementById('bal-painel'); if(!p) return;
-  if(!_bal.ativo){ p.style.display = 'none'; return; }
-  p.style.display = 'block';
-  var pend = _balPendentes();
-  var visiveis = _bal.verTodos ? _bal.registros.filter(function(r){ return r.dia === _bal.dia || _balEhPendente(r); }).slice().sort(function(a, b){ return b.numero - a.numero; }) : pend;
-  var outros = _bal.registros.filter(function(r){ return !_balEhPendente(r) && r.dia === _bal.dia; }).length;
-  var sel = _bal.registros.filter(function(r){ return _bal.sel[r.id]; });
-  var s = _balEstadoSync();
-  var h = '<div class="bal-topo" onclick="_bal.aberto=!_bal.aberto;_balRenderPainel()">' +
-    '<span style="font-size:1.05rem;">⚖️</span><b style="font-size:0.8rem;">' + pend.length + ' pendente' + (pend.length === 1 ? '' : 's') + '</b>' +
-    '<b style="color:var(--accent);font-size:0.86rem;">' + _balFmt(_balSoma(pend)) + '</b>' +
-    '<span id="bal-sync" style="margin-left:auto;font-size:0.68rem;color:var(--muted);">' + s.ic + ' ' + s.txt + '</span>' +
-    '<span style="font-size:0.8rem;color:var(--muted);">' + (_bal.aberto ? '▾' : '▸') + '</span></div>';
-  if(_bal.aberto){
-    h += '<div class="bal-lista">';
-    if(!visiveis.length) h += '<div style="font-size:0.78rem;color:var(--muted);padding:10px 4px;text-align:center;">Nenhum pendente. Digite um valor abaixo para registrar.</div>';
-    visiveis.forEach(function(r){
-      var pen = _balEhPendente(r), marcado = !!_bal.sel[r.id];
-      var chip = { aguardando:['Aguardando mesa', 'rgba(251,191,36,0.15)', '#fbbf24'], associado:['Mesa ' + r.mesa + ' · a lançar', 'rgba(96,165,250,0.15)', '#60a5fa'], lancando:['Lançando…', 'rgba(96,165,250,0.15)', '#60a5fa'], lancado:['Lançado · Mesa ' + r.mesa, 'rgba(74,222,128,0.15)', '#4ade80'], cancelado:['Cancelado', 'rgba(255,255,255,0.06)', 'var(--muted)'] }[r.status] || [r.status, 'transparent', 'var(--muted)'];
-      h += '<div class="bal-card' + (marcado ? ' bal-sel' : '') + (pen ? '' : ' bal-fim') + '" onclick="_balToggleSel(\'' + r.id + '\')">' +
-        '<div class="bal-ck">' + (pen ? (marcado ? '✓' : '') : '') + '</div>' +
-        '<div class="bal-num">' + _bal3(r.numero) + '</div>' +
-        '<div style="flex:1;min-width:0;">' +
-          '<div class="bal-nome">' + (r.tipo === 'kg' ? '🍽️ ' : '🥤 ') + esc(r.nome) + (r.qtd > 1 ? ' ×' + r.qtd : '') + '</div>' +
-          '<div class="bal-sub">' + _balHora(r.criadoEm) + (r.peso && r.tipo === 'kg' ? ' · ' + (r.peso / 1000).toFixed(3).replace('.', ',') + ' kg' : '') + ' · <span class="bal-chip" style="background:' + chip[1] + ';color:' + chip[2] + ';">' + chip[0] + '</span>' + (r._sync !== 'ok' ? ' <span title="ainda não salvo no servidor">⏳</span>' : '') + '</div>' +
-        '</div>' +
-        '<div class="bal-valor">' + _balFmt(_balTotal(r)) + '</div>' +
-        (pen ? '<button class="bal-ico" onclick="event.stopPropagation();_balEditar(\'' + r.id + '\')" title="Corrigir">✏️</button><button class="bal-ico" onclick="event.stopPropagation();_balCancelarUm(\'' + r.id + '\')" title="Cancelar">✕</button>'
-             : '<button class="bal-ico" onclick="event.stopPropagation();_balHistorico(\'' + r.id + '\')" title="Histórico">🕓</button>') +
-      '</div>';
-      if(pen && r.alerta){
-        h += '<div class="bal-alerta">⚠️ ' + esc(r.alerta.msg) + '. ' +
-          (r.alerta.sugestao ? '<button class="bal-btn" onclick="_balResolverAlerta(\'' + r.id + '\',\'sugestao\')">Era ' + _balFmt(r.alerta.sugestao) + '</button>' : '') +
-          (r.alerta.tipo === 'preco' ? '<button class="bal-btn" onclick="_balResolverAlerta(\'' + r.id + '\',\'cardapio\')">Usar ' + _balFmt(r.valor) + ' do cardápio</button>' : '<button class="bal-btn" onclick="_balResolverAlerta(\'' + r.id + '\',\'manter\')">Manter ' + _balFmt(_balTotal(r)) + '</button>') +
-          '<button class="bal-btn" onclick="_balEditar(\'' + r.id + '\')">Corrigir</button></div>';
-      }
-    });
-    h += '</div>';
-    if(sel.length){
-      h += '<div class="bal-barra">' +
-        '<span style="font-size:0.76rem;font-weight:700;">' + sel.length + ' sel. · ' + _balFmt(_balSoma(sel)) + '</span>' +
-        '<input id="bal-mesa-sel" type="number" inputmode="numeric" placeholder="Mesa" onkeydown="if(event.key===\'Enter\')_balAcaoSel(\'associar\')" style="width:70px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:9px;padding:8px;color:var(--text);font-size:0.9rem;">' +
-        '<button class="bal-btn bal-btn-pri" onclick="_balAcaoSel(\'associar\')">📌 Associar</button>' +
-        (sel.some(function(r){ return r.status === 'associado'; }) ? '<button class="bal-btn" onclick="_balAcaoSel(\'desassociar\')">Tirar da mesa</button>' : '') +
-        '<button class="bal-btn" onclick="_balAcaoSel(\'cancelar\')">✕</button>' +
-      '</div>';
-    } else {
-      var nAssoc = pend.filter(function(r){ return r.status === 'associado'; }).length;
-      h += '<div class="bal-barra">' +
-        (pend.length ? '<button class="bal-btn" onclick="_balSelTodos()">☑️ Selecionar</button>' : '') +
-        '<button class="bal-btn" onclick="_balDesfazerBtn()"' + (_bal.desfazer.length ? '' : ' disabled style="opacity:0.45"') + '>↩️ Desfazer</button>' +
-        (nAssoc ? '<button class="bal-btn bal-btn-pri" onclick="_balLancarTodosBtn()">🚀 Lançar associados (' + nAssoc + ')</button>' : '') +
-        (outros ? '<button class="bal-btn" onclick="_bal.verTodos=!_bal.verTodos;_balRenderPainel()">' + (_bal.verTodos ? 'Só pendentes' : 'Ver lançados (' + outros + ')') + '</button>' : '') +
-      '</div>';
-    }
+  if(feitos.length){
+    h += '<button class="bz-link" onclick="_bz.verLancados=!_bz.verLancados;_bzRender()">' + (_bz.verLancados ? '▾ Esconder lançados' : '▸ Lançados hoje (' + feitos.filter(function(t){ return t.status !== 'cancelado'; }).length + ')') + '</button>';
+    if(_bz.verLancados) feitos.forEach(function(t){ h += _bzHtmlTicket(t); });
   }
-  // mantém o número digitado na mesa ao re-renderizar
-  var mesaAnt = document.getElementById('bal-mesa-sel'); var valMesa = mesaAnt ? mesaAnt.value : '';
-  var focoMesa = mesaAnt && document.activeElement === mesaAnt;
-  p.innerHTML = h;
-  var mesaNova = document.getElementById('bal-mesa-sel');
-  if(mesaNova && valMesa){ mesaNova.value = valMesa; if(focoMesa) mesaNova.focus(); }
+  if(!pend.length) h += '<div class="bz-vazio">Fila vazia.<br>Digite o valor da balança e toque em <b>BUFFET</b>.</div>';
+  pend.forEach(function(t){ h += _bzHtmlTicket(t); });
+  var rolagem = lista.scrollTop, noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 40;
+  lista.innerHTML = h;
+  if(rolarFim || noFim) lista.scrollTop = lista.scrollHeight; else lista.scrollTop = rolagem;
+  // barra de seleção
+  var sel = _bzSelPend();
+  var barra = document.getElementById('bz-barra');
+  if(barra){
+    if(_bz.editando){
+      var te = _bz.t[_bz.editando];
+      barra.style.display = 'flex';
+      barra.innerHTML = '<div style="flex:1;font-size:0.84rem;">✏️ Corrigindo <b>' + (te ? _bzNum(te) : '') + '</b> — digite o valor certo</div><button class="bz-b" onclick="_bzCancelarEdicao()">Cancelar</button>';
+    } else if(sel.length){
+      barra.style.display = 'flex';
+      barra.innerHTML = '<button class="bz-b" onclick="_bzLimparSel()" title="Limpar seleção">✕</button>' +
+        '<div style="flex:1;min-width:0;font-size:0.84rem;line-height:1.25;"><b>' + sel.length + ' selecionado' + (sel.length > 1 ? 's' : '') + '</b><br><span style="color:var(--muted)">R$ ' + _bzFmt(_bzSoma(sel)) + '</span></div>' +
+        '<button class="bz-b bz-b-pri bz-b-mesa" onclick="_bzAbrirMesa()">🍽️ MESA →</button>';
+    } else { barra.style.display = 'none'; barra.innerHTML = ''; }
+  }
+  // chips + botão principal
+  var chips = document.getElementById('bz-chips');
+  if(chips){
+    var c = '';
+    _bzOutrosKg().forEach(function(i){ var p = pausaAtiva(i); c += '<button class="bz-chip bz-chip-kg"' + (p ? ' disabled' : '') + ' onclick="_bzPesar(\'' + i.id + '\')">⚖️ ' + esc(_bzNomeCurto(i.nome)) + '</button>'; });
+    _bzBebidas().slice(0, 12).forEach(function(i){ c += '<button class="bz-chip" onclick="_bzBebida(\'' + i.id + '\')">🥤 ' + esc(_bzNomeCurto(i.nome)) + '</button>'; });
+    c += '<button class="bz-chip" onclick="_bzAbrirBebidas()">＋ Outro item</button>';
+    chips.innerHTML = c;
+  }
+  var bb = document.getElementById('bz-btn-buffet');
+  if(bb){
+    var buf = _bzBuffet();
+    if(_bz.editando) bb.innerHTML = '<div class="bz-bb1">SALVAR</div><div class="bz-bb2">correção</div>';
+    else if(!buf) bb.innerHTML = '<div class="bz-bb2">Sem item por kg</div>';
+    else bb.innerHTML = '<div class="bz-bb1">' + (pausaAtiva(buf) ? '⏸️ ' : '') + esc(_bzNomeCurto(buf.nome).toUpperCase()) + '</div><div class="bz-bb2">R$ ' + _bzFmt(buf.preco) + '/kg</div>';
+  }
+  _bzRenderDisplay();
+  _bzRenderSheet();
+}
+function _bzHtmlTicket(t){
+  var pend = t.status === 'pendente', sel = pend && _bz.sel[t.id];
+  var varios = (t.itens || []).length > 1;
+  var linhas = (t.itens || []).map(function(i){
+    return '<span>' + (i.tipo === 'kg' ? '🍽️ ' : '🥤 ') + (i.qtd > 1 ? i.qtd + '× ' : '') + esc(_bzNomeCurto(i.nome)) +
+      (varios ? ' <small>' + _bzFmt(i.valor * (i.qtd || 1)) + '</small>' : '') + '</span>';
+  }).join('');
+  var info = _bzHora(t.criadoEm);
+  if(t.nome) info += ' · <b style="color:var(--text)">' + esc(t.nome) + '</b>';
+  if(t.criadoPor && t.criadoPor !== _nomeGarcom) info += ' · ' + esc(t.criadoPor);
+  var etiqueta = '';
+  if(t.status === 'lancado') etiqueta = '<span class="bz-tag" style="color:#4ade80">Mesa ' + t.mesa + '</span>';
+  else if(t.status === 'lancando') etiqueta = '<span class="bz-tag" style="color:#60a5fa">lançando…</span>';
+  else if(t.status === 'cancelado') etiqueta = '<span class="bz-tag">cancelado</span>';
+  else if(t._sync !== 'ok') etiqueta = '<span class="bz-tag" title="ainda não subiu">⏳</span>';
+  return '<div class="bz-t' + (sel ? ' bz-sel' : '') + (pend ? '' : ' bz-fim') + '" onclick="_bzToggle(\'' + t.id + '\')">' +
+    '<div class="bz-ck">' + (sel ? '✓' : '') + '</div>' +
+    '<div class="bz-num">' + _bzNum(t) + '</div>' +
+    '<div style="flex:1;min-width:0;"><div class="bz-itens">' + linhas + '</div><div class="bz-info">' + info + ' ' + etiqueta + '</div></div>' +
+    '<div class="bz-tot">' + _bzFmt(_bzTotal(t)) + '</div>' +
+    '<button class="bz-mais" onclick="event.stopPropagation();_bzMenu(\'' + t.id + '\')">⋯</button>' +
+  '</div>';
 }
 
-// Mantém a fila sincronizando mesmo com o chat fechado (sem leituras extras:
-// só escreve o que está pendente) e atualiza o contador do botão ⚖️.
-window.addEventListener('online', function(){ _bal.offline = false; _balAgendarSync(200); });
+// ── folhas (mesa / menu do ticket / outros itens) ──
+function _bzFecharSheet(){ _bz.sheet = null; _bz.sheetId = null; _bzRenderSheet(); }
+function _bzAbrirMesa(){
+  if(!_bzSelPend().length) return;
+  _bz.sheet = 'mesa'; _bz.mesaDig = ''; _bz.enviando = false;
+  _bzRenderSheet();
+}
+function _bzTeclaMesa(k){
+  if(k === 'C') _bz.mesaDig = '';
+  else if(k === '<') _bz.mesaDig = _bz.mesaDig.slice(0, -1);
+  else if(_bz.mesaDig.length < 3) _bz.mesaDig = (_bz.mesaDig + k).replace(/^0+/, '');
+  _bzVibrar(8);
+  var d = document.getElementById('bz-mesa-num'); if(d) d.textContent = _bz.mesaDig || '—';
+  var b = document.getElementById('bz-btn-lancar'); if(b){ b.disabled = !_bz.mesaDig; b.textContent = _bz.mesaDig ? 'LANÇAR NA MESA ' + _bz.mesaDig : 'Digite a mesa'; }
+}
+function _bzConfirmarMesa(abrir){
+  if(_bz.enviando) return;
+  var mesa = parseInt(_bz.mesaDig, 10);
+  if(!mesa){ _bzVibrar(60); return; }
+  var nomeEl = document.getElementById('bz-mesa-nome');
+  var nome = nomeEl ? nomeEl.value.trim().slice(0, 40) : '';
+  var ids = _bzSelPend().map(function(t){ return t.id; });
+  _bz.enviando = true;
+  var b = document.getElementById('bz-btn-lancar'); if(b){ b.disabled = true; b.textContent = 'Lançando…'; }
+  _bzLancar(ids, mesa, nome, !!abrir).then(function(r){
+    _bz.enviando = false;
+    if(r.precisaAbrir){
+      if(confirm('A mesa ' + mesa + ' não tem conta aberta. Abrir a mesa e lançar?')) return _bzConfirmarMesa(true);
+      _bzRenderSheet(); return;
+    }
+    if(r.ok){ _bzVibrar(40); _bz.sel = {}; _bzFecharSheet(); showToast(r.texto, '#4ade80'); }
+    else { showToast(r.texto, '#f87171'); _bzRenderSheet(); }
+    _bzRender();
+  });
+}
+function _bzMenu(id){ _bz.sheet = 'menu'; _bz.sheetId = id; _bzRenderSheet(); }
+function _bzAbrirBebidas(){ _bz.sheet = 'bebidas'; _bz.busca = ''; _bzRenderSheet(); setTimeout(function(){ var i = document.getElementById('bz-busca'); if(i) i.focus(); }, 80); }
+function _bzFiltrarBebidas(v){ _bz.busca = v; var l = document.getElementById('bz-busca-lista'); if(l) l.innerHTML = _bzHtmlBusca(); }
+function _bzHtmlBusca(){
+  var q = _normNome(_bz.busca || '');
+  var itens = (_itens || []).filter(function(i){ return i.tipoVenda !== 'kg' && i.disponivel !== false && !pausaAtiva(i) && (!q || _normNome(i.nome).indexOf(q) >= 0 || _pontuarNomeItem(q, i.nome) >= 1); }).slice(0, 40);
+  if(!itens.length) return '<div class="bz-vazio">Nada encontrado.</div>';
+  return itens.map(function(i){ return '<button class="bz-linha" onclick="_bzBebida(\'' + i.id + '\')"><span>' + esc(i.nome) + '</span><b>R$ ' + _bzFmt(i.preco) + '</b></button>'; }).join('');
+}
+function _bzTeclado(fn, extra){
+  var k = ['1','2','3','4','5','6','7','8','9','C','0','<'];
+  return '<div class="bz-kp">' + k.map(function(x){ return '<button class="bz-k' + (x === 'C' || x === '<' ? ' bz-k2' : '') + '" onclick="' + fn + '(\'' + x + '\')">' + (x === '<' ? '⌫' : x) + '</button>'; }).join('') + (extra || '') + '</div>';
+}
+function _bzRenderSheet(){
+  var el = document.getElementById('bz-sheet'); if(!el) return;
+  if(!_bz.sheet || !_bz.aberto){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  var h = '';
+  if(_bz.sheet === 'mesa'){
+    var sel = _bzSelPend();
+    if(!sel.length){ _bz.sheet = null; el.style.display = 'none'; return; }
+    var nomeAnt = document.getElementById('bz-mesa-nome'); var nomeV = nomeAnt ? nomeAnt.value : (sel.length === 1 ? sel[0].nome || '' : '');
+    h = '<div class="bz-sh-tit">Lançar ' + sel.length + ' ticket' + (sel.length > 1 ? 's' : '') + ' · R$ ' + _bzFmt(_bzSoma(sel)) + '</div>' +
+      '<div class="bz-mesa-disp">Mesa <span id="bz-mesa-num">' + (_bz.mesaDig || '—') + '</span></div>' +
+      _bzTeclado('_bzTeclaMesa') +
+      '<input id="bz-mesa-nome" class="bz-in" placeholder="Nome do cliente (opcional)" value="' + esc(nomeV) + '" maxlength="40">' +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="bz-b" style="flex:0 0 auto;" onclick="_bzFecharSheet()">Voltar</button>' +
+      '<button id="bz-btn-lancar" class="bz-b bz-b-pri" style="flex:1;font-size:1rem;padding:15px;" onclick="_bzConfirmarMesa()"' + (_bz.mesaDig ? '' : ' disabled') + '>' + (_bz.mesaDig ? 'LANÇAR NA MESA ' + _bz.mesaDig : 'Digite a mesa') + '</button></div>';
+  } else if(_bz.sheet === 'menu'){
+    var t = _bz.t[_bz.sheetId];
+    if(!t){ _bz.sheet = null; el.style.display = 'none'; return; }
+    h = '<div class="bz-sh-tit">' + _bzNum(t) + ' · R$ ' + _bzFmt(_bzTotal(t)) + (t.nome ? ' · ' + esc(t.nome) : '') + '</div>';
+    if(t.status === 'pendente'){
+      if(t.itens.some(function(i){ return i.tipo === 'kg'; })) h += '<button class="bz-linha" onclick="_bzEditar(\'' + t.id + '\')"><span>✏️ Corrigir valor do prato</span></button>';
+      h += '<button class="bz-linha" onclick="_bzNome(\'' + t.id + '\')"><span>👤 ' + (t.nome ? 'Mudar nome' : 'Pôr nome do cliente') + '</span></button>';
+      t.itens.forEach(function(i){
+        if(i.tipo !== 'kg') h += '<button class="bz-linha" onclick="_bzRemoverItem(\'' + t.id + '\',\'' + i.k + '\')"><span>➖ Tirar ' + (i.qtd > 1 ? '1 ' : '') + esc(i.nome) + '</span><b>R$ ' + _bzFmt(i.valor) + '</b></button>';
+      });
+      h += '<button class="bz-linha" style="color:#f87171" onclick="_bzCancelar(\'' + t.id + '\')"><span>🗑️ Cancelar ticket</span></button>';
+    }
+    var nomes = { criado:'Registrado', bebida:'Bebida', corrigido:'Valor corrigido', removido:'Item tirado', nome:'Nome', cancelado:'Cancelado', lancado:'Lançado', falha:'Falha ao lançar', recuperado:'Recuperado' };
+    h += '<div class="bz-hist">' + (t.historico || []).map(function(x){
+      return _bzHora(x.em) + ' · ' + (nomes[x.acao] || x.acao) + (x.de != null ? ' ' + _bzFmt(x.de) + ' → ' + _bzFmt(x.para) : '') + (x.item ? ' ' + esc(x.item) : '') + (x.mesa ? ' · mesa ' + x.mesa : '') + (x.erro ? ' · ' + esc(x.erro) : '') + (x.obs ? ' · ' + esc(x.obs) : '') + ' · ' + esc(x.por || '');
+    }).join('<br>') + '</div>';
+    h += '<button class="bz-b" style="width:100%;margin-top:10px;" onclick="_bzFecharSheet()">Fechar</button>';
+  } else if(_bz.sheet === 'bebidas'){
+    var sp = _bzSelPend();
+    h = '<div class="bz-sh-tit">' + (sp.length === 1 ? 'Adicionar ao ' + _bzNum(sp[0]) : 'Item avulso (ticket novo)') + '</div>' +
+      '<input id="bz-busca" class="bz-in" placeholder="Buscar item…" oninput="_bzFiltrarBebidas(this.value)" value="' + esc(_bz.busca) + '">' +
+      '<div id="bz-busca-lista" style="max-height:42vh;overflow-y:auto;margin-top:8px;">' + _bzHtmlBusca() + '</div>' +
+      '<button class="bz-b" style="width:100%;margin-top:10px;" onclick="_bzFecharSheet()">Fechar</button>';
+  }
+  el.style.display = 'flex';
+  el.innerHTML = '<div class="bz-sh" onclick="event.stopPropagation()">' + h + '</div>';
+}
+
+// Mantém a fila sincronizando e o contador do botão ⚖️ em dia, mesmo com a tela fechada.
+window.addEventListener('online', function(){ _bz.offline = false; _bzAgendar(200); });
 setInterval(function(){
   try{
-    if(!_balGarantirCarregado()) return;
-    if(_bal.registros.some(function(r){ return r._sync !== 'ok'; })) _balAgendarSync(0);
-    _balRenderBadge();
+    if(!_bzGarantir()) return;
+    if(_bzLista().some(function(t){ return t._sync !== 'ok'; })) _bzAgendar(0);
+    if(_bz.aberto) _bzRecuperar();
+    _bzRenderBadge();
   }catch(e){}
 }, 20000);
-setTimeout(function(){ try{ if(_balGarantirCarregado()){ _balRenderBadge(); _balAgendarSync(1500); } }catch(e){} }, 4000);
+setTimeout(function(){ try{ if(_bzGarantir()){ _bzRenderBadge(); _bzAgendar(1500); } }catch(e){} }, 4000);
 </script>
 
 </body>

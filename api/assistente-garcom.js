@@ -681,7 +681,7 @@ ${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') 
     // ═══ ETAPA 1 — leve e rápida: classifica E já resolve pedido/cancelamento ═══
     const promptEtapa1 =
 `Você é o assistente do app de um garçom de restaurante. O texto abaixo pode
-ser UMA DAS QUATORZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
+ser UMA DAS DEZESSEIS COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
 
 (A) Uma DÚVIDA sobre produto (IBU, teor alcoólico, ingredientes, alérgenos)
     ou sobre o restaurante (horário, promoção, política).
@@ -729,7 +729,15 @@ ser UMA DAS QUATORZE COISAS (ou VÁRIAS delas — ver AÇÕES MISTURADAS):
     'o prato demora 20 minutos' em inglês?", "traduz pro espanhol: aceita
     cartão?").
 
-Decida qual das quatorze é e responda SOMENTE com um JSON válido, sem texto
+(O) Uma pergunta sobre o TEMPO DE UM PRATO/PEDIDO (ex: "quanto falta pra
+    picanha da 8?", "o prato da 8 já saiu?", "a 12 tá esperando faz
+    quanto tempo?", "a porção da 5 ficou pronta?").
+(P) DIVIDIR A CONTA de uma mesa (ex: "divide a 12 por 3", "a 12 vai rachar
+    em 4", "o Fernando paga a picanha e o chopp dele", "a Sara da 5 paga
+    só o que é dela", "separa 2 chopp e a porção pra cobrar"). Diferente
+    de só "fechar a conta" (que não fala em dividir/quem paga o quê).
+
+Decida qual das dezesseis é e responda SOMENTE com um JSON válido, sem texto
 antes ou depois, sem marcação de código — só o JSON puro.
 
 SE FOR DÚVIDA, responda SÓ isto (a resposta de verdade vem numa etapa
@@ -858,6 +866,18 @@ pressa"), responda:
 
 SE FOR CONSULTA DE CONTA:
 {"tipo":"consulta","mesa":12}
+
+SE FOR TEMPO DO PRATO:
+{"tipo":"tempoPrato","mesa":8,"nomeItem":"picanha","itemId":"id-ou-null"}
+- "nomeItem"/"itemId": null se ele perguntar da mesa toda.
+
+SE FOR DIVIDIR CONTA:
+{"tipo":"dividirConta","mesa":12,"partes":3,"pessoa":null,"itens":[]}
+- "partes": em quantas partes iguais (só quando for divisão igual); senão null.
+- "pessoa": nome de quem vai pagar uma parte (ex: "Fernando"); senão null.
+- "itens": o que essa pessoa paga, [{"nome":"picanha","qtd":1}] — vazio se
+  for "o que é dele/dela" (o app pega os itens marcados no nome dela).
+- "mesa": null se não foi dita (o app acha pela pessoa).
 
 SE FOR LEMBRETE:
 {"tipo":"lembrete","minutos":10,"texto":"levar a sobremesa da 8"}
@@ -1146,6 +1166,18 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return ({ ok: true, tipo: 'lembrete', minutos: min, texto: (parsed.texto || '').toString().trim().slice(0, 160) });
     }
     if (parsed.tipo === 'resumoTurno') return ({ ok: true, tipo: 'resumoTurno' });
+    if (parsed.tipo === 'tempoPrato') {
+      const mT = parseInt(parsed.mesa, 10);
+      return ({ ok: true, tipo: 'tempoPrato', mesa: isNaN(mT) ? null : mT,
+        nomeItem: (parsed.nomeItem || '').toString().trim() || null, itemId: _idValido(parsed.itemId) ? parsed.itemId : null });
+    }
+    if (parsed.tipo === 'dividirConta') {
+      const mD = parseInt(parsed.mesa, 10) || mesaPadrao || null;
+      const partes = parseInt(parsed.partes, 10);
+      return ({ ok: true, tipo: 'dividirConta', mesa: mD, partes: partes > 1 ? Math.min(partes, 50) : null,
+        pessoa: (parsed.pessoa || '').toString().trim() || null,
+        itens: (Array.isArray(parsed.itens) ? parsed.itens : []).map((x) => ({ nome: String((x && x.nome) || x || '').trim(), qtd: Math.max(1, parseInt(x && x.qtd, 10) || 1) })).filter((x) => x.nome) });
+    }
     if (parsed.tipo === 'pausarCategoria') {
       return ({ ok: true, tipo: 'pausarCategoria', nomeCategoria: (parsed.nomeCategoria || '').toString().trim(), pausar: parsed.pausar !== false });
     }

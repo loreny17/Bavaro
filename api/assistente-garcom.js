@@ -242,13 +242,28 @@ async function obterContexto(db, tenantId, restauranteId) {
     return cacheado.dados;
   }
 
-  const [restDoc, itensSnap, arquivosSnap] = await Promise.all([
+  const [restDoc, itensSnap, arquivosSnap, gruposSnap] = await Promise.all([
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId).get(),
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
       .collection('cardapio').doc('data').collection('itens').get(),
     db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
       .collection('assistente_arquivos').get(),
+    db.collection('tenants').doc(tenantId).collection('restaurantes').doc(restauranteId)
+      .collection('cardapio').doc('data').collection('grupos_opcoes').get().catch(() => null),
   ]);
+
+  // Grupos de opções/adicionais (ex: "Trocar por batata palito +4,90")
+  const grupos = {};
+  if (gruposSnap) gruposSnap.forEach((d) => {
+    const g = d.data() || {};
+    grupos[d.id] = {
+      nome: g.nome || '', tipo: g.tipo || 'opcao',
+      opcoes: (g.opcoes || []).map((o) => ({
+        nome: (o && o.nome) || '', precoExtra: parseFloat(o && o.precoExtra) || 0,
+        pausado: !!(o && o.pausado === true && (!o.pausadoAte || o.pausadoAte > Date.now())),
+      })),
+    };
+  });
 
   const documentoGeral = ((restDoc.data() || {}).documentoGeralIA || '').trim();
   const cardapioCompleto = [];
@@ -271,6 +286,7 @@ async function obterContexto(db, tenantId, restauranteId) {
         precosPorHorario: Array.isArray(it.precosPorHorario) ? it.precosPorHorario : null,
         dica: (it.fichaTecnica || '').trim().slice(0, 100),
         voz: (it.palavrasVoz || '').toString().trim().slice(0, 120),
+        gruposIds: Array.isArray(it.gruposIds) ? it.gruposIds : [],
       });
     }
     if (it.fichaTecnica && it.fichaTecnica.trim()) {
@@ -287,7 +303,7 @@ async function obterContexto(db, tenantId, restauranteId) {
     if (a.url && a.nome) arquivos.push({ nome: a.nome, url: a.url, tipo: a.tipo || 'image/png' });
   });
 
-  const dados = { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos };
+  const dados = { documentoGeral, cardapioCompleto, cardapioKg, comFicha, arquivos, grupos };
   _cacheContexto[chave] = { em: agora, dados };
   return dados;
 }
@@ -402,6 +418,42 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao) {
   }
   if (pedidos.some((p) => !p.mesa)) return null;
   return { tipo: 'pedido', pedidos };
+}
+
+
+// Acha, entre os adicionais/opções DO PRÓPRIO ITEM, o que foi falado
+// ("palito", "trocar por palito", "bacon extra"). Devolve as seleções no mesmo
+// formato do lançamento manual + o que não bateu (vira observação).
+function _resolverAdicionais(textos, item, grupos) {
+  const selecoes = [];
+  const naoAchados = [];
+  let extras = 0;
+  const opcoes = [];
+  (item.gruposIds || []).forEach((gid) => {
+    const g = grupos && grupos[gid];
+    if (!g) return;
+    g.opcoes.forEach((o) => { if (o.nome && !o.pausado) opcoes.push({ g, o }); });
+  });
+  (textos || []).forEach((t) => {
+    const txt = (t && (t.nome || t.texto)) || t;
+    const qtdAd = Math.max(1, parseInt(t && t.qtd, 10) || 1);
+    if (!txt || !String(txt).trim()) return;
+    const limpo = String(txt).replace(/\b(trocar|troca|troque|por|com|adicional|de|extra|mais)\b/gi, ' ').trim() || String(txt);
+    const pont = opcoes.map((x) => ({ x, p: Math.max(_pontuar(limpo, x.o.nome), _pontuar(x.o.nome, limpo) * 0.9) }))
+      .filter((r) => r.p >= 0.5).sort((a, b) => b.p - a.p);
+    const melhor = pont[0];
+    const empate = pont[1] && pont[1].p === melhor.p;
+    if (!melhor || empate) { naoAchados.push(String(txt).trim()); return; }
+    const { g, o } = melhor.x;
+    if (g.tipo === 'adicional') {
+      selecoes.push({ grupo: g.nome, opcao: o.nome, precoExtra: o.precoExtra, qtd: qtdAd });
+      extras += o.precoExtra * qtdAd;
+    } else {
+      selecoes.push({ grupo: g.nome, opcao: o.nome, precoExtra: o.precoExtra });
+      extras += o.precoExtra;
+    }
+  });
+  return { selecoes, extras: Math.round(extras * 100) / 100, naoAchados };
 }
 
 module.exports = async (req, res) => {
@@ -574,7 +626,7 @@ seguinte, com mais informação disponível — aqui é só classificar):
 {"tipo":"pergunta"}
 
 SE FOR PEDIDO:
-{"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":""}]}
+{"tipo":"pedido","pedidos":[{"mesa":34,"itemId":"abc123","quantidade":1,"obs":"","adicionais":[]}]}
 - "itemId" deve ser exatamente um [id:...] da lista de cardápio abaixo.
   NUNCA invente um id que não esteja na lista.
 - O texto pode vir de reconhecimento de voz, então pode ter erros de
@@ -641,6 +693,18 @@ SE FOR PEDIDO:
      {"mesa":15,"itemId":"xyz","tipoVenda":"kg","valorTotal":24.15,"cliente":"Beatriz"}]}
 - Cada combinação mesa+item é um objeto separado, mesmo com quantidade 1.
 - Se mencionar várias mesas, cada uma gera seus próprios itens no array.
+- "adicionais": lista de ADICIONAIS/TROCAS PAGAS que o funcionário pediu pro
+  item (ex: "com palito", "trocar por palito", "troca a fritas por palito",
+  "com bacon extra", "adicional de queijo", "com ovo", "duplo", "triplo",
+  "em dobro" — ex: "1 x-burguer duplo na 5" → item X-Burguer com
+  adicionais [{"nome":"duplo","qtd":1}], a não ser que exista no cardápio
+  um item com "duplo" no próprio nome). Cada um é um objeto
+  {"nome":"batata palito","qtd":1} com o nome curto do adicional (sem
+  "trocar por"/"com"). "qtd" é o TOTAL daquele adicional na linha: se o
+  adicional vale pra todas as unidades ("2 picanha com palito"), use a
+  mesma quantidade do item (2). Omita ou [] se não houver. NÃO coloque
+  adicionais em "obs" — o sistema confere cada um nos adicionais
+  cadastrados no item e cobra o valor.
 - "obs" é uma observação sobre a PREPARAÇÃO do item (ex: "sem salada",
   "sem gelo", "bem passado", "sem cebola") — texto curto, só o essencial,
   SEM repetir o nome do produto. Deixe "" se não houver observação pra
@@ -797,14 +861,51 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         const qtd = Math.max(1, parseInt(p.quantidade, 10) || 1);
         let item = p.itemId ? cardapioCompleto.find((c) => c.id === p.itemId) : null;
         if (!item && p.nomeDigitado) item = _acharItemPorNome(p.nomeDigitado, cardapioCompleto);
+        let obsFinal = (p.obs || '').toString().trim();
+        let ad = { selecoes: [], extras: 0, naoAchados: [] };
+        if (item && Array.isArray(p.adicionais) && p.adicionais.length) {
+          ad = _resolverAdicionais(p.adicionais, item, ctx.grupos);
+          // O que não é adicional do item não se perde: vai pra observação
+          if (ad.naoAchados.length) obsFinal = [obsFinal].concat(ad.naoAchados).filter(Boolean).join(', ');
+        }
+        // Rede de segurança: pedaço da observação que é EXATAMENTE um adicional
+        // do item (ex: obs "duplo" e o item tem o adicional "Duplo") vira
+        // adicional cobrado, em vez de ficar só escrito.
+        if (item && obsFinal && (item.gruposIds || []).length) {
+          const sobra = [];
+          obsFinal.split(/\s*[,;]\s*|\s+e\s+/).forEach((pedaco) => {
+            if (!pedaco) return;
+            const exato = (item.gruposIds || []).some((gid) => {
+              const gg = ctx.grupos && ctx.grupos[gid];
+              return gg && gg.opcoes.some((o) => o.nome && !o.pausado && _pontuar(pedaco, o.nome) >= 1 && _pontuar(o.nome, pedaco) >= 1);
+            });
+            if (exato) {
+              const r = _resolverAdicionais([{ nome: pedaco, qtd: qtd }], item, ctx.grupos);
+              if (r.selecoes.length) {
+                ad.selecoes = ad.selecoes.concat(r.selecoes);
+                ad.extras = Math.round((ad.extras + r.extras) * 100) / 100;
+                return;
+              }
+            }
+            sobra.push(pedaco);
+          });
+          obsFinal = sobra.join(', ');
+        }
+        const precoBaseU = item ? item.preco : null;
         return {
           mesa, cliente, quantidade: qtd,
           itemId: item ? item.id : null,
           itemNome: item ? item.nome : null,
-          itemPreco: item ? item.preco : null,
+          // preço unitário embute os adicionais (igual ao lançamento manual:
+          // total da linha = base×qtd + extras)
+          itemPreco: item ? Math.round(((precoBaseU * qtd + ad.extras) / qtd) * 100) / 100 : null,
+          precoBase: precoBaseU,
+          extras: ad.extras,
+          selecoes: ad.selecoes,
+          adicionaisNaoAchados: ad.naoAchados,
           encontrado: !!item,
           nomeDigitado: p.nomeDigitado || null,
-          obs: (p.obs || '').toString().trim().slice(0, 140),
+          obs: obsFinal.slice(0, 140),
         };
       }).filter((p) => p !== null);
 

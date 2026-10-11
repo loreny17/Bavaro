@@ -19772,6 +19772,11 @@ function executarAssistenteGarcom(){
   var input = document.getElementById('input-assistente-garcom');
   var texto = input.value.trim();
   if(!texto) return;
+  // "confirma" / "pode mandar": confirma o que está na tela, sem ir ao servidor
+  if(_ehConfirmacaoVoz(texto) && _confirmarPendenteBox()){ input.value = ''; return; }
+  var cmdAuto = _comandoAutoEnvio(texto);
+  if(cmdAuto){ input.value = ''; document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + cmdAuto + '</div>'; return; }
+  _cancelarAutoEnvio();
   var caixa = document.getElementById('resposta-assistente-garcom');
   caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Pensando...</div>';
   _draftsPedidoIA = [];
@@ -19779,15 +19784,16 @@ function executarAssistenteGarcom(){
   fetch('/api/assistente-garcom', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto, indisponiveis: _idsIndisponiveisAssistente() })
+    body: JSON.stringify(Object.assign({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto }, _contextoAssistente()))
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + (j.detalhe ? '<div style="font-size:0.62rem;color:var(--muted);margin-top:5px;word-break:break-word;">' + esc(j.detalhe) + '</div>' : '') + '</div>';
       return;
     }
     if(j.tipo === 'pedido'){
-      _draftsPedidoIA = _marcarEsgotados((j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; }));
+      _draftsPedidoIA = _prepararDrafts(_marcarEsgotados((j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; })));
       _renderDraftsPedidoIA();
+      if(_podeAutoEnviar(j, _draftsPedidoIA)) _iniciarAutoEnvioBox();
     } else if(j.tipo === 'multiplo'){
       // Várias ações: mostra no chat, que comporta uma confirmação embaixo da outra
       caixa.innerHTML = '';
@@ -19803,6 +19809,15 @@ function executarAssistenteGarcom(){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Buscando a conta da Mesa ' + j.mesa + '...</div>';
       _contaAbertaDaMesa(j.mesa).then(function(conta){ caixa.innerHTML = _htmlConsultaConta(j.mesa, conta); })
         .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
+    } else if(j.tipo === 'lembrete'){
+      input.value = '';
+      caixa.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + _criarLembrete(j.minutos, j.texto) + '</div>';
+    } else if(j.tipo === 'resumoTurno'){
+      caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Somando seus pedidos de hoje...</div>';
+      _resumoTurnoHtml().then(function(h){ caixa.innerHTML = '<div style="background:var(--surface2);border-radius:10px;padding:11px;">' + h + '</div>'; })
+        .catch(function(e){ caixa.innerHTML = '<div style="font-size:0.82rem;color:#f87171;">Erro: ' + esc(e.message||'') + '</div>'; });
+    } else if(j.tipo === 'traducao'){
+      caixa.innerHTML = '<div style="background:var(--surface2);border-radius:10px;padding:11px;">' + _traducaoHtml(j) + '</div>';
     } else if(j.tipo === 'pausarCategoria'){
       _pausaCatBox = Object.assign({ id:'box' }, _montarPausaCategoria(j));
       _rerenderPausaCat('box');
@@ -19862,21 +19877,21 @@ function _renderDraftsPedidoIA(){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
         '<span style="font-size:1rem;">⚠️</span>' +
-        '<div style="flex:1;font-size:0.8rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : 'Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa + '<div style="font-size:0.68rem;color:var(--muted);">Lance esse manualmente</div>') + '</div>' +
+        '<div style="flex:1;font-size:0.8rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — Mesa ' + p.mesa + _htmlCandidatos(p, 'box', p._idx)) + '</div>' +
       '</div>';
     }
     if(p.tipoVenda === 'kg'){
       var pesoHtml = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + '</div>' +
+        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
         '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = (p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(p.obs) + '</div>' : '') + _htmlSelecoesDraft(p);
     return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + '</div>' +
+      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
       '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -20628,6 +20643,283 @@ function _htmlSelecoesDraft(p){
     return '➕ ' + (x.qtd > 1 ? x.qtd + 'x ' : '') + esc(x.opcao) + ((x.precoExtra||0) > 0 ? ' +R$ ' + fmtPreco((x.precoExtra||0) * (x.qtd||1)) : '');
   }).join(' · ') + '</div>';
 }
+
+// ════════════════════════════════════════
+//  ESCOLHA DE ITEM (quando o assistente ficou em dúvida) + APRENDIZADO
+// ════════════════════════════════════════
+function _draftsDoCtx(ctxId){
+  if(ctxId === 'box') return _draftsPedidoIA;
+  var m = _chatHistorico.find(function(x){ return x.id === ctxId; });
+  return m ? m.itens : null;
+}
+function _rerenderDrafts(ctxId){
+  if(ctxId === 'box'){ _renderDraftsPedidoIA(); } else { renderChatMensagens(true); }
+}
+function _htmlCandidatos(p, ctxId, idx){
+  if(p.esgotado) return '';
+  var cands = (p.candidatos || []).filter(function(c){
+    var it = (_itens||[]).find(function(x){ return x.id === c.itemId; });
+    return !it || !pausaAtiva(it);
+  });
+  var botoes = cands.map(function(c){
+    return '<button onclick="event.preventDefault();_escolherItemDraft(\'' + ctxId + '\',' + idx + ',\'' + c.itemId + '\')" style="background:var(--surface);border:1px solid var(--accent);color:var(--text);border-radius:8px;padding:7px 10px;font-size:0.76rem;cursor:pointer;font-family:inherit;margin:4px 4px 0 0;">' + esc(c.itemNome) + '</button>';
+  }).join('');
+  var busca = '<input type="text" placeholder="🔎 procurar outro item…" oninput="_buscarItemDraft(\'' + ctxId + '\',' + idx + ',this.value)" style="width:100%;box-sizing:border-box;margin-top:6px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:7px 9px;font-family:inherit;font-size:0.78rem;">' +
+    '<div id="busca-draft-' + ctxId + '-' + idx + '"></div>';
+  return '<div style="margin-top:5px;">' + (cands.length ? '<div style="font-size:0.7rem;color:var(--muted);">Qual desses?</div>' + botoes : '') + busca + '</div>';
+}
+function _buscarItemDraft(ctxId, idx, txt){
+  var box = document.getElementById('busca-draft-' + ctxId + '-' + idx);
+  if(!box) return;
+  txt = String(txt||'').trim();
+  if(txt.length < 2){ box.innerHTML = ''; return; }
+  var n = _normNome(txt);
+  var achados = (_itens||[]).filter(function(it){
+    if(!it.disponivel || pausaAtiva(it)) return false;
+    return _normNome(it.nome).indexOf(n) >= 0 || _normNome(it.palavrasVoz||'').indexOf(n) >= 0 || _pontuarNomeItem(txt, it.nome) >= 1;
+  }).slice(0, 6);
+  box.innerHTML = achados.map(function(it){
+    return '<button onclick="event.preventDefault();_escolherItemDraft(\'' + ctxId + '\',' + idx + ',\'' + it.id + '\')" style="background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:7px 10px;font-size:0.76rem;cursor:pointer;font-family:inherit;margin:4px 4px 0 0;">' + esc(it.nome) + ' · R$ ' + fmtPreco(it.preco||0) + '</button>';
+  }).join('') || '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Nada encontrado</div>';
+}
+function _escolherItemDraft(ctxId, idx, itemId){
+  var lista = _draftsDoCtx(ctxId);
+  if(!lista) return;
+  var p = ctxId === 'box' ? lista.find(function(x){ return x._idx === idx; }) : lista[idx];
+  var it = (_itens||[]).find(function(x){ return x.id === itemId; });
+  if(!p || !it) return;
+  var falado = p.nomeDigitado || '';
+  p.itemId = it.id; p.itemNome = it.nome;
+  p.quantidade = p.quantidade || 1;
+  p.precoBase = it.preco || 0; p.extras = 0; p.selecoes = [];
+  p.itemPreco = it.preco || 0;
+  p.encontrado = true; p._selecionado = true; p.candidatos = [];
+  _rerenderDrafts(ctxId);
+  if(ctxId === 'box') try{ _atualizarBotaoConfirmarIA(); }catch(e){}
+  _aprenderApelido(falado, it);
+}
+// Guarda "o que foi falado" → item escolhido, pra acertar sozinho da próxima vez
+function _aprenderApelido(falado, it){
+  falado = String(falado||'').trim();
+  if(!falado || falado.length > 40 || !it) return;
+  if(_normNome(falado) === _normNome(it.nome)) return;
+  var docId = (_normNome(falado).replace(/[^a-z0-9]+/g,'_') + '__' + _normNome(_nomeGarcom||'todos').replace(/[^a-z0-9]+/g,'_')).slice(0, 120);
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+    .collection('assistente_apelidos').doc(docId).set({
+      texto: falado, itemId: it.id, itemNome: it.nome, garcom: _nomeGarcom || '', em: Date.now()
+    }).then(function(){
+      showToast('🧠 Aprendi: "' + falado + '" = ' + it.nome, '#a78bfa', 3000);
+      // avisa o servidor pra recarregar (vale já no próximo pedido)
+      try{ fetch('/api/assistente-garcom', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, aquecer:true, limparCache:true }) }).catch(function(){}); }catch(e){}
+    }).catch(function(e){ console.warn('[apelido] não salvou:', e.message); });
+}
+
+// Alerta de valor/quantidade estranha na confirmação
+function _htmlAlertaDraft(p, ctxId, idx){
+  if(!p.alerta) return '';
+  var fix = (p.sugestaoValor && p.tipoVenda === 'kg')
+    ? ' <button onclick="event.preventDefault();_usarSugestaoValor(\'' + ctxId + '\',' + idx + ')" style="background:#fbbf24;border:none;color:#000;border-radius:6px;padding:3px 8px;font-size:0.7rem;font-weight:800;cursor:pointer;font-family:inherit;">Usar R$ ' + fmtPreco(p.sugestaoValor) + '</button>' : '';
+  return '<div style="font-size:0.7rem;color:#fbbf24;margin-top:3px;">⚠️ ' + esc(p.alerta) + fix + '</div>';
+}
+function _usarSugestaoValor(ctxId, idx){
+  var lista = _draftsDoCtx(ctxId);
+  if(!lista) return;
+  var p = ctxId === 'box' ? lista.find(function(x){ return x._idx === idx; }) : lista[idx];
+  if(!p || !p.sugestaoValor) return;
+  p.itemPreco = p.sugestaoValor; p.peso = null; p.alerta = null; p.sugestaoValor = null; p._selecionado = true;
+  _rerenderDrafts(ctxId);
+  if(ctxId === 'box') try{ _atualizarBotaoConfirmarIA(); }catch(e){}
+}
+// Itens com alerta começam desmarcados (precisa conferir)
+function _prepararDrafts(lista){
+  (lista||[]).forEach(function(p){ if(p.alerta) p._selecionado = false; });
+  return lista;
+}
+
+// Contexto mandado ao assistente: quem é o garçom (apelidos dele) e os nomes
+// de clientes de cada mesa aberta (pra "mais um chopp pro Fernando").
+function _contextoAssistente(){
+  var mesas = [];
+  try{
+    Object.keys(_contasMesaCache||{}).forEach(function(k){
+      var c = _contasMesaCache[k];
+      if(!c || !c.mesa || String(k).indexOf('_') >= 0) return;
+      var nomes = {};
+      if(c.cliente) nomes[c.cliente] = 1;
+      (c.itens||[]).forEach(function(it){ if(it.status !== 'cancelado' && (it.pessoa || it.nomeCliente)) nomes[it.pessoa || it.nomeCliente] = 1; });
+      var lista = Object.keys(nomes).filter(Boolean);
+      if(lista.length) mesas.push({ mesa: parseInt(c.mesa,10) || c.mesa, nomes: lista.slice(0, 8) });
+    });
+  }catch(e){}
+  return { garcom: _nomeGarcom || '', mesasClientes: mesas.slice(0, 60), indisponiveis: _idsIndisponiveisAssistente() };
+}
+
+// ════════════════════════════════════════
+//  CONFIRMAR POR VOZ + ENVIO AUTOMÁTICO (com desfazer)
+// ════════════════════════════════════════
+var RE_CONFIRMA_VOZ = /^(confirma|confirmar|confirmado|confirme|pode mandar|manda|mande|pode enviar|envia|envie|pode lancar|lanca|isso|isso mesmo|ok|okay|ta certo|certo|sim|pode)$/;
+function _ehConfirmacaoVoz(texto){
+  var t = _normNome(texto).replace(/[!.?,]+/g, '').replace(/\s+/g, ' ').trim();
+  return RE_CONFIRMA_VOZ.test(t);
+}
+// Confirma o rascunho pendente mais recente do CHAT. Devolve true se havia um.
+function _confirmarPendenteChat(){
+  var mapa = { pedido: _chatConfirmarPedido, cancelamento: _chatConfirmarCancelamento, troca: _confirmarTrocas,
+    transferir: _confirmarTransf, pausar: _confirmarPausa, pausarCategoria: _confirmarPausaCat, recado: _enviarRecado };
+  for(var i = _chatHistorico.length - 1; i >= 0; i--){
+    var m = _chatHistorico[i];
+    if(m.tipo === 'usuario') continue;
+    if(mapa[m.tipo] && !m.enviado && !m.enviando){ m.autoAte = null; mapa[m.tipo](m.id); return true; }
+    if(m.tipo !== 'carregando') return false; // só vale pro último cartão mostrado
+  }
+  return false;
+}
+// Confirma o que estiver aberto na CAIXA da tela de mesas
+function _confirmarPendenteBox(){
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  var html = caixa ? caixa.innerHTML : '';
+  var b = document.getElementById('btn-confirmar-pedidos-ia');
+  if(b && !b.disabled && b.style.display !== 'none'){ _cancelarAutoEnvio(); confirmarEnviarPedidosIA(); return true; }
+  b = document.getElementById('btn-confirmar-cancel-ia');
+  if(b && !b.disabled && b.style.display !== 'none'){ confirmarCancelamentosIA(); return true; }
+  var pares = [["_confirmarTrocas('box')", function(){ _confirmarTrocas('box'); }], ["_confirmarTransf('box')", function(){ _confirmarTransf('box'); }],
+    ["_confirmarPausa('box')", function(){ _confirmarPausa('box'); }], ["_confirmarPausaCat('box')", function(){ _confirmarPausaCat('box'); }],
+    ["_enviarRecado('box')", function(){ _enviarRecado('box'); }]];
+  for(var i = 0; i < pares.length; i++){ if(html.indexOf(pares[i][0]) >= 0){ pares[i][1](); return true; } }
+  return false;
+}
+
+// Envio automático: só pra pedido entendido SEM IA (atalho local), tudo
+// reconhecido e sem alerta. 5 segundos pra desfazer.
+var AUTO_ENVIO_SEG = 5;
+var _autoEnvioTimer = null;
+function _autoEnvioLigado(){ try{ return localStorage.getItem('assistente_auto_envio') !== '0'; }catch(e){ return true; } }
+function _podeAutoEnviar(j, itens){
+  return _autoEnvioLigado() && j && j.rapido && (itens||[]).length && itens.every(function(p){ return p.encontrado && p._selecionado && !p.alerta; });
+}
+function _cancelarAutoEnvio(){
+  if(_autoEnvioTimer){ clearInterval(_autoEnvioTimer); _autoEnvioTimer = null; }
+  var bar = document.getElementById('auto-envio-bar'); if(bar) bar.remove();
+}
+function _iniciarAutoEnvioBox(){
+  _cancelarAutoEnvio();
+  var caixa = document.getElementById('resposta-assistente-garcom');
+  if(!caixa) return;
+  var restante = AUTO_ENVIO_SEG;
+  var bar = document.createElement('div');
+  bar.id = 'auto-envio-bar';
+  bar.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;border-radius:9px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.35);font-size:0.8rem;';
+  bar.innerHTML = '<span style="flex:1;">⏱ Enviando em <b id="auto-envio-seg">' + restante + '</b>s…</span><button onclick="_cancelarAutoEnvio()" style="background:#f87171;border:none;color:#fff;border-radius:7px;padding:6px 12px;font-weight:800;cursor:pointer;font-family:inherit;">Desfazer</button>';
+  caixa.appendChild(bar);
+  _autoEnvioTimer = setInterval(function(){
+    restante--;
+    var el = document.getElementById('auto-envio-seg'); if(el) el.textContent = restante;
+    if(restante <= 0){
+      _cancelarAutoEnvio();
+      var b = document.getElementById('btn-confirmar-pedidos-ia');
+      if(b && !b.disabled) confirmarEnviarPedidosIA();
+    }
+  }, 1000);
+}
+// No chat: a bolha mostra a contagem; um relógio confere a cada segundo
+setInterval(function(){
+  var tela = document.getElementById('tela-chat-assistente');
+  if(!tela || tela.style.display !== 'flex' || !_chatHistorico) return;
+  var algum = false;
+  _chatHistorico.forEach(function(m){
+    if(m.tipo !== 'pedido' || !m.autoAte || m.enviado || m.enviando) return;
+    algum = true;
+    if(Date.now() >= m.autoAte){ m.autoAte = null; _chatConfirmarPedido(m.id); }
+  });
+  if(algum) renderChatMensagens(true);
+}, 1000);
+function _desfazerAutoChat(msgId){
+  var m = _chatHistorico.find(function(x){ return x.id === msgId; });
+  if(m){ m.autoAte = null; renderChatMensagens(true); }
+}
+
+// ════════════════════════════════════════
+//  LEMBRETES / RESUMO DO TURNO / TRADUÇÃO / liga-desliga envio automático
+// ════════════════════════════════════════
+function _lerLembretes(){ try{ return JSON.parse(localStorage.getItem('assistente_lembretes') || '[]'); }catch(e){ return []; } }
+function _gravarLembretes(l){ try{ localStorage.setItem('assistente_lembretes', JSON.stringify(l)); }catch(e){} }
+function _criarLembrete(minutos, texto){
+  var l = _lerLembretes();
+  var ate = Date.now() + minutos * 60000;
+  l.push({ id: 'l' + Date.now(), ate: ate, texto: texto || 'Lembrete' });
+  _gravarLembretes(l);
+  try{ if(window.Notification && Notification.permission === 'default') Notification.requestPermission(); }catch(e){}
+  var hora = new Date(ate).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  return '⏰ Combinado! Às <b>' + hora + '</b> (em ' + minutos + ' min) eu te lembro: <b>' + esc(texto) + '</b>' +
+    '<div style="font-size:0.68rem;color:var(--muted);margin-top:4px;">Deixe o app aberto pra o aviso tocar na hora.</div>';
+}
+function _dispararLembrete(lb){
+  try{ if(navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]); }catch(e){}
+  try{ if(window.Notification && Notification.permission === 'granted') new Notification('⏰ Lembrete', { body: lb.texto }); }catch(e){}
+  try{ if(window.speechSynthesis){ var u = new SpeechSynthesisUtterance('Lembrete: ' + lb.texto); u.lang = 'pt-BR'; speechSynthesis.speak(u); } }catch(e){}
+  var ex = document.getElementById('banner-lembrete'); if(ex) ex.remove();
+  var d = document.createElement('div');
+  d.id = 'banner-lembrete';
+  d.style.cssText = 'position:fixed;left:12px;right:12px;top:14px;z-index:999999;background:#fbbf24;color:#000;border-radius:14px;padding:14px 16px;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:flex;gap:10px;align-items:center;font-weight:700;';
+  d.innerHTML = '<span style="font-size:1.6rem;">⏰</span><div style="flex:1;font-size:0.95rem;">' + esc(lb.texto) + '</div><button onclick="this.parentNode.remove()" style="background:#000;color:#fbbf24;border:none;border-radius:9px;padding:9px 14px;font-weight:800;font-family:inherit;cursor:pointer;">OK</button>';
+  document.body.appendChild(d);
+}
+setInterval(function(){
+  var l = _lerLembretes(); if(!l.length) return;
+  var agora = Date.now(), resto = [];
+  l.forEach(function(lb){ if(lb.ate <= agora) _dispararLembrete(lb); else resto.push(lb); });
+  if(resto.length !== l.length) _gravarLembretes(resto);
+}, 10000);
+
+function _resumoTurnoHtml(){
+  var ini = new Date(); ini.setHours(0,0,0,0);
+  return fbDb.collection('pedidos').where('restauranteId','==', _restauranteId).where('criadoEm','>=', ini.getTime()).get()
+    .then(function(snap){
+      var total = 0, qtdItens = 0, qtdPedidos = 0, porItem = {};
+      snap.forEach(function(d){
+        var p = d.data() || {};
+        if(p.garcom !== _nomeGarcom || p.teste || p.transferidoDe) return;
+        var conta = 0;
+        (p.itens||[]).forEach(function(it){
+          if(it.status === 'cancelado' || it.transferidoPara) return;
+          var v = (it.preco||0) * (it.tipoVenda === 'kg' ? 1 : (it.qtd||1));
+          total += v; conta++; qtdItens += (it.tipoVenda === 'kg' ? 1 : (it.qtd||1));
+          porItem[it.nome] = (porItem[it.nome] || 0) + (it.tipoVenda === 'kg' ? 1 : (it.qtd||1));
+        });
+        if(conta) qtdPedidos++;
+      });
+      var top = Object.keys(porItem).sort(function(a,b){ return porItem[b] - porItem[a]; }).slice(0, 3)
+        .map(function(n){ return porItem[n] + 'x ' + esc(n); }).join(', ');
+      return '<div style="font-weight:800;margin-bottom:6px;">📊 Seu turno hoje, ' + esc(_nomeGarcom||'') + '</div>' +
+        '<div style="font-size:0.84rem;line-height:1.7;">Lançado: <b style="color:var(--accent);">R$ ' + fmtPreco(total) + '</b><br>' +
+        '10% estimado: <b>R$ ' + fmtPreco(total * 0.10) + '</b><br>' +
+        qtdPedidos + ' pedido(s) · ' + qtdItens + ' item(ns)' + (top ? '<br>Mais lançados: ' + top : '') + '</div>' +
+        '<div style="font-size:0.66rem;color:var(--muted);margin-top:5px;">Pedidos lançados por você hoje (sem cancelados). Os 10% são estimativa.</div>';
+    });
+}
+
+function _traducaoHtml(j){
+  var id = 'trad_' + Date.now();
+  window[id] = { texto: j.traducao || '', lang: j.codigoIdioma || 'en-US' };
+  return '<div style="font-size:0.72rem;color:var(--muted);">"' + esc(j.original||'') + '" em ' + esc(j.idioma||'') + ':</div>' +
+    '<div style="font-size:1.05rem;font-weight:800;margin:6px 0;">' + esc(j.traducao||'') + '</div>' +
+    (j.pronuncia ? '<div style="font-size:0.74rem;color:var(--muted);">Fala-se: <i>' + esc(j.pronuncia) + '</i></div>' : '') +
+    '<button onclick="_falarTexto(\'' + id + '\')" style="margin-top:8px;background:var(--accent);border:none;color:#000;border-radius:9px;padding:9px 14px;font-weight:800;cursor:pointer;font-family:inherit;">🔊 Ouvir</button>';
+}
+function _falarTexto(id){
+  var d = window[id]; if(!d) return;
+  try{ speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(d.texto); u.lang = d.lang; u.rate = 0.9; speechSynthesis.speak(u); }
+  catch(e){ showToast('Áudio não disponível neste aparelho', '#f7a34f'); }
+}
+
+// "desliga/liga o envio automático"
+function _comandoAutoEnvio(texto){
+  var t = _normNome(texto);
+  if(/(desliga|desativa|tira).*(envio|enviar) automatic/.test(t)){ try{ localStorage.setItem('assistente_auto_envio','0'); }catch(e){} return '⏸️ Envio automático <b>desligado</b>. Todo pedido vai esperar você confirmar.'; }
+  if(/(liga|ativa|volta).*(envio|enviar) automatic/.test(t)){ try{ localStorage.setItem('assistente_auto_envio','1'); }catch(e){} return '▶️ Envio automático <b>ligado</b>. Pedido simples entendido com certeza sai sozinho em 5s (dá pra desfazer).'; }
+  return null;
+}
 function _montarRepeticao(r){
   if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
   return _contaAbertaDaMesa(r.mesa).then(function(conta){
@@ -21109,7 +21401,7 @@ function abrirChatAssistente(){
   _chatHistorico = [];
   _chatContexto = [];
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-    texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém ou tirar dúvidas de produto. Em que posso ajudar?' });
+    texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém, criar lembretes, ver seu resumo do dia, traduzir pra cliente estrangeiro ou tirar dúvidas de produto. Depois de um pedido, é só falar "confirma".' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -21226,20 +21518,20 @@ function _renderMsgPedidoChat(msg){
   var linhas = msg.itens.map(function(p, i){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
-        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : 'Não reconheci "' + esc(p.nomeDigitado||'item') + '" — Mesa ' + p.mesa) + '</div></div>';
+        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — Mesa ' + p.mesa + _htmlCandidatos(p, msg.id, i)) + '</div></div>';
     }
     if(p.tipoVenda === 'kg'){
       var pesoHtml2 = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + '</div>' +
+        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
         '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = (p.obs ? '<div style="font-size:0.68rem;color:#f7a34f;margin-top:1px;">📝 ' + esc(p.obs) + '</div>' : '') + _htmlSelecoesDraft(p);
     return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + '</div>' +
+      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
       '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -21249,6 +21541,10 @@ function _renderMsgPedidoChat(msg){
     btn = '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Enviando...</div>';
   } else if(qtdSel > 0){
     btn = '<button onclick="_chatConfirmarPedido(\'' + msg.id + '\')" style="width:100%;margin-top:4px;background:var(--accent);border:none;color:#000;border-radius:8px;padding:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">Confirmar e enviar (' + qtdSel + ')</button>';
+  }
+  if(msg.autoAte && !msg.enviando){
+    var segR = Math.max(0, Math.ceil((msg.autoAte - Date.now()) / 1000));
+    btn = '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;padding:8px 10px;border-radius:8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.35);font-size:0.78rem;"><span style="flex:1;">⏱ Enviando em <b>' + segR + '</b>s…</span><button onclick="_desfazerAutoChat(\'' + msg.id + '\')" style="background:#f87171;border:none;color:#fff;border-radius:7px;padding:6px 12px;font-weight:800;cursor:pointer;font-family:inherit;">Desfazer</button></div>' + btn;
   }
   return '<div class="chat-bolha-assistente-wrap"><img src="/assistente-avatar.png" onerror="this.style.display=\'none\'">' +
     '<div class="chat-bolha-assistente" style="width:100%;">' + linhas + btn + '</div></div>';
@@ -21400,6 +21696,22 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   var input = document.getElementById('input-chat-assistente');
   var texto = (typeof textoForcado === 'string' && textoForcado) ? textoForcado : input.value.trim();
   if(!texto) return;
+  if(!respostaPronta){
+    var cmdAutoC = _comandoAutoEnvio(texto);
+    if(cmdAutoC){
+      input.value = '';
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html: cmdAutoC });
+      renderChatMensagens();
+      return;
+    }
+  }
+  if(!respostaPronta && _ehConfirmacaoVoz(texto)){
+    input.value = '';
+    _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
+    if(_confirmarPendenteChat()){ renderChatMensagens(); return; }
+    _chatHistorico.pop();
+  }
   input.value = '';
 
   // Captura o histórico ANTES de somar essa mensagem nova — é o que vai
@@ -21416,7 +21728,7 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   (respostaPronta ? Promise.resolve({ json: function(){ return respostaPronta; } }) : fetch('/api/assistente-garcom', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar, indisponiveis: _idsIndisponiveisAssistente() })
+    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar }, _contextoAssistente()))
   })).then(function(r){ return r.json(); }).then(function _tratarJ(j){
     _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
 
@@ -21433,8 +21745,8 @@ function enviarMensagemChat(textoForcado, respostaPronta){
     }
 
     if(j.tipo === 'pedido'){
-      var itensPedido = _marcarEsgotados((j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; }));
-      _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: itensPedido });
+      var itensPedido = _prepararDrafts(_marcarEsgotados((j.pedidos||[]).map(function(p){ p._selecionado = p.encontrado; return p; })));
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'pedido', itens: itensPedido, autoAte: _podeAutoEnviar(j, itensPedido) ? Date.now() + AUTO_ENVIO_SEG * 1000 : null });
       // Resumo em texto puro — é isso que a próxima pergunta vai "ver"
       // como contexto, pra entender "muda pra 3" se referindo a isto.
       var resumoPedido = itensPedido.map(function(p){
@@ -21464,6 +21776,27 @@ function enviarMensagemChat(textoForcado, respostaPronta){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar a conta: ' + e.message });
         renderChatMensagens();
       });
+    } else if(j.tipo === 'lembrete'){
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html: _criarLembrete(j.minutos, j.texto) });
+      _chatAdicionarContexto('assistente', 'Lembrete criado: ' + j.texto + ' em ' + j.minutos + ' min');
+      renderChatMensagens();
+    } else if(j.tipo === 'resumoTurno'){
+      var idCarrRs = _novoIdChat();
+      _chatHistorico.push({ id:idCarrRs, tipo:'carregando' });
+      renderChatMensagens();
+      _resumoTurnoHtml().then(function(h){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrRs; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html: h });
+        renderChatMensagens();
+      }).catch(function(e){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarrRs; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao somar: ' + e.message });
+        renderChatMensagens();
+      });
+    } else if(j.tipo === 'traducao'){
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html: _traducaoHtml(j) });
+      _chatAdicionarContexto('assistente', 'Tradução: ' + (j.traducao||''));
+      renderChatMensagens();
     } else if(j.tipo === 'pausarCategoria'){
       _chatHistorico.push(Object.assign({ id:_novoIdChat(), tipo:'pausarCategoria' }, _montarPausaCategoria(j)));
       renderChatMensagens();

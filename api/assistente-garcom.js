@@ -662,7 +662,9 @@ ${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') 
       : '';
     // ── Memória da conversa: rascunho na tela (ainda não confirmado) e mesa em foco
     const rascunho = body.rascunho && Array.isArray(body.rascunho.itens) ? body.rascunho.itens.slice(0, 30) : [];
-    const mesaFoco = parseInt(body.mesaEmFoco, 10) || null;
+    // "Mesa em foco" desligada: a mesa muda a cada pedido, então ela NUNCA é
+    // puxada da conversa — só vale a mesa dita no próprio texto.
+    const mesaFoco = null;
     const blocoRascunho = (rascunho.length && !modoComanda)
       ? `RASCUNHO NA TELA (mostrado ao funcionário, AINDA NÃO CONFIRMADO):
 ${rascunho.map((t, i) => `${i + 1}. ${t}`).join('\n')}
@@ -692,8 +694,9 @@ ${rascunho.map((t, i) => `${i + 1}. ${t}`).join('\n')}
       ? '\n\nHISTÓRICO RECENTE DESTA CONVERSA (mais antigo primeiro):\n' +
         historico.map((h) => `${h.autor === 'usuario' ? 'Funcionário' : h.autor === 'sistema' ? 'Sistema' : 'Você'}: ${h.texto}`).join('\n') +
         '\n\nUse este histórico pra entender o CONTEXTO: referências ("muda pra 3", ' +
-        '"na verdade era o IPA", "cancela aquele", "a mesma coisa pra ele"), de qual mesa ' +
-        'e de qual cliente se está falando, e o que já foi feito. Nunca ' +
+        '"na verdade era o IPA", "cancela aquele", "a mesma coisa pra ele") e o que já ' +
+        'foi feito. MESA: use SÓ a mesa dita no texto atual — nunca puxe a mesa de ' +
+        'mensagens anteriores (sem mesa no texto = "mesa": null, vai pra fila). Nunca ' +
         'repita uma ação que o histórico já mostra como CONFIRMADA — se o ' +
         'funcionário só comentar sobre algo já confirmado, trate como ' +
         'PERGUNTA, não como novo pedido/cancelamento.'

@@ -432,7 +432,7 @@ function _acharItemRapido(falado, lista) {
   return ok.length === 1 ? ok[0] : null;
 }
 const _NUM_PALAVRA = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };
-function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao) {
+function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao, mesaPadrao) {
   let t = _normTxt(texto).replace(/[!?.]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 120) return null;
   // verbos de "lançar" no começo
@@ -465,6 +465,7 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao) {
   for (let i = pedidos.length - 1, ultima = null; i >= 0; i--) {
     if (pedidos[i].mesa) ultima = pedidos[i].mesa; else pedidos[i].mesa = ultima;
   }
+  if (mesaPadrao) pedidos.forEach((p) => { if (!p.mesa) p.mesa = mesaPadrao; });
   if (pedidos.some((p) => !p.mesa)) return null;
   return { tipo: 'pedido', pedidos };
 }
@@ -638,6 +639,22 @@ module.exports = async (req, res) => {
       .filter((w) => w.length >= 4 && !/^(prato|quilo|kilo|por|peso|livre|self|service)$/.test(w));
     const textoNorm = _norm(texto);
     const itemKgCitado = (it) => palavrasDoItem(it.nome).some((w) => textoNorm.indexOf(w.slice(0, Math.max(4, w.length - 2))) >= 0);
+    // ── COMANDA AO VIVO: o garçom vai falando item por item numa mesa só
+    const modoComanda = body.modoComanda && parseInt(body.modoComanda.mesa, 10) ? body.modoComanda : null;
+    const mesaPadrao = modoComanda ? parseInt(modoComanda.mesa, 10) : null;
+    const listaComanda = modoComanda && Array.isArray(modoComanda.itens) ? modoComanda.itens.slice(0, 40) : [];
+    const blocoComanda = modoComanda
+      ? `MODO COMANDA AO VIVO — MESA ${mesaPadrao}. O funcionário está anotando o pedido desta mesa falando aos poucos, enquanto conversa com o cliente. Os itens ainda NÃO foram enviados.
+- Item falado sem número de mesa → use "mesa": ${mesaPadrao}.
+- Ignore conversa que não é pedido (ex: "deixa eu ver", "o que você recomenda", "hmm"): responda {"tipo":"pedido","pedidos":[]}.
+- Se ele pedir pra MUDAR/TIRAR algo da LISTA ATUAL abaixo (ex: "tira o chopp", "na verdade são dois", "um deles sem cebola", "esquece a coca"), NÃO é cancelamento: responda
+  {"tipo":"ajusteComanda","acoes":[{"acao":"remover","indice":2},{"acao":"quantidade","indice":1,"quantidade":2},{"acao":"obs","indice":3,"obs":"sem cebola"}]}
+  usando o NÚMERO do item na LISTA ATUAL. Pode misturar com itens novos usando "multiplo".
+LISTA ATUAL (ainda não enviada):
+${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') : '(vazia)'}
+
+`
+      : '';
     const mesasClientes = Array.isArray(body.mesasClientes) ? body.mesasClientes.slice(0, 60) : [];
     const blocoClientes = mesasClientes.length
       ? 'CLIENTES NAS MESAS ABERTAS AGORA (pra entender "pro Fernando" sem o número da mesa):\n' +
@@ -903,14 +920,14 @@ SE FOR CANCELAMENTO:
   confere o que realmente está na conta daquela mesa.)
 - Cada combinação mesa+item é um objeto separado.
 
-${blocoClientes}CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
+${blocoComanda}${blocoClientes}CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
 ${listaCardapio}${listaPausados ? `\n\nITENS PAUSADOS AGORA (NUNCA use em PEDIDO — só pra "voltou"/liberar):\n${listaPausados}` : ''}
 ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
 
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
-    const rapido = _interpretarRapido(texto, cardapioCompleto, cardapioKg, kgPadrao);
+    const rapido = _interpretarRapido(texto, cardapioCompleto, cardapioKg, kgPadrao, mesaPadrao);
     if (rapido) console.log('[assistente-garcom] atalho local (sem IA): ' + texto);
     const r1 = rapido ? { ok: true, texto: JSON.stringify(rapido) } : await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
     if (!r1.ok) {
@@ -932,7 +949,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
     if (parsed.tipo === 'pedido') {
       const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
       const resultado = brutos.map((p) => {
-        const mesa = parseInt(p.mesa, 10);
+        const mesa = parseInt(p.mesa, 10) || mesaPadrao || NaN;
         if (isNaN(mesa)) return null;
         const cliente = (p.cliente || '').toString().trim().slice(0, 40);
 
@@ -1117,6 +1134,13 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
       return ({ ok: true, tipo: 'cancelamento', itens: resultado });
     }
 
+    if (parsed.tipo === 'ajusteComanda') {
+      const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : []).map((a) => ({
+        acao: String(a.acao || ''), indice: parseInt(a.indice, 10) || 0,
+        quantidade: parseInt(a.quantidade, 10) || null, obs: (a.obs || '').toString().slice(0, 140),
+      })).filter((a) => a.indice > 0 && ['remover', 'quantidade', 'obs'].indexOf(a.acao) >= 0);
+      return ({ ok: true, tipo: 'ajusteComanda', acoes });
+    }
     if (parsed.tipo === 'lembrete') {
       const min = Math.max(1, Math.min(240, parseInt(parsed.minutos, 10) || 5));
       return ({ ok: true, tipo: 'lembrete', minutos: min, texto: (parsed.texto || '').toString().trim().slice(0, 160) });

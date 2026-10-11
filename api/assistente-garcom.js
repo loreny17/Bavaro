@@ -436,6 +436,7 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao, mesaPadrao) {
   let t = _normTxt(texto).replace(/[!?.]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 120) return null;
   // verbos de "lançar" no começo
+  t = t.replace(/^(e mais|mais|e)\s+/, '');
   t = t.replace(/^(lanca|lance|manda|mande|traz|traga|poe|coloca|bota|desce|pede|pedido de|pedido)\s+/, '');
   // qualquer palavra de outra ação → deixa pra IA
   if (/\b(cancel|tira|troc|transf|passa|muda|fecha|conta|quanto|acabou|voltou|pausa|avisa|recado|repet|rodada|igual|mesma|nome|cliente|pra o|pro |bem |mal |obs|separad|depois|tambem|gelad|quente)/.test(t)) return null;
@@ -465,7 +466,7 @@ function _interpretarRapido(texto, cardapio, cardapioKg, kgPadrao, mesaPadrao) {
   for (let i = pedidos.length - 1, ultima = null; i >= 0; i--) {
     if (pedidos[i].mesa) ultima = pedidos[i].mesa; else pedidos[i].mesa = ultima;
   }
-  if (mesaPadrao) pedidos.forEach((p) => { if (!p.mesa) p.mesa = mesaPadrao; });
+  if (mesaPadrao) pedidos.forEach((p) => { if (!p.mesa) { p.mesa = mesaPadrao; p._doFoco = true; } });
   if (pedidos.some((p) => !p.mesa)) return null;
   return { tipo: 'pedido', pedidos };
 }
@@ -587,7 +588,7 @@ module.exports = async (req, res) => {
     }
   }
   const texto = (body.texto || '').toString().trim();
-  const historico = Array.isArray(body.historico) ? body.historico.slice(-12) : [];
+  const historico = Array.isArray(body.historico) ? body.historico.slice(-24) : [];
 
   if (!texto) return res.status(400).json({ ok: false, error: 'Falta o texto' });
 
@@ -655,6 +656,21 @@ ${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') 
 
 `
       : '';
+    // ── Memória da conversa: rascunho na tela (ainda não confirmado) e mesa em foco
+    const rascunho = body.rascunho && Array.isArray(body.rascunho.itens) ? body.rascunho.itens.slice(0, 30) : [];
+    const mesaFoco = parseInt(body.mesaEmFoco, 10) || null;
+    const blocoRascunho = (rascunho.length && !modoComanda)
+      ? `RASCUNHO NA TELA (mostrado ao funcionário, AINDA NÃO CONFIRMADO):
+${rascunho.map((t, i) => `${i + 1}. ${t}`).join('\n')}
+- Se ele pedir pra MUDAR este rascunho ("muda pra 3", "tira a coca", "a picanha é mal passada", "na verdade era o IPA", "era na mesa 8"), NÃO crie pedido novo: responda
+  {"tipo":"ajusteComanda","acoes":[{"acao":"quantidade","indice":1,"quantidade":3},{"acao":"remover","indice":2},{"acao":"obs","indice":1,"obs":"mal passada"},{"acao":"trocar","indice":1,"itemIdNovo":"id-do-IPA"},{"acao":"mesa","indice":1,"mesa":8}]}
+  com o NÚMERO do item no rascunho (para "todos", repita a ação pra cada índice). Item NOVO ("e mais uma coca") é PEDIDO normal.
+
+`
+      : '';
+    const blocoFoco = (mesaFoco && !modoComanda)
+      ? `MESA EM FOCO NA CONVERSA: ${mesaFoco}. Se o funcionário não disser a mesa e o contexto indicar que é a mesma ("e mais uma coca", "pra ela uma salada", "fecha ela"), use a mesa ${mesaFoco}.\n\n`
+      : '';
     const mesasClientes = Array.isArray(body.mesasClientes) ? body.mesasClientes.slice(0, 60) : [];
     const blocoClientes = mesasClientes.length
       ? 'CLIENTES NAS MESAS ABERTAS AGORA (pra entender "pro Fernando" sem o número da mesa):\n' +
@@ -671,8 +687,9 @@ ${listaComanda.length ? listaComanda.map((t, i) => `${i + 1}. ${t}`).join('\n') 
     const blocoHistorico = historico.length
       ? '\n\nHISTÓRICO RECENTE DESTA CONVERSA (mais antigo primeiro):\n' +
         historico.map((h) => `${h.autor === 'usuario' ? 'Funcionário' : h.autor === 'sistema' ? 'Sistema' : 'Você'}: ${h.texto}`).join('\n') +
-        '\n\nUse este histórico SÓ pra entender referências à troca anterior ' +
-        '(ex: "muda pra 3", "na verdade era o IPA", "cancela aquele"). Nunca ' +
+        '\n\nUse este histórico pra entender o CONTEXTO: referências ("muda pra 3", ' +
+        '"na verdade era o IPA", "cancela aquele", "a mesma coisa pra ele"), de qual mesa ' +
+        'e de qual cliente se está falando, e o que já foi feito. Nunca ' +
         'repita uma ação que o histórico já mostra como CONFIRMADA — se o ' +
         'funcionário só comentar sobre algo já confirmado, trate como ' +
         'PERGUNTA, não como novo pedido/cancelamento.'
@@ -950,14 +967,14 @@ SE FOR CANCELAMENTO:
   confere o que realmente está na conta daquela mesa.)
 - Cada combinação mesa+item é um objeto separado.
 
-${blocoComanda}${blocoClientes}CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
+${blocoComanda}${blocoRascunho}${blocoFoco}${blocoClientes}CARDÁPIO DISPONÍVEL (pra uso em PEDIDO):
 ${listaCardapio}${listaPausados ? `\n\nITENS PAUSADOS AGORA (NUNCA use em PEDIDO — só pra "voltou"/liberar):\n${listaPausados}` : ''}
 ${listaCardapioKg ? `\nCARDÁPIO POR KG (pratos pesados — ver regras de ITEM POR KG acima):\n${listaCardapioKg}` : ''}${blocoHistorico}
 
 TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico acima só como apoio):
 "${texto}"`;
 
-    const rapido = _interpretarRapido(texto, cardapioCompleto, cardapioKg, kgPadrao, mesaPadrao);
+    const rapido = _interpretarRapido(texto, cardapioCompleto, cardapioKg, kgPadrao, mesaPadrao || (!/\d/.test(texto) ? mesaFoco : null));
     if (rapido) console.log('[assistente-garcom] atalho local (sem IA): ' + texto);
     const r1 = rapido ? { ok: true, texto: JSON.stringify(rapido) } : await textoDoGemini(apiKey, [{ text: promptEtapa1 }], 1500);
     if (!r1.ok) {
@@ -979,7 +996,9 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
     if (parsed.tipo === 'pedido') {
       const brutos = Array.isArray(parsed.pedidos) ? parsed.pedidos : [];
       const resultado = brutos.map((p) => {
-        const mesa = parseInt(p.mesa, 10) || mesaPadrao || NaN;
+        const semNumero = !/\d/.test(texto);
+        const mesaVeioDoFoco = !parseInt(p.mesa, 10) && !mesaPadrao && semNumero && !!mesaFoco;
+        const mesa = parseInt(p.mesa, 10) || mesaPadrao || (mesaVeioDoFoco ? mesaFoco : NaN);
         if (isNaN(mesa)) return null;
         const cliente = (p.cliente || '').toString().trim().slice(0, 40);
 
@@ -1018,7 +1037,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
             alerta = 'Valor muito baixo: R$ ' + valorTotal.toFixed(2).replace('.', ',') + ' — confira';
           }
           return {
-            mesa, cliente, tipoVenda: 'kg', encontrado: true,
+            mesa, cliente, tipoVenda: 'kg', encontrado: true, mesaDoContexto: mesaVeioDoFoco || !!p._doFoco,
             itemId: itemKg.id, itemNome: itemKg.nome,
             precoBase: itemKg.precoPorKg, peso: pesoGramas, itemPreco: valorTotal,
             alerta, sugestaoValor,
@@ -1060,7 +1079,7 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
         }
         const precoBaseU = item ? item.preco : null;
         return {
-          mesa, cliente, quantidade: qtd,
+          mesa, cliente, quantidade: qtd, mesaDoContexto: mesaVeioDoFoco || !!p._doFoco,
           itemId: item ? item.id : null,
           itemNome: item ? item.nome : null,
           // preço unitário embute os adicionais (igual ao lançamento manual:
@@ -1165,10 +1184,16 @@ TEXTO (mensagem ATUAL do funcionário — interprete este, usando o histórico a
     }
 
     if (parsed.tipo === 'ajusteComanda') {
-      const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : []).map((a) => ({
-        acao: String(a.acao || ''), indice: parseInt(a.indice, 10) || 0,
-        quantidade: parseInt(a.quantidade, 10) || null, obs: (a.obs || '').toString().slice(0, 140),
-      })).filter((a) => a.indice > 0 && ['remover', 'quantidade', 'obs'].indexOf(a.acao) >= 0);
+      const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : []).map((a) => {
+        const novo = a.itemIdNovo ? cardapioCompleto.find((c) => c.id === a.itemIdNovo) : null;
+        return {
+          acao: String(a.acao || ''), indice: parseInt(a.indice, 10) || 0,
+          quantidade: parseInt(a.quantidade, 10) || null, obs: (a.obs || '').toString().slice(0, 140),
+          mesa: parseInt(a.mesa, 10) || null,
+          itemIdNovo: novo ? novo.id : null, itemNomeNovo: novo ? novo.nome : null, itemPrecoNovo: novo ? novo.preco : null,
+        };
+      }).filter((a) => a.indice > 0 && ['remover', 'quantidade', 'obs', 'trocar', 'mesa'].indexOf(a.acao) >= 0)
+        .filter((a) => (a.acao !== 'trocar' || a.itemIdNovo) && (a.acao !== 'mesa' || a.mesa));
       return ({ ok: true, tipo: 'ajusteComanda', acoes });
     }
     if (parsed.tipo === 'lembrete') {

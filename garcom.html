@@ -19774,25 +19774,43 @@ function executarAssistenteGarcom(){
   if(!texto) return;
   // "confirma" / "pode mandar": confirma o que está na tela, sem ir ao servidor
   if(_ehConfirmacaoVoz(texto) && _confirmarPendenteBox()){ input.value = ''; return; }
+  if(/^(nova conversa|esquece( tudo| a conversa)?|limpa a conversa|comecar de novo)$/.test(_normNome(texto).replace(/[!.?,]+/g,'').trim())){
+    _limparMemoria(); input.value = '';
+    document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">🧹 Pronto, comecei uma conversa nova.</div>';
+    return;
+  }
   var cmdAuto = _comandoAutoEnvio(texto);
   if(cmdAuto){ input.value = ''; document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + cmdAuto + '</div>'; return; }
   _cancelarAutoEnvio();
+  var _historicoBox = _chatContexto.slice();
+  var _ctxPrevio = _contextoAssistente(); // captura o rascunho ANTES de limpar a tela
+  _chatAdicionarContexto('usuario', texto);
   var caixa = document.getElementById('resposta-assistente-garcom');
+  var _rascunhoAntes = _ctxPrevio && _ctxPrevio.rascunho ? caixa.innerHTML : null;
   caixa.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Pensando...</div>';
-  _draftsPedidoIA = [];
 
   fetch('/api/assistente-garcom', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(Object.assign({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto }, _contextoAssistente()))
+    body: JSON.stringify(Object.assign({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto, historico: _historicoBox }, _ctxPrevio))
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + (j.detalhe ? '<div style="font-size:0.62rem;color:var(--muted);margin-top:5px;word-break:break-word;">' + esc(j.detalhe) + '</div>' : '') + '</div>';
       return;
     }
+    if(j.tipo === 'ajusteComanda'){
+      var msgAj = _aplicarAjusteRascunho(j);
+      if(!_rascunhoEnviado) caixa.innerHTML = '<div style="font-size:0.84rem;">' + esc(msgAj) + '</div>';
+      else { var aviso = document.createElement('div'); aviso.style.cssText = 'font-size:0.78rem;color:#60a5fa;margin-top:6px;'; aviso.textContent = msgAj; caixa.appendChild(aviso); }
+      input.value = '';
+      _chatAdicionarContexto('assistente', msgAj);
+      return;
+    }
+    if(j.tipo !== 'multiplo') _draftsPedidoIA = [];
     if(j.tipo === 'pedido'){
       _draftsPedidoIA = _prepararDrafts(_marcarEsgotados((j.pedidos||[]).map(function(p, i){ p._idx = i; p._selecionado = p.encontrado; return p; })));
       _renderDraftsPedidoIA();
+      _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + _draftsPedidoIA.map(function(p){ return p.encontrado ? _textoDraft(p) : ('não reconheci "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa); }).join('; '));
       if(_podeAutoEnviar(j, _draftsPedidoIA)) _iniciarAutoEnvioBox();
     } else if(j.tipo === 'multiplo'){
       // Várias ações: mostra no chat, que comporta uma confirmação embaixo da outra
@@ -19960,6 +19978,7 @@ function confirmarEnviarPedidosIA(){
 }
 
 function _mostrarResultadoPedidosIA(resultados){
+  try{ _chatAdicionarContexto('sistema', 'Pedido já foi CONFIRMADO E ENVIADO: ' + resultados.map(function(r){ return 'Mesa ' + r.mesa + (r.ok ? (r.numero ? ' #' + r.numero : '') + ' ok' : ' erro'); }).join('; ')); }catch(e){}
   // Limpa o texto digitado — a caixa de busca não deve ficar com o comando
   // antigo depois de já ter sido executado, fica pronta pro próximo.
   var inputEl = document.getElementById('input-assistente-garcom');
@@ -20764,7 +20783,10 @@ function _contextoAssistente(){
       if(lista.length) mesas.push({ mesa: parseInt(c.mesa,10) || c.mesa, nomes: lista.slice(0, 8) });
     });
   }catch(e){}
-  return { garcom: _nomeGarcom || '', mesasClientes: mesas.slice(0, 60), indisponiveis: _idsIndisponiveisAssistente() };
+  var r = _rascunhoPendente();
+  _rascunhoEnviado = r;
+  return { garcom: _nomeGarcom || '', mesasClientes: mesas.slice(0, 60), indisponiveis: _idsIndisponiveisAssistente(),
+    mesaEmFoco: _mesaEmFoco || null, rascunho: r ? { itens: r.itens } : null };
 }
 
 // ════════════════════════════════════════
@@ -20808,7 +20830,7 @@ var AUTO_ENVIO_SEG = 5;
 var _autoEnvioTimer = null;
 function _autoEnvioLigado(){ try{ return localStorage.getItem('assistente_auto_envio') !== '0'; }catch(e){ return true; } }
 function _podeAutoEnviar(j, itens){
-  return _autoEnvioLigado() && j && j.rapido && (itens||[]).length && itens.every(function(p){ return p.encontrado && p._selecionado && !p.alerta; });
+  return _autoEnvioLigado() && j && j.rapido && (itens||[]).length && itens.every(function(p){ return p.encontrado && p._selecionado && !p.alerta && !p.mesaDoContexto; });
 }
 function _cancelarAutoEnvio(){
   if(_autoEnvioTimer){ clearInterval(_autoEnvioTimer); _autoEnvioTimer = null; }
@@ -21110,6 +21132,68 @@ function _enviarRecadoLoja(ctxId){
     showToast('❌ Não enviou: ' + e.message, '#f87171', 5000);
     if(ctxId === 'box'){ var c2 = document.getElementById('resposta-assistente-garcom'); if(c2) c2.innerHTML = _htmlRecadoLoja(ctx, 'box'); } else renderChatMensagens(true);
   });
+}
+
+// ════════════════════════════════════════
+//  RASCUNHO NA TELA: "muda pra 3", "tira a coca", "na verdade era o IPA"
+//  corrigem o cartão que ainda não foi confirmado.
+// ════════════════════════════════════════
+var _rascunhoEnviado = null;
+function _textoDraft(p){
+  var sel = (p.selecoes||[]).map(function(x){ return x.opcao; }).join(', ');
+  return (p.tipoVenda === 'kg' ? '⚖️ ' + p.itemNome + ' R$ ' + fmtPreco(p.itemPreco||0) : (p.quantidade||1) + 'x ' + p.itemNome) +
+    ' — Mesa ' + p.mesa + (sel ? ' (+ ' + sel + ')' : '') + (p.obs ? ' [' + p.obs + ']' : '') + (p.cliente ? ' · ' + p.cliente : '');
+}
+function _rascunhoPendente(){
+  var tela = document.getElementById('tela-chat-assistente');
+  if(tela && tela.style.display === 'flex'){
+    for(var i = _chatHistorico.length - 1; i >= 0; i--){
+      var m = _chatHistorico[i];
+      if(m.tipo === 'pedido' && !m.enviado && !m.enviando){
+        var refs = m.itens.filter(function(p){ return p.encontrado; });
+        return refs.length ? { origem: m.id, refs: refs, itens: refs.map(_textoDraft) } : null;
+      }
+      if(m.tipo === 'pedido') return null;
+    }
+    return null;
+  }
+  var b = document.getElementById('btn-confirmar-pedidos-ia');
+  if(b && !b.disabled && (_draftsPedidoIA||[]).length){
+    var refsB = _draftsPedidoIA.filter(function(p){ return p.encontrado; });
+    return refsB.length ? { origem: 'box', refs: refsB, itens: refsB.map(_textoDraft) } : null;
+  }
+  return null;
+}
+function _aplicarAjusteRascunho(j){
+  var r = _rascunhoEnviado;
+  if(!r || !r.refs.length) return 'Não tem nenhum pedido na tela pra eu ajustar.';
+  var remover = [], feitos = [];
+  (j.acoes||[]).forEach(function(a){
+    var p = r.refs[a.indice - 1]; if(!p) return;
+    if(a.acao === 'remover'){ remover.push(p); feitos.push('tirei ' + p.itemNome); }
+    else if(a.acao === 'quantidade' && a.quantidade > 0 && p.tipoVenda !== 'kg'){
+      var base = (typeof p.precoBase === 'number') ? p.precoBase : (p.itemPreco||0);
+      p.quantidade = a.quantidade;
+      p.itemPreco = Math.round(((base * a.quantidade + (p.extras||0)) / a.quantidade) * 100) / 100;
+      feitos.push(p.itemNome + ' → ' + a.quantidade + 'x');
+    } else if(a.acao === 'obs' && a.obs){ p.obs = [p.obs, a.obs].filter(Boolean).join(', '); feitos.push(p.itemNome + ': ' + a.obs); }
+    else if(a.acao === 'trocar' && a.itemIdNovo){
+      var antes = p.itemNome;
+      p.itemId = a.itemIdNovo; p.itemNome = a.itemNomeNovo; p.precoBase = a.itemPrecoNovo || 0; p.extras = 0; p.selecoes = [];
+      p.itemPreco = a.itemPrecoNovo || 0; p.tipoVenda = 'unidade';
+      feitos.push(antes + ' → ' + a.itemNomeNovo);
+    } else if(a.acao === 'mesa' && a.mesa){ p.mesa = a.mesa; p.mesaDoContexto = false; feitos.push(p.itemNome + ' → Mesa ' + a.mesa); }
+  });
+  if(r.origem === 'box'){
+    _draftsPedidoIA = _draftsPedidoIA.filter(function(p){ return remover.indexOf(p) < 0; });
+    _draftsPedidoIA.forEach(function(p, i){ p._idx = i; });
+    _cancelarAutoEnvio();
+    _renderDraftsPedidoIA();
+  } else {
+    var m = _chatHistorico.find(function(x){ return x.id === r.origem; });
+    if(m){ m.itens = m.itens.filter(function(p){ return remover.indexOf(p) < 0; }); m.autoAte = null; }
+  }
+  return feitos.length ? ('✏️ Ajustei: ' + feitos.join('; ') + '. Confirma?') : 'Não consegui aplicar esse ajuste — corrija na tela.';
 }
 function _montarRepeticao(r){
   if(!r.mesa) return Promise.reject(new Error('Não entendi qual mesa'));
@@ -21566,10 +21650,32 @@ var _reconhecimentoVozChat = null;
 // Acrescenta uma troca no contexto enxuto e mantém só as últimas 12
 // entradas (6 idas e vindas) — suficiente pra entender referência à
 // pergunta anterior, sem deixar a mensagem enviada pro servidor enorme.
-function _chatAdicionarContexto(autor, texto){
-  _chatContexto.push({ autor: autor, texto: texto });
-  if(_chatContexto.length > 12) _chatContexto = _chatContexto.slice(-12);
+// Memória da conversa: compartilhada entre a caixinha e o chat, guardada no
+// aparelho por 30 min sem uso (fechar o chat não apaga mais).
+var MEMORIA_MIN = 30;
+var _mesaEmFoco = null;
+function _salvarMemoria(){
+  try{ localStorage.setItem('assistente_memoria', JSON.stringify({ em: Date.now(), itens: _chatContexto, mesa: _mesaEmFoco })); }catch(e){}
 }
+function _restaurarMemoria(){
+  try{
+    var m = JSON.parse(localStorage.getItem('assistente_memoria') || 'null');
+    if(m && (Date.now() - (m.em||0)) < MEMORIA_MIN * 60000){ _mesaEmFoco = m.mesa || null; return m.itens || []; }
+  }catch(e){}
+  _mesaEmFoco = null;
+  return [];
+}
+function _limparMemoria(){ _chatContexto = []; _mesaEmFoco = null; try{ localStorage.removeItem('assistente_memoria'); }catch(e){} }
+function _chatAdicionarContexto(autor, texto){
+  texto = String(texto || '');
+  _chatContexto.push({ autor: autor, texto: texto });
+  if(_chatContexto.length > 24) _chatContexto = _chatContexto.slice(-24);
+  // Mesa em foco = a última mesa citada na conversa
+  var ms = texto.match(/\b(?:mesa|na|da|pra|para a|no)\s+(\d{1,3})\b/gi);
+  if(ms && ms.length){ var n = parseInt(ms[ms.length - 1].replace(/\D+/g, ''), 10); if(n) _mesaEmFoco = n; }
+  _salvarMemoria();
+}
+setTimeout(function(){ try{ _chatContexto = _restaurarMemoria(); }catch(e){} }, 0);
 
 function _novoIdChat(){ return 'm' + (++_chatIdContador) + '_' + Date.now(); }
 
@@ -21590,7 +21696,8 @@ function abrirChatAssistente(){
   // Conversa sempre começa do zero — evita o histórico crescer pra sempre
   // e ficar pesado/confuso depois de um tempo de uso.
   _chatHistorico = [];
-  _chatContexto = [];
+  _chatContexto = _restaurarMemoria();
+  if(_chatContexto.length) _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html:'<div style="font-size:0.74rem;color:var(--muted);">🧠 Lembro da nossa conversa dos últimos minutos' + (_mesaEmFoco ? ' (mesa em foco: ' + _mesaEmFoco + ')' : '') + '. Diga <b>“nova conversa”</b> pra começar do zero.</div>' });
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
     texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém, criar lembretes, ver seu resumo do dia, traduzir pra cliente estrangeiro ou tirar dúvidas de produto. Depois de um pedido, é só falar "confirma".' });
   renderChatMensagens();
@@ -21888,6 +21995,13 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   var input = document.getElementById('input-chat-assistente');
   var texto = (typeof textoForcado === 'string' && textoForcado) ? textoForcado : input.value.trim();
   if(!texto) return;
+  if(!respostaPronta && /^(nova conversa|esquece( tudo| a conversa)?|limpa a conversa|comecar de novo)$/.test(_normNome(texto).replace(/[!.?,]+/g,'').trim())){
+    input.value = '';
+    _limparMemoria();
+    _chatHistorico = [{ id:_novoIdChat(), tipo:'texto-assistente', texto:'🧹 Pronto, conversa nova. Em que posso ajudar?' }];
+    renderChatMensagens();
+    return;
+  }
   if(!respostaPronta){
     var cmdAutoC = _comandoAutoEnvio(texto);
     if(cmdAutoC){
@@ -21968,6 +22082,11 @@ function enviarMensagemChat(textoForcado, respostaPronta){
         _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:'Erro ao buscar a conta: ' + e.message });
         renderChatMensagens();
       });
+    } else if(j.tipo === 'ajusteComanda'){
+      var msgAjC = _aplicarAjusteRascunho(j);
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto: msgAjC });
+      _chatAdicionarContexto('assistente', msgAjC);
+      renderChatMensagens();
     } else if(j.tipo === 'recadoLoja'){
       _montarRecadoLoja(j).then(function(r){
         _chatHistorico.push(Object.assign({ id:_novoIdChat(), tipo:'recadoLoja' }, r));

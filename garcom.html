@@ -1133,8 +1133,8 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       </div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="input-assistente-garcom" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:0.86rem;outline:none;" oninput="if(!this.value.trim())_limparAssistenteGarcom()" onkeydown="if(event.key==='Enter')executarAssistenteGarcom()">
-        <button id="btn-balanca-box" onclick="_bzAbrir()" title="Balança"
-          style="position:relative;flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">⚖️
+        <button id="btn-balanca-box" onclick="_bzAbrir()" title="Fila sem mesa"
+          style="position:relative;flex-shrink:0;width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">📥
           <span id="btn-balanca-box-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#fbbf24;color:#000;font-size:0.66rem;font-weight:800;align-items:center;justify-content:center;"></span>
         </button>
         <button onclick="executarAssistenteGarcom()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:0 15px;font-weight:800;">➤</button>
@@ -19789,6 +19789,18 @@ function executarAssistenteGarcom(){
   }
   var cmdAuto = _comandoAutoEnvio(texto);
   if(cmdAuto){ input.value = ''; document.getElementById('resposta-assistente-garcom').innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + cmdAuto + '</div>'; return; }
+  var _cmdFila = (typeof _bzExecutarComando === 'function') ? _bzExecutarComando(texto) : null;
+  if(_cmdFila){
+    input.value = '';
+    var _cxF = document.getElementById('resposta-assistente-garcom');
+    _cxF.innerHTML = '<div style="font-size:0.8rem;color:var(--muted);">Lançando da fila...</div>';
+    _cmdFila.then(function(h){
+      _cxF.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + esc(h) + '</div>';
+      _chatAdicionarContexto('usuario', texto); _chatAdicionarContexto('assistente', h);
+      if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+    });
+    return;
+  }
   _cancelarAutoEnvio();
   var _historicoBox = _chatContexto.slice();
   var _ctxPrevio = _contextoAssistente(); // captura o rascunho ANTES de limpar a tela
@@ -19915,21 +19927,21 @@ function _renderDraftsPedidoIA(){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(248,113,113,0.35);background:rgba(248,113,113,0.06);border-radius:9px;margin-bottom:7px;">' +
         '<span style="font-size:1rem;">⚠️</span>' +
-        '<div style="flex:1;font-size:0.8rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — Mesa ' + p.mesa + _htmlCandidatos(p, 'box', p._idx)) + '</div>' +
+        '<div style="flex:1;font-size:0.8rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — ' + _rotMesa(p) : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — ' + _rotMesa(p) + _htmlCandidatos(p, 'box', p._idx)) + '</div>' +
       '</div>';
     }
     if(p.tipoVenda === 'kg'){
       var pesoHtml = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
+        '<div style="flex:1;font-size:0.84rem;">⚖️ ' + esc(p.itemNome) + pesoHtml + ' — ' + _rotMesa(p) + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
         '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = (p.obs ? '<div style="font-size:0.72rem;color:#f7a34f;margin-top:2px;">📝 ' + esc(p.obs) + '</div>' : '') + _htmlSelecoesDraft(p);
     return '<label style="display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border2);background:var(--surface2);border-radius:9px;margin-bottom:7px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_draftsPedidoIA[' + p._idx + ']._selecionado=this.checked;_atualizarBotaoConfirmarIA()" style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
+      '<div style="flex:1;font-size:0.84rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — ' + _rotMesa(p) + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, 'box', p._idx) + '</div>' +
       '<div style="font-size:0.78rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -19958,11 +19970,12 @@ function confirmarEnviarPedidosIA(){
 
   var porMesa = {};
   selecionados.forEach(function(p){
-    if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
+    var _m = p.mesa || 'fila'; // sem mesa → fila
+    if(!porMesa[_m]) porMesa[_m] = [];
     if(p.tipoVenda === 'kg'){
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
+      porMesa[_m].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
+      porMesa[_m].push({ id: p.itemId, nome: p.itemNome, preco: p.itemPreco, qtd: p.quantidade, obs: p.obs || '', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
     }
   });
   var mesas = Object.keys(porMesa);
@@ -19974,7 +19987,7 @@ function confirmarEnviarPedidosIA(){
       return;
     }
     var mesaNum = mesas[i];
-    _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum]).then(function(numeroSequencial){
+    (mesaNum === 'fila' ? _bzGuardarItens(porMesa[mesaNum]).then(function(t){ return t.numero || null; }) : _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum])).then(function(numeroSequencial){
       resultados.push({mesa: mesaNum, ok: true, numero: numeroSequencial});
       processarProxima(i+1);
     }).catch(function(e){
@@ -19986,7 +19999,7 @@ function confirmarEnviarPedidosIA(){
 }
 
 function _mostrarResultadoPedidosIA(resultados){
-  try{ _chatAdicionarContexto('sistema', 'Pedido já foi CONFIRMADO E ENVIADO: ' + resultados.map(function(r){ return 'Mesa ' + r.mesa + (r.ok ? (r.numero ? ' #' + r.numero : '') + ' ok' : ' erro'); }).join('; ')); }catch(e){}
+  try{ _chatAdicionarContexto('sistema', 'Pedido já foi CONFIRMADO E ENVIADO: ' + resultados.map(function(r){ return r.mesa === 'fila' ? ('Guardado na FILA SEM MESA' + (r.numero ? ' #' + r.numero : '') + (r.ok ? '' : ' (erro)')) : 'Mesa ' + r.mesa + (r.ok ? (r.numero ? ' #' + r.numero : '') + ' ok' : ' erro'); }).join('; ')); }catch(e){}
   // Limpa o texto digitado — a caixa de busca não deve ficar com o comando
   // antigo depois de já ter sido executado, fica pronta pro próximo.
   var inputEl = document.getElementById('input-assistente-garcom');
@@ -19994,8 +20007,8 @@ function _mostrarResultadoPedidosIA(resultados){
   var caixa = document.getElementById('resposta-assistente-garcom');
   caixa.innerHTML = resultados.map(function(r){
     return r.ok
-      ? '<div style="padding:9px 10px;border-radius:9px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.82rem;margin-bottom:6px;">✓ Mesa ' + r.mesa + (r.numero?' — pedido #'+r.numero:'') + ' enviado</div>'
-      : '<div style="padding:9px 10px;border-radius:9px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.82rem;margin-bottom:6px;">❌ Mesa ' + r.mesa + ': ' + esc(r.erro) + '</div>';
+      ? '<div style="padding:9px 10px;border-radius:9px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.82rem;margin-bottom:6px;">' + (r.mesa === 'fila' ? '' : '✓ ') + esc(_txtResultadoIA(r)) + '</div>'
+      : '<div style="padding:9px 10px;border-radius:9px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;font-size:0.82rem;margin-bottom:6px;">❌ ' + (r.mesa === 'fila' ? 'Fila' : 'Mesa ' + r.mesa) + ': ' + esc(r.erro) + '</div>';
   }).join('');
   if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
   var algumSucesso = resultados.some(function(r){ return r.ok; });
@@ -21150,7 +21163,7 @@ var _rascunhoEnviado = null;
 function _textoDraft(p){
   var sel = (p.selecoes||[]).map(function(x){ return x.opcao; }).join(', ');
   return (p.tipoVenda === 'kg' ? '⚖️ ' + p.itemNome + ' R$ ' + fmtPreco(p.itemPreco||0) : (p.quantidade||1) + 'x ' + p.itemNome) +
-    ' — Mesa ' + p.mesa + (sel ? ' (+ ' + sel + ')' : '') + (p.obs ? ' [' + p.obs + ']' : '') + (p.cliente ? ' · ' + p.cliente : '');
+    ' — ' + _rotMesa(p) + (sel ? ' (+ ' + sel + ')' : '') + (p.obs ? ' [' + p.obs + ']' : '') + (p.cliente ? ' · ' + p.cliente : '');
 }
 function _rascunhoPendente(){
   var tela = document.getElementById('tela-chat-assistente');
@@ -21636,7 +21649,7 @@ function _lancarPedidoEmMesa(mesaNum, itensCarrinho, opcoes){
   <div style="padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
     <div style="display:flex;gap:8px;">
       <input type="text" id="input-chat-assistente" placeholder="Pergunte, peça ou cancele um item..." style="flex:1;min-width:0;background:var(--surface2);border:1.5px solid var(--border2);border-radius:22px;padding:11px 16px;color:var(--text);font-size:0.9rem;outline:none;" onkeydown="if(event.key==='Enter')enviarMensagemChat()">
-      <button id="btn-balanca-chat" onclick="_bzAbrirDoChat()" title="Balança" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">⚖️</button>
+      <button id="btn-balanca-chat" onclick="_bzAbrirDoChat()" title="Fila sem mesa" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.15rem;">📥</button>
       <button onclick="enviarMensagemChat()" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--accent);color:#000;border:none;font-size:1.1rem;cursor:pointer;">➤</button>
     </div>
   </div>
@@ -21709,7 +21722,7 @@ function abrirChatAssistente(){
   _chatContexto = _restaurarMemoria();
   if(_chatContexto.length) _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html:'<div style="font-size:0.74rem;color:var(--muted);">🧠 Lembro da nossa conversa dos últimos minutos' + (_mesaEmFoco ? ' (mesa em foco: ' + _mesaEmFoco + ')' : '') + '. Diga <b>“nova conversa”</b> pra começar do zero.</div>' });
   _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente',
-    texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém, criar lembretes, ver seu resumo do dia, traduzir pra cliente estrangeiro ou tirar dúvidas de produto. Depois de um pedido, é só falar "confirma".' });
+    texto:'Oi! Pode lançar, repetir, cancelar, trocar ou transferir pedidos, ver quanto está uma mesa, avisar que um item acabou, fechar a conta de alguém, criar lembretes, ver seu resumo do dia, traduzir pra cliente estrangeiro ou tirar dúvidas de produto. Depois de um pedido, é só falar "confirma". Pedido SEM mesa (ex.: "prato de 15,14 mais 1 coca") fica na fila 📥 — depois diga "fila 3 na mesa 12".' });
   renderChatMensagens();
   setTimeout(function(){ var el=document.getElementById('input-chat-assistente'); if(el) el.focus(); }, 200);
 
@@ -21827,20 +21840,20 @@ function _renderMsgPedidoChat(msg){
   var linhas = msg.itens.map(function(p, i){
     if(!p.encontrado){
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);border-radius:8px;margin-bottom:6px;">' +
-        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — Mesa ' + p.mesa : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — Mesa ' + p.mesa + _htmlCandidatos(p, msg.id, i)) + '</div></div>';
+        '<span>⚠️</span><div style="flex:1;font-size:0.78rem;">' + (p.esgotado ? '⏸️ <b>' + esc(p.itemNome) + '</b> está esgotado (pausado) — ' + _rotMesa(p) : ((p.candidatos||[]).length ? 'Qual item é "' : 'Não reconheci "') + esc(p.nomeDigitado||'item') + '"? — ' + _rotMesa(p) + _htmlCandidatos(p, msg.id, i)) + '</div></div>';
     }
     if(p.tipoVenda === 'kg'){
       var pesoHtml2 = p.peso ? ' (' + p.peso + 'g)' : ' (valor informado)';
       return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
         '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
+        '<div style="flex:1;font-size:0.82rem;">⚖️ ' + esc(p.itemNome) + pesoHtml2 + ' — ' + _rotMesa(p) + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
         '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco(p.itemPreco||0) + '</div>' +
       '</label>';
     }
     var obsHtml = (p.obs ? '<div style="font-size:0.68rem;color:#f7a34f;margin-top:1px;">📝 ' + esc(p.obs) + '</div>' : '') + _htmlSelecoesDraft(p);
     return '<label style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--border2);background:var(--surface);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
       '<input type="checkbox" ' + (p._selecionado?'checked':'') + ' onchange="_chatTogglePedidoItem(\'' + msg.id + '\',' + i + ',this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">' +
-      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — Mesa ' + p.mesa + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
+      '<div style="flex:1;font-size:0.82rem;"><b>' + p.quantidade + 'x</b> ' + esc(p.itemNome) + ' — ' + _rotMesa(p) + (p.cliente ? ' · 👤 ' + esc(p.cliente) : '') + obsHtml + _htmlAlertaDraft(p, msg.id, i) + '</div>' +
       '<div style="font-size:0.76rem;color:var(--accent);font-weight:700;">R$ ' + fmtPreco((p.itemPreco||0)*p.quantidade) + '</div>' +
     '</label>';
   }).join('');
@@ -21876,11 +21889,12 @@ function _chatConfirmarPedido(msgId){
 
   var porMesa = {};
   selecionados.forEach(function(p){
-    if(!porMesa[p.mesa]) porMesa[p.mesa] = [];
+    var _m = p.mesa || 'fila'; // sem mesa → fila
+    if(!porMesa[_m]) porMesa[_m] = [];
     if(p.tipoVenda === 'kg'){
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
+      porMesa[_m].push({ id:p.itemId, nome:p.itemNome, tipoVenda:'kg', peso:p.peso||0, precoBase:p.precoBase||0, preco:p.itemPreco, cliente:p.cliente||'' });
     } else {
-      porMesa[p.mesa].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
+      porMesa[_m].push({ id:p.itemId, nome:p.itemNome, preco:p.itemPreco, qtd:p.quantidade, obs:p.obs||'', cliente:p.cliente||'', selecoes:p.selecoes||[], precoBase:p.precoBase, extras:p.extras||0 });
     }
   });
   var mesas = Object.keys(porMesa);
@@ -21890,7 +21904,7 @@ function _chatConfirmarPedido(msgId){
     if(i >= mesas.length){
       msg.enviado = true;
       var linhasResultado = resultados.map(function(r){
-        return { ok:r.ok, texto: 'Mesa ' + r.mesa + (r.ok ? (r.numero?' — pedido #'+r.numero:'') + ' enviado' : ': ' + r.erro) };
+        return { ok:r.ok, texto: r.ok ? _txtResultadoIA(r) : ((r.mesa === 'fila' ? 'Fila' : 'Mesa ' + r.mesa) + ': ' + r.erro) };
       });
       _chatHistorico.push({ id:_novoIdChat(), tipo:'resultado', linhas: linhasResultado });
       _chatAdicionarContexto('sistema', 'Pedido já foi CONFIRMADO E ENVIADO: ' + linhasResultado.map(function(l){ return l.texto; }).join('; '));
@@ -21899,7 +21913,7 @@ function _chatConfirmarPedido(msgId){
       return;
     }
     var mesaNum = mesas[i];
-    _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum]).then(function(numero){
+    (mesaNum === 'fila' ? _bzGuardarItens(porMesa[mesaNum]).then(function(t){ return t.numero || null; }) : _lancarPedidoEmMesa(mesaNum, porMesa[mesaNum])).then(function(numero){
       resultados.push({mesa:mesaNum, ok:true, numero:numero});
       processarProxima(i+1);
     }).catch(function(e){
@@ -22022,6 +22036,24 @@ function enviarMensagemChat(textoForcado, respostaPronta){
       return;
     }
   }
+  if(!respostaPronta && typeof _bzExecutarComando === 'function'){
+    var _cmdFilaC = _bzExecutarComando(texto);
+    if(_cmdFilaC){
+      input.value = '';
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
+      var _idCF = _novoIdChat();
+      _chatHistorico.push({ id:_idCF, tipo:'carregando' });
+      renderChatMensagens();
+      _cmdFilaC.then(function(h){
+        _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== _idCF; });
+        _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto:h });
+        _chatAdicionarContexto('usuario', texto); _chatAdicionarContexto('assistente', h);
+        renderChatMensagens();
+        if(typeof _refrescarMesasRapido === 'function') _refrescarMesasRapido();
+      });
+      return;
+    }
+  }
   if(!respostaPronta && _ehConfirmacaoVoz(texto)){
     input.value = '';
     _chatHistorico.push({ id:_novoIdChat(), tipo:'usuario', texto:texto });
@@ -22067,8 +22099,8 @@ function enviarMensagemChat(textoForcado, respostaPronta){
       // como contexto, pra entender "muda pra 3" se referindo a isto.
       var resumoPedido = itensPedido.map(function(p){
         if(!p.encontrado) return 'item não identificado: "' + (p.nomeDigitado||'') + '" - Mesa ' + p.mesa;
-        if(p.tipoVenda === 'kg') return p.itemNome + (p.peso?' ('+p.peso+'g)':'') + ' - R$ ' + fmtPreco(p.itemPreco||0) + ' - Mesa ' + p.mesa;
-        return p.quantidade + 'x ' + p.itemNome + ' - Mesa ' + p.mesa + (p.obs?' ('+p.obs+')':'');
+        if(p.tipoVenda === 'kg') return p.itemNome + (p.peso?' ('+p.peso+'g)':'') + ' - R$ ' + fmtPreco(p.itemPreco||0) + ' - ' + _rotMesa(p);
+        return p.quantidade + 'x ' + p.itemNome + ' - ' + _rotMesa(p) + (p.obs?' ('+p.obs+')':'');
       }).join('; ');
       _chatAdicionarContexto('assistente', 'Entendi este pedido (ainda não confirmado): ' + resumoPedido);
       renderChatMensagens();
@@ -22317,8 +22349,8 @@ function iniciarVozChatAssistente(){
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════
-     ⚖️ BALANÇA — tela de registro rápido do buffet (botão ⚖️ no lugar
-     do microfone). Ticket na fila não é venda; só vira pedido ao lançar.
+     ⚖️ BALANÇA / FILA SEM MESA — pedidos feitos no assistente sem mesa
+     ficam aqui até escolher a mesa. Ticket na fila não é venda.
 ═══════════════════════════════════════════════════════════════ -->
 <style>
   #tela-balanca{position:fixed;inset:0;z-index:999100;background:var(--bg);display:none;flex-direction:column;}
@@ -22326,7 +22358,7 @@ function iniciarVozChatAssistente(){
   .bz-voltar{width:40px;height:40px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:1.5rem;line-height:1;cursor:pointer;flex-shrink:0;font-family:inherit;}
   .bz-titulo{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--accent);letter-spacing:0.04em;line-height:1;}
   .bz-sync{font-size:0.66rem;margin-top:3px;font-weight:700;}
-  .bz-resumo{margin-left:auto;font-size:0.84rem;text-align:right;line-height:1.3;}
+  .bz-resumo{margin-left:auto;font-size:0.84rem;text-align:right;line-height:1.3;white-space:nowrap;}
   .bz-lista{flex:1;overflow-y:auto;padding:10px 12px 4px;-webkit-overflow-scrolling:touch;}
   .bz-t{display:flex;align-items:center;gap:9px;background:var(--surface);border:1.5px solid var(--border2);border-radius:13px;padding:10px 4px 10px 10px;margin-bottom:7px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
   .bz-t.bz-sel{border-color:var(--accent);background:rgba(212,168,67,0.11);}
@@ -22344,7 +22376,7 @@ function iniciarVozChatAssistente(){
   .bz-mais{background:none;border:none;color:var(--muted);font-size:1.3rem;padding:6px 10px;cursor:pointer;flex-shrink:0;}
   .bz-vazio{text-align:center;color:var(--muted);font-size:0.86rem;padding:34px 12px;line-height:1.6;}
   .bz-link{background:none;border:none;color:var(--muted);font-size:0.76rem;padding:2px 2px 9px;cursor:pointer;font-family:inherit;}
-  .bz-barra{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
+  .bz-barra{display:none;align-items:center;gap:10px;padding:9px 12px;padding-bottom:max(9px,env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
   .bz-b{background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:11px;padding:11px 14px;font-size:0.86rem;font-weight:700;cursor:pointer;font-family:inherit;}
   .bz-b:disabled{opacity:0.45;}
   .bz-b-pri{background:var(--accent);border-color:var(--accent);color:#000;}
@@ -22379,24 +22411,13 @@ function iniciarVozChatAssistente(){
   <div class="bz-top">
     <button class="bz-voltar" onclick="_bzFechar()" title="Voltar">‹</button>
     <div>
-      <div class="bz-titulo">⚖️ BALANÇA</div>
+      <div class="bz-titulo">📥 SEM MESA</div>
       <div id="bz-sync" class="bz-sync"></div>
     </div>
     <div id="bz-resumo" class="bz-resumo"></div>
   </div>
   <div id="bz-lista" class="bz-lista"></div>
   <div id="bz-barra" class="bz-barra"></div>
-  <div class="bz-entrada">
-    <div id="bz-chips" class="bz-chips"></div>
-    <div id="bz-display" class="bz-display"></div>
-    <div class="bz-pad">
-      <button id="bz-btn-buffet" class="bz-buffet" onclick="_bzPesar()"></button>
-      <button class="bz-k" onclick="_bzTecla('1')">1</button><button class="bz-k" onclick="_bzTecla('2')">2</button><button class="bz-k" onclick="_bzTecla('3')">3</button>
-      <button class="bz-k" onclick="_bzTecla('4')">4</button><button class="bz-k" onclick="_bzTecla('5')">5</button><button class="bz-k" onclick="_bzTecla('6')">6</button>
-      <button class="bz-k" onclick="_bzTecla('7')">7</button><button class="bz-k" onclick="_bzTecla('8')">8</button><button class="bz-k" onclick="_bzTecla('9')">9</button>
-      <button class="bz-k bz-k2" onclick="_bzTecla('C')">C</button><button class="bz-k" onclick="_bzTecla('0')">0</button><button class="bz-k bz-k2" onclick="_bzTecla('<')">⌫</button>
-    </div>
-  </div>
   <div id="bz-sheet" class="bz-sheet-bg" onclick="_bzFecharSheet()"></div>
 </div>
 
@@ -22463,32 +22484,6 @@ function _bzAdotar(id, s){
 function _bzDoc(t){ var o = {}; Object.keys(t).forEach(function(k){ if(k.charAt(0) !== '_' && t[k] !== undefined) o[k] = t[k]; }); return JSON.parse(JSON.stringify(o)); }
 
 // ── cardápio ──
-function _bzBuffet(){
-  // Mesma regra da tela "Pesagem/almoço": item por kg com buffet/almoço no nome
-  var kg = (_itens || []).filter(function(i){ return i.tipoVenda === 'kg' && i.disponivel !== false; });
-  var buf = kg.filter(function(i){ return /buffet|almoco/.test(_normNome(i.nome)); });
-  var bufLivre = buf.filter(function(i){ return !pausaAtiva(i); })[0];
-  if(buf.length) return bufLivre || buf[0];
-  var livres = kg.filter(function(i){ return !pausaAtiva(i); });
-  var base = livres.length ? livres : kg;
-  return base.filter(function(i){ return !/sorvet|acai|picol|doce|sobremes|gelat|frozen|iogurt/.test(_normNome(i.nome)); })[0]
-    || base[0] || null;
-}
-function _bzOutrosKg(){
-  var b = _bzBuffet();
-  return (_itens || []).filter(function(i){ return i.tipoVenda === 'kg' && i.disponivel !== false && (!b || i.id !== b.id); });
-}
-function _bzUso(){ try{ return JSON.parse(localStorage.getItem('balanca_uso_' + _restauranteId) || '{}'); }catch(e){ return {}; } }
-function _bzContarUso(id){ try{ var u = _bzUso(); u[id] = (u[id] || 0) + 1; localStorage.setItem('balanca_uso_' + _restauranteId, JSON.stringify(u)); }catch(e){} }
-function _bzBebidas(){
-  var cats = (typeof _almCatsSelecionadas !== 'undefined' && _almCatsSelecionadas) ? _almCatsSelecionadas : [];
-  if(!cats.length){
-    cats = (_categorias || []).filter(function(c){ return /bebid|refri|suco|cervej|agua|drink|vinho|cafe/.test(_normNome(c.nome)); }).map(function(c){ return c.id; });
-  }
-  var u = _bzUso();
-  return (_itens || []).filter(function(i){ return i.tipoVenda !== 'kg' && i.disponivel !== false && !pausaAtiva(i) && cats.indexOf(i.categoriaId) >= 0; })
-    .sort(function(a, b){ return ((u[b.id] || 0) - (u[a.id] || 0)) || String(a.nome).localeCompare(String(b.nome)); });
-}
 function _bzNomeCurto(n){ n = String(n || ''); return n.length > 16 ? n.slice(0, 15) + '…' : n; }
 
 // ── estado local (aparelho) ──
@@ -22501,7 +22496,7 @@ function _bzSalvar(){
 }
 function _bzCarregar(){
   var d = null; try{ d = JSON.parse(localStorage.getItem(_bzChave()) || 'null'); }catch(e){}
-  _bz.t = {}; _bz.sel = {}; _bz.editando = null;
+  _bz.t = {}; _bz.sel = {};
   _bz.dia = _bzDia();
   (d && d.t || []).forEach(function(t){
     // de outro dia, só o que ainda não terminou ou não subiu
@@ -22603,73 +22598,36 @@ function _bzMudar(t, fn, acao, extra){
   t.atualizadoEm = Date.now(); t._rev = (t._rev || 0) + 1; t._sync = 'pendente';
 }
 function _bzPersistir(){ _bzSalvar(); _bzAgendar(0); _bzRender(); }
-function _bzItemKg(item, valor){
-  var pb = item.preco || 0;
-  return { k:_bzRand(), id:item.id, nome:item.nome, tipo:'kg', valor:_bzR2(valor), precoBase:pb, peso: pb > 0 ? Math.round(valor * 1000 / pb) : 0, qtd:1 };
-}
-function _bzItemUn(item){ return { k:_bzRand(), id:item.id, nome:item.nome, tipo:'unidade', valor:_bzR2(item.preco || 0), precoBase:_bzR2(item.preco || 0), peso:0, qtd:1 }; }
-function _bzCriar(itens){
+function _bzCriar(itens, nome){
   var agora = Date.now();
   var t = { id:'bz_' + agora.toString(36) + '_' + _bzRand(), numero:null, restauranteId:_restauranteId, tenantId:_tenantId || null,
-    dia:_bz.dia, criadoPor:_nomeGarcom || '', criadoEm:agora, atualizadoEm:agora, status:'pendente', itens:itens, nome:'',
+    dia:_bz.dia, criadoPor:_nomeGarcom || '', criadoEm:agora, atualizadoEm:agora, status:'pendente', itens:itens, nome:String(nome || '').slice(0, 40),
     mesa:null, pedidoId:null, teste:(typeof _modoTeste !== 'undefined' && _modoTeste) ? true : false,
     historico:[{ acao:'criado', em:agora, por:_nomeGarcom || '', total:_bzR2(itens.reduce(function(s, i){ return s + i.valor * i.qtd; }, 0)) }],
     _rev:1, _sync:'pendente' };
   _bz.t[t.id] = t;
-  _bz.sel = {}; _bz.sel[t.id] = true; // o novo fica selecionado: a bebida seguinte cai nele
   _bzPersistir();
   return t;
 }
-function _bzConfirmaValor(v){
-  if(v > BZ_MAX) return confirm('R$ ' + _bzFmt(v) + ' em um prato? Toque OK só se estiver certo.');
-  if(v < BZ_MIN) return confirm('Só R$ ' + _bzFmt(v) + '? Toque OK só se estiver certo.');
-  return true;
+// Pedido do assistente SEM MESA → um ticket na fila (prato + bebidas juntos).
+// Recebe os itens no mesmo formato que vai pro _lancarPedidoEmMesa.
+function _bzGuardarItens(itens){
+  if(!_podeBalanca) return Promise.reject(new Error('fila sem mesa não liberada para você'));
+  if(!_bzGarantir()) return Promise.reject(new Error('app ainda carregando'));
+  var nome = (itens.filter(function(i){ return i.cliente; })[0] || {}).cliente || '';
+  var tItens = itens.map(function(i){
+    if(i.tipoVenda === 'kg'){
+      var pb = i.precoBase || 0;
+      return { k:_bzRand(), id:i.id, nome:i.nome, tipo:'kg', valor:_bzR2(i.preco), precoBase:pb, peso: i.peso || (pb > 0 ? Math.round(i.preco * 1000 / pb) : 0), qtd:1 };
+    }
+    return { k:_bzRand(), id:i.id, nome:i.nome, tipo:'unidade', valor:_bzR2(i.preco), precoBase: typeof i.precoBase === 'number' ? i.precoBase : _bzR2(i.preco),
+      extras:i.extras || 0, selecoes:i.selecoes || [], obs:i.obs || '', qtd:i.qtd || 1 };
+  });
+  var t = _bzCriar(tItens, nome);
+  // espera um pouco o número do ticket; sem internet fica guardado no aparelho
+  return _bzEsperarSync([t.id]).then(function(){ return t; }, function(){ return t; });
 }
-
 // ── ações dos botões ──
-function _bzTecla(k){
-  if(k === 'C') _bz.cent = '';
-  else if(k === '<') _bz.cent = _bz.cent.slice(0, -1);
-  else if(_bz.cent.length < 6) _bz.cent = (_bz.cent + k).replace(/^0+/, '');
-  _bzVibrar(8);
-  _bzRenderDisplay();
-}
-function _bzValor(){ return _bz.cent ? parseInt(_bz.cent, 10) / 100 : 0; }
-function _bzPesar(itemId){
-  if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
-  var item = itemId ? _bzItem(itemId) : _bzBuffet();
-  if(!item){ showToast('Nenhum item por kg no cardápio', '#f87171'); return; }
-  var v = _bzValor();
-  if(!(v > 0)){ _bzVibrar(60); showToast('Digite o valor da balança', '#f7a34f'); return; }
-  if(_bz.editando){ _bzSalvarEdicao(v); return; }
-  if(pausaAtiva(item)){ showToast('⏸️ ' + item.nome + ' está pausado', '#f87171'); return; }
-  if(!_bzConfirmaValor(v)) return;
-  _bzCriar([_bzItemKg(item, v)]);
-  _bz.cent = ''; _bzVibrar(30);
-  _bzRender(true);
-}
-function _bzBebida(itemId){
-  if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
-  var item = _bzItem(itemId); if(!item) return;
-  if(pausaAtiva(item)){ showToast('⏸️ ' + item.nome + ' está pausado', '#f87171'); return; }
-  _bzContarUso(itemId);
-  var sel = _bzSelPend();
-  if(sel.length === 1){
-    var t = sel[0];
-    _bzMudar(t, function(x){
-      var ja = x.itens.filter(function(i){ return i.tipo !== 'kg' && i.id === item.id; })[0];
-      if(ja) ja.qtd += 1; else x.itens.push(_bzItemUn(item));
-    }, 'bebida', { item:item.nome });
-    _bzPersistir();
-    showToast('🥤 ' + item.nome + ' → ' + _bzNum(t), '#4ade80');
-  } else {
-    _bzCriar([_bzItemUn(item)]);
-    showToast('🥤 ' + item.nome + ' (ticket novo)', '#4ade80');
-  }
-  _bzVibrar(30);
-  if(_bz.sheet === 'bebidas') _bzFecharSheet();
-  _bzRender(true);
-}
 function _bzToggle(id){
   var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
   if(_bz.sel[id]) delete _bz.sel[id]; else _bz.sel[id] = true;
@@ -22679,19 +22637,23 @@ function _bzLimparSel(){ _bz.sel = {}; _bzRender(); }
 function _bzEditar(id){
   var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
   var kg = t.itens.filter(function(i){ return i.tipo === 'kg'; })[0]; if(!kg) return;
-  _bz.editando = id; _bz.cent = String(Math.round(kg.valor * 100));
-  _bzFecharSheet(); _bzRender();
-}
-function _bzCancelarEdicao(){ _bz.editando = null; _bz.cent = ''; _bzRender(); }
-function _bzSalvarEdicao(v){
-  var t = _bz.t[_bz.editando]; _bz.editando = null;
-  if(!t || t.status !== 'pendente'){ _bz.cent = ''; _bzRender(); showToast('Esse ticket já foi lançado', '#f87171'); return; }
-  if(!_bzConfirmaValor(v)){ _bz.editando = t.id; return; }
-  var kg = t.itens.filter(function(i){ return i.tipo === 'kg'; })[0];
+  var r = prompt('Valor certo do prato (ex.: 15,14)', _bzFmt(kg.valor));
+  if(r === null) return;
+  var v = _bzLerValor(r);
+  if(!(v > 0)){ showToast('Valor inválido', '#f87171'); return; }
+  if((v > 150 || v < 3) && !confirm('R$ ' + _bzFmt(v) + ' em um prato? OK só se estiver certo.')) return;
   var de = kg.valor;
   _bzMudar(t, function(){ kg.valor = _bzR2(v); kg.peso = kg.precoBase > 0 ? Math.round(v * 1000 / kg.precoBase) : 0; }, 'corrigido', { de:de, para:_bzR2(v) });
-  _bz.cent = ''; _bzPersistir();
+  _bzPersistir(); _bzMenu(id);
   showToast('✏️ ' + _bzNum(t) + ': ' + _bzFmt(de) + ' → ' + _bzFmt(v), '#4ade80');
+}
+// "15,14" · "15.14" · "1514" (sem vírgula = centavos) · "15"
+function _bzLerValor(txt){
+  txt = String(txt || '').replace(/[^\d,.]/g, '');
+  if(!txt) return 0;
+  if(/[,.]\d{1,2}$/.test(txt)) return _bzR2(parseFloat(txt.replace(/\.(?=\d{3})/g, '').replace(',', '.')));
+  var n = parseInt(txt.replace(/\D/g, ''), 10) || 0;
+  return n >= 300 ? _bzR2(n / 100) : n;
 }
 function _bzRemoverItem(id, k){
   var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
@@ -22704,7 +22666,7 @@ function _bzCancelar(id){
   var t = _bz.t[id]; if(!t || t.status !== 'pendente') return;
   if(!confirm('Cancelar ' + _bzNum(t) + ' (R$ ' + _bzFmt(_bzTotal(t)) + ')?')) return;
   _bzMudar(t, function(x){ x.status = 'cancelado'; }, 'cancelado', { total:_bzTotal(t) });
-  delete _bz.sel[id]; if(_bz.editando === id) _bz.editando = null;
+  delete _bz.sel[id];
   _bzFecharSheet(); _bzPersistir();
 }
 function _bzNome(id){
@@ -22789,9 +22751,9 @@ function _bzLancar(ids, mesa, nome, abrir){
           t.itens.forEach(function(i){
             if(i.tipo === 'kg') itens.push({ id:i.id, nome:i.nome, tipoVenda:'kg', peso:i.peso, precoBase:i.precoBase, preco:i.valor, qtd:1, obs:'', cliente:cli });
             else {
-              var k = i.id + '|' + i.valor + '|' + cli;
+              var k = i.id + '|' + i.valor + '|' + cli + '|' + (i.obs || '') + '|' + JSON.stringify(i.selecoes || []);
               if(junta[k]) junta[k].qtd += i.qtd;
-              else { junta[k] = { id:i.id, nome:i.nome, preco:i.valor, precoBase:i.valor, extras:0, selecoes:[], qtd:i.qtd, obs:'', cliente:cli }; itens.push(junta[k]); }
+              else { junta[k] = { id:i.id, nome:i.nome, preco:i.valor, precoBase: typeof i.precoBase === 'number' ? i.precoBase : i.valor, extras:i.extras || 0, selecoes:i.selecoes || [], qtd:i.qtd, obs:i.obs || '', cliente:cli }; itens.push(junta[k]); }
             }
           });
         });
@@ -22824,24 +22786,72 @@ function _bzRecuperar(){
   }).catch(function(){});
 }
 
+// Rótulos usados nos rascunhos/resultados do assistente
+function _rotMesa(p){ return p && p.mesa ? 'Mesa ' + p.mesa : '📥 Fila sem mesa'; }
+function _txtResultadoIA(r){
+  if(r.mesa === 'fila') return '📥 Na fila sem mesa' + (r.numero ? ' — #' + String(r.numero).padStart(2, '0') + '. Pra lançar: “fila ' + r.numero + ' na mesa 12”' : ' (guardado no aparelho; sobe quando a internet voltar)');
+  return 'Mesa ' + r.mesa + (r.numero ? ' — pedido #' + r.numero : '') + ' enviado';
+}
+
+// ── comandos no assistente: "fila 3 na mesa 12", "o último da fila na 12",
+//    "o da Ana na 12", "mostra a fila" (sem IA; só age se bater certinho) ──
+function _bzComando(texto){
+  var t = _normNome(texto).replace(/[!?.;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if(!t) return null;
+  if(/^(mostra|mostrar|ver|abre|abrir|abra)?\s*(a |os )?(fila|pendentes)( sem mesa)?$/.test(t)) return { abrir:true };
+  var verbo = '(?:(?:manda|mande|lanca|lance|coloca|coloque|poe|bota|leva|leve|passa|joga)\\s+)?';
+  var mesaRe = '\\s+(?:na|no|pra|para|para a|pra a|a)\\s+(?:mesa\\s+)?(\\d{1,3})$';
+  var m = t.match(new RegExp('^' + verbo + '(?:o |os |a |as )?(?:fila|pendentes?|tickets?|#)\\s*#?(\\d{1,3}(?:\\s*(?:,|e)\\s*#?\\d{1,3})*)' + mesaRe));
+  if(m){
+    var nums = m[1].split(/\s*(?:,|e)\s*/).map(function(x){ return parseInt(x.replace('#', ''), 10); });
+    return { nums:nums, mesa:parseInt(m[2], 10) };
+  }
+  m = t.match(new RegExp('^' + verbo + '(?:o |a )?(?:ultimo|ultima)(?: da fila| pendente| ticket| prato)?' + mesaRe));
+  if(m && _bzPendentes().length) return { ultimo:true, mesa:parseInt(m[1], 10) };
+  m = t.match(new RegExp('^' + verbo + '(?:o |os |a |as )?(?:prato |pratos |pedido |pendente |ticket )?(?:do|da|de)\\s+([a-z]+(?: [a-z]+)?)' + mesaRe));
+  if(m){
+    var alvo = _bzPendentes().filter(function(x){ return x.nome && _normNome(x.nome).indexOf(m[1]) === 0; });
+    if(alvo.length) return { ids:alvo.map(function(x){ return x.id; }), mesa:parseInt(m[2], 10), nome:m[1] };
+  }
+  return null;
+}
+// Executa o comando e devolve uma Promise com o texto do resultado (ou null se não for comando da fila)
+function _bzExecutarComando(texto){
+  var c = _bzComando(texto);
+  if(!c) return null;
+  if(!_bzGarantir()) return Promise.resolve('Aguarde o app carregar.');
+  if(c.abrir){ _bzAbrir(); return Promise.resolve('📥 Abrindo a fila sem mesa.'); }
+  var pend = _bzPendentes(), ids = [], falta = [];
+  if(c.nums){
+    c.nums.forEach(function(n){ var x = pend.filter(function(t){ return t.numero === n; })[0]; if(x) ids.push(x.id); else falta.push(n); });
+  } else if(c.ultimo) ids = [pend[pend.length - 1].id];
+  else ids = c.ids;
+  if(falta.length && !ids.length) return Promise.resolve('Não achei ' + falta.map(function(n){ return '#' + String(n).padStart(2, '0'); }).join(', ') + ' na fila (já foi lançado ou não existe).');
+  return _bzLancar(ids, c.mesa, '', false).then(function(r){
+    if(r.precisaAbrir){
+      if(!confirm('A mesa ' + c.mesa + ' não tem conta aberta. Abrir a mesa e lançar?')) return 'Ok, não lancei. Continua na fila.';
+      return _bzLancar(ids, c.mesa, '', true).then(function(r2){ return r2.texto; });
+    }
+    return r.texto + (falta.length ? ' (não achei ' + falta.map(function(n){ return '#' + n; }).join(', ') + ')' : '');
+  });
+}
+
 // ── tela ──
 function _bzAbrir(){
   if(!_podeBalanca){ showToast('🔒 Balança não liberada para você', '#f7a34f'); return; }
   if(!_bzGarantir()){ showToast('Aguarde o app carregar', '#f7a34f'); return; }
-  if(typeof _almCatsSelecionadas !== 'undefined' && !_almCatsSelecionadas.length && typeof _almCarregarConfig === 'function') _almCarregarConfig();
   _bz.aberto = true; _bz.sheet = null;
   var tela = document.getElementById('tela-balanca');
   if(tela) tela.style.display = 'flex';
   _bzRecuperar(); _bzAgendar(0);
   _bzRender(true);
-  setTimeout(function(){ _bzRender(true); }, 1200); // categorias de bebida podem chegar depois
 }
 function _bzAbrirDoChat(){
   if(typeof fecharChatAssistente === 'function') fecharChatAssistente();
   setTimeout(_bzAbrir, 150);
 }
 function _bzFechar(){
-  _bz.aberto = false; _bz.sheet = null; _bz.editando = null;
+  _bz.aberto = false; _bz.sheet = null;
   var tela = document.getElementById('tela-balanca'); if(tela) tela.style.display = 'none';
   _bzRenderBadge();
 }
@@ -22862,13 +22872,6 @@ function _bzRenderBadge(){
   var n = _bzPendentes().length;
   b.textContent = n; b.style.display = n ? 'flex' : 'none';
 }
-function _bzRenderDisplay(){
-  var el = document.getElementById('bz-display'); if(!el) return;
-  var v = _bzValor();
-  el.innerHTML = '<span class="bz-rs">R$</span>' + (_bz.cent ? _bzFmt(v) : '<span style="opacity:0.3">0,00</span>');
-  var b = document.getElementById('bz-btn-buffet');
-  if(b) b.classList.toggle('bz-pronto', v > 0);
-}
 function _bzRender(rolarFim){
   _bzRenderBadge();
   if(!_bz.aberto) return;
@@ -22886,7 +22889,7 @@ function _bzRender(rolarFim){
     h += '<button class="bz-link" onclick="_bz.verLancados=!_bz.verLancados;_bzRender()">' + (_bz.verLancados ? '▾ Esconder lançados' : '▸ Lançados hoje (' + feitos.filter(function(t){ return t.status !== 'cancelado'; }).length + ')') + '</button>';
     if(_bz.verLancados) feitos.forEach(function(t){ h += _bzHtmlTicket(t); });
   }
-  if(!pend.length) h += '<div class="bz-vazio">Fila vazia.<br>Digite o valor da balança e toque em <b>BUFFET</b>.</div>';
+  if(!pend.length) h += '<div class="bz-vazio">Nada esperando mesa.<br><br>No assistente, mande o pedido <b>sem a mesa</b>:<br><b>“prato de 15,14 mais 1 coca”</b><br>e ele fica aqui até você escolher a mesa.<br><br>Depois: toque nos tickets → <b>MESA</b>, ou diga<br><b>“fila 3 na mesa 12”</b>.</div>';
   pend.forEach(function(t){ h += _bzHtmlTicket(t); });
   var rolagem = lista.scrollTop, noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 40;
   lista.innerHTML = h;
@@ -22895,34 +22898,13 @@ function _bzRender(rolarFim){
   var sel = _bzSelPend();
   var barra = document.getElementById('bz-barra');
   if(barra){
-    if(_bz.editando){
-      var te = _bz.t[_bz.editando];
-      barra.style.display = 'flex';
-      barra.innerHTML = '<div style="flex:1;font-size:0.84rem;">✏️ Corrigindo <b>' + (te ? _bzNum(te) : '') + '</b> — digite o valor certo</div><button class="bz-b" onclick="_bzCancelarEdicao()">Cancelar</button>';
-    } else if(sel.length){
+    if(sel.length){
       barra.style.display = 'flex';
       barra.innerHTML = '<button class="bz-b" onclick="_bzLimparSel()" title="Limpar seleção">✕</button>' +
         '<div style="flex:1;min-width:0;font-size:0.84rem;line-height:1.25;"><b>' + sel.length + ' selecionado' + (sel.length > 1 ? 's' : '') + '</b><br><span style="color:var(--muted)">R$ ' + _bzFmt(_bzSoma(sel)) + '</span></div>' +
         '<button class="bz-b bz-b-pri bz-b-mesa" onclick="_bzAbrirMesa()">🍽️ MESA →</button>';
     } else { barra.style.display = 'none'; barra.innerHTML = ''; }
   }
-  // chips + botão principal
-  var chips = document.getElementById('bz-chips');
-  if(chips){
-    var c = '';
-    _bzOutrosKg().forEach(function(i){ var p = pausaAtiva(i); c += '<button class="bz-chip bz-chip-kg"' + (p ? ' disabled' : '') + ' onclick="_bzPesar(\'' + i.id + '\')">⚖️ ' + esc(_bzNomeCurto(i.nome)) + '</button>'; });
-    _bzBebidas().slice(0, 12).forEach(function(i){ c += '<button class="bz-chip" onclick="_bzBebida(\'' + i.id + '\')">🥤 ' + esc(_bzNomeCurto(i.nome)) + '</button>'; });
-    c += '<button class="bz-chip" onclick="_bzAbrirBebidas()">＋ Outro item</button>';
-    chips.innerHTML = c;
-  }
-  var bb = document.getElementById('bz-btn-buffet');
-  if(bb){
-    var buf = _bzBuffet();
-    if(_bz.editando) bb.innerHTML = '<div class="bz-bb1">SALVAR</div><div class="bz-bb2">correção</div>';
-    else if(!buf) bb.innerHTML = '<div class="bz-bb2">Sem item por kg</div>';
-    else bb.innerHTML = '<div class="bz-bb1">' + (pausaAtiva(buf) ? '⏸️ ' : '') + esc(_bzNomeCurto(buf.nome).toUpperCase()) + '</div><div class="bz-bb2">R$ ' + _bzFmt(buf.preco) + '/kg</div>';
-  }
-  _bzRenderDisplay();
   _bzRenderSheet();
 }
 function _bzHtmlTicket(t){
@@ -22985,14 +22967,6 @@ function _bzConfirmarMesa(abrir){
   });
 }
 function _bzMenu(id){ _bz.sheet = 'menu'; _bz.sheetId = id; _bzRenderSheet(); }
-function _bzAbrirBebidas(){ _bz.sheet = 'bebidas'; _bz.busca = ''; _bzRenderSheet(); setTimeout(function(){ var i = document.getElementById('bz-busca'); if(i) i.focus(); }, 80); }
-function _bzFiltrarBebidas(v){ _bz.busca = v; var l = document.getElementById('bz-busca-lista'); if(l) l.innerHTML = _bzHtmlBusca(); }
-function _bzHtmlBusca(){
-  var q = _normNome(_bz.busca || '');
-  var itens = (_itens || []).filter(function(i){ return i.tipoVenda !== 'kg' && i.disponivel !== false && !pausaAtiva(i) && (!q || _normNome(i.nome).indexOf(q) >= 0 || _pontuarNomeItem(q, i.nome) >= 1); }).slice(0, 40);
-  if(!itens.length) return '<div class="bz-vazio">Nada encontrado.</div>';
-  return itens.map(function(i){ return '<button class="bz-linha" onclick="_bzBebida(\'' + i.id + '\')"><span>' + esc(i.nome) + '</span><b>R$ ' + _bzFmt(i.preco) + '</b></button>'; }).join('');
-}
 function _bzTeclado(fn, extra){
   var k = ['1','2','3','4','5','6','7','8','9','C','0','<'];
   return '<div class="bz-kp">' + k.map(function(x){ return '<button class="bz-k' + (x === 'C' || x === '<' ? ' bz-k2' : '') + '" onclick="' + fn + '(\'' + x + '\')">' + (x === '<' ? '⌫' : x) + '</button>'; }).join('') + (extra || '') + '</div>';
@@ -23028,12 +23002,6 @@ function _bzRenderSheet(){
       return _bzHora(x.em) + ' · ' + (nomes[x.acao] || x.acao) + (x.de != null ? ' ' + _bzFmt(x.de) + ' → ' + _bzFmt(x.para) : '') + (x.item ? ' ' + esc(x.item) : '') + (x.mesa ? ' · mesa ' + x.mesa : '') + (x.erro ? ' · ' + esc(x.erro) : '') + (x.obs ? ' · ' + esc(x.obs) : '') + ' · ' + esc(x.por || '');
     }).join('<br>') + '</div>';
     h += '<button class="bz-b" style="width:100%;margin-top:10px;" onclick="_bzFecharSheet()">Fechar</button>';
-  } else if(_bz.sheet === 'bebidas'){
-    var sp = _bzSelPend();
-    h = '<div class="bz-sh-tit">' + (sp.length === 1 ? 'Adicionar ao ' + _bzNum(sp[0]) : 'Item avulso (ticket novo)') + '</div>' +
-      '<input id="bz-busca" class="bz-in" placeholder="Buscar item…" oninput="_bzFiltrarBebidas(this.value)" value="' + esc(_bz.busca) + '">' +
-      '<div id="bz-busca-lista" style="max-height:42vh;overflow-y:auto;margin-top:8px;">' + _bzHtmlBusca() + '</div>' +
-      '<button class="bz-b" style="width:100%;margin-top:10px;" onclick="_bzFecharSheet()">Fechar</button>';
   }
   el.style.display = 'flex';
   el.innerHTML = '<div class="bz-sh" onclick="event.stopPropagation()">' + h + '</div>';

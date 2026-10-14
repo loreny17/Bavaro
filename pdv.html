@@ -3734,8 +3734,18 @@ function verContaPDV(id){
       pagoEm: null,
       pagoPor: null,
       tipoVenda: it.tipoVenda || 'unidade',
-      peso: it.peso || null
+      peso: it.peso || null,
+      // ⚠️ Mantém de quem era cada item (antes o nome sumia ao restaurar)
+      pessoa: it.pessoa || it.nomeCliente || '',
+      nomeCliente: it.nomeCliente || it.pessoa || '',
+      adicionadoPor: it.adicionadoPor || null,
+      adicionadoEm: it.adicionadoEm || null
     };
+  });
+  // Lista de pessoas da mesa: a que a conta já tinha + os nomes dos itens
+  var pessoasRestauradas = [];
+  (Array.isArray(c.pessoas) ? c.pessoas : []).concat(itensBase.map(function(it){ return it.pessoa; })).forEach(function(n){
+    if(n && pessoasRestauradas.indexOf(n) < 0) pessoasRestauradas.push(n);
   });
   var totalCalc = (c.itens||[])
     .filter(function(it){ return it.status !== 'cancelado'; })
@@ -3764,7 +3774,8 @@ function verContaPDV(id){
     pagoTotal: 0,
     restante: 0,
     restaurada: true,
-    contaOriginalId: c.id
+    contaOriginalId: c.id,
+    pessoas: pessoasRestauradas
   };
 
   fbDb.collection('contas_mesa').add(contaMesaData).then(function(refConta){

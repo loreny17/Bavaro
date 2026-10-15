@@ -6034,7 +6034,9 @@ function renderModelos(){
     var tipoTxt;
     if(tipo === 'fechamento') tipoTxt = 'Imprime no fechamento da mesa';
     else if(tipo === 'cupom_cliente') tipoTxt = 'Ticket com senha do totem';
-    else tipoTxt = (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias');
+    else tipoTxt = (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias' +
+      ((m.itensExcluidos||[]).length ? ' · ' + m.itensExcluidos.length + ' ' + (m.itensExcluidos.length > 1 ? 'itens fora' : 'item fora') : '') +
+      ((m.itensExtras||[]).length ? ' · +' + m.itensExtras.length + ' ' + (m.itensExtras.length > 1 ? 'itens' : 'item') : ''));
     var card = document.createElement('div');
     card.className = 'imp-card';
     card.innerHTML =
@@ -6091,7 +6093,7 @@ function abrirNovoModelo(){
   modCCSetLogo(null);
   atualizarTipoModelo();
   atualizarFiltroModelo();
-  renderModeloCategorias([], []);
+  renderModeloCategorias([], [], [], []);
   renderModeloItens([]);
   // Estilos: novo modelo herda o global
   preencherEstilosNoModeloUI(null); // null = pega do global
@@ -6142,7 +6144,7 @@ function abrirEditarModelo(m){
   modCCSetLogo(m.logoCupomCliente || null);
   atualizarTipoModelo();
   atualizarFiltroModelo();
-  renderModeloCategorias(m.categorias || [], m.categoriasTotem || []);
+  renderModeloCategorias(m.categorias || [], m.categoriasTotem || [], m.itensExcluidos || [], m.itensExtras || []);
   renderModeloItens(m.itens || []);
   // Estilos do modelo (ou herda do global se não tiver)
   preencherEstilosNoModeloUI(m);
@@ -6532,23 +6534,109 @@ function atualizarFiltroModelo(){
   document.getElementById('mod-filtro-itens').style.display = f==='item'?'':'none';
 }
 
-function renderModeloCategorias(selecionadas, selecionadasTotem){
+// Exceções por item dentro do filtro por categoria (estado da tela)
+var _modExcl = [], _modExtra = [], _modCatsAbertas = {};
+function _modCatMarcada(catId){
+  var cb = document.querySelector('#mod-cats-lista input[data-cat-id="' + catId + '"]');
+  return !!(cb && cb.checked);
+}
+function _modItemImprime(itemId, catId){
+  if(_modExtra.indexOf(itemId) >= 0) return true;
+  if(_modExcl.indexOf(itemId) >= 0) return false;
+  return _modCatMarcada(catId);
+}
+function _modToggleItem(itemId, catId, marcar){
+  _modExcl = _modExcl.filter(function(x){ return x !== itemId; });
+  _modExtra = _modExtra.filter(function(x){ return x !== itemId; });
+  var catOk = _modCatMarcada(catId);
+  if(catOk && !marcar) _modExcl.push(itemId);      // categoria vem pra cá, mas ESTE item não
+  if(!catOk && marcar) _modExtra.push(itemId);     // categoria não vem, mas ESTE item sim
+  _modAtualizarCat(catId);
+}
+function _modAtualizarCat(catId){
+  var itensCat = _itens.filter(function(i){ return i.categoria === catId; });
+  var aqui = itensCat.filter(function(i){ return _modItemImprime(i.id, catId); }).length;
+  var resumo = document.getElementById('mod-cat-resumo-' + catId);
+  if(resumo){
+    var catOk = _modCatMarcada(catId);
+    var txt = !itensCat.length ? 'sem itens'
+      : !aqui ? ''
+      : (aqui === itensCat.length) ? (itensCat.length === 1 ? '1 item' : 'todos os ' + itensCat.length + ' itens')
+      : aqui + ' de ' + itensCat.length + ' itens';
+    resumo.textContent = txt;
+    resumo.style.color = (aqui > 0 && aqui < itensCat.length) ? '#f7a34f' : 'var(--muted)';
+  }
+  var row = document.querySelector('#mod-cats-lista .mod-cat-row[data-cat="' + catId + '"]');
+  if(row) row.classList.toggle('selected', aqui > 0);
+  var lista = document.getElementById('mod-cat-itens-' + catId);
+  if(lista && _modCatsAbertas[catId]){
+    lista.querySelectorAll('input[data-mod-item]').forEach(function(cb){
+      var on = _modItemImprime(cb.getAttribute('data-mod-item'), catId);
+      cb.checked = on;
+      cb.closest('label').style.opacity = on ? '1' : '.55';
+    });
+  }
+}
+function _modAbrirItensCat(catId){
+  _modCatsAbertas[catId] = !_modCatsAbertas[catId];
+  var lista = document.getElementById('mod-cat-itens-' + catId);
+  var seta = document.getElementById('mod-cat-seta-' + catId);
+  if(!lista) return;
+  if(seta) seta.textContent = _modCatsAbertas[catId] ? '▾' : '▸';
+  if(!_modCatsAbertas[catId]){ lista.style.display = 'none'; return; }
+  var itensCat = _itens.filter(function(i){ return i.categoria === catId; })
+    .sort(function(a, b){ return String(a.nome || '').localeCompare(String(b.nome || '')); });
+  lista.innerHTML = itensCat.length ? itensCat.map(function(i){
+    return '<label style="display:flex;align-items:center;gap:9px;padding:6px 10px;font-size:0.8rem;cursor:pointer;">' +
+      '<input type="checkbox" data-mod-item="' + i.id + '" style="width:16px;height:16px;accent-color:var(--accent);margin:0;">' +
+      '<span style="flex:1;">' + escapeHtml(i.nome || '') + '</span></label>';
+  }).join('') : '<div style="font-size:0.76rem;color:var(--muted);padding:6px 10px;">Nenhum item nesta categoria.</div>';
+  lista.querySelectorAll('input[data-mod-item]').forEach(function(cb){
+    cb.addEventListener('change', function(e){ _modToggleItem(cb.getAttribute('data-mod-item'), catId, e.target.checked); });
+  });
+  lista.style.display = 'block';
+  _modAtualizarCat(catId);
+}
+function _modMarcarTodosCat(catId, marcar){
+  // marcar/desmarcar a categoria inteira limpa as exceções dela
+  _itens.filter(function(i){ return i.categoria === catId; }).forEach(function(i){
+    _modExcl = _modExcl.filter(function(x){ return x !== i.id; });
+    _modExtra = _modExtra.filter(function(x){ return x !== i.id; });
+  });
+  _modAtualizarCat(catId);
+}
+
+function renderModeloCategorias(selecionadas, selecionadasTotem, excluidos, extras){
+  _modExcl = (excluidos || []).slice(); _modExtra = (extras || []).slice(); _modCatsAbertas = {};
   // ── Cardápio Principal ──
   var wrap = document.getElementById('mod-cats-lista');
   if(!_categorias.length){
     wrap.innerHTML = '<div style="font-size:0.78rem;color:var(--muted);padding:10px;background:var(--surface2);border-radius:8px;">Nenhuma categoria do cardápio principal.</div>';
   } else {
-    wrap.innerHTML = '';
+    wrap.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);line-height:1.4;margin-bottom:2px;">Marque a categoria inteira e toque em <b>▸ itens</b> pra tirar algum item dela (ex.: um prato que sai no salão) ou pra incluir só um item de outra categoria.</div>';
+    wrap.style.maxHeight = '360px';
     _categorias.forEach(function(c){
       var marc = selecionadas.indexOf(c.id) >= 0;
-      var lbl = document.createElement('label');
-      lbl.className = 'mod-cat-row' + (marc?' selected':'');
-      lbl.innerHTML = '<input type="checkbox" data-cat-id="'+c.id+'" '+(marc?'checked':'')+'>'+
-        '<span>'+escapeHtml(c.emoji||'📂')+' '+escapeHtml(c.nome||'')+'</span>';
-      lbl.querySelector('input').addEventListener('change', function(e){
-        lbl.classList.toggle('selected', e.target.checked);
-      });
-      wrap.appendChild(lbl);
+      var box = document.createElement('div');
+      box.innerHTML =
+        '<div class="mod-cat-row' + (marc ? ' selected' : '') + '" data-cat="' + c.id + '" style="cursor:default;">' +
+          '<input type="checkbox" data-cat-id="' + c.id + '" ' + (marc ? 'checked' : '') + ' style="cursor:pointer;">' +
+          '<span style="flex:1;cursor:pointer;" class="mod-cat-nome">' + escapeHtml(c.emoji || '📂') + ' ' + escapeHtml(c.nome || '') + '</span>' +
+          '<span id="mod-cat-resumo-' + c.id + '" style="font-size:0.7rem;color:var(--muted);white-space:nowrap;"></span>' +
+          '<button type="button" class="mod-cat-itens-btn" style="background:none;border:1px solid var(--border2);color:var(--text);border-radius:7px;padding:4px 8px;font-size:0.72rem;cursor:pointer;font-family:inherit;white-space:nowrap;"><span id="mod-cat-seta-' + c.id + '">▸</span> itens</button>' +
+        '</div>' +
+        '<div id="mod-cat-itens-' + c.id + '" style="display:none;margin:2px 0 6px 28px;border-left:2px solid var(--border2);max-height:220px;overflow-y:auto;"></div>';
+      var cb = box.querySelector('input[data-cat-id]');
+      cb.addEventListener('change', function(e){ _modMarcarTodosCat(c.id, e.target.checked); });
+      box.querySelector('.mod-cat-nome').addEventListener('click', function(){ cb.checked = !cb.checked; _modMarcarTodosCat(c.id, cb.checked); });
+      box.querySelector('.mod-cat-itens-btn').addEventListener('click', function(){ _modAbrirItensCat(c.id); });
+      wrap.appendChild(box);
+    });
+    _categorias.forEach(function(c){ _modAtualizarCat(c.id); });
+    // categorias com exceção já abrem mostrando os itens
+    _categorias.forEach(function(c){
+      var temExc = _itens.some(function(i){ return i.categoria === c.id && (_modExcl.indexOf(i.id) >= 0 || _modExtra.indexOf(i.id) >= 0); });
+      if(temExc) _modAbrirItensCat(c.id);
     });
   }
 
@@ -6725,14 +6813,22 @@ function salvarModelo(){
     document.querySelectorAll('#mod-cats-totem-lista input[type="checkbox"]:checked').forEach(function(cb){
       catsTotem.push(cb.getAttribute('data-cat-totem-id'));
     });
-    if(!cats.length && !catsTotem.length){ showToast('Selecione ao menos 1 categoria','#f7a34f'); return; }
+    // exceções só valem onde fazem sentido (fora = categoria marcada; extra = categoria não marcada)
+    var itemCat = function(id){ var it = _itens.find(function(i){ return i.id === id; }); return it ? it.categoria : null; };
+    var excl = _modExcl.filter(function(id){ var c = itemCat(id); return c && cats.indexOf(c) >= 0; });
+    var extra = _modExtra.filter(function(id){ var c = itemCat(id); return c && cats.indexOf(c) < 0; });
+    if(!cats.length && !catsTotem.length && !extra.length){ showToast('Selecione ao menos 1 categoria ou item','#f7a34f'); return; }
     dados.categorias = cats;
     dados.categoriasTotem = catsTotem;
+    dados.itensExcluidos = excl;
+    dados.itensExtras = extra;
     dados.itens = [];
   } else {
     if(!window._modItensSelTemp || !window._modItensSelTemp.length){ showToast('Selecione ao menos 1 item','#f7a34f'); return; }
     dados.itens = window._modItensSelTemp.slice();
     dados.categorias = [];
+    dados.itensExcluidos = [];
+    dados.itensExtras = [];
   }
   var p;
   if(_modEditandoId){
@@ -7419,6 +7515,14 @@ function _modeloDoAvulso(impressoraId){
   return doTipo.find(function(m){ return !m.apenasAlmoco; }) || doTipo[0] || null;
 }
 
+// Modelo por CATEGORIA com exceções: a categoria inteira imprime aqui, menos
+// os "itensExcluidos"; e "itensExtras" (de outras categorias) também imprimem.
+// Itens novos cadastrados na categoria já entram sozinhos.
+function _modeloPegaPorCategoria(modelo, itemId, catOk){
+  if((modelo.itensExtras || []).indexOf(itemId) >= 0) return true;
+  if((modelo.itensExcluidos || []).indexOf(itemId) >= 0) return false;
+  return !!catOk;
+}
 function filtrarItensPorModelo(itens, modelo){
   itens = expandirCombosParaImpressao(itens);
   var _ehDoModeloAvulso = function(it){
@@ -7438,14 +7542,14 @@ function filtrarItensPorModelo(itens, modelo){
       if(it.avulso) return _ehDoModeloAvulso(it);
       // Se o item já traz a categoria embutida (caso do totem), usa direto
       if(it.origemTotem && it.categoriaTotemId){
-        return catsTotem.indexOf(it.categoriaTotemId) >= 0;
+        return _modeloPegaPorCategoria(modelo, it.id, catsTotem.indexOf(it.categoriaTotemId) >= 0);
       }
       // Caso padrão (garçom): busca a categoria em _itens
       var itemDef = _itens.find(function(i){ return i.id === it.id; });
       var cat = itemDef ? itemDef.categoria : '';
       // Se o item tem categoria embutida do principal (ex: bebida importada pelo totem)
       if(!cat && it.categoriaPrincipalId) cat = it.categoriaPrincipalId;
-      return cats.indexOf(cat) >= 0;
+      return _modeloPegaPorCategoria(modelo, it.id, cats.indexOf(cat) >= 0);
     });
   }
 }
@@ -9119,7 +9223,7 @@ function processarComandoImpressao(cmdId, cmd){
           } else {
             var itemDef = (_itens||[]).find(function(i){ return i.id === cmd.item.id; });
             var cat = itemDef ? itemDef.categoria : '';
-            match = (modelo.categorias||[]).indexOf(cat) >= 0;
+            match = _modeloPegaPorCategoria(modelo, cmd.item.id, (modelo.categorias||[]).indexOf(cat) >= 0);
           }
           if(match){
             impDestino = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });

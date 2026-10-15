@@ -1326,7 +1326,7 @@ function montarCardapio(){
   var catsPrincSelecionadas = [];
   _catsPrincipaisIds.forEach(function(id){
     var c = _catsPrincipal.find(function(x){ return x.id === id; });
-    if(c) catsPrincSelecionadas.push(c);
+    if(c && c.pausada !== true) catsPrincSelecionadas.push(c);
   });
 
   // Filtra itens do principal que estão nas categorias selecionadas
@@ -1334,6 +1334,9 @@ function montarCardapio(){
   var itensPrincFiltrados = _itensPrincipal.filter(function(it){
     if(_catsPrincipaisIds.indexOf(it.categoria) < 0) return false;
     if(_itensExcluidos.indexOf(it.id) >= 0) return false;
+    // categoria pausada no PDV: some do totem
+    var catP = _catsPrincipal.find(function(x){ return x.id === it.categoria; });
+    if(catP && catP.pausada === true) return false;
     return true;
   });
 
@@ -1359,6 +1362,7 @@ function montarCardapio(){
     return (a.criadoEm||0) - (b.criadoEm||0);
   });
   window._cardapioItens = itensTotem.concat(itensPrinc);
+  aplicarPrecosHorario(window._cardapioItens);
   dbg('_cardapioItens: '+window._cardapioItens.length+' total (totem='+itensTotem.length+' princ='+itensPrinc.length+')');
 
   if(!window._cardapioCats.length){
@@ -1661,8 +1665,43 @@ function _limparSelecoesOrfas(){
 }
 
 // Calcula o preço total com adicionais
+// ═══ PREÇO POR HORÁRIO ═══
+// Calcula o preço que vale AGORA pra um item, considerando as faixas de
+// horário cadastradas no PDV (se tiver — campo "precosPorHorario", só
+// existe em itens do cardápio PRINCIPAL, não nos específicos do totem).
+// Sem faixa cadastrada, comportamento idêntico a sempre.
+function precoAtualDoItem(it){
+  var base = (it && it._precoCad !== undefined) ? it._precoCad : ((it && it.preco) || 0);
+  var faixas = it && it.precosPorHorario;
+  if(!faixas || !faixas.length) return base;
+  var agora = new Date();
+  var minAgora = agora.getHours()*60 + agora.getMinutes();
+  var melhor = null, melhorMin = -1;
+  faixas.forEach(function(f){
+    if(!f || !f.inicio) return;
+    var partes = f.inicio.split(':');
+    var minF = (parseInt(partes[0],10)||0)*60 + (parseInt(partes[1],10)||0);
+    if(minF <= minAgora && minF > melhorMin){ melhor = f.preco; melhorMin = minF; }
+  });
+  return melhor !== null ? melhor : base;
+}
+
+
+// Aplica o preço por horário vigente em TODA a lista (cards, carrinho, conta).
+// Guarda o preço cadastrado em _precoCad (usado pra editar e como base das faixas).
+function aplicarPrecosHorario(lista){
+  var mudou = false;
+  (lista||[]).forEach(function(it){
+    if(!it) return;
+    if(it._precoCad === undefined) it._precoCad = it.preco || 0;
+    var novo = precoAtualDoItem(it);
+    if(novo !== it.preco){ it.preco = novo; mudou = true; }
+  });
+  return mudou;
+}
+setInterval(function(){ if(aplicarPrecosHorario(window._cardapioItens)){ try{ if(typeof renderItens==='function') renderItens(); }catch(e){} } }, 30000);
 function _precoComExtras(item, selecoes){
-  var base = item.preco || 0;
+  var base = precoAtualDoItem(item);
   var extras = 0;
   Object.keys(selecoes||{}).forEach(function(gid){
     var g = _grupos.find(function(x){ return x.id === gid; });
@@ -1925,7 +1964,7 @@ function _confirmarAdicionaisSugeridos(){
     var qtd = _sugSelecoes[itemId]; if(!qtd) return;
     var it = _sugItens.find(function(x){ return x.id===itemId; });
     if(!it) return;
-    _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:it.preco||0, precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
+    _carrinho.push({ itemId:it.id, fonte:it.fonte||'totem', nome:it.nome, preco:precoAtualDoItem(it), precoBase:it.preco||0, foto:it.foto||'', qtd:qtd, selecoes:{}, selecoesLabel:'', observacao:'', gruposIds:it.gruposIds||[] });
     temExtras = true;
   });
   if(temExtras){ atualizarBarra(); renderItens(); try{ if(navigator.vibrate) navigator.vibrate([30,20,30]); }catch(e){} }
@@ -2037,7 +2076,7 @@ function _adicionarSugerido(itemId){
     itemId: it.id,
     fonte: it.fonte||'totem',
     nome: it.nome,
-    preco: it.preco||0,
+    preco: precoAtualDoItem(it),
     precoBase: it.preco||0,
     foto: it.foto||'',
     qtd: 1,

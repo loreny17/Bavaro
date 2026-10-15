@@ -1783,35 +1783,161 @@ function abrirTrocaMesaCarrinho(){
   if(_mesaAtiva === null || _mesaAtiva === undefined) return;
   var ex = document.getElementById('modal-trocar-mesa');
   if(ex) ex.remove();
-
-  var botoesHtml = '';
-  for(var i = 1; i <= _TOTAL_MESAS; i++){
-    var num = String(i);
-    if(num === String(_mesaAtiva)) continue; // não mostra a mesa atual na lista
-    var ocupada = !!_mesasOcupadas[num];
-    botoesHtml +=
-      '<button onclick="confirmarTrocaMesaCarrinho(\'' + num + '\')" style="position:relative;padding:14px 0;border-radius:10px;' +
-        'border:1px solid ' + (ocupada ? 'rgba(248,113,113,0.4)' : 'var(--border)') + ';' +
-        'background:' + (ocupada ? 'rgba(248,113,113,0.12)' : 'var(--surface2)') + ';' +
-        'color:var(--text);font-weight:700;font-size:1rem;cursor:pointer;">' + num +
-        (ocupada ? '<div style="position:absolute;top:5px;right:7px;width:7px;height:7px;border-radius:50%;background:#f87171;"></div>' : '') +
-      '</button>';
-  }
-
+  _tm = { modo:'normal', sub:null, origem:null, destino:null, timer:null, x:0, y:0, longo:false };
   var mod = document.createElement('div');
   mod.id = 'modal-trocar-mesa';
   mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99995;display:flex;align-items:flex-end;justify-content:center;';
-  mod.onclick = function(e){ if(e.target === mod) mod.remove(); };
-  mod.innerHTML =
-    '<div style="background:var(--surface,#1a1a1a);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px;max-height:75vh;display:flex;flex-direction:column;">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
-        '<div style="font-weight:800;font-size:1.05rem;">Mudar pedido para qual mesa?</div>' +
-        '<button onclick="document.getElementById(\'modal-trocar-mesa\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;line-height:1;">×</button>' +
-      '</div>' +
-      '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">O pedido está montado na mesa ' + _mesaAtiva + '. Os itens do carrinho não serão perdidos — só o destino muda.</div>' +
-      '<div style="overflow-y:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding-bottom:4px;">' + botoesHtml + '</div>' +
-    '</div>';
+  mod.onclick = function(e){ if(e.target === mod) _tmFechar(); };
+  mod.innerHTML = '<div id="tm-sheet" style="background:var(--surface,#1a1a1a);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px;max-height:80vh;display:flex;flex-direction:column;"></div>';
   document.body.appendChild(mod);
+  _tmRender();
+}
+
+// ── Segurar o dedo numa mesa ocupada abre: Transferir / Fechar conta, sem sair daqui ──
+var _tm = { modo:'normal' };
+function _tmFechar(){
+  clearTimeout(_tm.timer);
+  var m = document.getElementById('modal-trocar-mesa'); if(m) m.remove();
+}
+function _tmBotaoMesa(num, ocupada, marcado){
+  return '<button data-tm="' + num + '" ' +
+    'onpointerdown="_tmDown(event,\'' + num + '\')" onpointermove="_tmMove(event)" onpointerup="_tmUp(event,\'' + num + '\')" ' +
+    'onpointercancel="_tmCancela()" onpointerleave="_tmCancela()" oncontextmenu="return false" ' +
+    'style="position:relative;padding:14px 0;border-radius:10px;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation;' +
+      'border:' + (marcado ? '2px solid var(--accent)' : '1px solid ' + (ocupada ? 'rgba(248,113,113,0.4)' : 'var(--border)')) + ';' +
+      'background:' + (marcado ? 'rgba(212,168,67,0.18)' : (ocupada ? 'rgba(248,113,113,0.12)' : 'var(--surface2)')) + ';' +
+      'color:var(--text);font-weight:700;font-size:1rem;cursor:pointer;">' + num +
+    (ocupada ? '<div style="position:absolute;top:5px;right:7px;width:7px;height:7px;border-radius:50%;background:#f87171;"></div>' : '') +
+  '</button>';
+}
+function _tmRender(){
+  var sh = document.getElementById('tm-sheet'); if(!sh) return;
+  var x = '<button onclick="_tmFechar()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;line-height:1;">×</button>';
+  var h = '';
+  if(_tm.modo === 'sub'){
+    var num = _tm.sub, c = _contasMesaCache[String(num)] || {};
+    var ativos = (c.itens || []).filter(function(i){ return i.status !== 'cancelado'; });
+    var t = c.itens ? calcularTotaisConta({ itens: c.itens || [], pagamentos: c.pagamentos || [] }) : null;
+    var info = [];
+    if(t) info.push('R$ ' + fmtPreco(t.total) + ' · ' + ativos.length + ' ' + (ativos.length === 1 ? 'item' : 'itens'));
+    else info.push('Carregando conta...');
+    if(t && t.pagoTotal > 0.05) info.push(t.restante > 0.05 ? 'falta R$ ' + fmtPreco(t.restante) : '✓ paga');
+    var quem = c.abertaPor || c.garcomPrincipal || '';
+    if(c.abertaEm) info.push('aberta ' + new Date(c.abertaEm).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) + (quem ? ' por ' + esc(quem) : ''));
+    h = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+        '<button onclick="_tm.modo=\'normal\';_tmRender()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:18px;padding:6px 12px;font-weight:700;cursor:pointer;font-family:inherit;">‹ Voltar</button>' +
+        '<div style="flex:1;font-family:\'Bebas Neue\',sans-serif;font-size:1.6rem;letter-spacing:0.04em;color:var(--accent);">MESA ' + num + '</div>' + x + '</div>' +
+      '<div style="font-size:0.84rem;color:var(--muted);margin-bottom:16px;line-height:1.5;">' + info.join(' · ') + '</div>' +
+      '<button class="mesa-menu-item" onclick="_tmTransferir()" style="margin-bottom:8px;">' +
+        '<span style="font-size:1.4rem;margin-right:12px;">🔀</span><div style="flex:1;text-align:left;"><div style="font-weight:700;">Transferir para outra mesa</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);">Leva a conta inteira da mesa ' + num + ' (com pagamentos)</div></div></button>' +
+      '<button class="mesa-menu-item" onclick="_tmFecharConta()">' +
+        '<span style="font-size:1.4rem;margin-right:12px;">💰</span><div style="flex:1;text-align:left;"><div style="font-weight:700;">Fechar conta da mesa ' + num + '</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);">Receber e encerrar. Seu pedido continua no carrinho.</div></div></button>';
+  } else {
+    var destino = _tm.modo === 'destino';
+    var botoes = '';
+    for(var i = 1; i <= _TOTAL_MESAS; i++){
+      var n = String(i);
+      if(destino ? n === String(_tm.origem) : n === String(_mesaAtiva)) continue;
+      botoes += _tmBotaoMesa(n, !!_mesasOcupadas[n], destino && n === String(_tm.destino));
+    }
+    if(destino){
+      var co = _contasMesaCache[String(_tm.origem)] || {};
+      var to = co.itens ? calcularTotaisConta({ itens: co.itens || [], pagamentos: co.pagamentos || [] }) : null;
+      h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+          '<div style="font-weight:800;font-size:1.05rem;">🔀 Mesa ' + _tm.origem + ' vai para qual mesa?</div>' + x + '</div>' +
+        '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">Toque na mesa de destino (livre ou ocupada).</div>' +
+        '<div style="overflow-y:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding-bottom:4px;">' + botoes + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;align-items:center;">' +
+          '<button onclick="_tm.modo=\'sub\';_tm.destino=null;_tmRender()" style="flex:0 0 auto;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:13px 14px;font-weight:700;cursor:pointer;font-family:inherit;">Voltar</button>' +
+          (_tm.destino
+            ? '<button id="tm-btn-transf" onclick="_tmConfirmarTransf()" style="flex:1;background:var(--accent);border:none;color:#000;border-radius:10px;padding:13px;font-weight:800;cursor:pointer;font-family:inherit;">Transferir ' + _tm.origem + ' → ' + _tm.destino + (to ? ' (R$ ' + fmtPreco(to.total) + ')' : '') + '</button>'
+            : '<div style="flex:1;font-size:0.8rem;color:var(--muted);text-align:center;">Escolha a mesa de destino</div>') +
+        '</div>';
+    } else {
+      h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+          '<div style="font-weight:800;font-size:1.05rem;">Mudar pedido para qual mesa?</div>' + x + '</div>' +
+        '<div style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">O pedido está montado na mesa ' + _mesaAtiva + '. Os itens do carrinho não serão perdidos — só o destino muda. <b style="color:var(--text);">Segure</b> uma mesa ocupada pra transferir ou fechar a conta dela.</div>' +
+        '<div style="overflow-y:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding-bottom:4px;">' + botoes + '</div>';
+    }
+  }
+  sh.innerHTML = h;
+}
+function _tmDown(e, num){
+  _tm.x = e.clientX; _tm.y = e.clientY; _tm.longo = false; _tm.ativo = num;
+  clearTimeout(_tm.timer);
+  if(_tm.modo !== 'normal') return;
+  _tm.timer = setTimeout(function(){
+    _tm.longo = true;
+    if(!_mesasOcupadas[num]){ showToast('Mesa ' + num + ' está livre', '#f7a34f'); return; }
+    try{ if(navigator.vibrate) navigator.vibrate(35); }catch(err){}
+    _tmAbrirSub(num);
+  }, 550);
+}
+function _tmMove(e){
+  if(Math.abs(e.clientX - _tm.x) > 10 || Math.abs(e.clientY - _tm.y) > 10) _tmCancela();
+}
+function _tmCancela(){ clearTimeout(_tm.timer); _tm.ativo = null; }
+function _tmUp(e, num){
+  clearTimeout(_tm.timer);
+  if(_tm.longo || _tm.ativo !== num){ _tm.longo = false; return; } // segurou, rolou ou saiu do botão
+  _tm.ativo = null;
+  if(_tm.modo === 'destino'){ _tm.destino = num; _tmRender(); return; }
+  confirmarTrocaMesaCarrinho(num); // toque normal: igual a antes
+}
+function _tmAbrirSub(num){
+  _tm.modo = 'sub'; _tm.sub = num; _tm.destino = null;
+  _tmRender();
+  var c = _contasMesaCache[String(num)];
+  if(c && c.id) _carregarItensMesa(c.id, function(){ if(_tm.modo === 'sub' && _tm.sub === num) _tmRender(); });
+}
+function _tmTransferir(){
+  var num = _tm.sub, c = _contasMesaCache[String(num)];
+  if(!c || !c.id){ showToast('⚠️ Mesa ' + num + ' sem conta aberta', '#f7a34f'); return; }
+  // Busca os itens atuais no servidor antes de transferir (nada de cache velho)
+  if(_itensMesaCache && _itensMesaCache[c.id]) delete _itensMesaCache[c.id];
+  _carregarItensMesa(c.id, function(){
+    _tm.modo = 'destino'; _tm.origem = num; _tm.destino = null;
+    _tmRender();
+  });
+}
+function _tmConfirmarTransf(){
+  var origem = _tm.origem, destino = _tm.destino;
+  if(!origem || !destino) return;
+  var b = document.getElementById('tm-btn-transf'); if(b){ b.disabled = true; b.textContent = 'Transferindo...'; }
+  // Mesma transferência do mapa de mesas (busca destino no servidor, junta se já tiver conta)
+  _transferirOrigemNum = origem; _transferirModo = 'mesa'; _transferirItensSel = {};
+  confirmarTransferencia(destino, true);
+  _tm.modo = 'normal'; _tm.origem = null; _tm.destino = null;
+  // o mapa se atualiza sozinho quando o servidor confirmar
+  [600, 1600, 3200].forEach(function(ms){ setTimeout(function(){ if(document.getElementById('tm-sheet') && _tm.modo === 'normal') _tmRender(); }, ms); });
+  _tmRender();
+}
+function _tmFecharConta(){
+  var num = _tm.sub;
+  var mod = document.getElementById('modal-trocar-mesa');
+  var fc = document.getElementById('modal-fechar-conta');
+  if(mod) mod.style.display = 'none'; // esconde o menuzinho enquanto fecha a conta
+  abrirFecharConta(num);
+  // Se o Fechar Conta não abrir (ex.: conta sumiu), o menuzinho volta
+  setTimeout(function(){
+    var m3 = document.getElementById('modal-trocar-mesa');
+    if(m3 && m3.style.display === 'none' && !(fc && fc.classList.contains('show'))){ m3.style.display = 'flex'; _tm.modo = 'normal'; _tmRender(); }
+  }, 2500);
+  // Quando o Fechar Conta sair da tela, o menuzinho volta atualizado
+  if(fc && window.MutationObserver){
+    var obs = new MutationObserver(function(){
+      if(!fc.classList.contains('show')){
+        obs.disconnect();
+        var m2 = document.getElementById('modal-trocar-mesa');
+        if(m2){ m2.style.display = 'flex'; _tm.modo = 'normal'; _tmRender(); }
+      }
+    });
+    obs.observe(fc, { attributes:true, attributeFilter:['class'] });
+  } else if(mod){
+    mod.remove();
+  }
 }
 
 function confirmarTrocaMesaCarrinho(novoNum){

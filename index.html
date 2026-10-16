@@ -1211,6 +1211,21 @@ body.admin-mode .admin-only{display:flex!important;}
 }
 
 
+.brf-mini-txt{width:auto;padding:0 10px;font-family:'Space Grotesk',sans-serif;font-size:0.72rem;font-weight:600;letter-spacing:0;}
+.brf-modal{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:700;display:none;align-items:flex-end;justify-content:center;}
+.brf-modal-box{background:var(--surface);border:1px solid var(--border2);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;padding:16px 16px calc(20px + env(safe-area-inset-bottom));}
+.brf-modal-head{display:flex;align-items:center;justify-content:space-between;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:0.06em;color:var(--accent);margin-bottom:12px;}
+.brf-x{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);width:34px;height:32px;font-size:1rem;cursor:pointer;}
+.brf-fl-item{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px;margin-bottom:8px;}
+.brf-fl-item .brf-info{cursor:pointer;}
+.brf-fl-item .brf-mini{margin-left:0;}
+.brf-chips{display:flex;gap:5px;margin-bottom:14px;}
+.brf-chip{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--muted);font-size:0.66rem;font-weight:700;padding:9px 0;cursor:pointer;font-family:'Space Grotesk',sans-serif;}
+.brf-chip.on{background:var(--accent);border-color:var(--accent);color:#000;}
+.brf-seg{display:flex;gap:6px;margin-bottom:14px;}
+.brf-seg button{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--muted);font-size:0.76rem;font-weight:600;padding:10px 6px;cursor:pointer;font-family:'Space Grotesk',sans-serif;}
+.brf-seg button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim);}
+#brf-modal input[type="time"]{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:0.9rem;padding:11px 13px;outline:none;color-scheme:dark;}
 /* ☀️ BRIEFING DO DIA */
 .brf-sec{font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:0.06em;color:var(--accent);margin:6px 0 10px;display:flex;align-items:center;gap:6px;}
 .brf-mini{margin-left:auto;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:0.9rem;width:34px;height:30px;cursor:pointer;}
@@ -12500,22 +12515,47 @@ var _fbInterval = setInterval(function(){
 var BRF_DIAS = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
 var BRF_DIAS_CURTO = ['DOM','SEG','TER','QUA','QUI','SEX','SÁB'];
 
-function _brfChegaProxUtil(d){ return d===5 ? 'chega segunda' : 'chega amanhã'; }
-function _brfChegaProxAberto(d){ return d===6 ? 'chega segunda' : 'chega amanhã'; }
+var BRF_FECHADO = [0]; // domingo fechado
+var BRF_SEG_SAB=[1,2,3,4,5,6], BRF_SEG_SEX=[1,2,3,4,5];
 
-// Regras dos fornecedores (dias: 0=dom ... 6=sáb). Restaurante fecha no domingo.
-var BRF_FORN = [
-  {id:'concorde', emoji:'📦', nome:'Concorde', desc:'embalagens', dias:[1,2,3,4,5], prazo:'12:00', chega:_brfChegaProxUtil},
-  {id:'coxinhas', emoji:'🥟', nome:'Coxinhas', dias:[1,2,3,4,5,6], prazo:'14:00', chega:function(){return 'chega hoje';}},
-  {id:'coca', emoji:'🥤', nome:'Coca-Cola', dias:[1,3,5], chega:function(d){return {1:'chega terça',3:'chega quinta',5:'chega sábado'}[d];}},
-  {id:'gold', emoji:'🍔', nome:'Gold', desc:'pão de hambúrguer', dias:[1,2,3,4,5,6], chega:_brfChegaProxAberto},
-  {id:'belpan', emoji:'🥖', nome:'Belpan', desc:'baguete e broa', dias:[1,2,3,4,5,6], chega:_brfChegaProxAberto},
-  {id:'molho', emoji:'🍅', nome:'Molho de tomate', dias:[1,2,3,4,5], chega:_brfChegaProxUtil},
-  {id:'povao', emoji:'📦', nome:'Povão', desc:'embalagens', dias:[1,2,3,4,5], chega:function(){return 'em até 2 dias úteis';}},
-  {id:'gelo', emoji:'🧊', nome:'Gelo', dias:[1,2,3,4,5,6], chega:function(){return 'todo dia';}},
-  {id:'bebidas', emoji:'🍺', nome:'Bebidas alcoólicas', dias:[5], conferir:true, chega:function(){return 'conferir estoque (semanal)';}},
-  {id:'sorvetes', emoji:'🍦', nome:'Sorvetes', dias:[5], conferir:true, chega:function(){return 'conferir estoque (semanal)';}}
-];
+// Fornecedores padrão (usados até você editar). Dias: 0=dom ... 6=sáb.
+// modo 'entrega': o app calcula os dias de pedir pelos dias de entrega + antecedência.
+// modo 'direto': você escolhe direto os dias de pedir.
+function brfFornPadrao(){ return [
+  {id:'concorde', emoji:'📦', nome:'Concorde', desc:'embalagens', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SEX.slice(), antec:1, atende:BRF_SEG_SEX.slice(), pedir:[], prazo:'12:00', obs:''},
+  {id:'coxinhas', emoji:'🥟', nome:'Coxinhas', desc:'', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SAB.slice(), antec:0, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'14:00', obs:''},
+  {id:'coca', emoji:'🥤', nome:'Coca-Cola', desc:'', tipo:'pedido', modo:'entrega', entrega:[2,4,6], antec:1, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'', obs:''},
+  {id:'gold', emoji:'🍔', nome:'Gold', desc:'pão de hambúrguer', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SAB.slice(), antec:1, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'', obs:''},
+  {id:'belpan', emoji:'🥖', nome:'Belpan', desc:'baguete e broa', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SAB.slice(), antec:1, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'', obs:''},
+  {id:'molho', emoji:'🍅', nome:'Molho de tomate', desc:'', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SEX.slice(), antec:1, atende:BRF_SEG_SEX.slice(), pedir:[], prazo:'', obs:''},
+  {id:'povao', emoji:'📦', nome:'Povão', desc:'embalagens', tipo:'pedido', modo:'direto', entrega:[], antec:1, atende:BRF_SEG_SEX.slice(), pedir:BRF_SEG_SEX.slice(), prazo:'', obs:'entrega em até 2 dias úteis'},
+  {id:'gelo', emoji:'🧊', nome:'Gelo', desc:'', tipo:'pedido', modo:'entrega', entrega:BRF_SEG_SAB.slice(), antec:0, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'', obs:''},
+  {id:'bebidas', emoji:'🍺', nome:'Bebidas alcoólicas', desc:'', tipo:'conferir', modo:'direto', entrega:[], antec:1, atende:[], pedir:[5], prazo:'', obs:'conferir estoque (semanal)'},
+  {id:'sorvetes', emoji:'🍦', nome:'Sorvetes', desc:'', tipo:'conferir', modo:'direto', entrega:[], antec:1, atende:[], pedir:[5], prazo:'', obs:'conferir estoque (semanal)'}
+]; }
+function brfForn(){ if(!brfData.forn || !brfData.forn.length) brfData.forn=brfFornPadrao(); return brfData.forn; }
+
+// Para cada dia de entrega, em que dia é preciso pedir? → {diaPedido:[diasEntrega]}
+function brfMapaPedido(f){
+  var mapa={};
+  if(f.tipo==='conferir' || f.modo==='direto'){ (f.pedir||[]).forEach(function(d){ mapa[d]=[]; }); return mapa; }
+  var atende=(f.atende&&f.atende.length)?f.atende:BRF_SEG_SAB;
+  (f.entrega||[]).forEach(function(e){
+    var d=((e-(f.antec||0))%7+7)%7, n=0;
+    while((atende.indexOf(d)<0 || BRF_FECHADO.indexOf(d)>=0) && n<7){ d=(d+6)%7; n++; }
+    if(n>=7) return;
+    (mapa[d]=mapa[d]||[]).push(e);
+  });
+  return mapa;
+}
+function brfDiasPedido(f){ return Object.keys(brfMapaPedido(f)).map(Number).sort(function(a,b){return ((a+6)%7)-((b+6)%7);}); }
+function brfChega(f,d){
+  if(f.tipo==='conferir' || f.modo==='direto') return f.obs||'';
+  var ents=brfMapaPedido(f)[d]||[];
+  var txt=ents.map(function(e){ return e===d?'hoje':(e===(d+1)%7?'amanhã':BRF_DIAS[e]); });
+  return (txt.length?'chega '+txt.join(' e '):'')+(f.obs?(txt.length?' · ':'')+f.obs:'');
+}
+function _brfListaDias(arr){ if(!arr||!arr.length) return '—'; var o=arr.slice().sort(function(a,b){return ((a+6)%7)-((b+6)%7);}); return o.map(function(d){return BRF_DIAS_CURTO[d].toLowerCase();}).join(', '); }
 
 var brfData = {status:{}, apiKey:''};
 var brfJogos = {gerado:'', dias:{}, erro:''};
@@ -12568,11 +12608,11 @@ function brfCarregarFirebase(){
 
 function brfItensDoDia(dt){
   var d=dt.getDay();
-  var itens=BRF_FORN.filter(function(f){ return f.dias.indexOf(d)>=0; });
+  var itens=brfForn().filter(function(f){ return brfMapaPedido(f)[d]!==undefined; });
   itens.sort(function(a,b){
     if(a.prazo&&b.prazo) return _brfMin(a.prazo)-_brfMin(b.prazo);
     if(a.prazo) return -1; if(b.prazo) return 1;
-    if(a.conferir!==b.conferir) return a.conferir?1:-1;
+    var ca=a.tipo==='conferir', cb=b.tipo==='conferir'; if(ca!==cb) return ca?1:-1;
     return 0;
   });
   return itens;
@@ -12609,30 +12649,29 @@ function brfRender(){
 
   var h='';
   // ── PEDIDOS ──
-  h+='<div class="brf-sec">📦 Pedidos de hoje</div>';
+  h+='<div class="brf-sec">📦 Pedidos de hoje<button class="brf-mini brf-mini-txt" onclick="brfAbrirForn()">⚙️ Fornecedores</button></div>';
   if(d===0){
     h+='<div class="brf-vazio">Restaurante fechado hoje. Nenhum pedido. 😴</div>';
   } else {
     var itens=brfItensDoDia(hoje);
-    if(d===5) h+='<div class="brf-aviso">Sexta: Concorde, molho de tomate e Povão pedidos hoje chegam na segunda.</div>';
-    if(d===6) h+='<div class="brf-aviso">Sábado: Gold e Belpan pedidos hoje chegam na segunda.</div>';
+    if(!itens.length) h+='<div class="brf-vazio">Nenhum pedido hoje. 👍</div>';
     itens.forEach(function(f){
       var s=st[f.id];
       var atrasado = !s && f.prazo && agora>_brfMin(f.prazo);
       var ico = s==='feito' ? '✅' : (s==='nao' ? '➖' : '⬜');
       var tags='';
       if(f.prazo) tags+='<span class="brf-tag'+(atrasado?' brf-tag-late':'')+'">'+(atrasado?'prazo passou ':'até ')+f.prazo+'</span>';
-      var sub=(f.desc?f.desc+' · ':'')+(f.chega?f.chega(d):'');
+      var ch=brfChega(f,d); var sub=(f.desc?f.desc:'')+(f.desc&&ch?' · ':'')+ch;
       if(s==='nao') sub='não precisa hoje';
       h+='<div class="brf-item'+(s?' brf-ok':'')+'" onclick="brfToggle(\''+f.id+'\')">'
         +'<div class="brf-check">'+ico+'</div>'
-        +'<div class="brf-info"><div class="brf-nome">'+f.emoji+' '+escHtml(f.nome)+(f.conferir?' <span class="brf-conf">conferir</span>':'')+'</div>'
+        +'<div class="brf-info"><div class="brf-nome">'+f.emoji+' '+escHtml(f.nome)+(f.tipo==='conferir'?' <span class="brf-conf">conferir</span>':'')+'</div>'
         +'<div class="brf-desc">'+escHtml(sub)+'</div></div>'+tags+'</div>';
     });
     h+='<div class="brf-dica">Toque: ⬜ pendente → ✅ feito → ➖ não precisa</div>';
     // amanhã
     var am=_brfAddDias(hoje,1); if(am.getDay()===0) am=_brfAddDias(hoje,2);
-    var nomesAm=brfItensDoDia(am).map(function(f){return f.emoji+' '+f.nome;}).join(', ');
+    var nomesAm=brfItensDoDia(am).map(function(f){return f.emoji+' '+f.nome;}).join(', ')||'nenhum pedido';
     h+='<div class="brf-amanha"><b>'+(am.getDay()===1&&d===6?'Segunda':'Amanhã')+':</b> '+escHtml(nomesAm)+'</div>';
   }
 
@@ -12758,6 +12797,101 @@ function brfBuscarJogos(manual){
     brfRender();
   }
   proximo();
+}
+
+
+// ═══ EDITOR DE FORNECEDORES ═══
+var _brfEdit=null;
+function _brfModal(html){
+  var m=document.getElementById('brf-modal');
+  if(!m){ m=document.createElement('div'); m.id='brf-modal'; m.className='brf-modal'; document.body.appendChild(m);
+    m.addEventListener('click',function(e){ if(e.target===m) brfFecharModal(); }); }
+  m.innerHTML='<div class="brf-modal-box">'+html+'</div>'; m.style.display='flex';
+}
+function brfFecharModal(){ var m=document.getElementById('brf-modal'); if(m) m.style.display='none'; }
+
+function brfAbrirForn(){
+  var h='<div class="brf-modal-head"><span>Fornecedores</span><button class="brf-x" onclick="brfFecharModal()">✕</button></div>';
+  brfForn().forEach(function(f,i){
+    var dias=_brfListaDias(brfDiasPedido(f));
+    h+='<div class="brf-fl-item"><div class="brf-info" onclick="brfEditarForn('+i+')"><div class="brf-nome">'+escHtml(f.emoji+' '+f.nome)+(f.tipo==='conferir'?' <span class="brf-conf">conferir</span>':'')+'</div>'
+      +'<div class="brf-desc">'+(f.tipo==='conferir'?'Conferir':'Pedir')+': '+dias+(f.prazo?' · até '+f.prazo:'')+'</div></div>'
+      +'<button class="brf-mini" onclick="brfEditarForn('+i+')">✏️</button><button class="brf-mini" onclick="brfExcluirForn('+i+')">🗑️</button></div>';
+  });
+  h+='<button class="brf-btn" onclick="brfEditarForn(-1)">+ Novo fornecedor</button>';
+  _brfModal(h);
+}
+function brfExcluirForn(i){
+  var f=brfForn()[i]; if(!f) return;
+  if(!confirm('Remover '+f.nome+'?')) return;
+  brfForn().splice(i,1); brfSalvar(); brfRender(); brfAtualizarHome(); brfAbrirForn();
+  showToast(f.nome+' removido','var(--danger)');
+}
+function _brfChips(campo,sel){
+  var ordem=[1,2,3,4,5,6,0];
+  return '<div class="brf-chips">'+ordem.map(function(d){
+    return '<button type="button" class="brf-chip'+(sel.indexOf(d)>=0?' on':'')+'" onclick="brfChip(\''+campo+'\','+d+')">'+BRF_DIAS_CURTO[d]+'</button>';
+  }).join('')+'</div>';
+}
+function brfChip(campo,d){
+  _brfLerForm();
+  var a=_brfEdit[campo]||(_brfEdit[campo]=[]); var i=a.indexOf(d);
+  if(i>=0) a.splice(i,1); else a.push(d);
+  _brfRenderForm();
+}
+function brfEditarForn(i){
+  _brfEdit = i>=0 ? JSON.parse(JSON.stringify(brfForn()[i])) : {id:'', emoji:'📦', nome:'', desc:'', tipo:'pedido', modo:'entrega', entrega:[], antec:1, atende:BRF_SEG_SAB.slice(), pedir:[], prazo:'', obs:''};
+  _brfEdit._idx=i;
+  _brfRenderForm();
+}
+function _brfLerForm(){
+  if(!_brfEdit || !document.getElementById('brf-f-nome')) return;
+  _brfEdit.emoji=document.getElementById('brf-f-emoji').value.trim()||'📦';
+  _brfEdit.nome=document.getElementById('brf-f-nome').value.trim();
+  _brfEdit.desc=document.getElementById('brf-f-desc').value.trim();
+  _brfEdit.prazo=document.getElementById('brf-f-prazo')?document.getElementById('brf-f-prazo').value:'';
+  _brfEdit.obs=document.getElementById('brf-f-obs').value.trim();
+  var an=document.getElementById('brf-f-antec'); if(an) _brfEdit.antec=parseInt(an.value)||0;
+}
+function brfSetCampo(c,v){ _brfLerForm(); _brfEdit[c]=v; _brfRenderForm(); }
+function _brfRenderForm(){
+  var f=_brfEdit, conf=f.tipo==='conferir', ent=!conf&&f.modo==='entrega';
+  var h='<div class="brf-modal-head"><span>'+(f._idx>=0?'Editar':'Novo')+' fornecedor</span><button class="brf-x" onclick="brfAbrirForn()">‹</button></div>';
+  h+='<div class="form-row" style="grid-template-columns:64px 1fr;"><div><label>Emoji</label><input type="text" id="brf-f-emoji" value="'+escHtml(f.emoji)+'" maxlength="4" style="text-align:center;"></div>'
+    +'<div><label>Nome</label><input type="text" id="brf-f-nome" value="'+escHtml(f.nome)+'" placeholder="Ex.: Gold"></div></div>';
+  h+='<div class="form-group"><label>O que é (opcional)</label><input type="text" id="brf-f-desc" value="'+escHtml(f.desc)+'" placeholder="Ex.: pão de hambúrguer"></div>';
+  h+='<label>Tipo</label><div class="brf-seg"><button type="button" class="'+(!conf?'on':'')+'" onclick="brfSetCampo(\'tipo\',\'pedido\')">Fazer pedido</button><button type="button" class="'+(conf?'on':'')+'" onclick="brfSetCampo(\'tipo\',\'conferir\')">Só conferir estoque</button></div>';
+  if(!conf){
+    h+='<label>Como definir os dias</label><div class="brf-seg"><button type="button" class="'+(ent?'on':'')+'" onclick="brfSetCampo(\'modo\',\'entrega\')">Pelos dias de entrega</button><button type="button" class="'+(!ent?'on':'')+'" onclick="brfSetCampo(\'modo\',\'direto\')">Escolher dias de pedir</button></div>';
+  }
+  if(ent){
+    h+='<label>Dias que o fornecedor entrega</label>'+_brfChips('entrega',f.entrega||[]);
+    h+='<div class="form-group"><label>Precisa pedir com quanto tempo?</label><select id="brf-f-antec" onchange="brfSetCampo(\'antec\',parseInt(this.value))">'
+      +[[0,'No mesmo dia da entrega'],[1,'1 dia antes'],[2,'2 dias antes'],[3,'3 dias antes']].map(function(o){return '<option value="'+o[0]+'"'+(f.antec===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></div>';
+    h+='<label>Dias que o fornecedor aceita pedido</label>'+_brfChips('atende',f.atende||[]);
+  } else {
+    h+='<label>'+(conf?'Dias de conferir':'Dias de pedir')+'</label>'+_brfChips('pedir',f.pedir||[]);
+  }
+  if(!conf) h+='<div class="form-group"><label>Horário limite do pedido (opcional)</label><input type="time" id="brf-f-prazo" value="'+escHtml(f.prazo||'')+'"></div>';
+  h+='<div class="form-group"><label>Observação (opcional)</label><input type="text" id="brf-f-obs" value="'+escHtml(f.obs||'')+'" placeholder="'+(ent?'Ex.: pedir pelo WhatsApp':'Ex.: entrega em até 2 dias úteis')+'"></div>';
+  // prévia
+  var prev=brfDiasPedido(f);
+  h+='<div class="brf-aviso">📅 '+(conf?'Conferir':'Pedir')+': <b>'+_brfListaDias(prev)+'</b>';
+  if(ent && prev.length){ h+='<br>'+prev.map(function(d){ return BRF_DIAS_CURTO[d].toLowerCase()+' → '+brfChega(f,d).replace(/ · .*/,''); }).join(' · '); }
+  h+='</div>';
+  h+='<button class="brf-btn" onclick="brfSalvarForn()">Salvar</button>';
+  _brfModal(h);
+}
+function brfSalvarForn(){
+  _brfLerForm();
+  var f=_brfEdit;
+  if(!f.nome){ showToast('Coloque o nome do fornecedor','var(--warning)'); return; }
+  if(!brfDiasPedido(f).length){ showToast('Escolha os dias','var(--warning)'); return; }
+  var i=f._idx; delete f._idx;
+  if(!f.id) f.id='f'+Date.now();
+  if(i>=0) brfForn()[i]=f; else brfForn().push(f);
+  _brfEdit=null; brfSalvar(); brfRender(); brfAtualizarHome(); brfAbrirForn();
+  showToast('Fornecedor salvo ✅');
 }
 
 brfCarregar();

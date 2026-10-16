@@ -12907,6 +12907,165 @@ setTimeout(brfAtualizarHome,500);
   <button class="tab-btn" onclick="showTab('estoque')" id="btn-tab-estoque"><span class="icon">📦</span><span id="estoque-badge-tab">Estoque</span></button>
   <button class="tab-btn" onclick="showTab('faltas')"><span class="icon">⚠️</span><span id="faltas-tab-label">Faltas</span></button>
 </div>
+<!-- ═══ Assistente de gestão (pedidos a fornecedores, jogos, estoque) → /api/assistente-gestao ═══ -->
+<style>
+#ag-fab{position:fixed;left:14px;bottom:80px;width:54px;height:54px;border-radius:50%;border:2px solid var(--accent);background:#000;padding:0;overflow:hidden;cursor:pointer;z-index:101;box-shadow:0 4px 18px rgba(212,168,67,0.35);display:none;}
+#ag-fab img{width:100%;height:100%;object-fit:cover;display:block;}
+#ag-fab .ag-fb{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:var(--accent);}
+#ag-painel{position:fixed;left:0;right:0;bottom:0;top:12%;max-width:560px;margin:0 auto;background:var(--surface);border:1px solid var(--border2);border-bottom:none;border-radius:18px 18px 0 0;z-index:9500;display:none;flex-direction:column;box-shadow:0 -8px 40px rgba(0,0,0,0.6);}
+#ag-painel.aberto{display:flex;}
+#ag-fundo{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9499;display:none;}
+#ag-fundo.aberto{display:block;}
+.ag-topo{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border2);}
+.ag-topo img{width:34px;height:34px;border-radius:50%;object-fit:cover;border:1px solid var(--accent);}
+.ag-topo .ag-t{flex:1;font-weight:700;font-size:0.92rem;color:var(--text);}
+.ag-topo .ag-t small{display:block;font-weight:500;font-size:0.68rem;color:var(--muted);}
+.ag-topo button{background:none;border:none;color:var(--muted);font-size:1.3rem;cursor:pointer;padding:4px 6px;}
+#ag-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.ag-u{align-self:flex-end;max-width:82%;background:var(--accent);color:#000;border-radius:16px 16px 4px 16px;padding:9px 13px;font-size:0.86rem;white-space:pre-wrap;word-break:break-word;}
+.ag-a{display:flex;gap:8px;align-items:flex-end;max-width:90%;}
+.ag-a img{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;}
+.ag-a .ag-b{background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:16px 16px 16px 4px;padding:9px 13px;font-size:0.86rem;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+.ag-sug{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 8px;}
+.ag-sug button{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(212,168,67,0.35);border-radius:14px;padding:5px 10px;font-size:0.72rem;cursor:pointer;}
+.ag-barra{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--border2);}
+#ag-input{flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:22px;padding:10px 14px;font-size:16px;outline:none;}
+.ag-barra button{width:42px;height:42px;border-radius:50%;border:none;cursor:pointer;font-size:1.1rem;flex-shrink:0;}
+#ag-mic{background:var(--surface2);color:var(--text);border:1px solid var(--border2)!important;}
+#ag-mic.ouvindo{background:#ef4444;color:#fff;animation:agPulso 1s infinite;}
+#ag-env{background:var(--accent);color:#000;}
+@keyframes agPulso{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.6)}50%{box-shadow:0 0 0 8px rgba(239,68,68,0)}}
+.ag-dig span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:var(--muted);animation:agDig 1s infinite;}
+.ag-dig span:nth-child(2){animation-delay:.15s}.ag-dig span:nth-child(3){animation-delay:.3s}
+@keyframes agDig{0%,100%{opacity:.3}50%{opacity:1}}
+.ag-conf{display:flex;gap:8px;margin-top:9px;}
+.ag-conf button{flex:1;border-radius:9px;padding:8px;font-weight:700;font-size:0.8rem;cursor:pointer;}
+</style>
+<button id="ag-fab" onclick="agAbrir()" title="Assistente"><span class="ag-fb">✨</span><img src="/assistente-avatar.png" alt="" onerror="this.remove()"></button>
+<div id="ag-fundo" onclick="agFechar()"></div>
+<div id="ag-painel">
+  <div class="ag-topo">
+    <img src="/assistente-avatar.png" alt="" onerror="this.style.display='none'">
+    <div class="ag-t">Assistente<small>Pedidos, jogos e estoque</small></div>
+    <button onclick="agLimpar()" title="Nova conversa">🧹</button>
+    <button onclick="agFechar()" title="Fechar">✕</button>
+  </div>
+  <div id="ag-msgs"></div>
+  <div class="ag-sug" id="ag-sug">
+    <button onclick="agEnviar('O que falta pedir hoje?')">O que falta pedir hoje?</button>
+    <button onclick="agEnviar('O que chega amanhã?')">O que chega amanhã?</button>
+    <button onclick="agEnviar('Qual o jogo de hoje à noite?')">Jogos de hoje</button>
+    <button onclick="agEnviar('O que tá abaixo do mínimo no estoque?')">Estoque baixo</button>
+  </div>
+  <div class="ag-barra">
+    <button id="ag-mic" onclick="agVoz()" title="Falar">🎤</button>
+    <input id="ag-input" placeholder="Pergunte ou peça algo..." autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();agEnviar();}">
+    <button id="ag-env" onclick="agEnviar()" title="Enviar">➤</button>
+  </div>
+</div>
+<script>
+(function(){
+  var msgs = [], ctx = [], seq = 0, ocupado = false, recon = null;
+  var AV = '<img src="/assistente-avatar.png" alt="" onerror="this.style.visibility=\'hidden\'">';
+  function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function logado(){ try { return !!(_tenantId && fbAuth && fbAuth.currentUser); } catch(e){ return false; } }
+  function restId(){ try { return (restauranteAtivo && restauranteAtivo.id) || 'bavaro'; } catch(e){ return 'bavaro'; } }
+  // botão só aparece logado
+  setInterval(function(){ var f = document.getElementById('ag-fab'); if(f) f.style.display = logado() ? 'block' : 'none'; if(!logado()) agFechar(); }, 1500);
+
+  function render(){
+    var box = document.getElementById('ag-msgs'); if(!box) return;
+    if(!msgs.length){ box.innerHTML = '<div class="ag-a">' + AV + '<div class="ag-b">Oi! Posso dizer o que falta pedir hoje, o que chega, os jogos da semana e o que está abaixo do mínimo no estoque. Também marco pedidos ("já pedi a coxinha e o gelo") e cadastro, edito ou removo fornecedores.</div></div>'; }
+    else box.innerHTML = msgs.map(function(m){
+      if(m.u) return '<div class="ag-u">' + esc(m.t) + '</div>';
+      if(m.dig) return '<div class="ag-a">' + AV + '<div class="ag-b ag-dig"><span></span><span></span><span></span></div></div>';
+      var conf = m.conf ? '<div class="ag-conf"><button style="background:#ef4444;color:#fff;border:none;" onclick="agConfirmar(' + m.id + ',true)">🗑️ Remover</button><button style="background:var(--surface);color:var(--text);border:1px solid var(--border2);" onclick="agConfirmar(' + m.id + ',false)">Cancelar</button></div>' : '';
+      return '<div class="ag-a">' + AV + '<div class="ag-b">' + esc(m.t) + conf + '</div></div>';
+    }).join('');
+    document.getElementById('ag-sug').style.display = msgs.length ? 'none' : 'flex';
+    setTimeout(function(){ box.scrollTop = box.scrollHeight; }, 20);
+  }
+  function addA(t, extra){ var m = Object.assign({ id: ++seq, t: t }, extra || {}); msgs.push(m); return m; }
+  function textoDe(j){ return String((j.tipo === 'pergunta' ? j.resposta : j.mensagem) || j.resposta || ''); }
+  function atualizarBriefing(){
+    function r(){ try { if(typeof brfRender === 'function') brfRender(); if(typeof brfAtualizarHome === 'function') brfAtualizarHome(); } catch(e){} }
+    r(); setTimeout(r, 1200); // o onSnapshot traz o doc novo logo depois
+  }
+  function tratar(j){
+    if(!j || !j.ok){ addA((j && j.error) || 'Algo deu errado.'); return false; }
+    if(j.tipo === 'multiplo'){ var mudou = false; (j.acoes || []).forEach(function(a){ if(tratar(Object.assign({ ok: true }, a))) mudou = true; }); return mudou; }
+    var t = textoDe(j);
+    if(j.precisaConfirmar){ addA(t, { conf: true, fornecedorId: j.fornecedorId }); ctx.push({ autor:'assistente', texto:t }); return false; }
+    addA(t); ctx.push({ autor:'assistente', texto:t });
+    return j.tipo !== 'pergunta' && !j.negado;
+  }
+  async function chamar(corpo){
+    var tok = await fbAuth.currentUser.getIdToken();
+    var r = await fetch('/api/assistente-gestao', { method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:restId(), idToken:tok }, corpo)) });
+    var j; try { j = await r.json(); } catch(e){ j = { ok:false, error:'Resposta inválida do servidor (' + r.status + ').' }; }
+    return j;
+  }
+  window.agAbrir = function(){
+    document.getElementById('ag-painel').classList.add('aberto'); document.getElementById('ag-fundo').classList.add('aberto');
+    render(); setTimeout(function(){ var i = document.getElementById('ag-input'); if(i && window.innerWidth > 700) i.focus(); }, 80);
+  };
+  window.agFechar = function(){
+    var p = document.getElementById('ag-painel'); if(p) p.classList.remove('aberto');
+    var f = document.getElementById('ag-fundo'); if(f) f.classList.remove('aberto');
+    if(recon){ try { recon.stop(); } catch(e){} }
+  };
+  window.agLimpar = function(){ msgs = []; ctx = []; render(); };
+  window.agEnviar = async function(forcado){
+    var inp = document.getElementById('ag-input');
+    var texto = String(forcado != null ? forcado : inp.value).trim();
+    if(!texto || ocupado) return;
+    if(!logado()){ addA('Faça login pra usar o assistente.'); render(); return; }
+    inp.value = ''; ocupado = true;
+    var hist = ctx.slice(-8);
+    msgs.push({ id: ++seq, u: true, t: texto }); ctx.push({ autor:'usuario', texto:texto });
+    var dig = { id: ++seq, dig: true }; msgs.push(dig); render();
+    try {
+      var j = await chamar({ texto: texto, historico: hist });
+      msgs = msgs.filter(function(m){ return m !== dig; });
+      if(tratar(j)) atualizarBriefing();
+    } catch(e){
+      msgs = msgs.filter(function(m){ return m !== dig; });
+      addA('Não consegui falar com o assistente agora.');
+    }
+    ocupado = false; render();
+  };
+  window.agConfirmar = async function(id, sim){
+    var m = msgs.filter(function(x){ return x.id === id; })[0]; if(!m || !m.conf) return;
+    m.conf = false;
+    if(!sim){ addA('Ok, não removi.'); render(); return; }
+    var dig = { id: ++seq, dig: true }; msgs.push(dig); render();
+    try {
+      var j = await chamar({ confirmacao: { acao:'removerFornecedor', fornecedorId: m.fornecedorId } });
+      msgs = msgs.filter(function(x){ return x !== dig; });
+      if(tratar(j)) atualizarBriefing();
+    } catch(e){ msgs = msgs.filter(function(x){ return x !== dig; }); addA('Sem conexão — não removi.'); }
+    render();
+  };
+  window.agVoz = function(){
+    var R = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var btn = document.getElementById('ag-mic');
+    if(!R){ if(typeof showToast === 'function') showToast('Seu navegador não suporta voz', '#ef4444'); return; }
+    if(recon){ try { recon.stop(); } catch(e){} return; }
+    recon = new R(); recon.lang = 'pt-BR'; recon.interimResults = true; recon.continuous = false;
+    var final = '';
+    recon.onresult = function(ev){
+      var parcial = '';
+      for(var i = ev.resultIndex; i < ev.results.length; i++){ if(ev.results[i].isFinal) final += ev.results[i][0].transcript; else parcial += ev.results[i][0].transcript; }
+      document.getElementById('ag-input').value = (final + parcial).trim();
+    };
+    recon.onend = function(){ btn.classList.remove('ouvindo'); recon = null; var t = final.trim(); if(t) agEnviar(t); };
+    recon.onerror = function(){ btn.classList.remove('ouvindo'); };
+    btn.classList.add('ouvindo');
+    try { recon.start(); } catch(e){ btn.classList.remove('ouvindo'); recon = null; }
+  };
+})();
+</script>
 </body>
 </html>
 

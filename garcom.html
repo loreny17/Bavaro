@@ -19916,6 +19916,34 @@ function iniciarVozAssistenteGarcom(){
   try{ recon.start(); } catch(e){ _reconhecimentoVozAssistenteGarcom = null; showToast('Erro ao iniciar voz', '#f87171'); }
 }
 
+// ── Gestão (pedidos a fornecedores, jogos, estoque) — respostas do /api/_gestao ──
+var _gstSeq = 0;
+function _gestaoTexto(j){ return String((j.tipo === 'pergunta' ? j.resposta : j.mensagem) || j.resposta || ''); }
+function _htmlGestao(j){
+  var t = '<div style="white-space:pre-wrap;">' + esc(_gestaoTexto(j)) + '</div>';
+  if(!j.precisaConfirmar) return t;
+  var id = 'gst' + (++_gstSeq);
+  return '<div id="' + id + '">' + t + '<div style="display:flex;gap:8px;margin-top:9px;">' +
+    '<button onclick="_gestaoConfirmar(\'' + id + '\',\'' + esc(String(j.fornecedorId||'')).replace(/'/g,'') + '\')" style="flex:1;background:#ef4444;color:#fff;border:none;border-radius:9px;padding:9px;font-weight:700;font-size:0.8rem;">🗑️ Remover</button>' +
+    '<button onclick="_gestaoConfirmar(\'' + id + '\',null)" style="flex:1;background:var(--surface);color:var(--text);border:1px solid var(--border2);border-radius:9px;padding:9px;font-weight:700;font-size:0.8rem;">Cancelar</button>' +
+  '</div></div>';
+}
+function _gestaoTrocarHtml(id, novo){
+  var el = document.getElementById(id); if(el) el.outerHTML = novo;
+  (_chatHistorico||[]).forEach(function(m){ if(m.tipo === 'html' && m.html && m.html.indexOf('id="' + id + '"') >= 0) m.html = novo; });
+}
+function _gestaoConfirmar(id, fornecedorId){
+  if(!fornecedorId){ _gestaoTrocarHtml(id, '<div style="color:var(--muted);">Ok, não removi.</div>'); return; }
+  _gestaoTrocarHtml(id, '<div id="' + id + '" style="color:var(--muted);">Removendo...</div>');
+  fetch('/api/assistente-garcom', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, confirmacao:{ acao:'removerFornecedor', fornecedorId:fornecedorId } }, _contextoAssistente()))
+  }).then(function(r){ return r.json(); }).then(function(j){
+    var msg = j.ok ? _gestaoTexto(j) : (j.error || 'Não consegui remover.');
+    _gestaoTrocarHtml(id, '<div style="white-space:pre-wrap;">' + esc(msg) + '</div>');
+    _chatAdicionarContexto('assistente', msg);
+  }).catch(function(){ _gestaoTrocarHtml(id, '<div style="color:#f87171;">Sem conexão — não removi.</div>'); });
+}
+
 function executarAssistenteGarcom(){
   var input = document.getElementById('input-assistente-garcom');
   var texto = input.value.trim();
@@ -19956,6 +19984,12 @@ function executarAssistenteGarcom(){
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + (j.detalhe ? '<div style="font-size:0.62rem;color:var(--muted);margin-top:5px;word-break:break-word;">' + esc(j.detalhe) + '</div>' : '') + '</div>';
+      return;
+    }
+    if(j.gestao && j.tipo !== 'multiplo'){
+      caixa.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + _htmlGestao(j) + '</div>';
+      input.value = '';
+      _chatAdicionarContexto('assistente', _gestaoTexto(j));
       return;
     }
     if(j.tipo === 'ajusteComanda'){
@@ -22226,6 +22260,13 @@ function enviarMensagemChat(textoForcado, respostaPronta){
 
     if(!j.ok){
       _chatHistorico.push({ id:_novoIdChat(), tipo:'texto-assistente', texto: (j.error || 'Algo deu errado.') + (j.detalhe ? ' [' + j.detalhe + ']' : '') });
+      renderChatMensagens();
+      return;
+    }
+
+    if(j.gestao){
+      _chatHistorico.push({ id:_novoIdChat(), tipo:'html', html:_htmlGestao(j) });
+      _chatAdicionarContexto('assistente', _gestaoTexto(j));
       renderChatMensagens();
       return;
     }

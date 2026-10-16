@@ -639,7 +639,10 @@ async function _handler(req, res, canal) {
   // ── GESTÃO: pedidos a fornecedores, jogos, estoque ──
   // App de gestão: sempre. App do garçom: só quando a mensagem é de gestão
   // (checagem barata, sem ler o banco) ou é a confirmação de um botão.
-  if (canal === 'gestao' || body.confirmacao || gestao.pareceGestao(texto, tenantId, restauranteId)) {
+  // Continuação: logo depois de uma resposta de gestão, mensagem sem número
+  // ("e o gelo?", "chopp já fiz") também vai pra gestão — se não for, a IA devolve pro fluxo normal.
+  const seguimentoGestao = canal !== 'gestao' && !!body.emGestao && !/\d/.test(texto || '');
+  if (canal === 'gestao' || body.confirmacao || seguimentoGestao || gestao.pareceGestao(texto, tenantId, restauranteId)) {
     try {
       const db = getDb();
       let podeEditar = false;
@@ -653,7 +656,10 @@ async function _handler(req, res, canal) {
         db, tenantId, restauranteId, texto, historico, podeEditar, confirmacao: body.confirmacao,
         chamarIA: (prompt) => textoDoGemini(apiKey, [{ text: prompt }], 3000),
       });
-      return res.status(200).json(saidaG);
+      if (saidaG && saidaG.naoGestao) {
+        if (canal === 'gestao') return res.status(200).json({ ok: true, tipo: 'pergunta', gestao: true, resposta: 'Isso é do app do garçom (mesas, pedidos e contas). Aqui eu cuido de fornecedores, jogos, estoque e equipe.' });
+        // garçom: segue o fluxo normal abaixo
+      } else return res.status(200).json(saidaG);
     } catch (e) {
       console.error('[assistente] gestão falhou:', e);
       return res.status(500).json({ ok: false, error: 'Não consegui consultar a gestão agora.', detalhe: e.message });

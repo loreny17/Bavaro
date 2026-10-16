@@ -124,14 +124,20 @@ async function carregar(db, tenantId, restauranteId, forcar) {
     rh: r,
   };
   _cache[k] = { em: Date.now(), dados };
-  _nomesForn[k] = forn.map((f) => _norm(f.nome)).filter((n) => n.length >= 3);
+  const nf = new Set();
+  forn.forEach((f) => {
+    const n = _norm(f.nome).trim(); if (n.length < 3) return;
+    nf.add(n); if (/s$/.test(n) && n.length > 4) nf.add(n.slice(0, -1));
+    const p1 = n.split(/[\s\-]+/)[0]; if (p1.length >= 4) { nf.add(p1); if (/s$/.test(p1)) nf.add(p1.slice(0, -1)); }
+  });
+  _nomesForn[k] = Array.from(nf);
   _nomesFunc[k] = rh.nomesParaRota(r.funcs);
   return dados;
 }
 function limparCache(tenantId, restauranteId) { delete _cache[tenantId + '|' + (restauranteId || 'default')]; }
 
 // ── é pergunta/comando de gestão? (barato: só regex + nomes em cache) ──
-const RE_GESTAO = /\b(fornecedor(es)?|falta pedir|pedir hoje|pedidos? (de|do|pra|para) (hoje|amanha)|o que (tem|tenho|temos|preciso|precisa|precisamos)( que)? pedir|tem que pedir|ja pedi|já pedi|ja fiz o pedido|nao precisa (de|do|da)|não precisa (de|do|da)|vai chegar|chega(m)? (hoje|amanha)|entrega(m|r)?|jogos?|futebol|campeonato|brasileirao|libertadores|champions|estoque|abaixo do minimo|acabando|briefing|cadastra(r)? o fornecedor|adiciona(r)? o fornecedor|remove(r)? o fornecedor)\b/;
+const RE_GESTAO = /\b(brie?fi?ng|brifing|brefing|resumo do dia|como (ta|esta|tá|está) o dia|ja fiz|já fiz|fiz o pedido|ja conferi|já conferi|fornecedor(es)?|falta pedir|pedir hoje|pedidos? (de|do|pra|para) (hoje|amanha)|o que (tem|tenho|temos|preciso|precisa|precisamos)( que)? pedir|tem que pedir|ja pedi|já pedi|ja fiz o pedido|nao precisa (de|do|da)|não precisa (de|do|da)|vai chegar|chega(m)? (hoje|amanha)|entrega(m|r)?|jogos?|futebol|campeonato|brasileirao|libertadores|champions|estoque|abaixo do minimo|acabando|briefing|cadastra(r)? o fornecedor|adiciona(r)? o fornecedor|remove(r)? o fornecedor)\b/;
 function pareceGestao(texto, tenantId, restauranteId) {
   const t = _norm(texto);
   if (RE_GESTAO.test(t) || RE_GESTAO.test(String(texto || '').toLowerCase())) return true;
@@ -139,7 +145,7 @@ function pareceGestao(texto, tenantId, restauranteId) {
   if (rh.pareceRH(texto, _nomesFunc[k])) return true;
   const nomes = _nomesForn[k] || [];
   // nome de fornecedor + verbo de gestão ("remove o Povão", "a Gold agora entrega...")
-  return nomes.some((n) => t.indexOf(n) >= 0) && /\b(remove|exclui|apaga|tira o fornecedor|pedi|pedido|pedir|entrega|chega|precisa)\b/.test(t);
+  return nomes.some((n) => t.indexOf(n) >= 0) && /\b(remove|exclui|apaga|tira o fornecedor|pedi|pedido|pedir|entrega|chega|precisa|fiz|feito|feita|conferi|conferido|conferida|desmarca)\b/.test(t);
 }
 
 // ── texto de contexto pra IA (já com tudo calculado) ──
@@ -246,7 +252,8 @@ FORMATOS DE RESPOSTA:
 - "o que falta pedir hoje" = itens de HOJE com status PENDENTE (avise se o prazo já passou).
 - "hoje à noite" = jogos de hoje a partir das 18h. Se não houver, diga que não há.
 - Para estoque, use a seção ESTOQUE ABAIXO OU NO MÍNIMO.
-2) Marcar pedido de hoje ("já pedi a coxinha", "fiz o pedido do gelo", "hoje não precisa de Coca", "desmarca o gelo"):
+- "briefing do dia" / "resumo do dia" (aceite erros de digitação como "brifing") = pedidos de hoje (pendentes e feitos), o que chega hoje, jogos de hoje e estoque abaixo do mínimo. NÃO invente tarefas, avisos ou pendências que não estejam nos dados.
+2) Marcar pedido de hoje ("já pedi a coxinha", "fiz o pedido do gelo", "chopp já fiz", "sorvete conferido", "hoje não precisa de Coca", "desmarca o gelo"):
 {"tipo":"marcarPedido","fornecedorId":"id","status":"feito"}
 - status: "feito" (já pediu), "nao" (não precisa hoje), null (voltar pra pendente).
 3) Criar ou editar fornecedor ("adiciona o fornecedor X...", "a Gold agora entrega só de terça a sábado"):
@@ -262,6 +269,8 @@ FORMATOS DE RESPOSTA:
 {"tipo":"multiplo","acoes":[{ação 1},{ação 2}]}
 ${rh.promptRH(podeEditar)}
 ${podeEditar ? '' : '\nOBS: este usuário NÃO pode criar, editar ou remover fornecedores — se pedir isso, use mesmo assim o formato 3 ou 4 (o sistema vai recusar com a mensagem certa).'}
+0) Se a mensagem NÃO for de gestão (é pedido de cliente pra uma mesa, conta, cancelamento, recado pra cozinha, transferência de mesa): {"tipo":"naoGestao"}
+
 Identifique o fornecedor pelo nome falado (sem acento, abreviado, "coxinha" = Coxinhas, "coca" = Coca-Cola) e use o id exato da lista. Se não der pra saber qual é, responda no formato 1 perguntando.`;
 }
 
@@ -389,6 +398,7 @@ async function responder(opts) {
     try { parsed = m ? JSON.parse(m[0]) : null; } catch (e2) { parsed = null; }
   }
   if (!parsed) return { ok: true, tipo: 'pergunta', resposta: 'Não consegui entender. Pode repetir de outro jeito?' };
+  if (parsed.tipo === 'naoGestao') return { ok: true, naoGestao: true };
 
   const umaAcao = async (a) => {
     if (!a || a.tipo === 'resposta' || a.tipo === 'pergunta') return { ok: true, tipo: 'pergunta', resposta: String((a && (a.resposta || a.texto)) || 'Não entendi.') };
@@ -402,7 +412,7 @@ async function responder(opts) {
   };
   if (parsed.tipo === 'multiplo' && Array.isArray(parsed.acoes)) {
     const acoes = [];
-    for (const a of parsed.acoes.slice(0, 40)) acoes.push(Object.assign(await umaAcao(a), { gestao: true })); // em ordem (mesmo doc)
+    for (const a of parsed.acoes.slice(0, 40).filter((x) => x && x.tipo !== 'naoGestao')) acoes.push(Object.assign(await umaAcao(a), { gestao: true })); // em ordem (mesmo doc)
     return { ok: true, tipo: 'multiplo', gestao: true, acoes };
   }
   const out = await umaAcao(parsed);

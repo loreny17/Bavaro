@@ -19918,7 +19918,9 @@ function iniciarVozAssistenteGarcom(){
 
 // ── Gestão (pedidos a fornecedores, jogos, estoque) — respostas do /api/_gestao ──
 var _gstSeq = 0;
-function _gestaoTexto(j){ return String((j.tipo === 'pergunta' ? j.resposta : j.mensagem) || j.resposta || ''); }
+var _gstUltimaEm = 0;
+function _gestaoTexto(j){ _gstUltimaEm = Date.now(); return _gestaoTexto2(j); }
+function _gestaoTexto2(j){ return String((j.tipo === 'pergunta' ? j.resposta : j.mensagem) || j.resposta || ''); }
 function _htmlGestao(j){
   var t = '<div style="white-space:pre-wrap;">' + esc(_gestaoTexto(j)) + '</div>';
   var id = 'gst' + (++_gstSeq);
@@ -19997,12 +19999,13 @@ function executarAssistenteGarcom(){
   fetch('/api/assistente-garcom', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(Object.assign({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto, historico: _historicoBox }, _ctxPrevio))
+    body: JSON.stringify(Object.assign({ tenantId: _tenantId, restauranteId: _restauranteId, texto: texto, historico: _historicoBox, emGestao: (Date.now() - _gstUltimaEm) < 180000 }, _ctxPrevio))
   }).then(function(r){ return r.json(); }).then(function(j){
     if(!j.ok){
       caixa.innerHTML = '<div style="font-size:0.8rem;color:#f87171;">' + esc(j.error||'Algo deu errado.') + (j.detalhe ? '<div style="font-size:0.62rem;color:var(--muted);margin-top:5px;word-break:break-word;">' + esc(j.detalhe) + '</div>' : '') + '</div>';
       return;
     }
+    if(!j.gestao) _gstUltimaEm = 0;
     if(j.gestao && j.tipo !== 'multiplo'){
       caixa.innerHTML = '<div style="font-size:0.84rem;background:var(--surface2);border-radius:10px;padding:11px;">' + _htmlGestao(j) + '</div>';
       input.value = '';
@@ -22265,9 +22268,10 @@ function enviarMensagemChat(textoForcado, respostaPronta){
   (respostaPronta ? Promise.resolve({ json: function(){ return respostaPronta; } }) : fetch('/api/assistente-garcom', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar }, _contextoAssistente()))
+    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, texto:texto, historico:historicoParaEnviar, emGestao: (Date.now() - _gstUltimaEm) < 180000 }, _contextoAssistente()))
   })).then(function(r){ return r.json(); }).then(function _tratarJ(j){
     _chatHistorico = _chatHistorico.filter(function(m){ return m.id !== idCarregando; });
+    if(j && j.ok && !j.gestao && !j._multiplo) _gstUltimaEm = 0; // saiu do assunto gestão
 
     // Várias ações numa frase: trata cada uma, na ordem, como se viesse sozinha
     if(j && j.ok && j.tipo === 'multiplo'){

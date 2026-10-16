@@ -19921,12 +19921,29 @@ var _gstSeq = 0;
 function _gestaoTexto(j){ return String((j.tipo === 'pergunta' ? j.resposta : j.mensagem) || j.resposta || ''); }
 function _htmlGestao(j){
   var t = '<div style="white-space:pre-wrap;">' + esc(_gestaoTexto(j)) + '</div>';
-  if(!j.precisaConfirmar) return t;
   var id = 'gst' + (++_gstSeq);
+  if(j.desfazer){
+    _gstDesfazer[id] = j.desfazer;
+    return '<div id="' + id + '">' + t + '<button onclick="_gestaoDesfazer(\'' + id + '\')" style="margin-top:8px;background:var(--surface);color:var(--muted);border:1px solid var(--border2);border-radius:9px;padding:6px 12px;font-weight:600;font-size:0.76rem;">↩️ Desfazer</button></div>';
+  }
+  if(!j.precisaConfirmar) return t;
   return '<div id="' + id + '">' + t + '<div style="display:flex;gap:8px;margin-top:9px;">' +
     '<button onclick="_gestaoConfirmar(\'' + id + '\',\'' + esc(String(j.fornecedorId||'')).replace(/'/g,'') + '\')" style="flex:1;background:#ef4444;color:#fff;border:none;border-radius:9px;padding:9px;font-weight:700;font-size:0.8rem;">🗑️ Remover</button>' +
     '<button onclick="_gestaoConfirmar(\'' + id + '\',null)" style="flex:1;background:var(--surface);color:var(--text);border:1px solid var(--border2);border-radius:9px;padding:9px;font-weight:700;font-size:0.8rem;">Cancelar</button>' +
   '</div></div>';
+}
+var _gstDesfazer = {};
+function _gestaoDesfazer(id){
+  var c = _gstDesfazer[id]; if(!c) return; delete _gstDesfazer[id];
+  var el = document.getElementById(id); var txt = el ? (el.firstChild && el.firstChild.outerHTML || '') : '';
+  _gestaoTrocarHtml(id, '<div id="' + id + '">' + txt + '<div style="color:var(--muted);margin-top:6px;">Desfazendo...</div></div>');
+  fetch('/api/assistente-garcom', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:_restauranteId, confirmacao:c }, _contextoAssistente()))
+  }).then(function(r){ return r.json(); }).then(function(j){
+    var msg = j.ok ? _gestaoTexto(j) : (j.error || 'Não consegui desfazer.');
+    _gestaoTrocarHtml(id, '<div id="' + id + '">' + txt + '<div style="margin-top:6px;">' + esc(msg) + '</div></div>');
+    _chatAdicionarContexto('assistente', msg);
+  }).catch(function(){ _gestaoTrocarHtml(id, '<div id="' + id + '">' + txt + '<div style="color:#f87171;margin-top:6px;">Sem conexão — não desfiz.</div></div>'); });
 }
 function _gestaoTrocarHtml(id, novo){
   var el = document.getElementById(id); if(el) el.outerHTML = novo;

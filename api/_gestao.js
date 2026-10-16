@@ -98,6 +98,8 @@ function refConfig(db, tenantId, restauranteId) {
   return base.collection('restaurantes').doc(restauranteId).collection('configuracoes');
 }
 const _cache = {};
+const rh = require('./_rh');
+const _nomesFunc = {}; // nomes de funcionários (rota no garçom)
 const _nomesForn = {}; // nomes normalizados por tenant|rest (pra reconhecer "remove o Povão" no garçom)
 const CACHE_MS = 15000;
 function _norm(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
@@ -107,8 +109,9 @@ async function carregar(db, tenantId, restauranteId, forcar) {
   const c = _cache[k];
   if (!forcar && c && Date.now() - c.em < CACHE_MS) return c.dados;
   const col = refConfig(db, tenantId, restauranteId);
-  const [b, j, e] = await Promise.all([
+  const [b, j, e, r] = await Promise.all([
     col.doc('briefing').get(), col.doc('briefingJogos').get(), col.doc('estoqueV3').get(),
+    rh.carregar(db, tenantId, restauranteId).catch((err) => { console.warn('[gestao] funcionários:', err.message); return { funcs: [], vf: {} }; }),
   ]);
   const brf = (b.exists && b.data() && b.data().data) || {};
   const forn = (Array.isArray(brf.forn) && brf.forn.length) ? brf.forn : fornPadrao();
@@ -118,9 +121,11 @@ async function carregar(db, tenantId, restauranteId, forcar) {
     jogos: (j.exists && j.data() && j.data().data) || { dias: {} },
     estoque: (e.exists && e.data() && e.data().data) || { cats: [] },
     temBriefing: b.exists,
+    rh: r,
   };
   _cache[k] = { em: Date.now(), dados };
   _nomesForn[k] = forn.map((f) => _norm(f.nome)).filter((n) => n.length >= 3);
+  _nomesFunc[k] = rh.nomesParaRota(r.funcs);
   return dados;
 }
 function limparCache(tenantId, restauranteId) { delete _cache[tenantId + '|' + (restauranteId || 'default')]; }
@@ -130,13 +135,15 @@ const RE_GESTAO = /\b(fornecedor(es)?|falta pedir|pedir hoje|pedidos? (de|do|pra
 function pareceGestao(texto, tenantId, restauranteId) {
   const t = _norm(texto);
   if (RE_GESTAO.test(t) || RE_GESTAO.test(String(texto || '').toLowerCase())) return true;
-  const nomes = _nomesForn[tenantId + '|' + (restauranteId || 'default')] || [];
+  const k = tenantId + '|' + (restauranteId || 'default');
+  if (rh.pareceRH(texto, _nomesFunc[k])) return true;
+  const nomes = _nomesForn[k] || [];
   // nome de fornecedor + verbo de gestão ("remove o Povão", "a Gold agora entrega...")
   return nomes.some((n) => t.indexOf(n) >= 0) && /\b(remove|exclui|apaga|tira o fornecedor|pedi|pedido|pedir|entrega|chega|precisa)\b/.test(t);
 }
 
 // ── texto de contexto pra IA (já com tudo calculado) ──
-function montarContexto(dados) {
+function montarContexto(dados, podeEditar) {
   const sp = agoraSP();
   const forn = dados.forn;
   const st = dados.status[sp.key] || {};
@@ -220,11 +227,12 @@ function montarContexto(dados) {
   linhas.push('\nESTOQUE ABAIXO OU NO MÍNIMO (' + baixos.length + '):');
   linhas.push(baixos.length ? baixos.map((x) => '- ' + x).join('\n') : '- nenhum item abaixo do mínimo');
   if (todos.length) linhas.push('\nESTOQUE COMPLETO:\n' + todos.slice(0, 400).map((x) => '- ' + x).join('\n'));
+  if (podeEditar && dados.rh) linhas.push(rh.montarContexto(dados.rh, sp.key));
   return linhas.join('\n');
 }
 
 function montarPrompt(texto, contexto, historico, podeEditar) {
-  return `Você é o assistente de GESTÃO do restaurante Bávaro: pedidos a fornecedores, entregas, jogos de futebol da semana e estoque.
+  return `Você é o assistente de GESTÃO do restaurante Bávaro: pedidos a fornecedores, entregas, jogos de futebol da semana, estoque e funcionários (ficha, vales, faltas, feriados).
 Responda SOMENTE com JSON válido, sem markdown.
 
 ${contexto}
@@ -232,7 +240,7 @@ ${contexto}
 ${historico ? 'CONVERSA RECENTE:\n' + historico + '\n\n' : ''}MENSAGEM: "${texto}"
 
 FORMATOS DE RESPOSTA:
-1) Pergunta (o que pedir, o que chega, jogos, estoque, prazos):
+1) Pergunta (o que pedir, o que chega, jogos, estoque, prazos, funcionários):
 {"tipo":"resposta","resposta":"texto curto em português, direto, pode usar quebras de linha e emojis dos fornecedores"}
 - Use SÓ os dados acima. Não invente fornecedor, jogo, horário ou quantidade.
 - "o que falta pedir hoje" = itens de HOJE com status PENDENTE (avise se o prazo já passou).
@@ -250,8 +258,9 @@ FORMATOS DE RESPOSTA:
 - "pedir 1 dia antes" = modo "entrega" com antec 1. "até as 16h" = prazo "16:00".
 4) Remover fornecedor ("remove o Povão"):
 {"tipo":"removerFornecedor","fornecedorId":"id"}
-5) Várias ações na mesma frase ("já pedi a coxinha e o gelo"):
+5) Várias ações na mesma frase ("já pedi a coxinha e o gelo", "vale de 50 pro João e falta pra Ana"):
 {"tipo":"multiplo","acoes":[{ação 1},{ação 2}]}
+${rh.promptRH(podeEditar)}
 ${podeEditar ? '' : '\nOBS: este usuário NÃO pode criar, editar ou remover fornecedores — se pedir isso, use mesmo assim o formato 3 ou 4 (o sistema vai recusar com a mensagem certa).'}
 Identifique o fornecedor pelo nome falado (sem acento, abreviado, "coxinha" = Coxinhas, "coca" = Coca-Cola) e use o id exato da lista. Se não der pra saber qual é, responda no formato 1 perguntando.`;
 }
@@ -358,13 +367,19 @@ async function executar(db, tenantId, restauranteId, acao, podeEditar) {
 async function responder(opts) {
   const { db, tenantId, restauranteId, texto, historico, podeEditar, chamarIA, confirmacao } = opts;
   // confirmação de remoção (botão "Remover" no app): sem IA
+  if (confirmacao && confirmacao.acao === 'desfazerRH') {
+    const rd = await rh.desfazer(db, tenantId, restauranteId, confirmacao, podeEditar);
+    rd.gestao = true;
+    limparCache(tenantId, restauranteId);
+    return rd;
+  }
   if (confirmacao && confirmacao.acao === 'removerFornecedor') {
     const rc = await executar(db, tenantId, restauranteId, { tipo: 'removerFornecedor', fornecedorId: confirmacao.fornecedorId, confirmado: true }, podeEditar);
     rc.gestao = true;
     return rc;
   }
   const dados = await carregar(db, tenantId, restauranteId);
-  const contexto = montarContexto(dados);
+  const contexto = montarContexto(dados, podeEditar);
   const hist = (historico || []).slice(-8).map((h) => (h.autor === 'usuario' ? 'Usuário' : 'Assistente') + ': ' + String(h.texto || '').slice(0, 300)).join('\n');
   const r = await chamarIA(montarPrompt(texto, contexto, hist, podeEditar));
   if (!r || !r.ok) return { ok: false, error: 'Assistente indisponível agora. Tente de novo.', detalhe: r && r.detalhe };
@@ -377,12 +392,17 @@ async function responder(opts) {
 
   const umaAcao = async (a) => {
     if (!a || a.tipo === 'resposta' || a.tipo === 'pergunta') return { ok: true, tipo: 'pergunta', resposta: String((a && (a.resposta || a.texto)) || 'Não entendi.') };
+    if (rh.TIPOS.indexOf(a.tipo) >= 0) {
+      const rr = await rh.executar(db, tenantId, restauranteId, a, podeEditar, agoraSP().key);
+      limparCache(tenantId, restauranteId);
+      return rr;
+    }
     if (['marcarPedido', 'salvarFornecedor', 'removerFornecedor'].indexOf(a.tipo) < 0) return { ok: true, tipo: 'pergunta', resposta: 'Não entendi o que fazer.' };
     return executar(db, tenantId, restauranteId, a, podeEditar);
   };
   if (parsed.tipo === 'multiplo' && Array.isArray(parsed.acoes)) {
     const acoes = [];
-    for (const a of parsed.acoes.slice(0, 8)) acoes.push(Object.assign(await umaAcao(a), { gestao: true })); // em ordem (mesmo doc)
+    for (const a of parsed.acoes.slice(0, 40)) acoes.push(Object.assign(await umaAcao(a), { gestao: true })); // em ordem (mesmo doc)
     return { ok: true, tipo: 'multiplo', gestao: true, acoes };
   }
   const out = await umaAcao(parsed);

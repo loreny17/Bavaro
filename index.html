@@ -12946,7 +12946,7 @@ setTimeout(brfAtualizarHome,500);
 <div id="ag-painel">
   <div class="ag-topo">
     <img src="/assistente-avatar.png" alt="" onerror="this.style.display='none'">
-    <div class="ag-t">Assistente<small>Pedidos, jogos e estoque</small></div>
+    <div class="ag-t">Assistente<small>Pedidos, jogos, estoque e equipe</small></div>
     <button onclick="agLimpar()" title="Nova conversa">🧹</button>
     <button onclick="agFechar()" title="Fechar">✕</button>
   </div>
@@ -12956,6 +12956,7 @@ setTimeout(brfAtualizarHome,500);
     <button onclick="agEnviar('O que chega amanhã?')">O que chega amanhã?</button>
     <button onclick="agEnviar('Qual o jogo de hoje à noite?')">Jogos de hoje</button>
     <button onclick="agEnviar('O que tá abaixo do mínimo no estoque?')">Estoque baixo</button>
+    <button onclick="agEnviar('Quem faltou esse mês?')">Faltas do mês</button>
   </div>
   <div class="ag-barra">
     <button id="ag-mic" onclick="agVoz()" title="Falar">🎤</button>
@@ -12975,12 +12976,13 @@ setTimeout(brfAtualizarHome,500);
 
   function render(){
     var box = document.getElementById('ag-msgs'); if(!box) return;
-    if(!msgs.length){ box.innerHTML = '<div class="ag-a">' + AV + '<div class="ag-b">Oi! Posso dizer o que falta pedir hoje, o que chega, os jogos da semana e o que está abaixo do mínimo no estoque. Também marco pedidos ("já pedi a coxinha e o gelo") e cadastro, edito ou removo fornecedores.</div></div>'; }
+    if(!msgs.length){ box.innerHTML = '<div class="ag-a">' + AV + '<div class="ag-b">Oi! Posso dizer o que falta pedir hoje, o que chega, os jogos da semana e o que está abaixo do mínimo no estoque. Também marco pedidos ("já pedi a coxinha e o gelo"), cuido dos fornecedores e dos funcionários: "vale de 100 pro Rodrigo", "falta pro João", "qual o número da Ana?", "cadastra a Luciane, começou dia 10/10".</div></div>'; }
     else box.innerHTML = msgs.map(function(m){
       if(m.u) return '<div class="ag-u">' + esc(m.t) + '</div>';
       if(m.dig) return '<div class="ag-a">' + AV + '<div class="ag-b ag-dig"><span></span><span></span><span></span></div></div>';
       var conf = m.conf ? '<div class="ag-conf"><button style="background:#ef4444;color:#fff;border:none;" onclick="agConfirmar(' + m.id + ',true)">🗑️ Remover</button><button style="background:var(--surface);color:var(--text);border:1px solid var(--border2);" onclick="agConfirmar(' + m.id + ',false)">Cancelar</button></div>' : '';
-      return '<div class="ag-a">' + AV + '<div class="ag-b">' + esc(m.t) + conf + '</div></div>';
+      var desf = m.desf ? '<div class="ag-conf"><button style="background:var(--surface);color:var(--muted);border:1px solid var(--border2);flex:0 0 auto;padding:6px 12px;font-weight:600;" onclick="agDesfazer(' + m.id + ')">↩️ Desfazer</button></div>' : '';
+      return '<div class="ag-a">' + AV + '<div class="ag-b">' + esc(m.t) + conf + desf + '</div></div>';
     }).join('');
     document.getElementById('ag-sug').style.display = msgs.length ? 'none' : 'flex';
     setTimeout(function(){ box.scrollTop = box.scrollHeight; }, 20);
@@ -12996,7 +12998,7 @@ setTimeout(brfAtualizarHome,500);
     if(j.tipo === 'multiplo'){ var mudou = false; (j.acoes || []).forEach(function(a){ if(tratar(Object.assign({ ok: true }, a))) mudou = true; }); return mudou; }
     var t = textoDe(j);
     if(j.precisaConfirmar){ addA(t, { conf: true, fornecedorId: j.fornecedorId }); ctx.push({ autor:'assistente', texto:t }); return false; }
-    addA(t); ctx.push({ autor:'assistente', texto:t });
+    addA(t, j.desfazer ? { desf: j.desfazer } : null); ctx.push({ autor:'assistente', texto:t });
     return j.tipo !== 'pergunta' && !j.negado;
   }
   async function chamar(corpo){
@@ -13045,6 +13047,17 @@ setTimeout(brfAtualizarHome,500);
       msgs = msgs.filter(function(x){ return x !== dig; });
       if(tratar(j)) atualizarBriefing();
     } catch(e){ msgs = msgs.filter(function(x){ return x !== dig; }); addA('Sem conexão — não removi.'); }
+    render();
+  };
+  window.agDesfazer = async function(id){
+    var m = msgs.filter(function(x){ return x.id === id; })[0]; if(!m || !m.desf) return;
+    var c = m.desf; m.desf = null;
+    var dig = { id: ++seq, dig: true }; msgs.push(dig); render();
+    try {
+      var j = await chamar({ confirmacao: c });
+      msgs = msgs.filter(function(x){ return x !== dig; });
+      tratar(j);
+    } catch(e){ msgs = msgs.filter(function(x){ return x !== dig; }); m.desf = c; addA('Sem conexão — não desfiz.'); }
     render();
   };
   window.agVoz = function(){

@@ -651,7 +651,7 @@ async function _handler(req, res, canal) {
       }
       const saidaG = await gestao.responder({
         db, tenantId, restauranteId, texto, historico, podeEditar, confirmacao: body.confirmacao,
-        chamarIA: (prompt) => textoDoGemini(apiKey, [{ text: prompt }], 1200),
+        chamarIA: (prompt) => textoDoGemini(apiKey, [{ text: prompt }], 3000),
       });
       return res.status(200).json(saidaG);
     } catch (e) {

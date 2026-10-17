@@ -19329,16 +19329,15 @@ function _htmlNfceDetalhe(c){
 function abrirNfce(c){
   if(!c || !c.id){ showToast('❌ Conta não encontrada','#f87171'); return; }
   _nfceConta = c;
-  var pg = (c.pagamentos||[]).filter(function(p){ return p && p.valor > 0; });
-  _nfceForma = pg.length ? null : 'pix';
+  // O garçom registra pagamento sem a forma real, então a nota sempre pergunta
+  var fReal = (c.pagamentos||[]).map(function(p){ return p && p.forma; }).filter(function(f){ return ['dinheiro','pix','debito','credito'].indexOf(f) >= 0; });
+  _nfceForma = fReal.length === 1 || (fReal.length && fReal.every(function(f){ return f === fReal[0]; })) ? fReal[0] : null;
   var ex = document.getElementById('modal-nfce'); if(ex) ex.remove();
   var mod = document.createElement('div');
   mod.className = 'modal modal-centro show';
   mod.id = 'modal-nfce';
   mod.style.zIndex = '9600';
-  var formas = pg.length
-    ? '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">Pagamento: ' + pg.map(function(p){ return esc(p.forma||'?') + ' R$ ' + fmtPreco(p.valor); }).join(' + ') + '</div>'
-    : '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Forma de pagamento</div>'+
+  var formas = '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Forma de pagamento</div>'+
       '<div id="nfce-formas" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;">' + _NFCE_FORMAS.map(function(f){
         return '<button data-f="' + f[0] + '" onclick="_nfceSelForma(\'' + f[0] + '\')" style="padding:11px;border-radius:10px;font-family:inherit;font-size:0.84rem;font-weight:700;cursor:pointer;border:1.5px solid ' + (_nfceForma === f[0] ? 'var(--accent)' : 'var(--border2)') + ';background:' + (_nfceForma === f[0] ? 'rgba(212,168,67,0.12)' : 'var(--surface2)') + ';color:' + (_nfceForma === f[0] ? 'var(--accent)' : 'var(--text)') + ';">' + f[1] + '</button>';
       }).join('') + '</div>';
@@ -19378,6 +19377,7 @@ function emitirNfce(){
   var btn = document.getElementById('nfce-btn'), msg = document.getElementById('nfce-msg');
   var doc = (document.getElementById('nfce-doc').value||'').replace(/\D/g,'');
   if(doc && doc.length !== 11 && doc.length !== 14){ msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">CPF tem 11 números e CNPJ tem 14.</div>'; return; }
+  if(!_nfceForma){ msg.innerHTML = '<div style="color:#f59e0b;font-size:0.82rem;margin-bottom:8px;">Escolha a forma de pagamento.</div>'; return; }
   btn.disabled = true; btn.textContent = 'Emitindo...';
   msg.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:8px;">Enviando para a SEFAZ… pode levar alguns segundos.</div>';
   fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},

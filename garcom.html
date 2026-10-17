@@ -19302,13 +19302,41 @@ function _nfceValor(c){
     return a + ((i.tipoVenda === 'kg' && i.peso) ? (i.preco||0) : (i.preco||0)*(i.qtd||1));
   }, 0);
 }
-function _nfceMascara(el){
-  var d = el.value.replace(/\D/g,'').slice(0,14), v = d;
-  if(d.length <= 11) v = d.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2');
-  else v = d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5');
-  el.value = v;
-  var t = document.getElementById('nfce-doc-tipo');
-  if(t) t.textContent = d.length === 0 ? 'Sem CPF/CNPJ (consumidor não identificado)' : d.length <= 11 ? 'CPF' + (d.length === 11 ? ' ✓' : '') : 'CNPJ' + (d.length === 14 ? ' ✓' : '');
+
+function _docCpfOk(c){ if(c.length !== 11 || /^(\d)\1+$/.test(c)) return false; for(var t = 9; t < 11; t++){ var s = 0; for(var i = 0; i < t; i++) s += +c[i] * (t + 1 - i); if(((s * 10) % 11) % 10 !== +c[t]) return false; } return true; }
+function _docCnpjOk(c){ if(c.length !== 14 || /^(\d)\1+$/.test(c)) return false; function calc(n){ var s = 0, p = n - 7; for(var i = 0; i < n; i++){ s += +c[i] * p--; if(p < 2) p = 9; } var r = s % 11; return r < 2 ? 0 : 11 - r; } return calc(12) === +c[12] && calc(13) === +c[13]; }
+function _docFormatar(d){
+  return d.length <= 11
+    ? d.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2')
+    : d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5').replace(/\D+$/,'');
+}
+// '' = vazio (ok) · 'ok' = válido · 'parcial' = digitando · 'invalido'
+function _docSituacao(d){
+  if(!d) return '';
+  if(d.length === 11) return _docCpfOk(d) ? 'ok' : (d.length < 14 ? 'invalido11' : 'invalido');
+  if(d.length === 14) return _docCnpjOk(d) ? 'ok' : 'invalido';
+  return 'parcial';
+}
+function _docRotulo(d){
+  var s = _docSituacao(d);
+  if(s === '') return ['Sem CPF/CNPJ (consumidor não identificado)', 'var(--muted)'];
+  if(s === 'ok') return [(d.length === 11 ? 'CPF' : 'CNPJ') + ' válido ✓', '#4ade80'];
+  if(s === 'invalido11') return ['CPF inválido — confira os números (se for CNPJ, continue digitando)', '#f87171'];
+  if(s === 'invalido') return [(d.length === 11 ? 'CPF' : 'CNPJ') + ' inválido — confira os números', '#f87171'];
+  return [d.length < 11 ? 'CPF: faltam ' + (11 - d.length) + ' números' : 'CNPJ: faltam ' + (14 - d.length) + ' números', 'var(--muted)'];
+}
+// Ao apagar, não reformata (senão o ponto/traço volta e o apagar "trava"); formata de novo ao sair do campo
+function _nfceMascara(el, ev, final){
+  var d = el.value.replace(/\D/g,'').slice(0,14);
+  var antes = el.getAttribute('data-d') || '';
+  var apagando = ev && ev.inputType && ev.inputType.indexOf('delete') === 0;
+  // apagou só um ponto/traço/barra: apaga o número de antes também (senão a máscara põe o sinal de volta)
+  if(apagando && d === antes && d.length) d = d.slice(0, -1);
+  el.value = _docFormatar(d);
+  el.setAttribute('data-d', d);
+  var t = document.getElementById('nfce-doc-tipo'), r = _docRotulo(d);
+  if(t){ t.textContent = r[0]; t.style.color = r[1]; }
+  el.style.borderColor = /invalido/.test(_docSituacao(d)) ? '#f87171' : (_docSituacao(d) === 'ok' ? '#4ade80' : 'var(--border2)');
 }
 function _htmlNfceDetalhe(c){
   var n = c.nfce;
@@ -19351,7 +19379,7 @@ function abrirNfce(c){
         '</div>'+
         ((c.taxa10||0) > 0 ? '<div style="font-size:0.72rem;color:var(--muted);margin:-8px 0 12px;">Produtos R$ ' + fmtPreco(_nfceValor(c)) + ' + taxa de serviço R$ ' + fmtPreco(c.taxa10) + '</div>' : '')+
         '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">CPF ou CNPJ na nota (opcional)</div>'+
-        '<input id="nfce-doc" inputmode="numeric" autocomplete="off" placeholder="Deixe vazio se o cliente não quiser" oninput="_nfceMascara(this)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:1.05rem;font-family:inherit;outline:none;">'+
+        '<input id="nfce-doc" inputmode="numeric" autocomplete="off" placeholder="Deixe vazio se o cliente não quiser" oninput="_nfceMascara(this, event)" onblur="_nfceMascara(this, null, true)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:1.05rem;font-family:inherit;outline:none;">'+
         '<div id="nfce-doc-tipo" style="font-size:0.72rem;color:var(--muted);margin:5px 0 14px;">Sem CPF/CNPJ (consumidor não identificado)</div>'+
         formas+
         '<div id="nfce-msg"></div>'+
@@ -19376,7 +19404,9 @@ function emitirNfce(){
   var c = _nfceConta; if(!c) return;
   var btn = document.getElementById('nfce-btn'), msg = document.getElementById('nfce-msg');
   var doc = (document.getElementById('nfce-doc').value||'').replace(/\D/g,'');
-  if(doc && doc.length !== 11 && doc.length !== 14){ msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">CPF tem 11 números e CNPJ tem 14.</div>'; return; }
+  var sit = _docSituacao(doc);
+  if(sit === 'parcial'){ msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">CPF tem 11 números e CNPJ tem 14.</div>'; return; }
+  if(/invalido/.test(sit)){ msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">' + (doc.length === 11 ? 'CPF' : 'CNPJ') + ' inválido — confira os números com o cliente (ou apague pra emitir sem).</div>'; return; }
   if(!_nfceForma){ msg.innerHTML = '<div style="color:#f59e0b;font-size:0.82rem;margin-bottom:8px;">Escolha a forma de pagamento.</div>'; return; }
   btn.disabled = true; btn.textContent = 'Emitindo...';
   msg.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:8px;">Enviando para a SEFAZ… pode levar alguns segundos.</div>';
@@ -19565,6 +19595,15 @@ function pushHistory(state){
   try{ history.pushState({appState: state}, '', ''); }catch(e){}
 }
 window.addEventListener('popstate', function(e){
+  // Janela da nota fiscal: o "voltar" que fecha o teclado não pode fechar a janela junto
+  var _mNfce = document.getElementById('modal-nfce');
+  if(_mNfce){
+    var _ae = document.activeElement;
+    if(_ae && _mNfce.contains(_ae) && _ae.tagName === 'INPUT') _ae.blur();
+    else _mNfce.remove();
+    try{ history.pushState({appState: 'preso'}, '', ''); }catch(err){}
+    return;
+  }
   // Tenta voltar no estado interno
   if(_historyStack.length > 0){
     _historyStack.pop();

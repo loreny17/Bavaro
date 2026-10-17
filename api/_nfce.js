@@ -4,7 +4,7 @@
 //   FOCUS_TOKEN_HOMOLOGACAO / FOCUS_TOKEN_PRODUCAO
 //   FOCUS_CNPJ              (opcional) CNPJ do emitente — senão usa o doc fiscal/{tenantId} ou o padrão abaixo
 // Códigos fiscais: padrão de restaurante no Simples Nacional, ajustáveis no doc Firestore fiscal/{tenantId}
-//   { cnpj, padrao:{ncm,cfop,csosn,pis,cofins}, regras:[{palavras:[...], ncm, cfop, csosn, cest}], incluirServico:false }
+//   { cnpj, padrao:{ncm,cfop,csosn,pis,cofins}, regras:[{palavras:[...], ncm, cfop, csosn, cest}], incluirServico:true }  (taxa de serviço entra como 'outras despesas')
 
 const HOSTS = { homologacao: 'https://homologacao.focusnfe.com.br', producao: 'https://api.focusnfe.com.br' };
 const CNPJ_PADRAO = { tnt_molrfz1k_rznlgl: '14692372000130', _padrao: '14692372000130' }; // Bávaro — Simples Nacional
@@ -49,7 +49,7 @@ async function configFiscal(db, tenantId) {
     cnpj: _so(doc.cnpj || process.env.FOCUS_CNPJ || CNPJ_PADRAO[tenantId] || CNPJ_PADRAO._padrao || ''),
     padrao: Object.assign({}, PADRAO, doc.padrao || {}),
     regras: (Array.isArray(doc.regras) ? doc.regras : []).concat(REGRAS_PADRAO),
-    incluirServico: doc.incluirServico === true,
+    incluirServico: doc.incluirServico !== false, // padrão: a taxa de serviço entra na nota
   };
 }
 function fiscalDoItem(nome, cfg) {
@@ -195,7 +195,16 @@ async function emitir(db, { tenantId, restauranteId, contaId, documento, nomeCli
   const itens = montarItens(conta, cfg, amb);
   if (!itens.length) return { ok: false, error: 'A conta não tem itens com valor.' };
   let totalC = itens.reduce((s, i) => s + i._c, 0);
-  const servicoC = cfg.incluirServico ? centavos(conta.taxa10) : 0;
+  const servicoC = cfg.incluirServico ? Math.max(0, centavos(conta.taxa10)) : 0;
+  // Taxa de serviço = "outras despesas acessórias" (vOutro), rateada entre os itens
+  if (servicoC > 0) {
+    let resto = servicoC;
+    itens.forEach((it, k) => {
+      const v = k === itens.length - 1 ? resto : Math.round(servicoC * it._c / totalC);
+      resto -= v;
+      if (v > 0) it.valor_outras_despesas = reais(v);
+    });
+  }
   const pagamentos = montarPagamentos(conta, totalC + servicoC, formaPagamento);
   if (!pagamentos) return { ok: false, precisaForma: true, error: 'Essa conta não tem pagamento registrado. Escolha a forma de pagamento.' };
   itens.forEach((i) => { delete i._c; });
@@ -211,7 +220,10 @@ async function emitir(db, { tenantId, restauranteId, contaId, documento, nomeCli
     formas_pagamento: pagamentos,
   };
   if (conta.mesa != null && conta.mesa !== '') nota.informacoes_adicionais_contribuinte = 'Mesa ' + conta.mesa;
-  if (cfg.incluirServico && servicoC > 0) nota.valor_outras_despesas = reais(servicoC);
+  if (servicoC > 0) {
+    nota.valor_outras_despesas = reais(servicoC);
+    nota.informacoes_adicionais_contribuinte = (nota.informacoes_adicionais_contribuinte ? nota.informacoes_adicionais_contribuinte + '. ' : '') + 'Taxa de servico R$ ' + reais(servicoC).replace('.', ',');
+  }
   if (doc.length === 11) nota.cpf_destinatario = doc;
   if (doc.length === 14) { nota.cnpj_destinatario = doc; nota.indicador_inscricao_estadual_destinatario = 9; }
   if (doc && nomeCliente) nota.nome_destinatario = String(nomeCliente).slice(0, 60);
@@ -233,6 +245,7 @@ async function emitir(db, { tenantId, restauranteId, contaId, documento, nomeCli
     const nfce = _resumo(amb, ref, j, Object.assign(base, { impressao: Object.assign(dadosDoXml(xml), {
       itens: itens.map((i) => ({ cod: i.codigo_produto, desc: i.descricao, qtd: i.quantidade_comercial, un: i.unidade_comercial, unit: i.valor_unitario_comercial, total: i.valor_bruto })),
       pagamentos: pagamentos.map((p) => ({ forma: p.forma_pagamento, valor: p.valor_pagamento })),
+      produtos: reais(totalC), servico: reais(servicoC),
     }) }));
     await Promise.all([
       ref0.update({ nfce }),

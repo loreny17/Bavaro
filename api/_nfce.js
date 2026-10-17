@@ -7,7 +7,7 @@
 //   { cnpj, padrao:{ncm,cfop,csosn,pis,cofins}, regras:[{palavras:[...], ncm, cfop, csosn, cest}], incluirServico:false }
 
 const HOSTS = { homologacao: 'https://homologacao.focusnfe.com.br', producao: 'https://api.focusnfe.com.br' };
-const CNPJ_PADRAO = { /* tenantId: 'cnpj só números' — preencher */ };
+const CNPJ_PADRAO = { tnt_molrfz1k_rznlgl: '14692372000130', _padrao: '14692372000130' }; // Bávaro — Simples Nacional
 
 // Simples Nacional: 5102 / CSOSN 102 (tributada pelo Simples, sem crédito). PIS/COFINS 49.
 const PADRAO = { ncm: '21069090', cfop: '5102', csosn: '102', pis: '49', cofins: '49' };
@@ -46,7 +46,7 @@ async function configFiscal(db, tenantId) {
   let doc = {};
   try { const d = await db.collection('fiscal').doc(String(tenantId)).get(); if (d.exists) doc = d.data() || {}; } catch (e) { /* sem config */ }
   return {
-    cnpj: _so(doc.cnpj || process.env.FOCUS_CNPJ || CNPJ_PADRAO[tenantId] || ''),
+    cnpj: _so(doc.cnpj || process.env.FOCUS_CNPJ || CNPJ_PADRAO[tenantId] || CNPJ_PADRAO._padrao || ''),
     padrao: Object.assign({}, PADRAO, doc.padrao || {}),
     regras: (Array.isArray(doc.regras) ? doc.regras : []).concat(REGRAS_PADRAO),
     incluirServico: doc.incluirServico === true,

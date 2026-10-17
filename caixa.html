@@ -608,6 +608,11 @@ function abrirModalLiberar(pedido){
           '<button class="opt-recibo" data-recibo="nao" onclick="selRecibo(false)">Não</button>' +
           '<button class="opt-recibo" data-recibo="sim" onclick="selRecibo(true)">🧾 Sim, imprime</button>' +
         '</div>' +
+        '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin:18px 0 8px;">Nota fiscal (NFC-e)?</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          '<button class="opt-recibo opt-nota" data-nota="nao" onclick="selNota(false)">Não</button>' +
+          '<button class="opt-recibo opt-nota" data-nota="sim" onclick="selNota(true)">🧾 Emitir nota</button>' +
+        '</div>' +
       '</div>' +
       // Rodapé
       '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">' +
@@ -620,7 +625,16 @@ function abrirModalLiberar(pedido){
   // Pré-seleciona "não" no recibo (o mais comum)
   _pagtoSelecionado = '';
   _reciboSelecionado = false;
-  setTimeout(function(){ selRecibo(false); }, 50);
+  _notaSelecionada = false;
+  setTimeout(function(){ selRecibo(false); selNota(false); }, 50);
+}
+
+var _notaSelecionada = false;
+function selNota(quer){
+  _notaSelecionada = !!quer;
+  document.querySelectorAll('.opt-nota').forEach(function(b){
+    b.classList.toggle('selecionado', b.getAttribute('data-nota') === (quer ? 'sim' : 'nao'));
+  });
 }
 
 function selPagto(forma){
@@ -632,7 +646,7 @@ function selPagto(forma){
 
 function selRecibo(quer){
   _reciboSelecionado = !!quer;
-  document.querySelectorAll('.opt-recibo').forEach(function(b){
+  document.querySelectorAll('.opt-recibo:not(.opt-nota)').forEach(function(b){
     b.classList.toggle('selecionado', b.getAttribute('data-recibo') === (quer ? 'sim' : 'nao'));
   });
 }
@@ -650,6 +664,11 @@ function confirmarLiberar(id, senha){
     mostrarToast('Selecione a forma de pagamento pra emitir o recibo', '#f87171');
     return;
   }
+  if(_notaSelecionada && !_pagtoSelecionado){
+    mostrarToast('Selecione a forma de pagamento pra emitir a nota fiscal', '#f87171');
+    return;
+  }
+  var _querNota = _notaSelecionada, _formaNota = _pagtoSelecionado;
 
   var btn = document.getElementById('btn-confirmar-liberar');
   if(btn){ btn.disabled = true; btn.textContent = 'Liberando...'; }
@@ -697,6 +716,7 @@ function confirmarLiberar(id, senha){
     _selecionadoId = null;
     renderDetalheVazio();
     fecharModalLiberar();
+    if(_querNota) abrirNfceTotem(Object.assign({}, p, { id:id, senha:senha, formaPagamento:_formaNota, status:'pago' }));
   })
   .catch(function(e){
     console.error('[CAIXA] liberar:', e);
@@ -1435,6 +1455,7 @@ function abrirDetalheHistorico(pedidoId){
         itensHtml +
         '<div style="display:flex;justify-content:space-between;padding:12px 0 0;font-size:1.1rem;font-weight:800;"><span>TOTAL</span><span style="color:var(--accent);">R$ ' + totalTxt + '</span></div>' +
       '</div>' +
+      (p.status === 'pago' ? '<div id="hist-nfce-bloco" style="padding:12px 22px;border-top:1px solid var(--border);">' + _htmlNfceTotem(p) + '</div>' : '') +
       '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;flex-wrap:wrap;">' +
         (p.status === 'pago' ?
           '<button onclick="reimprimirRecibo(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--accent);color:#000;border:none;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🧾 Reimprimir Recibo</button>' +
@@ -1444,6 +1465,104 @@ function abrirDetalheHistorico(pedidoId){
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
+}
+
+
+// ════════════════════════════════════════
+//  NOTA FISCAL (NFC-e) DO TOTEM — /api/nfce (origem 'totem')
+// ════════════════════════════════════════
+var _nfceTotem = null, _nfceTotemForma = '';
+var _NFCE_FORMAS_CX = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito']];
+function _htmlNfceTotem(p){
+  var n = p.nfce;
+  if(n && n.status === 'autorizado'){
+    return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
+      '<div style="flex:1;min-width:160px;color:#4ade80;font-weight:700;font-size:0.9rem;">🧾 NFC-e nº ' + escapar(n.numero) + ' autorizada' + (n.ambiente === 'homologacao' ? ' <span style="color:#f59e0b;font-size:0.72rem;">TESTE</span>' : '') + '</div>'+
+      '<button onclick="imprimirNfceTotem(\'' + p.id + '\')" style="padding:10px 14px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir nota</button>'+
+    '</div>';
+  }
+  var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + escapar(n.numero) + ' foi cancelada.</div>'
+    : n && n.erro ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + escapar(n.erro) + '</div>' : '';
+  return aviso + '<button onclick="abrirNfceTotemPorId(\'' + p.id + '\')" style="width:100%;padding:12px;background:rgba(212,168,67,0.12);border:1.5px solid rgba(212,168,67,0.45);color:var(--accent);border-radius:9px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Emitir nota fiscal (NFC-e)</button>';
+}
+function abrirNfceTotemPorId(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(p) abrirNfceTotem(p);
+}
+function abrirNfceTotem(p){
+  _nfceTotem = p; _nfceTotemForma = p.formaPagamento || '';
+  var ex = document.getElementById('modal-nfce-totem'); if(ex) ex.remove();
+  var totalTxt = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  var mod = document.createElement('div');
+  mod.id = 'modal-nfce-totem';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:500;display:flex;align-items:center;justify-content:center;padding:14px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:440px;width:100%;overflow:hidden;">'+
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">'+
+        '<div style="font-size:1.6rem;">🧾</div><div style="flex:1;"><div style="font-weight:800;">Nota fiscal — senha #' + escapar(p.senha||'?') + '</div><div style="font-size:0.84rem;color:var(--muted);">Total R$ ' + totalTxt + '</div></div>'+
+        '<button onclick="document.getElementById(\'modal-nfce-totem\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>'+
+      '</div>'+
+      '<div id="nfce-totem-corpo" style="padding:16px 20px;">'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">CPF ou CNPJ na nota (opcional)</div>'+
+        '<input id="nfce-totem-doc" inputmode="numeric" autocomplete="off" placeholder="Deixe vazio se o cliente não quiser" oninput="_nfceTotemMascara(this)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-size:1.05rem;font-family:inherit;outline:none;margin-bottom:14px;">'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Forma de pagamento</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">' + _NFCE_FORMAS_CX.map(function(f){
+          return '<button class="opt-pagto opt-nfce-forma' + (_nfceTotemForma === f[0] ? ' selecionado' : '') + '" data-f="' + f[0] + '" onclick="_nfceTotemForma=\'' + f[0] + '\';document.querySelectorAll(\'.opt-nfce-forma\').forEach(function(b){b.classList.toggle(\'selecionado\',b.getAttribute(\'data-f\')===\'' + f[0] + '\');})">' + f[1] + '</button>';
+        }).join('') + '</div>'+
+        '<div id="nfce-totem-msg"></div>'+
+      '</div>'+
+      '<div id="nfce-totem-rodape" style="padding:14px 20px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">'+
+        '<button onclick="document.getElementById(\'modal-nfce-totem\').remove()" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Agora não</button>'+
+        '<button id="nfce-totem-btn" onclick="emitirNfceTotem()" style="flex:1.4;padding:13px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Emitir</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+function _nfceTotemMascara(el){
+  var d = el.value.replace(/\D/g,'').slice(0,14);
+  el.value = d.length <= 11
+    ? d.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2')
+    : d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5');
+}
+function emitirNfceTotem(){
+  var p = _nfceTotem; if(!p) return;
+  var msg = document.getElementById('nfce-totem-msg'), btn = document.getElementById('nfce-totem-btn');
+  var doc = (document.getElementById('nfce-totem-doc').value||'').replace(/\D/g,'');
+  if(doc && doc.length !== 11 && doc.length !== 14){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">CPF tem 11 números e CNPJ tem 14.</div>'; return; }
+  if(!_nfceTotemForma){ msg.innerHTML = '<div style="color:#f59e0b;font-size:0.84rem;">Escolha a forma de pagamento.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Emitindo...';
+  msg.innerHTML = '<div style="color:var(--muted);font-size:0.84rem;">Enviando para a SEFAZ…</div>';
+  fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ acao:'emitir', origem:'totem', tenantId:_tenantId, restauranteId:_restauranteId, pedidoId:p.id, documento:doc, formaPagamento:_nfceTotemForma, garcom:'Caixa' })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok && j.nfce){
+      p.nfce = j.nfce;
+      if(!j.jaEmitida) _enviarImpressaoNfce(p);
+      document.getElementById('nfce-totem-corpo').innerHTML = '<div style="text-align:center;padding:8px 0;"><div style="font-size:2.2rem;">✅</div><div style="font-weight:800;font-size:1.05rem;margin:6px 0;">NFC-e nº ' + escapar(j.nfce.numero) + ' ' + (j.jaEmitida ? 'já tinha sido emitida' : 'autorizada') + '</div>' +
+        (j.nfce.ambiente === 'homologacao' ? '<div style="color:#f59e0b;font-size:0.8rem;">Ambiente de TESTE — sem valor fiscal</div>' : '') +
+        (j.jaEmitida ? '' : '<div style="font-size:0.82rem;color:var(--muted);margin-top:4px;">🖨️ Enviada pra impressora.</div>') + '</div>';
+      document.getElementById('nfce-totem-rodape').innerHTML =
+        '<button onclick="_enviarImpressaoNfce(_nfceTotem)" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir de novo</button>'+
+        '<button onclick="document.getElementById(\'modal-nfce-totem\').remove()" style="flex:1;padding:13px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">OK</button>';
+      var bl = document.getElementById('hist-nfce-bloco'); if(bl) bl.innerHTML = _htmlNfceTotem(p);
+      return;
+    }
+    btn.disabled = false; btn.textContent = '🧾 Tentar de novo';
+    msg.innerHTML = '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:10px;padding:10px;font-size:0.82rem;line-height:1.4;">❌ Nota não autorizada:<br>' + escapar(j.error||'erro desconhecido') + '</div>';
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = '🧾 Tentar de novo';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão com o servidor. A nota não foi emitida.</div>';
+  });
+}
+function _enviarImpressaoNfce(p){
+  if(!p || !p.nfce) return;
+  fbDb.collection('comandos_impressao').add({ tipo:'nfce', restauranteId:_restauranteId, tenantId:_tenantId, pedidoTotemId:p.id, senhaTotem:p.senha||null, nfce:p.nfce, solicitadoPor:'Caixa', solicitadoEm:Date.now(), criadoEm:Date.now() })
+    .then(function(){ mostrarToast('🖨️ Nota enviada pra impressora', '#22c55e'); })
+    .catch(function(e){ mostrarToast('Erro ao imprimir: ' + (e.message||e.code), '#f87171'); });
+}
+function imprimirNfceTotem(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(p) _enviarImpressaoNfce(p);
 }
 
 function reimprimirRecibo(pedidoId){

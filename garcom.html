@@ -19338,6 +19338,35 @@ function _nfceMascara(el, ev, final){
   if(t){ t.textContent = r[0]; t.style.color = r[1]; }
   el.style.borderColor = /invalido/.test(_docSituacao(d)) ? '#f87171' : (_docSituacao(d) === 'ok' ? '#4ade80' : 'var(--border2)');
 }
+
+// ── Enviar a nota pelo WhatsApp do cliente (abre o WhatsApp com a mensagem pronta) ──
+function _nfceLinkCliente(n){ var i = (n && n.impressao) || {}; return i.qrCode || n.qrcodeUrl || n.consultaUrl || n.danfeUrl || ''; }
+function _nfceFoneMascara(el){
+  var d = el.value.replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(0,11);
+  el.value = d.length > 10 ? d.replace(/^(\d{2})(\d{5})(\d{0,4}).*/,'($1) $2-$3') : d.length > 6 ? d.replace(/^(\d{2})(\d{4})(\d{0,4}).*/,'($1) $2-$3') : d.length > 2 ? d.replace(/^(\d{2})(\d*)/,'($1) $2') : d;
+}
+function _htmlNfceWhats(idCampo){
+  return '<div style="margin-top:12px;text-align:left;">'+
+    '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Mandar a nota no WhatsApp do cliente</div>'+
+    '<div style="display:flex;gap:7px;">'+
+      '<input id="' + idCampo + '" inputmode="tel" autocomplete="off" placeholder="(DDD) 9 0000-0000" oninput="_nfceFoneMascara(this)" style="flex:1;min-width:0;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2, var(--border));color:var(--text);border-radius:10px;padding:11px;font-size:1rem;font-family:inherit;outline:none;">'+
+      '<button onclick="_nfceEnviarWhats(\'' + idCampo + '\')" style="background:#25d366;color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:800;font-size:0.86rem;cursor:pointer;font-family:inherit;white-space:nowrap;">📲 Enviar</button>'+
+    '</div></div>';
+}
+function _nfceEnviarWhats(idCampo, nfceForcada){
+  var el = document.getElementById(idCampo);
+  var n = nfceForcada || (window._nfceWhatsAtual || null);
+  if(!n){ return; }
+  var d = (el ? el.value : '').replace(/\D/g,'');
+  if(d.length === 10 || d.length === 11) d = '55' + d;
+  if(d.length < 12 || d.length > 13){ if(el){ el.style.borderColor = '#f87171'; el.focus(); } return; }
+  var i = n.impressao || {}, r = String(n.restauranteId || '');
+  var loja = i.emitFantasia || ((!r || r === 'default' || r === 'bavaro') ? 'Bávaro' : r.charAt(0).toUpperCase() + r.slice(1));
+  var valor = Number(n.total || 0).toFixed(2).replace('.', ',');
+  var link = _nfceLinkCliente(n);
+  var txt = 'Olá! Segue a sua nota fiscal (NFC-e nº ' + n.numero + ') do ' + loja + ', no valor de R$ ' + valor + '.' + (link ? '\n\nVer a nota: ' + link : '') + '\n\nObrigado pela preferência! 🍺';
+  window.open('https://wa.me/' + d + '?text=' + encodeURIComponent(txt), '_blank');
+}
 function _htmlNfceDetalhe(c){
   var n = c.nfce;
   if(n && n.status === 'autorizado'){
@@ -19348,7 +19377,7 @@ function _htmlNfceDetalhe(c){
         '<button class="f-btn" style="flex:1;min-width:120px;" onclick="imprimirNfce(_contaDetalheAtual)">🖨️ Imprimir</button>'+
         (n.danfeUrl ? '<button class="f-btn secondary" style="flex:1;min-width:120px;" onclick="window.open(\'' + esc(n.danfeUrl) + '\',\'_blank\')">👁️ Ver nota</button>' : '')+
         (_ehAdmin ? '<button class="f-btn secondary" style="flex:1;min-width:120px;color:#f87171;" onclick="cancelarNfce()">✕ Cancelar nota</button>' : '')+
-      '</div></div>';
+      '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats('nfce-whats-hist')) + '</div>';
   }
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.76rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + esc(n.numero) + ' desta conta foi cancelada.</div>'
     : n && n.erro ? '<div style="font-size:0.76rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + esc(n.erro) + '</div>' : '';
@@ -19423,6 +19452,7 @@ function emitirNfce(){
           '<div style="font-weight:800;font-size:1.05rem;margin:6px 0;">NFC-e nº ' + esc(j.nfce.numero) + ' ' + (j.jaEmitida ? 'já tinha sido emitida' : 'autorizada') + '</div>'+
           (j.nfce.ambiente === 'homologacao' ? '<div style="color:#f59e0b;font-size:0.78rem;margin-bottom:6px;">Ambiente de TESTE — sem valor fiscal</div>' : '')+
           '<div style="font-size:0.8rem;color:var(--muted);">' + (j.jaEmitida ? '' : '🖨️ Enviada pra impressora do caixa.') + '</div>'+
+          (window._nfceWhatsAtual = j.nfce, _htmlNfceWhats('nfce-whats')) +
         '</div>';
       document.getElementById('nfce-footer').innerHTML =
         '<button class="f-btn secondary" style="flex:1;" onclick="imprimirNfce(_nfceConta)">🖨️ Imprimir de novo</button>'+

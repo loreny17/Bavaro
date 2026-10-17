@@ -1473,13 +1473,42 @@ function abrirDetalheHistorico(pedidoId){
 // ════════════════════════════════════════
 var _nfceTotem = null, _nfceTotemForma = '';
 var _NFCE_FORMAS_CX = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito']];
+
+// ── Enviar a nota pelo WhatsApp do cliente (abre o WhatsApp com a mensagem pronta) ──
+function _nfceLinkCliente(n){ var i = (n && n.impressao) || {}; return i.qrCode || n.qrcodeUrl || n.consultaUrl || n.danfeUrl || ''; }
+function _nfceFoneMascara(el){
+  var d = el.value.replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(0,11);
+  el.value = d.length > 10 ? d.replace(/^(\d{2})(\d{5})(\d{0,4}).*/,'($1) $2-$3') : d.length > 6 ? d.replace(/^(\d{2})(\d{4})(\d{0,4}).*/,'($1) $2-$3') : d.length > 2 ? d.replace(/^(\d{2})(\d*)/,'($1) $2') : d;
+}
+function _htmlNfceWhats(idCampo){
+  return '<div style="margin-top:12px;text-align:left;">'+
+    '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Mandar a nota no WhatsApp do cliente</div>'+
+    '<div style="display:flex;gap:7px;">'+
+      '<input id="' + idCampo + '" inputmode="tel" autocomplete="off" placeholder="(DDD) 9 0000-0000" oninput="_nfceFoneMascara(this)" style="flex:1;min-width:0;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2, var(--border));color:var(--text);border-radius:10px;padding:11px;font-size:1rem;font-family:inherit;outline:none;">'+
+      '<button onclick="_nfceEnviarWhats(\'' + idCampo + '\')" style="background:#25d366;color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:800;font-size:0.86rem;cursor:pointer;font-family:inherit;white-space:nowrap;">📲 Enviar</button>'+
+    '</div></div>';
+}
+function _nfceEnviarWhats(idCampo, nfceForcada){
+  var el = document.getElementById(idCampo);
+  var n = nfceForcada || (window._nfceWhatsAtual || null);
+  if(!n){ return; }
+  var d = (el ? el.value : '').replace(/\D/g,'');
+  if(d.length === 10 || d.length === 11) d = '55' + d;
+  if(d.length < 12 || d.length > 13){ if(el){ el.style.borderColor = '#f87171'; el.focus(); } return; }
+  var i = n.impressao || {}, r = String(n.restauranteId || '');
+  var loja = i.emitFantasia || ((!r || r === 'default' || r === 'bavaro') ? 'Bávaro' : r.charAt(0).toUpperCase() + r.slice(1));
+  var valor = Number(n.total || 0).toFixed(2).replace('.', ',');
+  var link = _nfceLinkCliente(n);
+  var txt = 'Olá! Segue a sua nota fiscal (NFC-e nº ' + n.numero + ') do ' + loja + ', no valor de R$ ' + valor + '.' + (link ? '\n\nVer a nota: ' + link : '') + '\n\nObrigado pela preferência! 🍺';
+  window.open('https://wa.me/' + d + '?text=' + encodeURIComponent(txt), '_blank');
+}
 function _htmlNfceTotem(p){
   var n = p.nfce;
   if(n && n.status === 'autorizado'){
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
       '<div style="flex:1;min-width:160px;color:#4ade80;font-weight:700;font-size:0.9rem;">🧾 NFC-e nº ' + escapar(n.numero) + ' autorizada' + (n.ambiente === 'homologacao' ? ' <span style="color:#f59e0b;font-size:0.72rem;">TESTE</span>' : '') + '</div>'+
       '<button onclick="imprimirNfceTotem(\'' + p.id + '\')" style="padding:10px 14px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir nota</button>'+
-    '</div>';
+    '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats('nfce-whats-hist'));
   }
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + escapar(n.numero) + ' foi cancelada.</div>'
     : n && n.erro ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + escapar(n.erro) + '</div>' : '';
@@ -1572,7 +1601,7 @@ function emitirNfceTotem(){
       if(!j.jaEmitida) _enviarImpressaoNfce(p);
       document.getElementById('nfce-totem-corpo').innerHTML = '<div style="text-align:center;padding:8px 0;"><div style="font-size:2.2rem;">✅</div><div style="font-weight:800;font-size:1.05rem;margin:6px 0;">NFC-e nº ' + escapar(j.nfce.numero) + ' ' + (j.jaEmitida ? 'já tinha sido emitida' : 'autorizada') + '</div>' +
         (j.nfce.ambiente === 'homologacao' ? '<div style="color:#f59e0b;font-size:0.8rem;">Ambiente de TESTE — sem valor fiscal</div>' : '') +
-        (j.jaEmitida ? '' : '<div style="font-size:0.82rem;color:var(--muted);margin-top:4px;">🖨️ Enviada pra impressora.</div>') + '</div>';
+        (j.jaEmitida ? '' : '<div style="font-size:0.82rem;color:var(--muted);margin-top:4px;">🖨️ Enviada pra impressora.</div>') + (window._nfceWhatsAtual = j.nfce, _htmlNfceWhats('nfce-whats')) + '</div>';
       document.getElementById('nfce-totem-rodape').innerHTML =
         '<button onclick="_enviarImpressaoNfce(_nfceTotem)" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir de novo</button>'+
         '<button onclick="document.getElementById(\'modal-nfce-totem\').remove()" style="flex:1;padding:13px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">OK</button>';

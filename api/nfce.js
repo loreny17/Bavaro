@@ -4,17 +4,24 @@ const nfce = require('./_nfce');
 const { getDb, garcomEhAdmin } = require('./_assistente');
 const admin = require('firebase-admin');
 
-// PDV logado: confere o token do Firebase e se o usuário é desse restaurante
-async function _usuarioDoTenant(db, idToken, tenantId) {
-  if (!idToken || !tenantId) return false;
+// PDV logado: confere o token do Firebase e se o usuário é desse restaurante.
+// Devolve '' quando ok, ou o motivo da recusa (aparece na tela pra diagnóstico).
+async function _motivoRecusa(db, idToken, tenantId) {
+  if (!tenantId) return 'o PDV ainda não sabe qual é o restaurante (recarregue a página)';
+  if (!idToken) return 'sem login no PDV';
+  let tok;
+  try { tok = await admin.auth().verifyIdToken(String(idToken)); }
+  catch (e) { return 'login expirado ou inválido (' + (e.code || e.message) + ')'; }
+  const email = String(tok.email || '').toLowerCase();
   try {
-    const tok = await admin.auth().verifyIdToken(String(idToken));
     const u = await db.collection('users').doc(tok.uid).get();
-    if (u.exists && u.data().tenantId === tenantId) return true;
+    const ud = u.exists ? (u.data() || {}) : {};
+    if (ud.tenantId === tenantId || (Array.isArray(ud.tenantIds) && ud.tenantIds.indexOf(tenantId) >= 0)) return '';
     const t = await db.collection('tenants').doc(tenantId).get();
     const td = t.exists ? (t.data() || {}) : {};
-    return td.ownerUid === tok.uid || (!!tok.email && td.ownerEmail === tok.email);
-  } catch (e) { return false; }
+    if (td.ownerUid === tok.uid || (email && String(td.ownerEmail || '').toLowerCase() === email)) return '';
+    return 'o usuário ' + (email || tok.uid) + ' não está vinculado a este restaurante' + (u.exists ? '' : ' (sem cadastro em users)');
+  } catch (e) { return 'erro ao conferir o usuário (' + e.message + ')'; }
 }
 
 module.exports = async (req, res) => {
@@ -24,7 +31,8 @@ module.exports = async (req, res) => {
   try {
     const db = getDb();
     if (b.acao === 'exportarLista' || b.acao === 'exportarXmls') {
-      if (!(await _usuarioDoTenant(db, b.idToken, b.tenantId))) return res.status(401).json({ ok: false, error: 'Faça login de novo no PDV.' });
+      const motivo = await _motivoRecusa(db, b.idToken, b.tenantId);
+      if (motivo) { console.warn('[nfce] exportação recusada:', motivo); return res.status(401).json({ ok: false, error: 'Acesso recusado: ' + motivo + '.' }); }
       if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId));
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
     }

@@ -9441,6 +9441,126 @@ function processarComandoImpressao(cmdId, cmd){
   }
 }
 
+
+// ════════════════════════════════════════
+//  NOTAS FISCAIS DO MÊS → ZIP PRA CONTABILIDADE
+// ════════════════════════════════════════
+var _nfcExport = null;
+var _NFC_FORMAS = {'01':'Dinheiro','03':'Cartão de Crédito','04':'Cartão de Débito','10':'Vale Alimentação','11':'Vale Refeição','17':'PIX','99':'Outros'};
+function _nfcMesPadrao(){
+  var d = new Date(); if(d.getDate() <= 15) d.setMonth(d.getMonth() - 1); // começo do mês: o fechamento é do mês anterior
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+}
+function abrirNotasContabilidade(){
+  var ex = document.getElementById('modal-nfc-export'); if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-nfc-export';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9400;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:460px;padding:18px;max-height:90vh;overflow-y:auto;">'+
+    '<div style="display:flex;align-items:center;margin-bottom:4px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.35rem;color:var(--accent);flex:1;">🧾 NOTAS FISCAIS DO MÊS</div>'+
+    '<button onclick="document.getElementById(\'modal-nfc-export\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button></div>'+
+    '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:14px;line-height:1.45;">Baixa um arquivo .zip com os XMLs de todas as NFC-e do mês (autorizadas e canceladas) e uma planilha de resumo. É só anexar no e-mail ou WhatsApp da contabilidade.</div>'+
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">'+
+      '<input type="month" id="nfc-mes" value="' + _nfcMesPadrao() + '" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;font-size:0.95rem;">'+
+      '<button onclick="_nfcBuscar()" style="background:var(--accent);color:#000;border:none;border-radius:10px;padding:11px 16px;font-weight:800;cursor:pointer;font-family:inherit;">Buscar</button>'+
+    '</div>'+
+    '<label style="display:flex;gap:8px;align-items:center;font-size:0.76rem;color:var(--muted);margin-bottom:12px;cursor:pointer;"><input type="checkbox" id="nfc-testes"> Incluir notas de teste (homologação)</label>'+
+    '<div id="nfc-resultado"></div>'+
+  '</div>';
+  document.body.appendChild(m);
+  _nfcBuscar();
+}
+function _nfcChamar(corpo){
+  var u = firebase.auth().currentUser;
+  if(!u) return Promise.reject(new Error('Faça login de novo no PDV.'));
+  return u.getIdToken().then(function(tok){
+    return fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({ tenantId:_tenantId, restauranteId:(_restauranteAtivo&&_restauranteAtivo.id)||'default', idToken:tok }, corpo)) });
+  }).then(function(r){ return r.json(); }).then(function(j){ if(!j.ok) throw new Error(j.error || 'Erro'); return j; });
+}
+function _nfcBuscar(){
+  var mes = document.getElementById('nfc-mes').value, box = document.getElementById('nfc-resultado');
+  if(!mes){ box.innerHTML = ''; return; }
+  box.innerHTML = '<div style="color:var(--muted);font-size:0.84rem;padding:10px 0;">Buscando notas…</div>';
+  _nfcChamar({ acao:'exportarLista', mes:mes, incluirTestes: document.getElementById('nfc-testes').checked }).then(function(j){
+    _nfcExport = j;
+    var aut = j.notas.filter(function(n){ return n.status === 'autorizado'; });
+    var can = j.notas.filter(function(n){ return n.status === 'cancelado'; });
+    var total = aut.reduce(function(a,n){ return a + (Number(n.total)||0); }, 0);
+    if(!j.notas.length){ box.innerHTML = '<div style="background:var(--surface2);border-radius:10px;padding:14px;font-size:0.84rem;color:var(--muted);text-align:center;">Nenhuma nota emitida pelo sistema nesse mês.</div>'; return; }
+    var nums = aut.map(function(n){ return Number(n.numero); }).filter(function(x){ return x; });
+    box.innerHTML = '<div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:12px;">'+
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span>✅ Autorizadas</span><b>' + aut.length + '</b></div>'+
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span>✕ Canceladas</span><b>' + can.length + '</b></div>'+
+        (nums.length ? '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:0.8rem;color:var(--muted);"><span>Numeração</span><span>nº ' + Math.min.apply(null, nums) + ' a ' + Math.max.apply(null, nums) + '</span></div>' : '')+
+        '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;"><span>Total (autorizadas)</span><b style="color:var(--accent);">R$ ' + formatarPreco(total) + '</b></div>'+
+      '</div>'+
+      '<div id="nfc-progresso" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;"></div>'+
+      '<button id="nfc-baixar" onclick="_nfcBaixarZip()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:14px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;">📦 Baixar ZIP para a contabilidade</button>';
+  }).catch(function(e){ box.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">❌ ' + escapeHtml(e.message) + '</div>'; });
+}
+function _nfcCarregarJSZip(){
+  if(window.JSZip) return Promise.resolve();
+  return new Promise(function(ok, falha){
+    var sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    sc.onload = ok; sc.onerror = function(){ falha(new Error('Não consegui carregar o gerador de ZIP (sem internet?)')); };
+    document.head.appendChild(sc);
+  });
+}
+function _nfcCsv(notas){
+  function br(v){ return (Number(v)||0).toFixed(2).replace('.',','); }
+  function c(v){ v = String(v == null ? '' : v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+  var linhas = [['Numero','Serie','Data emissao','Situacao','Valor','Forma de pagamento','CPF/CNPJ consumidor','Mesa','Chave de acesso'].join(';')];
+  var tot = 0;
+  notas.forEach(function(n){
+    if(n.status === 'autorizado') tot += Number(n.total)||0;
+    var formas = (n.formas||[]).map(function(f){ var p = f.split(':'); return (_NFC_FORMAS[p[0]]||p[0]) + ' ' + br(p[1]); }).join(' + ');
+    var dt = n.data ? new Date(n.data).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}) : '';
+    linhas.push([n.numero, n.serie, dt, n.status === 'autorizado' ? 'Autorizada' : 'Cancelada', br(n.total), formas, n.documento, n.mesa == null ? '' : n.mesa, "'" + n.chave].map(c).join(';'));
+  });
+  linhas.push(''); linhas.push(['TOTAL AUTORIZADAS','','','',br(tot)].join(';'));
+  return '﻿' + linhas.join('\r\n');
+}
+function _nfcBaixarZip(){
+  var j = _nfcExport; if(!j || !j.notas.length) return;
+  var btn = document.getElementById('nfc-baixar'), prog = document.getElementById('nfc-progresso');
+  btn.disabled = true; btn.style.opacity = '0.6';
+  var refs = j.notas.map(function(n){ return n.ref; }), arquivos = [], falhas = [];
+  _nfcCarregarJSZip().then(function(){
+    var lotes = []; for(var i = 0; i < refs.length; i += 40) lotes.push(refs.slice(i, i + 40));
+    return lotes.reduce(function(p, lote, k){
+      return p.then(function(){
+        prog.textContent = 'Baixando XMLs da Focus… ' + Math.min(refs.length, (k + 1) * 40) + ' de ' + refs.length;
+        return _nfcChamar({ acao:'exportarXmls', refs:lote }).then(function(r){ arquivos = arquivos.concat(r.arquivos); });
+      });
+    }, Promise.resolve());
+  }).then(function(){
+    var zip = new JSZip(), nome = (_restauranteAtivo && _restauranteAtivo.nome || 'restaurante').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9]+/g,'-').toLowerCase();
+    arquivos.forEach(function(a){
+      if(!a.xml){ falhas.push((a.numero||a.ref) + (a.erro ? ' (' + a.erro + ')' : '')); return; }
+      var pasta = a.status === 'cancelado' ? 'canceladas/' : 'autorizadas/';
+      zip.file(pasta + a.chave + '-nfce.xml', a.xml);
+      if(a.xmlCancelamento) zip.file(pasta + a.chave + '-cancelamento.xml', a.xmlCancelamento);
+      else if(a.status === 'cancelado') falhas.push((a.numero||a.ref) + ' (XML do cancelamento não baixou)');
+    });
+    zip.file('resumo-' + j.mes + '.csv', _nfcCsv(j.notas));
+    prog.textContent = 'Montando o ZIP…';
+    return zip.generateAsync({ type:'blob', compression:'DEFLATE' }).then(function(blob){
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'notas-fiscais-' + nome + '-' + j.mes + '.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 60000);
+      prog.innerHTML = falhas.length
+        ? '<span style="color:#f59e0b;">⚠️ ZIP baixado, mas ' + falhas.length + ' arquivo(s) faltaram: ' + escapeHtml(falhas.slice(0,5).join(', ')) + (falhas.length > 5 ? '…' : '') + '. Tente de novo mais tarde.</span>'
+        : '<span style="color:#4ade80;">✓ ZIP baixado com ' + arquivos.length + ' nota(s) e a planilha de resumo.</span>';
+    });
+  }).catch(function(e){ prog.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>'; })
+    .then(function(){ btn.disabled = false; btn.style.opacity = '1'; });
+}
+
 // ─── DANFE NFC-e (layout simplificado do Manual de Especificações da NFC-e) ───
 function gerarDanfeNfce(n){
   var L = 42, imp = n.impressao || {};
@@ -16233,6 +16353,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <!-- 📊 RELATÓRIOS -->
     <div class="menu-grupo">
       <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
+      <button class="menu-item" onclick="abrirNotasContabilidade();fecharMenuLateral();"><span class="ico">🧾</span><span class="lbl">Notas fiscais (contabilidade)</span></button>
     </div>
 
     <!-- 🌙 FIM DO DIA -->

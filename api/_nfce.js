@@ -226,7 +226,7 @@ async function emitir(db, { tenantId, restauranteId, contaId, documento, nomeCli
     ({ http, j } = await chamarFocus(amb, 'GET', '/v2/nfce/' + encodeURIComponent(ref) + '?completo=0'));
   }
   const base = { tentativa, contaId: String(contaId), tenantId: tenantId || conta.tenantId || null, restauranteId: restauranteId || conta.restauranteId || null,
-    mesa: conta.mesa != null ? conta.mesa : null, documento: doc || '', total: reais(totalC + servicoC), emitidaPor: garcom || '', itens: itens.length };
+    mesa: conta.mesa != null ? conta.mesa : null, documento: doc || '', emitidaEm: Date.now(), total: reais(totalC + servicoC), emitidaPor: garcom || '', itens: itens.length };
 
   if (j && j.status === 'autorizado') {
     const xml = await _baixarXml(amb, j.caminho_xml_nota_fiscal);
@@ -264,4 +264,58 @@ async function cancelar(db, { contaId, justificativa, tenantId }) {
   return { ok: false, error: msgErro(j) };
 }
 
-module.exports = { emitir, cancelar, ambiente, _interno: { montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };
+// ── Exportação mensal pra contabilidade ──
+function _mesDaNota(n) {
+  const d = n.impressao && n.impressao.dataEmissao;
+  if (d && /^\d{4}-\d{2}/.test(d)) return d.slice(0, 7);
+  const ts = n.emitidaEm || n.atualizadoEm;
+  if (!ts) return '';
+  const p = {};
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).formatToParts(new Date(ts)).forEach((x) => { p[x.type] = x.value; });
+  return p.year + '-' + p.month;
+}
+async function listarMes(db, tenantId, mes, incluirTestes) {
+  if (!/^\d{4}-\d{2}$/.test(String(mes || ''))) return { ok: false, error: 'Mês inválido.' };
+  const snap = await db.collection('nfce').where('tenantId', '==', tenantId).get();
+  const notas = [];
+  snap.forEach((d) => {
+    const n = d.data() || {};
+    if (_mesDaNota(n) !== mes) return;
+    if (!incluirTestes && n.ambiente !== 'producao') return;
+    if (n.status !== 'autorizado' && n.status !== 'cancelado') return;
+    notas.push({
+      ref: n.ref || d.id, numero: n.numero, serie: n.serie, chave: n.chave, status: n.status, ambiente: n.ambiente,
+      data: (n.impressao && n.impressao.dataEmissao) || (n.emitidaEm ? new Date(n.emitidaEm).toISOString() : ''),
+      total: n.total, documento: n.documento || '', mesa: n.mesa, formas: ((n.impressao && n.impressao.pagamentos) || []).map((p) => p.forma + ':' + p.valor),
+    });
+  });
+  notas.sort((a, b) => (Number(a.serie) - Number(b.serie)) || (Number(a.numero) - Number(b.numero)));
+  return { ok: true, mes, notas };
+}
+async function xmlsDasNotas(db, tenantId, refs) {
+  const lista = (Array.isArray(refs) ? refs : []).slice(0, 40).map(String);
+  const saida = [];
+  let i = 0;
+  async function trabalhador() {
+    while (i < lista.length) {
+      const ref = lista[i++];
+      try {
+        const d = await db.collection('nfce').doc(ref).get();
+        const n = d.exists ? d.data() : null;
+        if (!n || n.tenantId !== tenantId) { saida.push({ ref, erro: 'não encontrada' }); continue; }
+        const amb = n.ambiente || ambiente();
+        const xml = await _baixarXml(amb, n.xmlUrl);
+        let xmlCancelamento = '';
+        if (n.status === 'cancelado') {
+          const c = await chamarFocus(amb, 'GET', '/v2/nfce/' + encodeURIComponent(ref));
+          if (c.j && c.j.caminho_xml_cancelamento) xmlCancelamento = await _baixarXml(amb, c.j.caminho_xml_cancelamento);
+        }
+        saida.push({ ref, numero: n.numero, serie: n.serie, chave: n.chave, status: n.status, xml, xmlCancelamento, erro: xml ? '' : 'XML não baixou' });
+      } catch (e) { saida.push({ ref, erro: e.message }); }
+    }
+  }
+  await Promise.all([1, 2, 3, 4, 5, 6].map(trabalhador));
+  return { ok: true, arquivos: saida };
+}
+
+module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };

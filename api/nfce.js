@@ -20,6 +20,8 @@ async function _motivoRecusa(db, idToken, tenantId) {
     const t = await db.collection('tenants').doc(tenantId).get();
     const td = t.exists ? (t.data() || {}) : {};
     if (td.ownerUid === tok.uid || (email && String(td.ownerEmail || '').toLowerCase() === email)) return '';
+    // PDV desktop entra com login anônimo do Firebase (sem e-mail/cadastro) — mesmo acesso que ele já tem às contas
+    if (tok.firebase && tok.firebase.sign_in_provider === 'anonymous' && t.exists) return '';
     return 'o usuário ' + (email || tok.uid) + ' não está vinculado a este restaurante' + (u.exists ? '' : ' (sem cadastro em users)');
   } catch (e) { return 'erro ao conferir o usuário (' + e.message + ')'; }
 }

@@ -18486,11 +18486,14 @@ function encerrarMesa(){
         '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-encerrar\').remove()">Cancelar</button>'+
         '<button class="f-btn" style="flex:1;background:var(--success);color:#000;" onclick="executarEncerramento()">🏁 Encerrar</button>'+
       '</div>'+
+      '<div style="padding:0 16px 16px;">'+
+        '<button class="f-btn" style="width:100%;background:rgba(212,168,67,0.12);color:var(--accent);border:1.5px solid rgba(212,168,67,0.45);" onclick="executarEncerramento(true)">🧾 Encerrar e emitir nota fiscal</button>'+
+      '</div>'+
     '</div>';
   document.body.appendChild(mod);
 }
 
-function executarEncerramento(){
+function executarEncerramento(comNota){
   var c = _fecharConta;
   if(!c){
     showToast('❌ Conta não carregada','#f87171');
@@ -18542,6 +18545,7 @@ function executarEncerramento(){
   // ═══ FIREBASE EM BACKGROUND ═══
   // 1. Cria conta_fechada
   fbDb.collection('contas_fechadas').add(registro).then(function(ref){
+    if(comNota) setTimeout(function(){ abrirNfce(Object.assign({ id: ref.id }, registro)); }, 150);
     // 2. Deleta conta_mesa
     return fbDb.collection('contas_mesa').doc(contaIdParaApagar).delete();
   }).then(function(){
@@ -19232,7 +19236,7 @@ function abrirHistorico(){
             '</div>'+
             '<div style="display:flex;justify-content:space-between;align-items:center;">'+
               '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
-              '<span class="hist-total">R$ ' + fmtPreco(c.total||0) + '</span>'+
+              '<span class="hist-total">' + (c.nfce && c.nfce.status === 'autorizado' ? '<span style="font-size:0.7rem;color:#4ade80;font-family:inherit;margin-right:8px;">🧾 NFC-e ' + esc(c.nfce.numero) + '</span>' : '') + 'R$ ' + fmtPreco(c.total||0) + '</span>'+
             '</div>'+
             '<button onclick="event.stopPropagation();excluirContaGarcom(\''+c.id+'\',\''+c.mesa+'\')" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:0.85rem;font-family:inherit;">🗑</button>';
           card.onclick = (function(conta){ return function(e){
@@ -19282,12 +19286,151 @@ function verContaDetalhe(c){
     });
     html += '</div>';
   }
+  html += '<div id="conta-detalhe-nfce">' + _htmlNfceDetalhe(c) + '</div>';
   document.getElementById('conta-detalhe-body').innerHTML = html;
   document.getElementById('modal-conta-detalhe').classList.add('show');
 }
 
+
+// ════════════════════════════════════════
+//  NOTA FISCAL (NFC-e) — via /api/nfce (Focus NFe)
+// ════════════════════════════════════════
+var _nfceConta = null, _nfceForma = null;
+var _NFCE_FORMAS = [['dinheiro','💵 Dinheiro'],['pix','⚡ Pix'],['debito','💳 Débito'],['credito','💳 Crédito']];
+function _nfceValor(c){
+  return (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).reduce(function(a,i){
+    return a + ((i.tipoVenda === 'kg' && i.peso) ? (i.preco||0) : (i.preco||0)*(i.qtd||1));
+  }, 0);
+}
+function _nfceMascara(el){
+  var d = el.value.replace(/\D/g,'').slice(0,14), v = d;
+  if(d.length <= 11) v = d.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2');
+  else v = d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5');
+  el.value = v;
+  var t = document.getElementById('nfce-doc-tipo');
+  if(t) t.textContent = d.length === 0 ? 'Sem CPF/CNPJ (consumidor não identificado)' : d.length <= 11 ? 'CPF' + (d.length === 11 ? ' ✓' : '') : 'CNPJ' + (d.length === 14 ? ' ✓' : '');
+}
+function _htmlNfceDetalhe(c){
+  var n = c.nfce;
+  if(n && n.status === 'autorizado'){
+    return '<div class="fechar-bloco" style="background:rgba(74,222,128,0.07);border:1px solid rgba(74,222,128,0.3);">'+
+      '<div style="font-weight:700;color:#4ade80;margin-bottom:8px;">🧾 NFC-e nº ' + esc(n.numero) + ' (série ' + esc(n.serie) + ') autorizada' + (n.ambiente === 'homologacao' ? ' <span style="color:#f59e0b;font-size:0.72rem;">TESTE</span>' : '') + '</div>'+
+      (n.documento ? '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:8px;">' + (n.documento.length === 11 ? 'CPF ' : 'CNPJ ') + esc(n.documento) + '</div>' : '')+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+        '<button class="f-btn" style="flex:1;min-width:120px;" onclick="imprimirNfce(_contaDetalheAtual)">🖨️ Imprimir</button>'+
+        (n.danfeUrl ? '<button class="f-btn secondary" style="flex:1;min-width:120px;" onclick="window.open(\'' + esc(n.danfeUrl) + '\',\'_blank\')">👁️ Ver nota</button>' : '')+
+        (_ehAdmin ? '<button class="f-btn secondary" style="flex:1;min-width:120px;color:#f87171;" onclick="cancelarNfce()">✕ Cancelar nota</button>' : '')+
+      '</div></div>';
+  }
+  var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.76rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + esc(n.numero) + ' desta conta foi cancelada.</div>'
+    : n && n.erro ? '<div style="font-size:0.76rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + esc(n.erro) + '</div>' : '';
+  return '<div class="fechar-bloco">' + aviso + '<button class="f-btn" style="width:100%;background:rgba(212,168,67,0.12);color:var(--accent);border:1.5px solid rgba(212,168,67,0.45);" onclick="abrirNfce(_contaDetalheAtual)">🧾 Emitir nota fiscal (NFC-e)</button></div>';
+}
+function abrirNfce(c){
+  if(!c || !c.id){ showToast('❌ Conta não encontrada','#f87171'); return; }
+  _nfceConta = c;
+  var pg = (c.pagamentos||[]).filter(function(p){ return p && p.valor > 0; });
+  _nfceForma = pg.length ? null : 'pix';
+  var ex = document.getElementById('modal-nfce'); if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.className = 'modal modal-centro show';
+  mod.id = 'modal-nfce';
+  mod.style.zIndex = '9600';
+  var formas = pg.length
+    ? '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">Pagamento: ' + pg.map(function(p){ return esc(p.forma||'?') + ' R$ ' + fmtPreco(p.valor); }).join(' + ') + '</div>'
+    : '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Forma de pagamento</div>'+
+      '<div id="nfce-formas" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;">' + _NFCE_FORMAS.map(function(f){
+        return '<button data-f="' + f[0] + '" onclick="_nfceSelForma(\'' + f[0] + '\')" style="padding:11px;border-radius:10px;font-family:inherit;font-size:0.84rem;font-weight:700;cursor:pointer;border:1.5px solid ' + (_nfceForma === f[0] ? 'var(--accent)' : 'var(--border2)') + ';background:' + (_nfceForma === f[0] ? 'rgba(212,168,67,0.12)' : 'var(--surface2)') + ';color:' + (_nfceForma === f[0] ? 'var(--accent)' : 'var(--text)') + ';">' + f[1] + '</button>';
+      }).join('') + '</div>';
+  mod.innerHTML =
+    '<div class="modal-box" style="max-width:400px;border-radius:18px;">'+
+      '<div class="modal-header"><div class="modal-titulo">🧾 NOTA FISCAL</div><button class="modal-fechar" onclick="document.getElementById(\'modal-nfce\').remove()">×</button></div>'+
+      '<div class="modal-body" id="nfce-body">'+
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;">'+
+          '<span style="font-weight:700;">' + (c.mesa ? 'Mesa ' + esc(c.mesa) : esc(c.cliente||'Conta')) + '</span>'+
+          '<span style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);">R$ ' + fmtPreco(_nfceValor(c)) + '</span>'+
+        '</div>'+
+        ((c.taxa10||0) > 0 ? '<div style="font-size:0.72rem;color:var(--muted);margin:-8px 0 12px;">Valor dos produtos (a taxa de serviço não entra na nota)</div>' : '')+
+        '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">CPF ou CNPJ na nota (opcional)</div>'+
+        '<input id="nfce-doc" inputmode="numeric" autocomplete="off" placeholder="Deixe vazio se o cliente não quiser" oninput="_nfceMascara(this)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:1.05rem;font-family:inherit;outline:none;">'+
+        '<div id="nfce-doc-tipo" style="font-size:0.72rem;color:var(--muted);margin:5px 0 14px;">Sem CPF/CNPJ (consumidor não identificado)</div>'+
+        formas+
+        '<div id="nfce-msg"></div>'+
+      '</div>'+
+      '<div class="modal-footer" id="nfce-footer">'+
+        '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-nfce\').remove()">Agora não</button>'+
+        '<button class="f-btn" id="nfce-btn" style="flex:1.4;" onclick="emitirNfce()">🧾 Emitir</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+}
+function _nfceSelForma(f){
+  _nfceForma = f;
+  document.querySelectorAll('#nfce-formas button').forEach(function(b){
+    var on = b.getAttribute('data-f') === f;
+    b.style.borderColor = on ? 'var(--accent)' : 'var(--border2)';
+    b.style.background = on ? 'rgba(212,168,67,0.12)' : 'var(--surface2)';
+    b.style.color = on ? 'var(--accent)' : 'var(--text)';
+  });
+}
+function emitirNfce(){
+  var c = _nfceConta; if(!c) return;
+  var btn = document.getElementById('nfce-btn'), msg = document.getElementById('nfce-msg');
+  var doc = (document.getElementById('nfce-doc').value||'').replace(/\D/g,'');
+  if(doc && doc.length !== 11 && doc.length !== 14){ msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">CPF tem 11 números e CNPJ tem 14.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Emitindo...';
+  msg.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:8px;">Enviando para a SEFAZ… pode levar alguns segundos.</div>';
+  fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ acao:'emitir', tenantId:_tenantId, restauranteId:_restauranteId, contaId:c.id, documento:doc, formaPagamento:_nfceForma, garcom:_nomeGarcom })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok && j.nfce){
+      c.nfce = j.nfce;
+      if(_contaDetalheAtual && _contaDetalheAtual.id === c.id){ _contaDetalheAtual.nfce = j.nfce; var bl = document.getElementById('conta-detalhe-nfce'); if(bl) bl.innerHTML = _htmlNfceDetalhe(_contaDetalheAtual); }
+      if(!j.jaEmitida) imprimirNfce(c);
+      document.getElementById('nfce-body').innerHTML =
+        '<div style="text-align:center;padding:10px 0;">'+
+          '<div style="font-size:2.4rem;">✅</div>'+
+          '<div style="font-weight:800;font-size:1.05rem;margin:6px 0;">NFC-e nº ' + esc(j.nfce.numero) + ' ' + (j.jaEmitida ? 'já tinha sido emitida' : 'autorizada') + '</div>'+
+          (j.nfce.ambiente === 'homologacao' ? '<div style="color:#f59e0b;font-size:0.78rem;margin-bottom:6px;">Ambiente de TESTE — sem valor fiscal</div>' : '')+
+          '<div style="font-size:0.8rem;color:var(--muted);">' + (j.jaEmitida ? '' : '🖨️ Enviada pra impressora do caixa.') + '</div>'+
+        '</div>';
+      document.getElementById('nfce-footer').innerHTML =
+        '<button class="f-btn secondary" style="flex:1;" onclick="imprimirNfce(_nfceConta)">🖨️ Imprimir de novo</button>'+
+        (j.nfce.danfeUrl ? '<button class="f-btn secondary" style="flex:1;" onclick="window.open(\'' + esc(j.nfce.danfeUrl) + '\',\'_blank\')">👁️ Ver</button>' : '')+
+        '<button class="f-btn" style="flex:1;" onclick="document.getElementById(\'modal-nfce\').remove()">OK</button>';
+      return;
+    }
+    btn.disabled = false; btn.textContent = '🧾 Tentar de novo';
+    if(j.precisaForma && !_nfceForma){ abrirNfce(Object.assign({}, c, { pagamentos: [] })); document.getElementById('nfce-msg').innerHTML = '<div style="color:#f59e0b;font-size:0.82rem;margin-bottom:8px;">' + esc(j.error) + '</div>'; return; }
+    msg.innerHTML = '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:10px;padding:10px;font-size:0.8rem;margin-bottom:8px;line-height:1.4;">❌ Nota não autorizada:<br>' + esc(j.error||'erro desconhecido') + '</div>';
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = '🧾 Tentar de novo';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.82rem;margin-bottom:8px;">Sem conexão com o servidor. A nota não foi emitida.</div>';
+  });
+}
+function imprimirNfce(c){
+  if(!c || !c.nfce || c.nfce.status !== 'autorizado'){ showToast('Essa conta não tem nota autorizada','#f7a34f'); return; }
+  _imprimirComRetry({ tipo:'nfce', restauranteId:_restauranteId, contaId:c.id, mesa:c.mesa||null, nfce:c.nfce, solicitadoPor:_nomeGarcom, solicitadoEm:Date.now() });
+  showToast('🖨️ Nota enviada pra impressora','#4ade80');
+}
+function cancelarNfce(){
+  var c = _contaDetalheAtual; if(!c || !c.nfce) return;
+  var just = prompt('Cancelar a NFC-e nº ' + c.nfce.numero + '?\n\nO prazo da SEFAZ é curto (normalmente 30 minutos depois da emissão).\n\nMotivo (mínimo 15 letras):', 'Venda cancelada a pedido do cliente');
+  if(just === null) return;
+  if(just.trim().length < 15){ showToast('O motivo precisa ter pelo menos 15 letras','#f7a34f'); return; }
+  showToast('Cancelando a nota…','#94a3b8');
+  fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ acao:'cancelar', tenantId:_tenantId, restauranteId:_restauranteId, contaId:c.id, justificativa:just.trim(), garcom:_nomeGarcom })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok){ c.nfce = j.nfce; showToast('✓ Nota cancelada','#4ade80'); }
+    else showToast('❌ ' + (j.error||'Não cancelou'),'#f87171', 6000);
+    var bl = document.getElementById('conta-detalhe-nfce'); if(bl) bl.innerHTML = _htmlNfceDetalhe(c);
+  }).catch(function(){ showToast('❌ Sem conexão','#f87171'); });
+}
+
 function restaurarConta(){
   if(!_contaDetalheAtual) return;
+  if(_contaDetalheAtual.nfce && _contaDetalheAtual.nfce.status === 'autorizado' && !confirm('⚠️ Essa conta já tem a NFC-e nº ' + _contaDetalheAtual.nfce.numero + '.\nRestaurar a mesa NÃO cancela a nota. Continuar?')) return;
   if(!confirm('Restaurar mesa ' + _contaDetalheAtual.mesa + '?\n\nIsso vai reabrir a mesa com os itens, ZERANDO os pagamentos (mesa volta como NÃO paga).\nNão reimprimirá na cozinha.')) return;
   var c = _contaDetalheAtual;
   var mesaNum = parseInt(c.mesa) || c.mesa;

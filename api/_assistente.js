@@ -1460,4 +1460,4 @@ PERGUNTA (mensagem ATUAL do funcionário):
   }
 }
 
-module.exports = { criarHandler, getDb, textoDoGemini, TENANT_PADRAO };
+module.exports = { criarHandler, getDb, textoDoGemini, TENANT_PADRAO, garcomEhAdmin: _garcomEhAdmin };

@@ -9386,6 +9386,18 @@ function processarComandoImpressao(cmdId, cmd){
     showToast('🖨️ Conta completa impressa', '#4ade80');
     } // fim else conta_pessoa_junto
 
+  } else if(cmd.tipo === 'nfce'){
+    // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO
+    try{
+      var danfe = gerarDanfeNfce(cmd.nfce || {});
+      var modsF = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
+      var impsN = [];
+      modsF.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsN.indexOf(imp) < 0) impsN.push(imp); });
+      if(!impsN.length && _impressoras.length) impsN = [_impressoras[0]];
+      impsN.forEach(function(imp){ enviarParaImpressora(imp, danfe); });
+      showToast('🧾 NFC-e ' + ((cmd.nfce||{}).numero||'') + ' impressa', '#4ade80');
+    }catch(e){ console.warn('danfe nfce:', e); showToast('❌ Erro ao imprimir a nota: ' + e.message, '#f87171'); }
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado
     fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
@@ -9427,6 +9439,54 @@ function processarComandoImpressao(cmdId, cmd){
         fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
       });
   }
+}
+
+// ─── DANFE NFC-e (layout simplificado do Manual de Especificações da NFC-e) ───
+function gerarDanfeNfce(n){
+  var L = 42, imp = n.impressao || {};
+  var FORMAS = {'01':'Dinheiro','02':'Cheque','03':'Cartao de Credito','04':'Cartao de Debito','05':'Credito Loja','10':'Vale Alimentacao','11':'Vale Refeicao','15':'Boleto','16':'Deposito','17':'PIX','18':'Transferencia','99':'Outros'};
+  function lv(lbl, val){ var e = L - lbl.length - val.length; return e < 1 ? lbl + ' ' + val + '\n' : lbl + new Array(e+1).join(' ') + val + '\n'; }
+  function brl(v){ return formatarPreco(Number(v)||0); }
+  function quebra(txt){ var out = '', t = String(txt||''); while(t.length > L){ out += t.slice(0,L) + '\n'; t = t.slice(L); } return out + t + '\n'; }
+  function dt(iso){ if(!iso) return ''; var d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}); }
+  var s = escposInit() + escposCenter();
+  s += escposBold(true) + quebra(imp.emitNome || 'EMITENTE') + escposBold(false);
+  var cnpj = String(imp.emitCnpj||'').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+  s += 'CNPJ ' + cnpj + (imp.emitIe ? '  IE ' + imp.emitIe : '') + '\n';
+  if(imp.emitEndereco) s += quebra(imp.emitEndereco);
+  if(imp.emitCidade) s += imp.emitCidade + '\n';
+  s += linha('-', L) + '\n';
+  s += 'Documento Auxiliar da Nota Fiscal\nde Consumidor Eletronica\n';
+  s += linha('-', L) + '\n' + escposLeft();
+  s += '#  Descricao\n' + padR('Qtd UN x Vl.Unit', L - 10) + padR('Vl.Total', 10) + '\n';
+  (imp.itens||[]).forEach(function(it, i){
+    s += ('00' + (i+1)).slice(-3) + ' ' + String(it.desc||'').slice(0, L-4) + '\n';
+    var esq = '    ' + it.qtd + ' ' + (it.un||'UN') + ' x ' + brl(it.unit);
+    s += esq + padR(brl(it.total), Math.max(1, L - esq.length)) + '\n';
+  });
+  s += linha('-', L) + '\n';
+  var total = Number(n.total)||0;
+  s += lv('Qtd. total de itens', String((imp.itens||[]).length));
+  s += escposBold(true) + lv('Valor a pagar R$', brl(total)) + escposBold(false);
+  s += lv('FORMA DE PAGAMENTO', 'VALOR PAGO R$');
+  (imp.pagamentos||[]).forEach(function(p){ s += lv(FORMAS[p.forma] || p.forma, brl(p.valor)); });
+  s += linha('-', L) + '\n' + escposCenter();
+  if(n.ambiente === 'homologacao') s += escposBold(true) + 'EMITIDA EM AMBIENTE DE HOMOLOGACAO\nSEM VALOR FISCAL\n' + escposBold(false);
+  s += 'Consulte pela Chave de Acesso em\n' + quebra(imp.urlChave || n.consultaUrl || '');
+  var ch = String(n.chave||'').replace(/\D/g,'').replace(/(\d{4})(?=\d)/g,'$1 ');
+  s += quebra(ch);
+  s += linha('-', L) + '\n';
+  var d = String(n.documento||'');
+  s += d ? 'CONSUMIDOR ' + (d.length === 11 ? 'CPF: ' + d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4') : 'CNPJ: ' + d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5')) + '\n' : 'CONSUMIDOR NAO IDENTIFICADO\n';
+  s += escposBold(true) + 'NFC-e n ' + ('000000000' + (n.numero||'')).slice(-9) + ' Serie ' + ('00' + (n.serie||'')).slice(-3) + '\n' + escposBold(false);
+  if(imp.dataEmissao) s += dt(imp.dataEmissao) + '\n';
+  if(imp.protocolo) s += 'Protocolo de autorizacao: ' + imp.protocolo + '\n';
+  if(imp.dataAutorizacao) s += 'Data de autorizacao: ' + dt(imp.dataAutorizacao) + '\n';
+  var qr = imp.qrCode || n.qrcodeUrl;
+  if(qr){ s += '\n' + escposQRCode(qr, 6) + escposCenter() + '\n'; }
+  if(imp.tributos && Number(imp.tributos) > 0) s += quebra('Tributos totais incidentes (Lei Federal 12.741/2012): R$ ' + brl(imp.tributos));
+  s += escposLeft() + '\n\n\n' + escposCut();
+  return s;
 }
 
 // ─── Helper: encontra modelo de fechamento p/ aplicar negrito ───

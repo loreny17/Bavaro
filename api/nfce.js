@@ -1,5 +1,5 @@
 // POST /api/nfce — emitir / cancelar NFC-e de uma conta fechada (lógica em ./_nfce.js)
-// body: { acao:'emitir'|'cancelar', tenantId, restauranteId, contaId, documento?, nomeCliente?, formaPagamento?, garcom?, justificativa? }
+// body: { acao:'emitir'|'cancelar'|'exportarLista'|'exportarXmls', tenantId, restauranteId, contaId | (origem:'totem', pedidoId), documento?, formaPagamento?, garcom?, justificativa? }
 const nfce = require('./_nfce');
 const { getDb, garcomEhAdmin } = require('./_assistente');
 const admin = require('firebase-admin');
@@ -18,14 +18,14 @@ async function _usuarioDoTenant(db, idToken, tenantId) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method === 'GET') return res.status(200).json({ ok: true, ambiente: nfce.ambiente() });
+  if (req.method === 'GET') return res.status(200).json({ ok: true });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Use POST' });
   const b = req.body || {};
   try {
     const db = getDb();
     if (b.acao === 'exportarLista' || b.acao === 'exportarXmls') {
       if (!(await _usuarioDoTenant(db, b.idToken, b.tenantId))) return res.status(401).json({ ok: false, error: 'Faça login de novo no PDV.' });
-      if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true));
+      if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId));
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
     }
     if (b.acao === 'cancelar') {

@@ -1565,34 +1565,136 @@ function confirmarBuffetCaixa(){
 var _nfceTotem = null, _nfceTotemForma = '';
 var _NFCE_FORMAS_CX = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito']];
 
-// ── Enviar a nota pelo WhatsApp do cliente (abre o WhatsApp com a mensagem pronta) ──
-// Link curto nosso (/nota/<ref>) que redireciona pro QR Code da SEFAZ — o WhatsApp corta o link original no '|'
-function _nfceLinkCliente(n){ if(n && n.ref) return location.origin + '/nota/' + encodeURIComponent(n.ref); var i = (n && n.impressao) || {}; return String(i.qrCode || n.qrcodeUrl || n.consultaUrl || '').trim(); }
+// ── Nota em PDF (gerada no aparelho) e compartilhada no WhatsApp ──
+function _nfceScript(src, globo){
+  if(window[globo]) return Promise.resolve();
+  return new Promise(function(ok, falha){
+    var sc = document.createElement('script'); sc.src = src;
+    sc.onload = ok; sc.onerror = function(){ falha(new Error('Sem internet pra gerar o PDF.')); };
+    document.head.appendChild(sc);
+  });
+}
+function _nfceLibsPdf(){
+  return Promise.all([
+    _nfceScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf'),
+    _nfceScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js', 'QRCode')
+  ]);
+}
+function _nfceQrPng(txt){
+  var d = document.createElement('div'); d.style.cssText = 'position:absolute;left:-9999px;top:0;';
+  document.body.appendChild(d);
+  try{ new QRCode(d, { text: txt, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M }); }catch(e){ d.remove(); return ''; }
+  var c = d.querySelector('canvas'), url = c ? c.toDataURL('image/png') : '';
+  d.remove(); return url;
+}
+// Monta o DANFE NFC-e em 80 mm (mesmo conteúdo do cupom impresso) — síncrono, pra não perder o toque no "compartilhar"
+function _nfcePdfBlob(n){
+  var i = n.impressao || {}, W = 80, M = 4, LW = W - 2 * M;
+  var FORMAS = {'01':'Dinheiro','03':'Cartão de Crédito','04':'Cartão de Débito','10':'Vale Alimentação','11':'Vale Refeição','17':'PIX','99':'Outros'};
+  function brl(v){ return (Number(v)||0).toFixed(2).replace('.', ','); }
+  function dt(iso){ if(!iso) return ''; var x = new Date(iso); return isNaN(x) ? iso : x.toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' }); }
+  var qr = _nfceQrPng(i.qrCode || n.qrcodeUrl || '');
+  function desenhar(doc){
+    var y = M + 2;
+    function fonte(t, negrito){ doc.setFontSize(t); doc.setFont('helvetica', negrito ? 'bold' : 'normal'); }
+    function linha(){ doc.setLineDashPattern([0.6, 0.6], 0); doc.line(M, y, W - M, y); doc.setLineDashPattern([], 0); y += 3; }
+    function centro(txt, t, neg){ fonte(t || 7.5, neg); doc.splitTextToSize(String(txt), LW).forEach(function(l){ doc.text(l, W / 2, y, { align:'center' }); y += (t || 7.5) * 0.42; }); }
+    function esq(txt, t, neg){ fonte(t || 7.5, neg); doc.splitTextToSize(String(txt), LW).forEach(function(l){ doc.text(l, M, y); y += (t || 7.5) * 0.42; }); }
+    function par(a, b, t, neg){ fonte(t || 7.5, neg); doc.text(String(a), M, y); doc.text(String(b), W - M, y, { align:'right' }); y += (t || 7.5) * 0.42; }
+    centro(i.emitNome || 'EMITENTE', 8.5, true);
+    var cnpj = String(i.emitCnpj||'').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    centro('CNPJ ' + cnpj + (i.emitIe ? '   IE ' + i.emitIe : ''));
+    if(i.emitEndereco) centro(i.emitEndereco);
+    if(i.emitCidade) centro(i.emitCidade);
+    y += 1; linha();
+    centro('Documento Auxiliar da Nota Fiscal de Consumidor Eletrônica', 7.5, true);
+    y += 1; linha();
+    par('Descrição', 'Valor', 7, true);
+    (i.itens||[]).forEach(function(it, k){
+      esq(('00' + (k + 1)).slice(-3) + '  ' + it.desc, 7.5);
+      par('      ' + it.qtd + ' ' + (it.un||'UN') + ' x ' + brl(it.unit), brl(it.total), 7.5);
+    });
+    y += 1; linha();
+    par('Qtd. total de itens', String((i.itens||[]).length));
+    if(Number(i.servico) > 0){ par('Valor total dos produtos R$', brl(i.produtos)); par('Acréscimos (taxa de serviço) R$', brl(i.servico)); }
+    par('Valor a pagar R$', brl(n.total), 9, true);
+    par('FORMA DE PAGAMENTO', 'VALOR PAGO R$', 7, true);
+    (i.pagamentos||[]).forEach(function(p){ par(FORMAS[p.forma] || p.forma, brl(p.valor)); });
+    y += 1; linha();
+    if(n.ambiente === 'homologacao'){ centro('EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO — SEM VALOR FISCAL', 7.5, true); y += 1; }
+    centro('Consulte pela Chave de Acesso em', 7.5, true);
+    centro(i.urlChave || n.consultaUrl || '', 7);
+    centro(String(n.chave||'').replace(/\D/g,'').replace(/(\d{4})(?=\d)/g, '$1 '), 7.5);
+    y += 1; linha();
+    var d = String(n.documento||'');
+    centro(d ? 'CONSUMIDOR ' + (d.length === 11 ? 'CPF: ' + d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4') : 'CNPJ: ' + d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')) : 'CONSUMIDOR NÃO IDENTIFICADO', 7.5, true);
+    centro('NFC-e nº ' + ('000000000' + (n.numero||'')).slice(-9) + '  Série ' + ('00' + (n.serie||'')).slice(-3) + '  ' + dt(i.dataEmissao), 7.5, true);
+    if(i.protocolo) centro('Protocolo de autorização: ' + i.protocolo);
+    if(i.dataAutorizacao) centro('Data de autorização: ' + dt(i.dataAutorizacao));
+    if(qr){ y += 2; doc.addImage(qr, 'PNG', (W - 38) / 2, y, 38, 38); y += 42; }
+    if(Number(i.tributos) > 0) centro('Tributos totais incidentes (Lei Federal 12.741/2012): R$ ' + brl(i.tributos), 6.5);
+    return y + M;
+  }
+  var medida = new jspdf.jsPDF({ unit:'mm', format:[W, 600] });
+  var H = Math.max(80, Math.ceil(desenhar(medida)));
+  var doc = new jspdf.jsPDF({ unit:'mm', format:[W, H] });
+  desenhar(doc);
+  return doc.output('blob');
+}
 function _nfceFoneMascara(el){
   var d = el.value.replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(0,11);
   el.value = d.length > 10 ? d.replace(/^(\d{2})(\d{5})(\d{0,4}).*/,'($1) $2-$3') : d.length > 6 ? d.replace(/^(\d{2})(\d{4})(\d{0,4}).*/,'($1) $2-$3') : d.length > 2 ? d.replace(/^(\d{2})(\d*)/,'($1) $2') : d;
+  var b = document.getElementById('nfce-pdf-btn'); if(b && !b.disabled) b.textContent = _nfceRotuloBtn();
 }
-function _htmlNfceWhats(idCampo){
+var _nfceConversaAberta = {}; // número → já abriu a conversa (aí o próximo toque manda o PDF)
+function _nfceFoneAtual(){ var el = document.getElementById('nfce-fone'); var d = el ? el.value.replace(/\D/g,'') : ''; if(d.length === 10 || d.length === 11) d = '55' + d; return d; }
+function _nfceRotuloBtn(){ var f = _nfceFoneAtual(); return (f && !_nfceConversaAberta[f]) ? '📲 1º Abrir conversa no WhatsApp' : '📄 Enviar nota em PDF'; }
+function _htmlNfceWhats(){
+  _nfceLibsPdf().catch(function(){}); // já deixa as bibliotecas prontas pro toque
   return '<div style="margin-top:12px;text-align:left;">'+
-    '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Mandar a nota no WhatsApp do cliente</div>'+
-    '<div style="display:flex;gap:7px;">'+
-      '<input id="' + idCampo + '" inputmode="tel" autocomplete="off" placeholder="(DDD) 9 0000-0000" oninput="_nfceFoneMascara(this)" style="flex:1;min-width:0;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2, var(--border));color:var(--text);border-radius:10px;padding:11px;font-size:1rem;font-family:inherit;outline:none;">'+
-      '<button onclick="_nfceEnviarWhats(\'' + idCampo + '\')" style="background:#25d366;color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:800;font-size:0.86rem;cursor:pointer;font-family:inherit;white-space:nowrap;">📲 Enviar</button>'+
-    '</div></div>';
+    '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Mandar a nota em PDF no WhatsApp</div>'+
+    '<input id="nfce-fone" inputmode="tel" autocomplete="off" placeholder="WhatsApp do cliente (opcional)" oninput="_nfceFoneMascara(this)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2, var(--border));color:var(--text);border-radius:10px;padding:11px;font-size:1rem;font-family:inherit;outline:none;margin-bottom:7px;">'+
+    '<button id="nfce-pdf-btn" onclick="_nfceEnviarPdf(this)" style="width:100%;background:#25d366;color:#fff;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:0.92rem;cursor:pointer;font-family:inherit;">📄 Enviar nota em PDF</button>'+
+    '<div id="nfce-pdf-dica" style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Com o número: o 1º toque abre a conversa, o 2º manda o PDF (escolha a conversa nos Recentes).</div>'+
+  '</div>';
 }
-function _nfceEnviarWhats(idCampo, nfceForcada){
-  var el = document.getElementById(idCampo);
-  var n = nfceForcada || (window._nfceWhatsAtual || null);
-  if(!n){ return; }
-  var d = (el ? el.value : '').replace(/\D/g,'');
-  if(d.length === 10 || d.length === 11) d = '55' + d;
-  if(d.length < 12 || d.length > 13){ if(el){ el.style.borderColor = '#f87171'; el.focus(); } return; }
-  var i = n.impressao || {}, r = String(n.restauranteId || '');
-  var loja = i.emitFantasia || ((!r || r === 'default' || r === 'bavaro') ? 'Bávaro' : r.charAt(0).toUpperCase() + r.slice(1));
-  var valor = Number(n.total || 0).toFixed(2).replace('.', ',');
-  var link = _nfceLinkCliente(n);
-  var txt = 'Olá! Segue a sua nota fiscal (NFC-e nº ' + n.numero + ') do ' + loja + ', no valor de R$ ' + valor + '.' + (link ? '\n\nVer a nota: ' + link : '') + '\n\nObrigado pela preferência! 🍺';
-  window.open('https://wa.me/' + d + '?text=' + encodeURIComponent(txt), '_blank');
+function _nfceEnviarPdf(btn){
+  var n = window._nfceWhatsAtual; if(!n) return;
+  var fone = _nfceFoneAtual(), elF = document.getElementById('nfce-fone');
+  if(elF && elF.value.replace(/\D/g,'') && !fone){ elF.style.borderColor = '#f87171'; elF.focus(); return; }
+  // 1º toque com número: abre a conversa (cria o chat mesmo sem o contato salvo)
+  if(fone && !_nfceConversaAberta[fone]){
+    _nfceConversaAberta[fone] = true;
+    var i = n.impressao || {}, r = String(n.restauranteId || '');
+    var loja = i.emitFantasia || ((!r || r === 'default' || r === 'bavaro') ? 'Bávaro' : r.charAt(0).toUpperCase() + r.slice(1));
+    var txt = 'Olá! Segue a sua nota fiscal (NFC-e nº ' + n.numero + ') do ' + loja + ', no valor de R$ ' + Number(n.total || 0).toFixed(2).replace('.', ',') + '. Obrigado pela preferência! 🍺';
+    window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(txt), '_blank');
+    if(btn) btn.textContent = '📄 2º Enviar o PDF';
+    var dica = document.getElementById('nfce-pdf-dica'); if(dica) dica.innerHTML = '<b style="color:#4ade80;">Mandou a mensagem? Agora toque em "Enviar o PDF"</b> e escolha a conversa do cliente nos Recentes do WhatsApp.';
+    return;
+  }
+  var txtBtn = btn ? btn.textContent : '';
+  function pronto(){ if(btn){ btn.disabled = false; btn.textContent = _nfceRotuloBtn(); } }
+  if(btn){ btn.disabled = true; btn.textContent = 'Gerando PDF…'; }
+  _nfceLibsPdf().then(function(){
+    var blob = _nfcePdfBlob(n);
+    var nome = 'NFCe-' + (n.numero || 'nota') + '.pdf';
+    var file = new File([blob], nome, { type:'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      return navigator.share({ files:[file], title:'Nota fiscal ' + (n.numero||'') }).then(pronto, function(e){
+        pronto();
+        if(e && e.name === 'AbortError') return; // fechou o compartilhar
+        _nfceBaixar(blob, nome);
+      });
+    }
+    _nfceBaixar(blob, nome); pronto();
+  }).catch(function(e){ pronto(); alert('Não consegui gerar o PDF: ' + (e && e.message || e)); });
+}
+function _nfceBaixar(blob, nome){
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 60000);
+  alert('Este aparelho não abre o compartilhar com arquivo — o PDF foi baixado (' + nome + '). Anexe ele na conversa do WhatsApp.');
 }
 function _htmlNfceTotem(p){
   var n = p.nfce;
@@ -1600,7 +1702,7 @@ function _htmlNfceTotem(p){
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
       '<div style="flex:1;min-width:160px;color:#4ade80;font-weight:700;font-size:0.9rem;">🧾 NFC-e nº ' + escapar(n.numero) + ' autorizada' + (n.ambiente === 'homologacao' ? ' <span style="color:#f59e0b;font-size:0.72rem;">TESTE</span>' : '') + '</div>'+
       '<button onclick="imprimirNfceTotem(\'' + p.id + '\')" style="padding:10px 14px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir nota</button>'+
-    '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats('nfce-whats-hist'));
+    '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats());
   }
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + escapar(n.numero) + ' foi cancelada.</div>'
     : n && n.erro ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + escapar(n.erro) + '</div>' : '';
@@ -1693,7 +1795,7 @@ function emitirNfceTotem(){
       if(!j.jaEmitida) _enviarImpressaoNfce(p);
       document.getElementById('nfce-totem-corpo').innerHTML = '<div style="text-align:center;padding:8px 0;"><div style="font-size:2.2rem;">✅</div><div style="font-weight:800;font-size:1.05rem;margin:6px 0;">NFC-e nº ' + escapar(j.nfce.numero) + ' ' + (j.jaEmitida ? 'já tinha sido emitida' : 'autorizada') + '</div>' +
         (j.nfce.ambiente === 'homologacao' ? '<div style="color:#f59e0b;font-size:0.8rem;">Ambiente de TESTE — sem valor fiscal</div>' : '') +
-        (j.jaEmitida ? '' : '<div style="font-size:0.82rem;color:var(--muted);margin-top:4px;">🖨️ Enviada pra impressora.</div>') + (window._nfceWhatsAtual = j.nfce, _htmlNfceWhats('nfce-whats')) + '</div>';
+        (j.jaEmitida ? '' : '<div style="font-size:0.82rem;color:var(--muted);margin-top:4px;">🖨️ Enviada pra impressora.</div>') + (window._nfceWhatsAtual = j.nfce, _htmlNfceWhats()) + '</div>';
       document.getElementById('nfce-totem-rodape').innerHTML =
         '<button onclick="_enviarImpressaoNfce(_nfceTotem)" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir de novo</button>'+
         '<button onclick="document.getElementById(\'modal-nfce-totem\').remove()" style="flex:1;padding:13px;background:var(--accent);border:none;color:#000;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">OK</button>';

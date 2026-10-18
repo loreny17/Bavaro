@@ -11,6 +11,7 @@
 
 const HOSTS = { homologacao: 'https://homologacao.focusnfe.com.br', producao: 'https://api.focusnfe.com.br' };
 const CNPJ_BAVARO = '14692372000130'; // Bávaro — Simples Nacional
+const CNPJS = { prinzen: '20826369000165' }; // outros restaurantes (a variável FOCUS_CNPJ_<ID> tem prioridade)
 
 // Simples Nacional: 5102 / CSOSN 102 (tributada pelo Simples, sem crédito). PIS/COFINS 49.
 const PADRAO = { ncm: '21069090', cfop: '5102', csosn: '102', pis: '49', cofins: '49' };
@@ -55,7 +56,7 @@ async function configFiscal(db, tenantId, restId) {
   const ehBavaro = chaveRest(restId) === 'bavaro';
   try { const d = await db.collection('fiscal').doc(String(tenantId) + (ehBavaro ? '' : '__' + chaveRest(restId))).get(); if (d.exists) doc = d.data() || {}; } catch (e) { /* sem config */ }
   return {
-    cnpj: _so(doc.cnpj || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : '')),
+    cnpj: _so(doc.cnpj || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : (CNPJS[chaveRest(restId)] || ''))),
     padrao: Object.assign({}, PADRAO, doc.padrao || {}),
     regras: (Array.isArray(doc.regras) ? doc.regras : []).concat(REGRAS_PADRAO),
     incluirServico: doc.incluirServico !== false, // padrão: a taxa de serviço entra na nota

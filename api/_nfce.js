@@ -132,7 +132,7 @@ function dataSP() {
   return p.year + '-' + p.month + '-' + p.day + 'T' + p.hour + ':' + p.minute + ':' + p.second + '-03:00';
 }
 
-function _tag(xml, nome) { const m = String(xml).match(new RegExp('<' + nome + '(?:\\s[^>]*)?>([\\s\\S]*?)</' + nome + '>')); return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : ''; }
+function _tag(xml, nome) { const m = String(xml).match(new RegExp('<' + nome + '(?:\\s[^>]*)?>([\\s\\S]*?)</' + nome + '>')); return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim() : ''; }
 // dados pra imprimir o DANFE NFC-e no próprio sistema
 function dadosDoXml(xml) {
   if (!xml) return {};

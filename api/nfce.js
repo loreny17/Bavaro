@@ -27,7 +27,25 @@ async function _motivoRecusa(db, idToken, tenantId) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method === 'GET') return res.status(200).json({ ok: true });
+  // Link curto pro cliente (WhatsApp): /nota/<ref> → redireciona pro QR Code da SEFAZ com o '|' intacto
+  // (o WhatsApp corta link no '|', e a SEFAZ-PR não aceita o '|' codificado)
+  if (req.method === 'GET') {
+    const ref = String((req.query && req.query.v) || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!ref) return res.status(200).json({ ok: true });
+    try {
+      const d = await getDb().collection('nfce').doc(ref).get();
+      const n = d.exists ? d.data() : null;
+      const destino = n && ((n.impressao && n.impressao.qrCode) || n.qrcodeUrl || n.consultaUrl);
+      if (!destino) { res.statusCode = 404; res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end('<meta name=viewport content="width=device-width"><p style="font-family:sans-serif;padding:20px">Nota fiscal não encontrada.</p>'); }
+      const url = String(destino).trim().replace(/&amp;/g, '&').replace(/%7C/gi, '|');
+      res.statusCode = 302;
+      res.setHeader('Location', url);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end();
+    } catch (e) {
+      res.statusCode = 500; return res.end('Erro ao abrir a nota.');
+    }
+  }
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Use POST' });
   const b = req.body || {};
   try {

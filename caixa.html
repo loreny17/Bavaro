@@ -288,7 +288,8 @@
       <div>Aguardando: <b id="stat-aguardando">0</b></div>
       <div>Pagos hoje: <b id="stat-pagos">0</b></div>
     </div>
-    <button onclick="abrirHistorico()" style="margin-left:12px;background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">📋 Histórico</button>
+    <button onclick="abrirBuffetCaixa()" style="margin-left:12px;background:var(--surface2);color:var(--accent);border:1.5px solid var(--accent);border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">⚖️ Buffet</button>
+    <button onclick="abrirHistorico()" style="margin-left:8px;background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">📋 Histórico</button>
   </div>
 
   <!-- Corpo: fila + detalhe -->
@@ -1459,7 +1460,7 @@ function abrirDetalheHistorico(pedidoId){
       '<div style="padding:14px 22px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;flex-wrap:wrap;">' +
         (p.status === 'pago' ?
           '<button onclick="reimprimirRecibo(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--accent);color:#000;border:none;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🧾 Reimprimir Recibo</button>' +
-          '<button onclick="reimprimirCozinha(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🍳 Reimprimir Cozinha</button>' :
+(p.tipo === 'buffet' ? '' :           '<button onclick="reimprimirCozinha(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🍳 Reimprimir Cozinha</button>') :
           '<div style="flex:1;text-align:center;color:var(--muted);padding:8px;font-size:0.84rem;">Reimpressão disponível só pra pedidos pagos</div>'
         ) +
       '</div>' +
@@ -1467,6 +1468,96 @@ function abrirDetalheHistorico(pedidoId){
   document.body.appendChild(mod);
 }
 
+
+// ════════════════════════════════════════
+//  LANÇAR BUFFET NO CAIXA (valor + forma de pagamento, nota opcional)
+//  Fica em pedidos_totem (status 'pago', tipo 'buffet') → entra no histórico e nos "pagos hoje"
+// ════════════════════════════════════════
+var _bufCxForma = '', _bufCxNota = false;
+function abrirBuffetCaixa(){
+  _bufCxForma = ''; _bufCxNota = false;
+  var ex = document.getElementById('modal-buffet-cx'); if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-buffet-cx';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:450;display:flex;align-items:center;justify-content:center;padding:14px;animation:fadeInTela 0.2s ease;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:440px;width:100%;overflow:hidden;">'+
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">'+
+        '<div style="font-size:1.7rem;">⚖️</div><div style="flex:1;font-weight:800;font-size:1.05rem;">Lançar buffet</div>'+
+        '<button onclick="document.getElementById(\'modal-buffet-cx\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>'+
+      '</div>'+
+      '<div style="padding:16px 20px;">'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Valor do buffet</div>'+
+        '<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1.5px solid var(--border);border-radius:12px;padding:6px 14px;margin-bottom:16px;">'+
+          '<span style="font-weight:800;color:var(--accent);font-size:1.3rem;">R$</span>'+
+          '<input id="buf-cx-valor" inputmode="decimal" autocomplete="off" placeholder="0,00" oninput="this.value=this.value.replace(/[^0-9,\\.]/g,\'\')" onkeydown="if(event.key===\'Enter\')confirmarBuffetCaixa()" style="flex:1;min-width:0;background:none;border:none;color:var(--text);font-size:2rem;font-weight:800;font-family:inherit;outline:none;padding:6px 0;">'+
+        '</div>'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Forma de pagamento</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">'+
+          [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito']].map(function(f){
+            return '<button class="opt-pagto opt-buf-forma" data-f="' + f[0] + '" onclick="_bufCxSelForma(\'' + f[0] + '\')">' + f[1] + '</button>';
+          }).join('')+
+        '</div>'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Nota fiscal (NFC-e)?</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+          '<button class="opt-recibo opt-buf-nota selecionado" data-n="nao" onclick="_bufCxSelNota(false)">Não</button>'+
+          '<button class="opt-recibo opt-buf-nota" data-n="sim" onclick="_bufCxSelNota(true)">🧾 Emitir nota</button>'+
+        '</div>'+
+        '<div id="buf-cx-msg" style="margin-top:10px;"></div>'+
+      '</div>'+
+      '<div style="padding:14px 20px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">'+
+        '<button onclick="document.getElementById(\'modal-buffet-cx\').remove()" style="flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>'+
+        '<button id="buf-cx-btn" onclick="confirmarBuffetCaixa()" style="flex:2;padding:14px;background:var(--verde);border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;">✓ Lançar venda</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var i = document.getElementById('buf-cx-valor'); if(i) i.focus(); }, 60);
+}
+function _bufCxSelForma(f){
+  _bufCxForma = f;
+  document.querySelectorAll('.opt-buf-forma').forEach(function(b){ b.classList.toggle('selecionado', b.getAttribute('data-f') === f); });
+}
+function _bufCxSelNota(q){
+  _bufCxNota = !!q;
+  document.querySelectorAll('.opt-buf-nota').forEach(function(b){ b.classList.toggle('selecionado', b.getAttribute('data-n') === (q ? 'sim' : 'nao')); });
+}
+function confirmarBuffetCaixa(){
+  var msg = document.getElementById('buf-cx-msg'), btn = document.getElementById('buf-cx-btn');
+  var bruto = String(document.getElementById('buf-cx-valor').value || '').trim();
+  // aceita "35,90", "35.90" e "1.035,90"
+  var v = bruto.indexOf(',') >= 0 ? bruto.replace(/\./g,'').replace(',', '.') : bruto;
+  var valor = Math.round((parseFloat(v) || 0) * 100) / 100;
+  if(!(valor > 0)){ msg.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">Digite o valor do buffet.</div>'; return; }
+  if(valor > 5000){ msg.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">Valor muito alto — confira.</div>'; return; }
+  if(!_bufCxForma){ msg.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">Escolha a forma de pagamento.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Lançando...';
+  var agora = Date.now(), hoje = _dataHoje();
+  var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId);
+  var ref = base.collection('pedidos_totem').doc();
+  // número sequencial do buffet no dia (B1, B2…) só pra identificar no histórico
+  var refSeq = base.collection('senhas_totem').doc(hoje + '_buffet');
+  fbDb.runTransaction(function(tx){
+    return tx.get(refSeq).then(function(d){
+      var n = ((d.exists && d.data().ultima) || 0) + 1;
+      tx.set(refSeq, { ultima: n, atualizadoEm: agora }, { merge: true });
+      var pedido = {
+        senha: 'B' + n, data: hoje, tipo: 'buffet', origemCaixa: true,
+        itens: [{ id: 'buffet', nome: 'Buffet', preco: valor, precoBase: valor, qtd: 1 }],
+        total: valor, status: 'pago', formaPagamento: _bufCxForma,
+        criadoEm: agora, pagoEm: agora, reciboImpresso: false
+      };
+      tx.set(ref, pedido);
+      return pedido;
+    });
+  }).then(function(pedido){
+    var m = document.getElementById('modal-buffet-cx'); if(m) m.remove();
+    mostrarToast('✓ Buffet ' + pedido.senha + ' — R$ ' + valor.toLocaleString('pt-BR', {minimumFractionDigits:2}) + ' lançado', '#22c55e');
+    if(_bufCxNota) abrirNfceTotem(Object.assign({ id: ref.id }, pedido));
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = '✓ Lançar venda';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">Erro ao lançar: ' + escapar(e.message || e.code || '') + '</div>';
+  });
+}
 
 // ════════════════════════════════════════
 //  NOTA FISCAL (NFC-e) DO TOTEM — /api/nfce (origem 'totem')

@@ -193,7 +193,7 @@ async function _origem(db, b) {
     const s = await ref.get();
     if (!s.exists) return null;
     const p = s.data() || {};
-    return { ref, id: 'tot' + b.pedidoId, conta: { tenantId: b.tenantId, restauranteId: b.restauranteId, mesa: null, senha: p.senha, itens: p.itens || [], taxa10: 0,
+    return { ref, id: 'tot' + b.pedidoId, conta: { tenantId: b.tenantId, restauranteId: b.restauranteId, mesa: null, senha: p.senha, tipo: p.tipo || 'totem', itens: p.itens || [], taxa10: 0,
       pagamentos: p.formaPagamento ? [{ forma: p.formaPagamento, valor: p.total }] : [], nfce: p.nfce } };
   }
   if (!b.contaId) return null;
@@ -250,6 +250,7 @@ async function emitir(db, b) {
     formas_pagamento: pagamentos,
   };
   if (conta.mesa != null && conta.mesa !== '') nota.informacoes_adicionais_contribuinte = 'Mesa ' + conta.mesa;
+  else if (conta.tipo === 'buffet') nota.informacoes_adicionais_contribuinte = 'Buffet ' + (conta.senha || '');
   else if (conta.senha) nota.informacoes_adicionais_contribuinte = 'Totem senha ' + conta.senha;
   if (servicoC > 0) {
     nota.valor_outras_despesas = reais(servicoC);

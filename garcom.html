@@ -19415,47 +19415,21 @@ function _nfcePdfBlob(n){
   desenhar(doc);
   return doc.output('blob');
 }
-function _nfceFoneMascara(el){
-  var d = el.value.replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(0,11);
-  el.value = d.length > 10 ? d.replace(/^(\d{2})(\d{5})(\d{0,4}).*/,'($1) $2-$3') : d.length > 6 ? d.replace(/^(\d{2})(\d{4})(\d{0,4}).*/,'($1) $2-$3') : d.length > 2 ? d.replace(/^(\d{2})(\d*)/,'($1) $2') : d;
-  var b = document.getElementById('nfce-pdf-btn'); if(b && !b.disabled) b.textContent = _nfceRotuloBtn();
-}
-var _nfceConversaAberta = {}; // número → já abriu a conversa (aí o próximo toque manda o PDF)
-function _nfceFoneAtual(){ var el = document.getElementById('nfce-fone'); var d = el ? el.value.replace(/\D/g,'') : ''; if(d.length === 10 || d.length === 11) d = '55' + d; return d; }
-function _nfceRotuloBtn(){ var f = _nfceFoneAtual(); return (f && !_nfceConversaAberta[f]) ? '📲 1º Abrir conversa no WhatsApp' : '📄 Enviar nota em PDF'; }
 function _htmlNfceWhats(){
   _nfceLibsPdf().catch(function(){}); // já deixa as bibliotecas prontas pro toque
-  return '<div style="margin-top:12px;text-align:left;">'+
-    '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Mandar a nota em PDF no WhatsApp</div>'+
-    '<input id="nfce-fone" inputmode="tel" autocomplete="off" placeholder="WhatsApp do cliente (opcional)" oninput="_nfceFoneMascara(this)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2, var(--border));color:var(--text);border-radius:10px;padding:11px;font-size:1rem;font-family:inherit;outline:none;margin-bottom:7px;">'+
-    '<button id="nfce-pdf-btn" onclick="_nfceEnviarPdf(this)" style="width:100%;background:#25d366;color:#fff;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:0.92rem;cursor:pointer;font-family:inherit;">📄 Enviar nota em PDF</button>'+
-    '<div id="nfce-pdf-dica" style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Com o número: o 1º toque abre a conversa, o 2º manda o PDF (escolha a conversa nos Recentes).</div>'+
-  '</div>';
+  return '<button onclick="_nfceEnviarPdf(this)" style="margin-top:12px;width:100%;background:#25d366;color:#fff;border:none;border-radius:10px;padding:13px;font-weight:800;font-size:0.92rem;cursor:pointer;font-family:inherit;">📄 Enviar nota em PDF</button>';
 }
 function _nfceEnviarPdf(btn){
   var n = window._nfceWhatsAtual; if(!n) return;
-  var fone = _nfceFoneAtual(), elF = document.getElementById('nfce-fone');
-  if(elF && elF.value.replace(/\D/g,'') && !fone){ elF.style.borderColor = '#f87171'; elF.focus(); return; }
-  // 1º toque com número: abre a conversa (cria o chat mesmo sem o contato salvo)
-  if(fone && !_nfceConversaAberta[fone]){
-    _nfceConversaAberta[fone] = true;
-    var i = n.impressao || {}, r = String(n.restauranteId || '');
-    var loja = i.emitFantasia || ((!r || r === 'default' || r === 'bavaro') ? 'Bávaro' : r.charAt(0).toUpperCase() + r.slice(1));
-    var txt = 'Olá! Segue a sua nota fiscal (NFC-e nº ' + n.numero + ') do ' + loja + ', no valor de R$ ' + Number(n.total || 0).toFixed(2).replace('.', ',') + '. Obrigado pela preferência! 🍺';
-    window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(txt), '_blank');
-    if(btn) btn.textContent = '📄 2º Enviar o PDF';
-    var dica = document.getElementById('nfce-pdf-dica'); if(dica) dica.innerHTML = '<b style="color:#4ade80;">Mandou a mensagem? Agora toque em "Enviar o PDF"</b> e escolha a conversa do cliente nos Recentes do WhatsApp.';
-    return;
-  }
   var txtBtn = btn ? btn.textContent : '';
-  function pronto(){ if(btn){ btn.disabled = false; btn.textContent = _nfceRotuloBtn(); } }
+  function pronto(){ if(btn){ btn.disabled = false; btn.textContent = txtBtn; } }
   if(btn){ btn.disabled = true; btn.textContent = 'Gerando PDF…'; }
   _nfceLibsPdf().then(function(){
     var blob = _nfcePdfBlob(n);
     var nome = 'NFCe-' + (n.numero || 'nota') + '.pdf';
     var file = new File([blob], nome, { type:'application/pdf' });
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      return navigator.share({ files:[file], title:'Nota fiscal ' + (n.numero||'') }).then(pronto, function(e){
+      return navigator.share({ files:[file] }).then(pronto, function(e){
         pronto();
         if(e && e.name === 'AbortError') return; // fechou o compartilhar
         _nfceBaixar(blob, nome);

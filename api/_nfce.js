@@ -6,12 +6,15 @@
 //   Outro restaurante — mesmo nome + _<ID DO RESTAURANTE EM MAIÚSCULAS> (ex.: Prinzen):
 //     FOCUS_CNPJ_PRINZEN · FOCUS_AMBIENTE_PRINZEN · FOCUS_TOKEN_HOMOLOGACAO_PRINZEN · FOCUS_TOKEN_PRODUCAO_PRINZEN
 //   Sem essas variáveis o restaurante não emite (mensagem "ainda não configurada").
+//   Omar Café (omar_cafe) usa o mesmo CNPJ da Prinzen → usa as variáveis _PRINZEN (ver MESMO_CNPJ).
 // Códigos fiscais: padrão de restaurante no Simples Nacional, ajustáveis no doc Firestore fiscal/{tenantId} (Bávaro) ou fiscal/{tenantId}__{restauranteId}
 //   { cnpj, padrao:{ncm,cfop,csosn,pis,cofins}, regras:[{palavras:[...], ncm, cfop, csosn, cest}], incluirServico:true }  (taxa de serviço entra como 'outras despesas')
 
 const HOSTS = { homologacao: 'https://homologacao.focusnfe.com.br', producao: 'https://api.focusnfe.com.br' };
 const CNPJ_BAVARO = '14692372000130'; // Bávaro — Simples Nacional
 const CNPJS = { prinzen: '20826369000165' }; // outros restaurantes (a variável FOCUS_CNPJ_<ID> tem prioridade)
+// Restaurantes que emitem com o CNPJ/certificado/tokens de outro (mesma empresa na Focus, mesma numeração)
+const MESMO_CNPJ = { omar_cafe: 'prinzen' };
 
 // Simples Nacional: 5102 / CSOSN 102 (tributada pelo Simples, sem crédito). PIS/COFINS 49.
 const PADRAO = { ncm: '21069090', cfop: '5102', csosn: '102', pis: '49', cofins: '49' };
@@ -43,20 +46,21 @@ function cnpjValido(c) {
 }
 
 function chaveRest(r) { r = String(r || '').trim(); return (!r || r === 'default' || r === 'bavaro') ? 'bavaro' : r; }
-function _suf(restId) { const k = chaveRest(restId); return k === 'bavaro' ? '' : '_' + k.toUpperCase().replace(/[^A-Z0-9]/g, '_'); }
+function chaveEmissor(r) { const k = chaveRest(r); return MESMO_CNPJ[k] || k; }
+function _suf(restId) { const k = chaveEmissor(restId); return k === 'bavaro' ? '' : '_' + k.toUpperCase().replace(/[^A-Z0-9]/g, '_'); }
 function _env(nome, restId) { return process.env[nome + _suf(restId)]; }
 // Outros restaurantes ficam em teste até terem FOCUS_AMBIENTE_<ID>=producao
 function ambiente(restId) { return String(_env('FOCUS_AMBIENTE', restId) || 'homologacao').toLowerCase().indexOf('prod') === 0 ? 'producao' : 'homologacao'; }
 function token(amb, restId) { return _env(amb === 'producao' ? 'FOCUS_TOKEN_PRODUCAO' : 'FOCUS_TOKEN_HOMOLOGACAO', restId); }
-function emissor(restId, ambForcado) { const amb = ambForcado || ambiente(restId); return { amb, tk: token(amb, restId), rest: chaveRest(restId) }; }
+function emissor(restId, ambForcado) { const amb = ambForcado || ambiente(restId); return { amb, tk: token(amb, restId), rest: chaveEmissor(restId) }; }
 function authHeader(tk) { return 'Basic ' + Buffer.from(String(tk).trim() + ':').toString('base64'); }
 
 async function configFiscal(db, tenantId, restId) {
   let doc = {};
-  const ehBavaro = chaveRest(restId) === 'bavaro';
-  try { const d = await db.collection('fiscal').doc(String(tenantId) + (ehBavaro ? '' : '__' + chaveRest(restId))).get(); if (d.exists) doc = d.data() || {}; } catch (e) { /* sem config */ }
+  const ehBavaro = chaveEmissor(restId) === 'bavaro';
+  try { const d = await db.collection('fiscal').doc(String(tenantId) + (ehBavaro ? '' : '__' + chaveEmissor(restId))).get(); if (d.exists) doc = d.data() || {}; } catch (e) { /* sem config */ }
   return {
-    cnpj: _so(doc.cnpj || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : (CNPJS[chaveRest(restId)] || ''))),
+    cnpj: _so(doc.cnpj || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : (CNPJS[chaveEmissor(restId)] || ''))),
     padrao: Object.assign({}, PADRAO, doc.padrao || {}),
     regras: (Array.isArray(doc.regras) ? doc.regras : []).concat(REGRAS_PADRAO),
     incluirServico: doc.incluirServico !== false, // padrão: a taxa de serviço entra na nota
@@ -327,7 +331,7 @@ async function listarMes(db, tenantId, mes, incluirTestes, restauranteId) {
   snap.forEach((d) => {
     const n = d.data() || {};
     if (_mesDaNota(n) !== mes) return;
-    if (chaveRest(n.restauranteId) !== chaveRest(restauranteId)) return; // cada restaurante tem o seu CNPJ
+    if (chaveEmissor(n.restauranteId) !== chaveEmissor(restauranteId)) return; // por CNPJ (Omar entra junto com a Prinzen)
     if (!incluirTestes && n.ambiente !== 'producao') return;
     if (n.status !== 'autorizado' && n.status !== 'cancelado') return;
     notas.push({
@@ -365,4 +369,4 @@ async function xmlsDasNotas(db, tenantId, refs) {
   return { ok: true, arquivos: saida };
 }
 
-module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { chaveRest, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };
+module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };

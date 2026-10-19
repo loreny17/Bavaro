@@ -1278,6 +1278,7 @@ function carregarTenantECarrapio(){
     _tenantId = doc.data().tenantId;
     // Login de gerente de UMA loja: só enxerga as lojas dele
     _lojasPermitidas = (Array.isArray(doc.data().restaurantes) && doc.data().restaurantes.length) ? doc.data().restaurantes : null;
+    _papelPdv = String(doc.data().role || '');
     console.log('[CARREGAR-TENANT] tenantId encontrado:', _tenantId, '| lojas:', _lojasPermitidas || 'todas');
     _carregarTenantTentativas = 0; // sucesso — reseta contador
     prosseguirComTenant();
@@ -1313,6 +1314,7 @@ function carregarTenantECarrapio(){
 }
 var _carregarTenantTentativas = 0;
 var _lojasPermitidas = null;   // null = todas as lojas do restaurante
+var _papelPdv = '';            // 'gerente' = login de loja criado em Admin → Logins do PDV
 
 // Erro de permissão persistente — orienta o usuário
 function mostrarErroPermissao(){
@@ -1386,6 +1388,7 @@ function tentarFallbackTenant(){
 }
 
 function prosseguirComTenant(){
+  try{ checkAdminPDV(); }catch(e){}
   // Salva tenantId no localStorage pra próximas vezes
   try{ localStorage.setItem('gestao_tenant_id', _tenantId); }catch(e){}
   // Carrega restaurante ativo (do localStorage ou força default=Bávaro)
@@ -4546,8 +4549,9 @@ function checkAdminPDV(){
   // o nome desse garçom contiver alguma parte do email do _user.
   // SIMPLIFICAÇÃO: por enquanto, qualquer admin no cadastro habilita aba pra o user que tem email.
   // (usuário PDV é sempre o owner do tenant)
-  var temAdmin = (_garconsCache||[]).some(function(g){ return g.admin === true; });
-  _ehAdminPDV = temAdmin;
+  // Agora o PDV tem login de verdade: o grupo Admin aparece pro DONO (login sem loja
+  // fixa e que não é "gerente" de loja). Antes dependia de ter garçom marcado admin.
+  _ehAdminPDV = !_lojasPermitidas && _papelPdv !== 'gerente';
   atualizarVisibilidadeAdmin();
 }
 

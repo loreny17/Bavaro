@@ -1778,11 +1778,71 @@ function _htmlNfceTotem(p){
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
       '<div style="flex:1;min-width:160px;color:#4ade80;font-weight:700;font-size:0.9rem;">🧾 NFC-e nº ' + escapar(n.numero) + ' autorizada' + (n.ambiente === 'homologacao' ? ' <span style="color:#f59e0b;font-size:0.72rem;">TESTE</span>' : '') + '</div>'+
       '<button onclick="imprimirNfceTotem(\'' + p.id + '\')" style="padding:10px 14px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;">🖨️ Imprimir nota</button>'+
-    '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats());
+    '</div>' + (window._nfceWhatsAtual = n, _htmlNfceWhats()) +
+    '<button onclick="abrirCancelarNfceTotem(\'' + p.id + '\')" style="margin-top:8px;width:100%;background:transparent;border:1px solid rgba(248,113,113,0.45);color:#f87171;border-radius:10px;padding:11px;font-weight:700;font-size:0.86rem;cursor:pointer;font-family:inherit;">✖ Cancelar nota (gerente)</button>';
   }
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + escapar(n.numero) + ' foi cancelada.</div>'
     : n && n.erro ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + escapar(n.erro) + '</div>' : '';
   return aviso + '<button onclick="abrirNfceTotemPorId(\'' + p.id + '\')" style="width:100%;padding:12px;background:rgba(212,168,67,0.12);border:1.5px solid rgba(212,168,67,0.45);color:var(--accent);border-radius:9px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Emitir nota fiscal (NFC-e)</button>';
+}
+// ── Cancelar NFC-e (Caixa) — senha do gerente do PDV; no PR só até 30 min depois de autorizada ──
+function abrirCancelarNfceTotem(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(!p || !p.nfce) return;
+  var n = p.nfce, min = n.emitidaEm ? Math.floor((Date.now() - n.emitidaEm) / 60000) : null;
+  var ex = document.getElementById('modal-cancel-nfce'); if(ex) ex.remove();
+  var mod = document.createElement('div');
+  mod.id = 'modal-cancel-nfce';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:520;display:flex;align-items:center;justify-content:center;padding:14px;';
+  var prazo = min === null ? '' : (min <= 30
+    ? '<div style="font-size:0.82rem;color:#4ade80;margin-bottom:12px;">Emitida há ' + min + ' min — dá pra cancelar até 30 min (faltam ' + (30 - min) + ').</div>'
+    : '<div style="font-size:0.82rem;color:#f59e0b;margin-bottom:12px;line-height:1.4;">⚠️ Emitida há ' + (min >= 120 ? Math.floor(min/60) + ' h' : min + ' min') + '. No Paraná a SEFAZ só aceita cancelar NFC-e até 30 min depois. Vou tentar, mas deve ser recusado — aí fale com o contador.</div>');
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;overflow:hidden;">'+
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">'+
+        '<div style="font-size:1.5rem;">✖</div><div style="flex:1;"><div style="font-weight:800;">Cancelar NFC-e nº ' + escapar(n.numero) + '</div><div style="font-size:0.82rem;color:var(--muted);">Senha #' + escapar(p.senha||'?') + ' · R$ ' + (Number(n.total || p.total) || 0).toLocaleString('pt-BR', {minimumFractionDigits:2}) + '</div></div>'+
+        '<button onclick="document.getElementById(\'modal-cancel-nfce\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>'+
+      '</div>'+
+      '<div style="padding:16px 20px;">' + prazo +
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Motivo (mín. 15 letras)</div>'+
+        '<input id="cnf-just" value="Nota emitida por engano no sistema" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;outline:none;margin-bottom:12px;">'+
+        '<div style="font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Senha do gerente</div>'+
+        '<input id="cnf-senha" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-size:1rem;font-family:inherit;outline:none;" onkeydown="if(event.key===\'Enter\')confirmarCancelarNfceTotem(\'' + p.id + '\')">'+
+        '<div id="cnf-msg" style="margin-top:10px;"></div>'+
+      '</div>'+
+      '<div style="padding:14px 20px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">'+
+        '<button onclick="document.getElementById(\'modal-cancel-nfce\').remove()" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Voltar</button>'+
+        '<button id="cnf-btn" onclick="confirmarCancelarNfceTotem(\'' + p.id + '\')" style="flex:1.4;padding:13px;background:#dc2626;border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">✖ Cancelar nota</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var i = document.getElementById('cnf-senha'); if(i) i.focus(); }, 60);
+}
+function confirmarCancelarNfceTotem(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(!p) return;
+  var msg = document.getElementById('cnf-msg'), btn = document.getElementById('cnf-btn');
+  var just = (document.getElementById('cnf-just').value || '').trim(), senha = document.getElementById('cnf-senha').value || '';
+  if(just.length < 15){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">O motivo precisa ter pelo menos 15 letras.</div>'; return; }
+  if(!senha){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Digite a senha do gerente.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Cancelando...';
+  msg.innerHTML = '<div style="color:var(--muted);font-size:0.84rem;">Enviando para a SEFAZ…</div>';
+  fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ acao:'cancelar', origem:'totem', tenantId:_tenantId, restauranteId:_restauranteId, pedidoId:p.id, justificativa:just, senhaGerente:senha, garcom:'Caixa' })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok && j.nfce){
+      p.nfce = j.nfce;
+      var m = document.getElementById('modal-cancel-nfce'); if(m) m.remove();
+      var bl = document.getElementById('hist-nfce-bloco'); if(bl) bl.innerHTML = _htmlNfceTotem(p);
+      mostrarToast('✓ NFC-e nº ' + (j.nfce.numero || '') + ' cancelada', '#22c55e');
+      return;
+    }
+    btn.disabled = false; btn.textContent = '✖ Cancelar nota';
+    msg.innerHTML = '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:10px;padding:10px;font-size:0.82rem;line-height:1.4;">❌ ' + escapar(j.error || 'Não foi possível cancelar') + '</div>';
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = '✖ Cancelar nota';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão com o servidor. A nota não foi cancelada.</div>';
+  });
 }
 function abrirNfceTotemPorId(id){
   var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });

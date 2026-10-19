@@ -26,6 +26,26 @@ async function _motivoRecusa(db, idToken, tenantId) {
   } catch (e) { return 'erro ao conferir o usuário (' + e.message + ')'; }
 }
 
+// Senha do gerente = a mesma do "Pedir senha do gerente para cancelar" do PDV
+// (tenants/{t}/restaurantes/{r}/impressao/config_geral.cancelSenhaValor).
+// senha null → só responde se existe uma senha cadastrada.
+async function _senhaGerenteOk(db, tenantId, restauranteId, senha) {
+  try {
+    const rest = String(restauranteId || 'default');
+    let certa = '';
+    if (tenantId) {
+      const d = await db.collection('tenants').doc(String(tenantId)).collection('restaurantes').doc(rest).collection('impressao').doc('config_geral').get();
+      certa = String((d.exists && d.data() && d.data().cancelSenhaValor) || '');
+    }
+    if (!certa) {
+      const d2 = await db.collection('restaurantes_publicos').doc(rest).get();
+      certa = String((d2.exists && d2.data() && d2.data().cancelSenhaValor) || '');
+    }
+    if (senha === null) return !!certa;
+    return !!certa && String(senha) === certa;
+  } catch (e) { return false; }
+}
+
 module.exports = async (req, res) => {
   // Link curto pro cliente (WhatsApp): /nota/<ref> → redireciona pro QR Code da SEFAZ com o '|' intacto
   // (o WhatsApp corta link no '|', e a SEFAZ-PR não aceita o '|' codificado)
@@ -57,7 +77,16 @@ module.exports = async (req, res) => {
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
     }
     if (b.acao === 'cancelar') {
-      if (!(await garcomEhAdmin(db, b.restauranteId, String(b.garcom || '')))) return res.status(200).json({ ok: false, error: '🔒 Só o gerente (garçom admin) pode cancelar nota.' });
+      // garçom admin (app do garçom) OU a "senha do gerente" do PDV (app Caixa)
+      const okAdmin = await garcomEhAdmin(db, b.restauranteId, String(b.garcom || ''));
+      const okSenha = !okAdmin && b.senhaGerente ? await _senhaGerenteOk(db, b.tenantId, b.restauranteId, b.senhaGerente) : false;
+      if (!okAdmin && !okSenha) {
+        if (b.senhaGerente !== undefined) {
+          const temSenha = await _senhaGerenteOk(db, b.tenantId, b.restauranteId, null);
+          return res.status(200).json({ ok: false, error: temSenha ? '🔒 Senha do gerente incorreta.' : '🔒 Nenhuma senha de gerente cadastrada. No PDV, em Impressão → ⚙️ Config → Cancelamentos, ligue "Pedir senha do gerente para cancelar" e defina a senha.' });
+        }
+        return res.status(200).json({ ok: false, error: '🔒 Só o gerente (garçom admin) pode cancelar nota.' });
+      }
       return res.status(200).json(await nfce.cancelar(db, b));
     }
     return res.status(200).json(await nfce.emitir(db, b));

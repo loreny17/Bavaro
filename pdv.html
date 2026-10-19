@@ -5219,13 +5219,15 @@ function _balAoVivoErro(m){
 }
 function _balAoVivoPublicar(g, erro){
   _balVivo.falhas = 0;
-  // Balança vazia (uma leitura < 20 g já basta): avisa NA HORA. Antes precisava de 3
-  // leituras zeradas seguidas — quem tirava e punha o prato rápido nunca "zerava" e o
-  // totem ficava preso em "Tire o prato anterior".
-  if(g < 20) _balVivo.hist = [g];
-  else _balVivo.hist = (_balVivo.hist || []).filter(function(x){ return x >= 20; }).concat([g]).slice(-5);
-  var c = _balConsenso(_balVivo.hist);
-  var vazio = g < 20, est = !vazio && c.n >= 3 && c.peso >= 20;
+  // Balança vazia: 2 leituras < 20 g seguidas (antes eram 3 e quem tirava e punha o
+  // prato rápido nunca "zerava"). Leitura zerada solta não apaga o peso do prato.
+  // (2 leituras vazias seguidas = balança vazia; uma só pode ser a balança "piscando")
+  _balVivo.zeros = g < 20 ? (_balVivo.zeros || 0) + 1 : 0;
+  if(g >= 20) _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-5);
+  var vazio = _balVivo.zeros >= 2;
+  if(vazio) _balVivo.hist = [];
+  var c = _balConsenso(_balVivo.hist || []);
+  var est = !vazio && c.n >= 3 && c.peso >= 20;
   // enquanto não decide, mantém o último peso publicado (só muda o "firme")
   var pub = est ? c.peso : (vazio ? 0 : (_balVivo.ult < 0 ? 0 : _balVivo.ult));
   var agora = Date.now();

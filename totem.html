@@ -3690,7 +3690,9 @@ function abrirTelaBalanca(outroPrato){
   t.id = 'tela-balanca';
   t.style.cssText = 'position:fixed;inset:0;z-index:450;background:linear-gradient(135deg,#0a0a0c 0%,#10161a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;';
   t.innerHTML =
-    '<div style="font-size:1.2rem;color:var(--muted);margin-bottom:6px;">⚖️ ' + escapar(it.nome) + ' — R$ ' + _balBrl(it.preco) + '/kg</div>' +
+    '<div style="font-size:1.2rem;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:10px;">⚖️' +
+      '<button id="bal-btn-atualizar" onclick="_balAtualizarManual()" title="Ler a balança de novo" style="background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:10px;padding:6px 12px;font-size:1rem;font-weight:800;cursor:pointer;font-family:inherit;">🔄 Atualizar</button>' +
+      '<span>' + escapar(it.nome) + ' — R$ ' + _balBrl(it.preco) + '/kg</span></div>' +
     '<div id="bal-status" style="font-size:1.05rem;color:#38bdf8;margin-bottom:22px;min-height:1.4em;">Coloque o prato na balança</div>' +
     '<div id="bal-peso" style="font-family:\'Bebas Neue\',sans-serif;font-size:8rem;line-height:1;color:var(--text);letter-spacing:0.03em;">0,000 <span style="font-size:3rem;color:var(--muted);">kg</span></div>' +
     '<div id="bal-valor" style="font-family:\'Bebas Neue\',sans-serif;font-size:5rem;line-height:1.1;color:var(--accent);margin-top:12px;">R$ 0,00</div>' +
@@ -3701,8 +3703,14 @@ function abrirTelaBalanca(outroPrato){
   document.body.appendChild(t);
   var meu = ++_balLoopId;
   _balPrecisaZerar = true;
+  _balManual = null;
   var ciclo = function(){
     if(meu !== _balLoopId || !document.getElementById('tela-balanca')) return;
+    // peso lido no botão 🔄: segura ele até a leitura ao vivo trazer um peso NOVO
+    if(_balManual){
+      if(_balManual.lendo || (_balVivoFresco() && ((Number(_balVivo.peso) || 0) === _balManual.vivoPeso || !_balVivo.estavel))){ setTimeout(ciclo, 250); return; }
+      _balManual = null;
+    }
     // PDV publicando ao vivo: usa o peso dele (sem gravar pedido de leitura)
     if(_balVivoFresco()){
       if(_balVivo.erro){
@@ -3732,6 +3740,38 @@ function abrirTelaBalanca(outroPrato){
   ciclo();
   resetTimerInatividade();
 }
+// 🔄 Atualizar (atendente): pede 3 leituras novas direto ao PDV da balança,
+// ignorando trava/peso anterior, e usa o peso que se repetir.
+var _balManual = null;
+function _balAtualizarManual(){
+  var it = _balItem(); if(!it || (_balManual && _balManual.lendo)) return;
+  var btn = document.getElementById('bal-btn-atualizar'), st = document.getElementById('bal-status');
+  _balManual = { lendo: true, vivoPeso: _balVivo ? (Number(_balVivo.peso) || 0) : -1 };
+  _balEstavel = 0; _balBloqueio = 0; _balHist = [];
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Lendo…'; }
+  if(st){ st.style.color = '#38bdf8'; st.textContent = 'Lendo a balança…'; }
+  var bt = document.getElementById('bal-btn-prox'); if(bt){ bt.disabled = true; bt.style.opacity = '0.35'; }
+  var lidas = [];
+  var fim = function(){
+    if(btn){ btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    var pratos = lidas.filter(function(x){ return x >= 20; });
+    var c = _balConsenso(pratos);
+    var g = c.n >= 2 ? c.peso : (pratos.length ? pratos[pratos.length - 1] : 0);
+    _balManual.lendo = false;
+    if(!document.getElementById('tela-balanca')) return;
+    if(!lidas.length){ _balManual = null; if(st){ st.style.color = '#f87171'; st.textContent = 'A balança não respondeu — o PDV está aberto no computador da balança?'; } return; }
+    _balHist = [];
+    if(g >= 20){ _balEstavel = g; _balMostrar(g, true); }
+    else { _balManual = null; _balMostrar(0, false); }
+  };
+  var ler = function(n){
+    if(n >= 3) return fim();
+    _balLerUmaVez().then(function(g){ lidas.push(Number(g) || 0); ler(n + 1); }, function(){ ler(n + 1); });
+  };
+  ler(0);
+  resetTimerInatividade();
+}
+
 // Peso "de consenso": entre as últimas 5 leituras, o valor que mais se repete (±4 g).
 // Leitura quebrada/maluca da balança (ex.: 86 g, 560 g no meio de 512 g) é descartada.
 function _balConsenso(h){
@@ -3744,15 +3784,16 @@ function _balConsenso(h){
 }
 // Depois de confirmado o número trava: só troca se vier OUTRO peso firme (> 10 g de
 // diferença) ou se tirarem o prato.
-var _balHist = [];
+var _balHist = [], _balZeros = 0;
 function _balMostrar(g, estavelPdv){
   var it = _balItem(); if(!it) return;
   // leitura < 20 g = balança vazia na hora; senão, consenso só entre pesos de prato
-  _balHist = g < 20 ? [g] : _balHist.filter(function(x){ return x >= 20; }).concat([g]).slice(-5);
+  _balZeros = g < 20 ? (_balZeros || 0) + 1 : 0;
+  if(g >= 20) _balHist = _balHist.concat([g]).slice(-5);
   var estavel, vazio, gFirme;
   if(estavelPdv === undefined){
     var c = _balConsenso(_balHist);
-    vazio = g < 20; estavel = !vazio && c.n >= 3 && c.peso >= 20; gFirme = c.peso;
+    vazio = _balZeros >= 2; if(vazio) _balHist = []; estavel = !vazio && c.n >= 3 && c.peso >= 20; gFirme = c.peso;
   } else { estavel = estavelPdv && g >= 20; vazio = g < 20; gFirme = g; }
   _balAnterior = g; _balPeso = g;
   if(vazio){ _balEstavel = 0; _balBloqueio = 0; }

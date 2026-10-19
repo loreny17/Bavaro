@@ -8577,6 +8577,8 @@ function _marcarImpresso(id){
 
 function imprimirPedidoAutomatico(pedido, opts){
   opts = opts || {};
+  // vários PDVs abertos: cada impressora imprime este pedido UMA vez só (posse por impressora)
+  var _pc = opts.manual ? null : (opts.posse || { col:'pedidos', id: pedido && pedido.id, cont:{}, faltando:'imprimir' });
   // ⛔ TRAVA ANTI-DUPLICATA
   if(pedido && pedido.id && !opts.manual){
     if(_jaImpressos[pedido.id]){
@@ -8624,7 +8626,7 @@ function imprimirPedidoAutomatico(pedido, opts){
     }
     var cupom = gerarCupomContaMesaAlmoco(pedido, modeloAlm, impAlm);
     if(cupom){
-      enviarParaImpressora(impAlm, cupom);
+      _enviarComPosse(_pc, impAlm, cupom);
     }
     return;
   }
@@ -8650,7 +8652,7 @@ function imprimirPedidoAutomatico(pedido, opts){
     var cupom = gerarCupomPedido(pedido, modelo);
     console.log('[IMPRIMIR] modelo', modelo.nome, '— cupom:', cupom ? (cupom.length + ' bytes') : 'VAZIO (sem itens correspondentes ao filtro)');
     if(cupom){
-      enviarParaImpressora(imp, cupom);
+      _enviarComPosse(_pc, imp, cupom);
     }
   });
 
@@ -8669,7 +8671,7 @@ function imprimirPedidoAutomatico(pedido, opts){
     Object.keys(semModelo).forEach(function(impId){
       var impAv = _impressoras.find(function(i){ return i.id === impId; });
       if(!impAv){ console.warn('[AVULSO] impressora não encontrada:', impId); return; }
-      enviarParaImpressora(impAv, _cupomAvulsoSimples(impAv, {
+      _enviarComPosse(_pc, impAv, _cupomAvulsoSimples(impAv, {
         mesa: pedido.mesa, garcom: pedido.garcom,
         pedidoNumero: pedido.numeroSequencial || (pedido.id||'').slice(-4).toUpperCase(),
         criadoEm: pedido.criadoEm, itens: semModelo[impId]
@@ -8713,7 +8715,7 @@ function imprimirPedidoAutomatico(pedido, opts){
         }
         _aplicarDialeto(imp); var cupom = gerarCupomClienteTotem(pedido, modelo, imp);
         console.log('[CUPOM-CLIENTE] enviando pra', imp.nome);
-        if(cupom) enviarParaImpressora(imp, cupom);
+        if(cupom) _enviarComPosse(_pc, imp, cupom);
       });
 
       // ── RECIBO CLIENTE (só se foi solicitado no caixa) ──
@@ -8726,7 +8728,7 @@ function imprimirPedidoAutomatico(pedido, opts){
           var recibo = gerarReciboCliente(pedido, modelo, imp);
           if(recibo){
             console.log('[RECIBO] enviando pra', imp.nome);
-            enviarParaImpressora(imp, recibo);
+            _enviarComPosse(_pc, imp, recibo);
         }
       });
     }
@@ -9238,6 +9240,8 @@ function _mostrarRecadoLoja(cmd){
   document.body.appendChild(d);
 }
 function processarComandoImpressao(cmdId, cmd){
+  // vários PDVs abertos: cada impressora imprime este comando UMA vez só (posse por impressora)
+  var _pc = { col:'comandos_impressao', id: cmdId, cont:{}, faltando:'pular' };
   if(cmd.tipo === 'insumos'){
     console.log('[INSUMOS] recebido pedido de', cmd.origemNome, '— itens:', (cmd.itens||[]).length);
     // Pedido de insumos de outro restaurante — imprime em TODAS as impressoras
@@ -9246,7 +9250,7 @@ function processarComandoImpressao(cmdId, cmd){
         try{
           // Gera o cupom com a largura específica DESTA impressora
           var cupom = gerarCupomInsumos(cmd, imp);
-          enviarParaImpressora(imp, cupom);
+          _enviarComPosse(_pc, imp, cupom);
           console.log('[INSUMOS] enviado pra impressora:', imp.nome, '(' + (imp.largura||48) + ' col)');
         }catch(e){
           console.error('[INSUMOS] erro impressora', imp.nome, ':', e);
@@ -9255,7 +9259,7 @@ function processarComandoImpressao(cmdId, cmd){
       showToast('🚚 Pedido de insumos de ' + (cmd.origemNome||'?') + ' — impresso!', '#d4a843', 6000);
       // Mostra um alerta visível também (caso o caixa não veja o toast)
       _mostrarAvisoInsumos(cmd);
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      _apagarComandoDepois(cmdId);
     } else {
       // Impressora não pronta — NÃO apaga o comando, mostra aviso e tenta de novo
       var motivo = !_impressoras.length ? 'nenhuma impressora cadastrada' : 'impressora desconectada';
@@ -9300,8 +9304,8 @@ function processarComandoImpressao(cmdId, cmd){
     sq += linha('-', Lq) + '\n';
     if(cmd.solicitadoPor) sq += 'Enviado por: ' + removerAcentosImpressao(String(cmd.solicitadoPor)) + '\n';
     sq += new Date(cmd.criadoEm || Date.now()).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + '\n\n\n\n' + escposCut();
-    enviarParaImpressora(impRL, sq);
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    _enviarComPosse(_pc, impRL, sq);
+    _apagarComandoDepois(cmdId);
     return;
   }
   if(cmd.tipo === 'recado'){
@@ -9309,7 +9313,7 @@ function processarComandoImpressao(cmdId, cmd){
     var impRec = _impressoras.find(function(i){ return i.id === cmd.impressoraId; });
     if(!impRec){
       showToast('⚠️ Recado: impressora não encontrada','#f7a34f', 5000);
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      _apagarComandoDepois(cmdId);
       return;
     }
     if(!_qzPronto){ showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000); return; }
@@ -9326,8 +9330,8 @@ function processarComandoImpressao(cmdId, cmd){
     var dRc = new Date(cmd.criadoEm || Date.now());
     sr += dRc.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '\n';
     sr += '\n\n\n' + escposCut();
-    enviarParaImpressora(impRec, sr).then(function(){ showToast('📣 Recado impresso em ' + impRec.nome, '#4ade80'); });
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    _enviarComPosse(_pc, impRec, sr).then(function(){ showToast('📣 Recado impresso em ' + impRec.nome, '#4ade80'); });
+    _apagarComandoDepois(cmdId);
     return;
   }
   if(cmd.tipo === 'pedido_avulso'){
@@ -9335,35 +9339,35 @@ function processarComandoImpressao(cmdId, cmd){
     // avulso JÁ sai pelo fluxo normal do pedido (mesmo layout/papel) — aqui
     // só apaga o comando, senão imprimiria duas vezes.
     if(_modeloDoAvulso(cmd.impressoraId)){
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      _apagarComandoDepois(cmdId);
       return;
     }
     var impAvulso = _impressoras.find(function(i){ return i.id === cmd.impressoraId; });
     if(!impAvulso){
       console.warn('[AVULSO] Impressora não encontrada:', cmd.impressoraId);
       showToast('⚠️ Impressora "' + (cmd.impressoraNome||cmd.impressoraId) + '" não encontrada','#f7a34f', 5000);
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      _apagarComandoDepois(cmdId);
       return;
     }
     if(!_qzPronto){
       showToast('⚠️ Serviço de impressão desconectado','#f7a34f', 5000);
       return;
     }
-    enviarParaImpressora(impAvulso, _cupomAvulsoSimples(impAvulso, cmd)).then(function(){
+    _enviarComPosse(_pc, impAvulso, _cupomAvulsoSimples(impAvulso, cmd)).then(function(){
       showToast('🖨️ Item avulso impresso em ' + impAvulso.nome, '#4ade80');
     });
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    _apagarComandoDepois(cmdId);
     return;
   }
   if(cmd.tipo === 'reimprimir'){
     fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
       if(doc.exists){
         var pedido = Object.assign({id: doc.id}, doc.data());
-        imprimirPedidoAutomatico(pedido);
+        imprimirPedidoAutomatico(pedido, { posse: _pc });
         showToast('🖨️ Reimprimindo pedido (solicitado por '+(cmd.solicitadoPor||'?')+')','#d4a843');
       }
       // Apaga o comando após processar
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+      _apagarComandoDepois(cmdId);
     });
   } else if(cmd.tipo === 'cancelamento'){
     // Imprime cupom de cancelamento
@@ -9399,11 +9403,11 @@ function processarComandoImpressao(cmdId, cmd){
         imps = impDestino ? [impDestino] : _impressoras;
       }
       imps.forEach(function(imp){
-        enviarParaImpressora(imp, cupom);
+        _enviarComPosse(_pc, imp, cupom);
       });
       showToast('✕ Cancelamento impresso','#f87171');
     }
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    _apagarComandoDepois(cmdId);
   } else if(cmd.tipo === 'reimpressao'){
     // Busca pedido completo e imprime versão atualizada (com itens cancelados)
     fbDb.collection('pedidos').doc(cmd.pedidoId).get().then(function(doc){
@@ -9415,13 +9419,13 @@ function processarComandoImpressao(cmdId, cmd){
         if(!imp) return;
         var cupom = gerarCupomReimpressao(pedido, modelo, cmd.motivo);
         if(cupom){
-          enviarParaImpressora(imp, cupom);
+          _enviarComPosse(_pc, imp, cupom);
         }
       });
       showToast('🖨️ Reimpressão enviada','#d4a843');
     }).catch(function(e){ console.warn('reimpressao:', e); })
       .finally(function(){
-        fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+        _apagarComandoDepois(cmdId);
       });
   } else if(cmd.tipo === 'conta_pessoa' || cmd.tipo === 'conta_pessoa_junto'){
     if(!_qzPronto){
@@ -9480,8 +9484,8 @@ function processarComandoImpressao(cmdId, cmd){
     if(modelosFech.length){
       modelosFech.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsP.indexOf(imp)<0) impsP.push(imp); });
     } else { impsP = _impressoras.slice(); }
-    impsP.forEach(function(imp){ enviarParaImpressora(imp, s); });
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    impsP.forEach(function(imp){ _enviarComPosse(_pc, imp, s); });
+    _apagarComandoDepois(cmdId);
     showToast('🖨️ Conta de ' + nomePessoa + ' impressa', '#4ade80');
 
     } else {
@@ -9547,8 +9551,8 @@ function processarComandoImpressao(cmdId, cmd){
     if(modelosFJ.length){
       modelosFJ.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsFJ.indexOf(imp)<0) impsFJ.push(imp); });
     } else { impsFJ = _impressoras.slice(); }
-    impsFJ.forEach(function(imp){ enviarParaImpressora(imp, s); });
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    impsFJ.forEach(function(imp){ _enviarComPosse(_pc, imp, s); });
+    _apagarComandoDepois(cmdId);
     showToast('🖨️ Conta completa impressa', '#4ade80');
     } // fim else conta_pessoa_junto
 
@@ -9557,7 +9561,7 @@ function processarComandoImpressao(cmdId, cmd){
     // Sai na MESMA impressora da nota fiscal (modelo "Fechamento" = a do caixa).
     // O "Cupom do cliente" costuma ser a impressora do totem — por isso não saía no caixa.
     // Pedido de relatório antigo (ex.: ficou esperando outro PDV abrir) é descartado.
-    if(Date.now() - (cmd.criadoEm || 0) > 10 * 60 * 1000){ fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){}); return; }
+    if(Date.now() - (cmd.criadoEm || 0) > 10 * 60 * 1000){ _apagarComandoDepois(cmdId); return; }
     _imprimirNasMinhas(cmdId, _impsDosModelos(['fechamento', 'cupom_cliente']), function(imp){ _imprimirRelatorioTexto(cmd, imp); });
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
@@ -9608,11 +9612,11 @@ function processarComandoImpressao(cmdId, cmd){
         showToast('⚠️ Nenhum modelo de "Fechamento" cadastrado. Imprimindo em todas.','#f7a34f', 4000);
       }
       impsAlvo.forEach(function(imp){
-        enviarParaImpressora(imp, cupom);
+        _enviarComPosse(_pc, imp, cupom);
       });
     }).catch(function(e){ console.warn('cupom conta:', e); })
       .finally(function(){
-        fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+        _apagarComandoDepois(cmdId);
       });
   }
 }
@@ -9807,6 +9811,43 @@ function _nfcBaixarZip(){
     });
   }).catch(function(e){ prog.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>'; })
     .then(function(){ btn.disabled = false; btn.style.opacity = '1'; });
+}
+
+
+// ═══ POSSE POR IMPRESSORA (vários PDVs abertos) ═══
+// Todo PDV aberto recebe o mesmo pedido/comando. Antes cada um imprimia → a comanda
+// saía 3x na cozinha com 3 PDVs abertos. Agora, pra cada impressão, o PDV "reserva"
+// aquela impressora naquele pedido (transação); só quem reservou imprime. Impressora
+// USB de outro computador o PDV nem tenta (deixa pro PDV de lá).
+// A chave inclui a ordem (1ª, 2ª… impressão naquela impressora) porque um pedido
+// pode ter 2 modelos na mesma impressora (ex.: comida e bebida) — os dois saem.
+function _enviarComPosse(ctx, imp, conteudo){
+  if(!ctx || !ctx.id || !imp) return enviarParaImpressora(imp, conteudo);
+  if(!_impAlcancavel(imp)) return Promise.resolve();
+  var end = _impEndereco(imp);
+  ctx.cont[end] = (ctx.cont[end] || 0) + 1;
+  var chave = (end + '_' + ctx.cont[end]).replace(/[^A-Za-z0-9]/g, '_');
+  var ref = fbDb.collection(ctx.col).doc(ctx.id);
+  return fbDb.runTransaction(function(tx){
+    return tx.get(ref).then(function(d){
+      if(!d.exists) return ctx.faltando === 'imprimir';
+      var por = (d.data() || {}).impPor || {};
+      if(por[chave]) return por[chave] === _pdvIdAparelho && false;
+      var upd = {}; upd['impPor.' + chave] = _pdvIdAparelho;
+      tx.update(ref, upd);
+      return true;
+    });
+  }).catch(function(e){
+    console.warn('[IMP] posse não marcou', ctx.col, ctx.id, e && (e.code || e.message));
+    return true;   // sem conseguir marcar: imprime (melhor duplicar que não sair)
+  }).then(function(minha){
+    if(!minha){ console.log('[IMP] outro PDV imprime', ctx.id, 'em', imp.nome); return; }
+    return enviarParaImpressora(imp, conteudo);
+  });
+}
+// Comando só some depois que os outros PDVs tiveram tempo de reservar as impressoras deles
+function _apagarComandoDepois(cmdId){
+  setTimeout(function(){ fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){}); }, 8000);
 }
 
 // Garante que só UM PDV imprime um comando (vários PDVs abertos do mesmo restaurante

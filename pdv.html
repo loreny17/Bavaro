@@ -9410,8 +9410,12 @@ function processarComandoImpressao(cmdId, cmd){
     } // fim else conta_pessoa_junto
 
   } else if(cmd.tipo === 'relatorio_texto'){
-    // Relatório do Caixa (fim de turno) — sai na impressora do "Cupom do cliente" (a do caixa)
-    _imprimirNasMinhas(cmdId, _impsDosModelos(['cupom_cliente', 'fechamento']), function(imp){ _imprimirRelatorioTexto(cmd, imp); });
+    // Relatório do Caixa (fim de turno)
+    // Sai na MESMA impressora da nota fiscal (modelo "Fechamento" = a do caixa).
+    // O "Cupom do cliente" costuma ser a impressora do totem — por isso não saía no caixa.
+    // Pedido de relatório antigo (ex.: ficou esperando outro PDV abrir) é descartado.
+    if(Date.now() - (cmd.criadoEm || 0) > 10 * 60 * 1000){ fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){}); return; }
+    _imprimirNasMinhas(cmdId, _impsDosModelos(['fechamento', 'cupom_cliente']), function(imp){ _imprimirRelatorioTexto(cmd, imp); });
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
     _imprimirNasMinhas(cmdId, _impsDosModelos(['cupom_cliente']), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });

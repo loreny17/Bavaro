@@ -2198,10 +2198,39 @@ var _wizDirecao = 'forward'; // 'forward' ou 'back' — pra animação
 var _obsTemp = ''; // observação livre do cliente (digitada no wizard)
 var _itemPendente = null; // item aguardando confirmação (após tela de adicionais)
 
+// Etapas do wizard na ordem certa: cada grupo aberto por uma opção ("vincular grupo" no PDV)
+// entra LOGO DEPOIS do grupo dessa opção — ex.: escolheu "Executivo" → próxima etapa "Retirar algum item".
+// Recalculado a cada escolha (antes era montado uma vez só e os vinculados nunca apareciam).
+function _wizMontarGrupos(item){
+  var salvas = _selecoesTemp;
+  _selecoesTemp = {};
+  var base = _gruposDoItem(item);          // só os fixos do item
+  _selecoesTemp = salvas;
+  var ativos = _gruposDoItem(item);        // fixos + os abertos pelas escolhas atuais
+  var porId = {}; ativos.forEach(function(g){ porId[g.id] = g; });
+  var lista = [], vistos = {};
+  function visitar(g){
+    if(!g || vistos[g.id]) return;
+    vistos[g.id] = true; lista.push(g);
+    (_selecoesTemp[g.id] || []).forEach(function(idx){
+      var op = (g.opcoes || [])[idx];
+      (op && op.abreGrupos || []).forEach(function(gid){ visitar(porId[gid]); });
+    });
+  }
+  base.forEach(visitar);
+  ativos.forEach(visitar); // qualquer outro que tenha sobrado
+  return lista;
+}
+function _wizRecalcular(){
+  if(!_itemAberto) return;
+  _limparSelecoesOrfas();                  // trocou Executivo por Risoto → some a escolha do grupo que não vale mais
+  _wizGrupos = _wizMontarGrupos(_itemAberto);
+}
+
 function abrirWizardItem(){
-  _wizGrupos = _gruposDoItem(_itemAberto);
   _wizPassoAtual = 0;
   _selecoesTemp = {};
+  _wizGrupos = _wizMontarGrupos(_itemAberto);
   _qtdTemp = 1;
   _obsTemp = '';
   // Limpa modal anterior
@@ -2414,6 +2443,7 @@ function wizardAvancar(){
     if(!sel.length) return;
   }
   _wizDirecao = 'forward';
+  _wizRecalcular();
   _wizPassoAtual++;
   renderWizardPasso();
 }

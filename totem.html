@@ -3719,19 +3719,31 @@ function abrirTelaBalanca(){
   ciclo();
   resetTimerInatividade();
 }
-// Só mostra peso FIRME: precisa de 3 leituras seguidas iguais (±4 g). Depois de
-// confirmado, o número trava — oscilação pequena ou leitura maluca isolada não muda
-// nada. Só troca se vier OUTRO peso firme (diferença > 10 g) ou se tirarem o prato.
+// Peso "de consenso": entre as últimas 5 leituras, o valor que mais se repete (±4 g).
+// Leitura quebrada/maluca da balança (ex.: 86 g, 560 g no meio de 512 g) é descartada.
+function _balConsenso(h){
+  var melhor = null, n = 0;
+  for(var i = h.length - 1; i >= 0; i--){
+    var c = h.filter(function(x){ return Math.abs(x - h[i]) <= 4; });
+    if(c.length > n){ n = c.length; c.sort(function(a, b){ return a - b; }); melhor = c[Math.floor(c.length / 2)]; }
+  }
+  return { peso: melhor, n: n };
+}
+// Depois de confirmado o número trava: só troca se vier OUTRO peso firme (> 10 g de
+// diferença) ou se tirarem o prato.
 var _balHist = [];
 function _balMostrar(g, estavelPdv){
   var it = _balItem(); if(!it) return;
-  _balHist.push(g); if(_balHist.length > 3) _balHist.shift();
-  var firme3 = _balHist.length === 3 && g >= 20 && (Math.max.apply(null, _balHist) - Math.min.apply(null, _balHist)) <= 4;
-  var estavel = estavelPdv === undefined ? firme3 : (estavelPdv && g >= 20);
+  _balHist = _balHist.concat([g]).slice(-5);
+  var estavel, vazio, gFirme;
+  if(estavelPdv === undefined){
+    var c = _balConsenso(_balHist);
+    estavel = c.n >= 3 && c.peso >= 20; vazio = c.n >= 3 && c.peso < 20; gFirme = c.peso;
+  } else { estavel = estavelPdv && g >= 20; vazio = g < 20; gFirme = g; }
   _balAnterior = g; _balPeso = g;
-  var vazio = _balHist.length === 3 && Math.max.apply(null, _balHist) < 20;
   if(vazio) _balEstavel = 0;
-  else if(estavel && (!_balEstavel || Math.abs(g - _balEstavel) > 10)) _balEstavel = g;
+  else if(estavel && (!_balEstavel || Math.abs(gFirme - _balEstavel) > 10)) _balEstavel = gFirme;
+  g = vazio ? 0 : Math.max(g, 20);
   var pe = document.getElementById('bal-peso'), va = document.getElementById('bal-valor'), st = document.getElementById('bal-status'), bt = document.getElementById('bal-btn-prox');
   var kgSpan = ' <span style="font-size:3rem;color:var(--muted);">kg</span>';
   if(pe) pe.innerHTML = (_balEstavel ? _balKg(_balEstavel) : (g < 20 ? '0,000' : '-,---')) + kgSpan;

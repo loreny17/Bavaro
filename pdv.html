@@ -5157,8 +5157,18 @@ function _balParsePeso(raw){
 // Lê o peso: simulação (aleatório), app desktop (Electron) ou QZ Tray (navegador)
 // Fila: só uma leitura da porta serial por vez (ao vivo + garçom + botão "Ler balança")
 var _balFila = Promise.resolve();
+// Cada leitura tem prazo de 5 s: se uma travar, não trava a fila inteira
+// (antes uma leitura presa parava o "ao vivo" e o totem ficava "Pesando…" pra sempre)
+function _balLerComPrazo(){
+  return new Promise(function(resolve, reject){
+    var fim = false;
+    var to = setTimeout(function(){ if(fim) return; fim = true; reject(new Error('Balança demorou pra responder')); }, 5000);
+    Promise.resolve().then(_balancaLerPesoBruto).then(function(g){ if(fim) return; fim = true; clearTimeout(to); resolve(g); },
+      function(e){ if(fim) return; fim = true; clearTimeout(to); reject(e); });
+  });
+}
 function balancaLerPeso(){
-  var p = _balFila.then(_balancaLerPesoBruto, _balancaLerPesoBruto);
+  var p = _balFila.then(_balLerComPrazo, _balLerComPrazo);
   _balFila = p.catch(function(){});
   return p;
 }
@@ -5182,17 +5192,29 @@ function _balAoVivoTick(){
     if(/peso v[aá]lido/i.test(m)) _balAoVivoPublicar(0, ''); else _balAoVivoPublicar(_balVivo.ult < 0 ? 0 : _balVivo.ult, m);
   }).then(function(){ _balVivo.ocupado = false; }, function(){ _balVivo.ocupado = false; });
 }
+// Peso "de consenso": entre as últimas 5 leituras, o valor que mais se repete (±4 g).
+// Leitura quebrada/maluca da balança (ex.: 86 g, 560 g no meio de 512 g) é descartada.
+function _balConsenso(h){
+  var melhor = null, n = 0;
+  for(var i = h.length - 1; i >= 0; i--){
+    var c = h.filter(function(x){ return Math.abs(x - h[i]) <= 4; });
+    if(c.length > n){ n = c.length; c.sort(function(a, b){ return a - b; }); melhor = c[Math.floor(c.length / 2)]; }
+  }
+  return { peso: melhor, n: n };
+}
 function _balAoVivoPublicar(g, erro){
-  _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-3);
-  var est = g >= 20 && _balVivo.hist.length === 3 && (Math.max.apply(null, _balVivo.hist) - Math.min.apply(null, _balVivo.hist)) <= 4;
-  _balVivo.ant = g;
+  _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-5);
+  var c = _balConsenso(_balVivo.hist);
+  var est = c.n >= 3 && c.peso >= 20, vazio = c.n >= 3 && c.peso < 20;
+  // enquanto não decide, mantém o último peso publicado (só muda o "firme")
+  var pub = est ? c.peso : (vazio ? 0 : (_balVivo.ult < 0 ? 0 : _balVivo.ult));
   var agora = Date.now();
-  var mudou = _balVivo.ult < 0 || Math.abs(g - _balVivo.ult) >= 5 || est !== _balVivo.est || erro !== _balVivo.erro;
+  var mudou = _balVivo.ult < 0 || Math.abs(pub - _balVivo.ult) >= 5 || est !== _balVivo.est || erro !== _balVivo.erro;
   if(!mudou && agora - _balVivo.envio < 10000) return;
-  _balVivo.ult = g; _balVivo.est = est; _balVivo.erro = erro; _balVivo.envio = agora;
+  _balVivo.ult = pub; _balVivo.est = est; _balVivo.erro = erro; _balVivo.envio = agora;
   fbDb.collection('comandos_balanca').doc('aovivo_' + _restauranteAtivo.id).set({
-    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: g, estavel: est, erro: erro || '',
-    atualizadoEm: agora, por: _pdvIdAparelho
+    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: pub, estavel: est, erro: erro || '',
+    leitura: g, atualizadoEm: agora, por: _pdvIdAparelho
   }).catch(function(e){ console.warn('[BALANÇA ao vivo]', e.code || e.message); });
 }
 

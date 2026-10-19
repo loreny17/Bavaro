@@ -5149,7 +5149,7 @@ function _balParsePeso(raw){
   m = String(raw).match(/(\d{4,6})/);
   if(m){
     var g = parseInt(m[1],10);
-    if(g > 0 && g < 100000) return g;
+    if(g >= 0 && g < 100000) return g;   // 0 = balança vazia (antes virava "não respondeu")
   }
   return null;
 }
@@ -5219,9 +5219,13 @@ function _balAoVivoErro(m){
 }
 function _balAoVivoPublicar(g, erro){
   _balVivo.falhas = 0;
-  _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-5);
+  // Balança vazia (uma leitura < 20 g já basta): avisa NA HORA. Antes precisava de 3
+  // leituras zeradas seguidas — quem tirava e punha o prato rápido nunca "zerava" e o
+  // totem ficava preso em "Tire o prato anterior".
+  if(g < 20) _balVivo.hist = [g];
+  else _balVivo.hist = (_balVivo.hist || []).filter(function(x){ return x >= 20; }).concat([g]).slice(-5);
   var c = _balConsenso(_balVivo.hist);
-  var est = c.n >= 3 && c.peso >= 20, vazio = c.n >= 3 && c.peso < 20;
+  var vazio = g < 20, est = !vazio && c.n >= 3 && c.peso >= 20;
   // enquanto não decide, mantém o último peso publicado (só muda o "firme")
   var pub = est ? c.peso : (vazio ? 0 : (_balVivo.ult < 0 ? 0 : _balVivo.ult));
   var agora = Date.now();

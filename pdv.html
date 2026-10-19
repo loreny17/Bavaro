@@ -8292,8 +8292,8 @@ function gerarCupomContaMesaAlmoco(pedido, modelo, imp){
 
 // Senha do totem ANTES do pagamento (modo com caixa) — mesmo modelo do "Cupom do cliente",
 // com a instrução de levar ao caixa
-function _imprimirSenhaTotemPreCaixa(cmd){
-  var modelosCupom = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; });
+function _imprimirSenhaTotemPreCaixa(cmd, soImp){
+  var modelosCupom = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente' && (!soImp || m.impressoraId === soImp.id || (function(){ var i = _impressoras.find(function(x){ return x.id === m.impressoraId; }); return i && _impEndereco(i) === _impEndereco(soImp); })()); });
   if(!modelosCupom.length){ console.warn('[SENHA-TOTEM] nenhum modelo "Cupom do cliente" cadastrado'); showToast('⚠️ Cadastre um modelo "Cupom do cliente" pra imprimir a senha do totem','#f7a34f', 5000); return; }
   var pedido = { senhaTotem: cmd.senhaTotem, itens: cmd.itens || [], total: cmd.total || 0 };
   modelosCupom.forEach(function(modelo){
@@ -9411,38 +9411,21 @@ function processarComandoImpressao(cmdId, cmd){
 
   } else if(cmd.tipo === 'relatorio_texto'){
     // Relatório do Caixa (fim de turno) — sai na impressora do "Cupom do cliente" (a do caixa)
-    _reivindicarComando(cmdId).then(function(minha){
-      if(minha) _imprimirRelatorioTexto(cmd);
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
-    });
+    _imprimirNasMinhas(cmdId, _impsDosModelos(['cupom_cliente', 'fechamento']), function(imp){ _imprimirRelatorioTexto(cmd, imp); });
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
-    _reivindicarComando(cmdId).then(function(minha){
-      if(minha) _imprimirSenhaTotemPreCaixa(cmd);
-      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
-    });
+    _imprimirNasMinhas(cmdId, _impsDosModelos(['cupom_cliente']), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });
   } else if(cmd.tipo === 'nfce'){
     // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO.
     // Só UM PDV imprime (se tiver dois abertos do mesmo restaurante, o outro ignora)
-    _reivindicarComando(cmdId).then(function(minha){
-      if(!minha){ console.log('[NFCE] outro PDV já pegou a impressão', cmdId); return; }
+    var danfeN = null;
+    _imprimirNasMinhas(cmdId, _impsDosModelos(['fechamento']), function(imp){
       try{
-        var danfe = gerarDanfeNfce(cmd.nfce || {});
-        var modsF = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
-        var impsN = [], enderecos = {};
-        modsF.forEach(function(m){
-          var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
-          if(!imp) return;
-          // mesma impressora física cadastrada duas vezes (mesmo IP ou mesmo nome no Windows) conta uma vez só
-          var end = imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.nomeWindows || imp.id);
-          if(enderecos[end]) return;
-          enderecos[end] = true; impsN.push(imp);
-        });
-        if(!impsN.length && _impressoras.length) impsN = [_impressoras[0]];
-        impsN.forEach(function(imp){ enviarParaImpressora(imp, danfe); });
-        showToast('🧾 NFC-e ' + ((cmd.nfce||{}).numero||'') + ' impressa', '#4ade80');
+        if(danfeN === null) danfeN = gerarDanfeNfce(cmd.nfce || {});
+        enviarParaImpressora(imp, danfeN);
+        showToast('🧾 NFC-e ' + ((cmd.nfce||{}).numero||'') + ' impressa em ' + imp.nome, '#4ade80');
       }catch(e){ console.warn('danfe nfce:', e); showToast('❌ Erro ao imprimir a nota: ' + e.message, '#f87171'); }
-    }).then(function(){ fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){}); });
+    });
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado
     fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
@@ -9627,17 +9610,66 @@ function _reivindicarComando(cmdId){
   });
 }
 
+// ─── VÁRIOS PDVs, CADA UM COM SUAS IMPRESSORAS ───
+// Impressora USB só pode ser usada pelo computador onde ela está ligada.
+// Impressora de rede (IP) qualquer PDV alcança. Então, pra nota, relatório e
+// senha do totem, cada PDV só imprime nas impressoras que ELE alcança — e cada
+// impressora é "reservada" por um PDV só (sem duplicar), via transação.
+var _impLocais = null; // nomes das impressoras instaladas NESTE computador (null = ainda não sei)
+function _atualizarImpLocais(){
+  try{
+    _listarImpressorasInstaladas().then(function(l){ _impLocais = (l || []).map(function(n){ return String(n).trim().toLowerCase(); }); })
+      .catch(function(){});
+  }catch(e){}
+}
+setTimeout(_atualizarImpLocais, 4000);
+setInterval(_atualizarImpLocais, 5 * 60 * 1000);
+function _impEndereco(imp){ return imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.nomeWindows || imp.id); }
+function _impAlcancavel(imp){
+  if(imp.tipo === 'rede') return true;
+  if(!_impLocais) return true;                       // não consegui listar: tenta mesmo assim
+  var n = String(imp.nomeWindows || '').trim().toLowerCase();
+  return !!n && _impLocais.indexOf(n) >= 0;
+}
+// imps = impressoras-alvo (já sem repetição). fn(imp) imprime numa delas.
+function _imprimirNasMinhas(cmdId, imps, fn){
+  var chave = function(imp){ return _impEndereco(imp).replace(/[^A-Za-z0-9]/g, '_'); };
+  var minhas = imps.filter(_impAlcancavel);
+  if(!minhas.length){ console.log('[IMP] comando', cmdId, 'é pra impressora de outro computador — deixando pro PDV de lá'); return Promise.resolve([]); }
+  var ref = fbDb.collection('comandos_impressao').doc(cmdId);
+  return fbDb.runTransaction(function(tx){
+    return tx.get(ref).then(function(d){
+      if(!d.exists) return { pegar: [], todas: false };
+      var por = (d.data() || {}).porImp || {}, upd = {}, pegar = [];
+      minhas.forEach(function(imp){ var k = chave(imp); if(!por[k]){ upd['porImp.' + k] = _pdvIdAparelho; por[k] = _pdvIdAparelho; pegar.push(imp); } });
+      if(pegar.length) tx.update(ref, upd);
+      return { pegar: pegar, todas: imps.every(function(imp){ return por[chave(imp)]; }) };
+    });
+  }).catch(function(e){
+    console.warn('[IMP] não marcou o comando', cmdId, e && (e.code || e.message));
+    return { pegar: minhas, todas: true };            // melhor duplicar que não sair
+  }).then(function(r){
+    r.pegar.forEach(function(imp){ try{ fn(imp); }catch(e){ console.warn('[IMP]', e); } });
+    if(r.todas) ref.delete().catch(function(){});
+    return r.pegar;
+  });
+}
+function _impsDosModelos(tipos){
+  var out = [], vistos = {};
+  for(var t = 0; t < tipos.length && !out.length; t++){
+    _modelos.filter(function(m){ return m.tipo === tipos[t]; }).forEach(function(m){
+      var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(!imp) return;
+      var e = _impEndereco(imp); if(vistos[e]) return; vistos[e] = true; out.push(imp);
+    });
+  }
+  if(!out.length && _impressoras.length) out = [_impressoras[0]];
+  return out;
+}
+
 // Relatório em texto vindo do Caixa: linhas com marcadores
 //   '#T titulo' grande · '#B negrito' · '#C centralizado' · '--' linha · 'rótulo|valor' alinhado
-function _imprimirRelatorioTexto(cmd){
-  var mods = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; });
-  if(!mods.length) mods = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
-  var imps = [], vistos = {};
-  mods.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(!imp) return;
-    var end = imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.nomeWindows || imp.id); if(vistos[end]) return; vistos[end] = true; imps.push(imp); });
-  if(!imps.length && _impressoras.length) imps = [_impressoras[0]];
-  imps.forEach(function(imp){
-    var L = (imp && imp.largura) || 42, s = escposInit();
+function _imprimirRelatorioTexto(cmd, imp){
+  var L = (imp && imp.largura) || 42, s = escposInit();
     (cmd.linhas || []).forEach(function(l){
       l = String(l);
       if(l === '--'){ s += escposLeft() + linha('-', L) + '\n'; return; }
@@ -9653,8 +9685,7 @@ function _imprimirRelatorioTexto(cmd){
     s += '\n\n\n' + escposCut();
     _aplicarDialeto(imp);
     enviarParaImpressora(imp, s);
-  });
-  showToast('🖨️ ' + (cmd.titulo || 'Relatório') + ' impresso', '#4ade80');
+  showToast('🖨️ ' + (cmd.titulo || 'Relatório') + ' impresso em ' + imp.nome, '#4ade80');
 }
 
 // ─── DANFE NFC-e (layout simplificado do Manual de Especificações da NFC-e) ───

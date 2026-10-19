@@ -1,9 +1,11 @@
 // api/notificar.js — Bávaro Ponto Notificações
 // Vercel Serverless Function (CommonJS)
 
+// Credenciais vêm das variáveis da Vercel (as mesmas do resto do sistema).
+// ⚠️ Antes a chave privada estava escrita aqui no código — foi removida.
 const SERVICE_ACCOUNT = {
-  private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMpcG5aG0lxCIi\nlrWiHd99zN/DwbhEKMKpEaeR/6fjM1nfWAJqFLz2RtjS0Lq7Z7ciSu1ipjMcMTOL\nJsgeg1f8rKrcovR5PoO+YnH84fxmYiTyn5el09psNT+iKRAm6aQiAjTiTDZAuWk4\nDcxQaScL52YEjViH3bC2X83rvIyM81S2lSvXIt/HbqOCUG+3MO+m0b2ZSYkTCbOq\nQKNFY3WWR9wga/kw0B8FzkXEP7+JgTmPUlAroe1w8NSqEgxtZTysu2gxicS6SAMB\n8Ju2gYJqfur8AZdeRYX9O7Yj3V/CbJxSVkUytTabZ04GNfVFVQsSy2yG6CdeSoAm\n1GK5srXxAgMBAAECggEAKyplX9XKe/ZQWupeGnlhnDfcFP7l/p54XNAH//AkefRp\nZwY50CVarDnKX0E+uevJAZc7Vh0HV9F69UVzXZhHtVi4W3yVw4Mvp7c9IuGJ6xCV\niYWnJ4e1oTBkITC3IvYSNEgx3m/D28ggDP5AE8/yN/0RlDE6NMJKlVVE6o3lOY9y\nvGicfSKZijmJbFt//7XmgPHqrs7MiCtX2LA56Cg336wR2WQOIPZCKAIiIQWoxv/l\n1cFOilebpk+JJT4y1V0cBKg49LKaYsmWXVwXGWws54K//FMmzljvO3I2sgjAkUeB\nmxjOfBxsrMTj2j2dgU26ZcLgz3JxhB0tyl7VdbaexwKBgQD+Yf81TXb27jNjrpag\nYyo9rBndzhWNDVS8QUjEzbJz65N68Op4+/y9gPmiDkYALMZZn0wGKz/vaceLeVT5\nIS6xVkwal/Y/yt2PCicY2VteB942rROvWrrdJtRWvTzT/MxFPYZfaVzWgOwfxvsU\npi/0qAoYn1qygaVFYXC4sRiJcwKBgQDN8tEKiLA4pqd0Rn2bTc457B4KzOg8FKw3\nQR0U4Qt2gaOsyBizSo0Bfe+lriVYa5285X5ohxHxeTVQnuTCtdabmg/5N/0Axmoz\nPozAIAak6gvkubCdWDA6lfLiZEtwbYUZvmv1EP0GMs4Pn4MIa7/zV4SVX4GDJfyw\nLon5akx6CwKBgG++srJCjjDY4IA4cHiSNzsSP+acogDtSzzLXOD/DxY29Pk7nXR6\nFUNVxdM3e+6VvKgf/vByzUopaHvPV9F8jxtdsl64RHcvcXZlWlljGezLfgT8sLoG\nHDIL3Zkg1fi1gzIjXcTJ7vtXdOJcsW0Xt9c8ffrk/Z2OsAAzVqX7PbEbAoGAVP0A\nQQ2ZUzeK4RP5364jDYof96sJp0mMrBylyKj6FwR2q+XDM7HvMI9s5v1PkgaPCJXY\nLYCX6gNv+f4oPyXVE09nihwNv1UiHFWStfJBa6reD5yFgtkSxgp9OenTq+i2RaJs\nYKyLDhTHLnFQHJiClQQnxZCtHJb/iSEbdR7lwnMCgYEAx3fbUGEvWX/xY8xjcbyg\nVQ9LXdYE+cNvjF5YxU14dla0+lQ8JLJ+UvRXh1yc82VYkQ48TkgR9SH3My/GtETl\nnMpp8YwExEp6qPxVv0XjHfETwKWjiw4lnDEXR3o3K1wSaVt97kYyK6AIAs3VqtzQ\ncyWOOql0lJn/boGxm+kj5GE=\n-----END PRIVATE KEY-----\n",
-  client_email: "firebase-adminsdk-fbsvc@gestao-reataurante.iam.gserviceaccount.com",
+  client_email: process.env.FIREBASE_CLIENT_EMAIL || 'firebase-adminsdk-fbsvc@gestao-reataurante.iam.gserviceaccount.com',
+  private_key: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
   token_uri: "https://oauth2.googleapis.com/token"
 };
 const PROJECT_ID = 'gestao-reataurante';

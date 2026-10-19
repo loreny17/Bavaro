@@ -365,6 +365,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         <input type="password" id="login-senha" autocomplete="current-password" placeholder="••••••••">
       </div>
       <button class="auth-btn" onclick="authLogar()">Entrar</button>
+      <button class="auth-btn secondary" onclick="authEsqueciSenha()" style="font-size:0.82rem;">🔑 Esqueci minha senha</button>
       <button class="auth-btn secondary" onclick="window.location.href='index.html'">← Voltar para o App</button>
       <button class="auth-btn secondary" onclick="limparCacheRecarregar()" style="font-size:0.78rem;margin-top:6px;">🧹 Limpar cache e recarregar</button>
       <div id="login-erro" class="auth-erro"></div>
@@ -1094,14 +1095,18 @@ var _catEditando = null;
 window.addEventListener('load', function(){
   try{
     firebase.initializeApp(firebaseConfig);
-    fbDb = firebase.firestore();
-    fbStorage = firebase.storage();
+    // 🔐 Sessão PRÓPRIA do PDV: o totem e o caixa (mesmo site/navegador) entram como
+    // anônimos e trocavam o login do PDV pelo anônimo deles. Com um app separado, o
+    // login do PDV (e-mail e senha) fica só dele.
+    var _appPdv = firebase.initializeApp(firebaseConfig, 'pdv');
+    fbDb = _appPdv.firestore();
+    fbStorage = _appPdv.storage();
     // ═══ CACHE OFFLINE DO FIRESTORE ═══
     // NÃO usamos mais persistence com synchronizeTabs (multi-aba).
     // No PWA isso causava o Firestore a usar uma sessão de auth antiga,
     // resultando em "permission-denied" mesmo com login OK.
     // O app funciona normal sem cache offline — só não guarda dados localmente.
-    fbAuth = firebase.auth();
+    fbAuth = _appPdv.auth();
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
     // ⏱️ Rede de segurança: a tela "Carregando PDV..." só some quando o Firebase
@@ -1132,6 +1137,12 @@ window.addEventListener('load', function(){
     fbAuth.onAuthStateChanged(function(user){
       _authRespondeu = true;
       document.getElementById('loading').classList.add('hidden');
+      if(user && user.isAnonymous){
+        // PDV não aceita mais entrar sem e-mail e senha
+        fbAuth.signOut();
+        mostrarErroLogin('Entre com o e-mail e a senha do PDV.');
+        return;
+      }
       if(user){
         _user = {uid:user.uid, email:user.email};
         document.getElementById('auth-overlay').classList.add('hidden');
@@ -1203,6 +1214,16 @@ function authLogar(){
       mostrarErroLogin(msg + ' (' + (e.code||'?') + ')');
     });
 }
+function authEsqueciSenha(){
+  var email = (document.getElementById('login-email').value || '').trim();
+  if(!email){ mostrarErroLogin('Digite seu e-mail no campo acima e toque de novo em "Esqueci minha senha".'); return; }
+  if(!fbAuth){ mostrarErroLogin('⏳ Aguarde a conexão com o servidor...'); return; }
+  fbAuth.sendPasswordResetEmail(email).then(function(){
+    mostrarErroLogin('📧 Enviamos um link pra ' + email + ' criar uma senha nova (olhe também o spam).');
+  }).catch(function(e){
+    mostrarErroLogin(e.code === 'auth/user-not-found' ? 'Esse e-mail não tem login no PDV.' : ('Não deu pra enviar: ' + (e.code || e.message)));
+  });
+}
 function mostrarErroLogin(msg){
   var el = document.getElementById('login-erro');
   if(!msg){ el.classList.remove('show'); return; }
@@ -1255,7 +1276,9 @@ function carregarTenantECarrapio(){
       return tentarFallbackTenant();
     }
     _tenantId = doc.data().tenantId;
-    console.log('[CARREGAR-TENANT] tenantId encontrado:', _tenantId);
+    // Login de gerente de UMA loja: só enxerga as lojas dele
+    _lojasPermitidas = (Array.isArray(doc.data().restaurantes) && doc.data().restaurantes.length) ? doc.data().restaurantes : null;
+    console.log('[CARREGAR-TENANT] tenantId encontrado:', _tenantId, '| lojas:', _lojasPermitidas || 'todas');
     _carregarTenantTentativas = 0; // sucesso — reseta contador
     prosseguirComTenant();
   }).catch(function(e){
@@ -1289,6 +1312,7 @@ function carregarTenantECarrapio(){
   });
 }
 var _carregarTenantTentativas = 0;
+var _lojasPermitidas = null;   // null = todas as lojas do restaurante
 
 // Erro de permissão persistente — orienta o usuário
 function mostrarErroPermissao(){
@@ -1369,6 +1393,11 @@ function prosseguirComTenant(){
   try{ restSalvo = localStorage.getItem('restauranteAtivo'); }catch(e){}
   if(restSalvo){
     try{ _restauranteAtivo = JSON.parse(restSalvo); }catch(e){}
+  }
+  if(_lojasPermitidas && _restauranteAtivo && _lojasPermitidas.indexOf(_restauranteAtivo.id) < 0) _restauranteAtivo = null;
+  if(!_restauranteAtivo && _lojasPermitidas){
+    _restauranteAtivo = {id:_lojasPermitidas[0], nome:_lojasPermitidas[0], emoji:'🍽️'};
+    try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
   }
   if(!_restauranteAtivo){
     // Default: Bávaro (id='default' onde estão os itens)
@@ -9661,7 +9690,7 @@ function abrirNotasContabilidade(){
   _nfcBuscar();
 }
 function _nfcChamar(corpo){
-  var u = (typeof fbAuth !== 'undefined' && fbAuth && fbAuth.currentUser) || firebase.auth().currentUser;
+  var u = (typeof fbAuth !== 'undefined' && fbAuth && fbAuth.currentUser) || null;
   if(!u) return Promise.reject(new Error('O PDV está sem usuário logado — saia e entre de novo.'));
   return u.getIdToken().then(function(tok){
     return fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
@@ -9823,6 +9852,153 @@ function _nfcBaixarZip(){
 }
 
 
+
+
+// ═══ 👤 LOGINS DO PDV (Admin) — cada loja com o e-mail e senha do seu gerente ═══
+function sairDoPdv(){
+  if(!confirm('Sair do PDV? Vai pedir e-mail e senha pra entrar de novo.')) return;
+  fbAuth.signOut().then(function(){ location.reload(); });
+}
+function _apiDono(url, corpo){
+  var u = fbAuth && fbAuth.currentUser;
+  if(!u) return Promise.reject(new Error('Faça login no PDV.'));
+  return u.getIdToken().then(function(tok){
+    return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({ idToken:tok, tenantId:_tenantId }, corpo)) });
+  }).then(function(r){ return r.json(); }).then(function(j){ if(!j.ok) throw new Error(j.error || 'Erro'); return j; });
+}
+function _lojasDoTenant(){
+  return fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
+    var l = [];
+    snap.forEach(function(d){ var x = d.data() || {}; if(x.tenantId === _tenantId) l.push({ id:d.id, nome:(d.id === 'default' && (!x.nome || x.nome === 'Meu Restaurante')) ? 'Bávaro' : (x.nome || d.id) }); });
+    if(!l.some(function(r){ return r.id === 'default'; })) l.unshift({ id:'default', nome:'Bávaro' });
+    return l;
+  });
+}
+function _modalBase(id, titulo, cor){
+  var ex = document.getElementById(id); if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = id;
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9400;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;padding:18px;max-height:90vh;overflow-y:auto;">'+
+    '<div style="display:flex;align-items:center;margin-bottom:6px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;color:' + (cor || 'var(--accent)') + ';flex:1;">' + titulo + '</div>'+
+    '<button onclick="document.getElementById(\'' + id + '\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button></div>'+
+    '<div id="' + id + '-corpo"><div style="color:var(--muted);font-size:0.84rem;">Carregando…</div></div></div>';
+  document.body.appendChild(m);
+  return document.getElementById(id + '-corpo');
+}
+var _lgLojas = [], _lgUsuarios = [];
+function abrirLoginsPdv(){
+  var corpo = _modalBase('modal-logins', '👤 LOGINS DO PDV');
+  Promise.all([_lojasDoTenant(), _apiDono('/api/usuarios', { acao:'listar' })]).then(function(r){
+    _lgLojas = r[0]; _lgUsuarios = r[1].usuarios || [];
+    var nomeLoja = function(id){ var l = _lgLojas.find(function(x){ return x.id === id; }); return l ? l.nome : id; };
+    var inp = 'width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;margin-bottom:8px;';
+    corpo.innerHTML =
+      '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:12px;line-height:1.45;">Cada pessoa entra no PDV com o próprio e-mail e senha. Login de uma loja só enxerga aquela loja.</div>'+
+      (_lgUsuarios.length ? _lgUsuarios.map(function(u, i){
+        return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;">'+
+          '<div style="font-weight:700;">' + escapeHtml(u.nome || u.email || 'Login do dono') + (u.voce ? ' <span style="font-size:0.72rem;color:#4ade80;">(você)</span>' : '') + '</div>'+
+          '<div style="font-size:0.76rem;color:var(--muted);">' + escapeHtml(u.email) + ' · ' + (u.restaurantes ? 'Loja: ' + u.restaurantes.map(function(x){ return escapeHtml(nomeLoja(x)); }).join(', ') : 'Todas as lojas') + (u.role ? ' · ' + escapeHtml(u.role) : '') + '</div>'+
+          (u.voce || u.role === 'dono' || u.role === 'admin' ? '' :
+          '<div style="display:flex;gap:6px;margin-top:8px;">'+
+            '<button onclick="_lgSenha(' + i + ')" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;cursor:pointer;font-size:0.8rem;">🔑 Nova senha</button>'+
+            '<button onclick="_lgRemover(' + i + ')" style="flex:1;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:8px;padding:8px;font-family:inherit;cursor:pointer;font-size:0.8rem;">Remover</button>'+
+          '</div>') +
+        '</div>';
+      }).join('') : '<div style="color:var(--muted);font-size:0.84rem;margin-bottom:10px;">Nenhum login cadastrado ainda.</div>')+
+      '<div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px;">'+
+        '<div style="font-weight:800;margin-bottom:8px;">+ Novo login</div>'+
+        '<input id="lg-nome" placeholder="Nome (ex: Gerente Prinzen)" style="' + inp + '">'+
+        '<input id="lg-email" type="email" placeholder="E-mail" autocomplete="off" style="' + inp + '">'+
+        '<input id="lg-senha" type="password" placeholder="Senha (mín. 6)" autocomplete="new-password" style="' + inp + '">'+
+        '<select id="lg-loja" style="' + inp + '"><option value="">Todas as lojas</option>' + _lgLojas.map(function(l){ return '<option value="' + escapeHtml(l.id) + '">Só ' + escapeHtml(l.nome) + '</option>'; }).join('') + '</select>'+
+        '<div id="lg-msg" style="font-size:0.84rem;margin-bottom:8px;"></div>'+
+        '<button id="lg-btn" onclick="_lgCriar()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-weight:800;cursor:pointer;font-family:inherit;">Criar login</button>'+
+      '</div>';
+  }).catch(function(e){ corpo.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">❌ ' + escapeHtml(e.message) + '</div>'; });
+}
+function _lgCriar(){
+  var msg = document.getElementById('lg-msg'), btn = document.getElementById('lg-btn');
+  var loja = document.getElementById('lg-loja').value;
+  btn.disabled = true; btn.textContent = 'Criando...';
+  _apiDono('/api/usuarios', { acao:'criar', nome:document.getElementById('lg-nome').value, email:document.getElementById('lg-email').value, senha:document.getElementById('lg-senha').value, restaurantes: loja ? [loja] : null })
+    .then(function(){ showToast('✓ Login criado', '#4ade80'); abrirLoginsPdv(); })
+    .catch(function(e){ btn.disabled = false; btn.textContent = 'Criar login'; msg.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>'; });
+}
+function _lgSenha(i){
+  var u = _lgUsuarios[i]; if(!u) return;
+  var s = prompt('Nova senha pra ' + u.email + ' (mín. 6):'); if(!s) return;
+  _apiDono('/api/usuarios', { acao:'senha', uid:u.uid, senha:s }).then(function(){ showToast('✓ Senha trocada', '#4ade80'); }).catch(function(e){ showToast('❌ ' + e.message, '#f87171', 5000); });
+}
+function _lgRemover(i){
+  var u = _lgUsuarios[i]; if(!u) return;
+  if(!confirm('Remover o login ' + u.email + '? Essa pessoa não entra mais no PDV.')) return;
+  _apiDono('/api/usuarios', { acao:'remover', uid:u.uid }).then(function(){ showToast('✓ Login removido', '#4ade80'); abrirLoginsPdv(); }).catch(function(e){ showToast('❌ ' + e.message, '#f87171', 5000); });
+}
+
+// ═══ 🧾 NOTA FISCAL DAS LOJAS (Admin) — CNPJ, teste/produção e tokens da Focus sem mexer na Vercel ═══
+var _nlLojas = [];
+function abrirNotaLojas(){
+  var corpo = _modalBase('modal-nota-lojas', '🧾 NOTA FISCAL DAS LOJAS');
+  _lojasDoTenant().then(function(lojas){
+    return _apiDono('/api/nfce', { acao:'emissoresListar', lojas: lojas });
+  }).then(function(j){
+    _nlLojas = j.lojas || [];
+    var semChave = _nlLojas.length && !_nlLojas[0].temChaveSecreta;
+    corpo.innerHTML =
+      '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:12px;line-height:1.45;">Cada loja emite com o CNPJ e o certificado dela (cadastrados na Focus NFe). Aqui você coloca os tokens da Focus e liga Teste ou Produção.</div>'+
+      (semChave ? '<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;border-radius:10px;padding:10px;font-size:0.8rem;margin-bottom:12px;line-height:1.4;">⚠️ Falta a variável <b>NFCE_CHAVE_SECRETA</b> na Vercel. Sem ela dá pra ver, mas não dá pra salvar tokens.</div>' : '')+
+      _nlLojas.map(function(l, i){
+        var st = l.mesmoDe ? '🔗 Usa a nota de: ' + escapeHtml((_nlLojas.find(function(x){ return x.chave === l.mesmoDe; }) || {}).nome || l.mesmoDe)
+          : (!l.tokenHom && !l.tokenProd ? '<span style="color:#f87171;">● Não configurada</span>'
+          : (l.ambiente === 'producao' ? '<span style="color:#4ade80;">● Produção (valendo)</span>' : '<span style="color:#f59e0b;">● Teste (homologação)</span>'));
+        return '<div onclick="_nlEditar(' + i + ')" style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;">'+
+          '<div style="display:flex;align-items:center;"><div style="font-weight:800;flex:1;">' + escapeHtml(l.nome) + '</div><div style="font-size:0.78rem;">Editar ›</div></div>'+
+          '<div style="font-size:0.78rem;margin-top:3px;">' + st + '</div>'+
+          '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + (l.cnpj ? 'CNPJ ' + escapeHtml(l.cnpj) : 'sem CNPJ') + (l.origem === 'vercel' ? ' · tokens na Vercel' : (l.origem === 'painel' ? ' · tokens salvos aqui' : '')) + '</div>'+
+        '</div>';
+      }).join('');
+  }).catch(function(e){ corpo.innerHTML = '<div style="color:#f87171;font-size:0.86rem;">❌ ' + escapeHtml(e.message) + '</div>'; });
+}
+function _nlEditar(i){
+  var l = _nlLojas[i]; if(!l) return;
+  var corpo = _modalBase('modal-nota-loja', '🧾 ' + escapeHtml(l.nome).toUpperCase());
+  var inp = 'width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;margin-bottom:10px;';
+  var lbl = function(t){ return '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:4px;">' + t + '</div>'; };
+  corpo.innerHTML =
+    lbl('Usa a nota de outra loja? (mesmo CNPJ e certificado)')+
+    '<select id="nl-mesmo" onchange="document.getElementById(\'nl-proprio\').style.display=this.value?\'none\':\'\'" style="' + inp + '"><option value="">Não — tem CNPJ próprio</option>' + _nlLojas.filter(function(x){ return x.chave !== l.chave; }).map(function(x){ return '<option value="' + escapeHtml(x.chave) + '"' + (l.mesmoDe === x.chave ? ' selected' : '') + '>Sim, usa a da ' + escapeHtml(x.nome) + '</option>'; }).join('') + '</select>'+
+    '<div id="nl-proprio" style="' + (l.mesmoDe ? 'display:none;' : '') + '">'+
+      lbl('CNPJ da loja')+'<input id="nl-cnpj" inputmode="numeric" value="' + escapeHtml(l.cnpj || '') + '" style="' + inp + '">'+
+      lbl('Emitir em')+
+      '<select id="nl-amb" style="' + inp + '"><option value="homologacao"' + (l.ambiente !== 'producao' ? ' selected' : '') + '>🧪 Teste (homologação — sem valor fiscal)</option><option value="producao"' + (l.ambiente === 'producao' ? ' selected' : '') + '>✅ Produção (nota valendo)</option></select>'+
+      lbl('Token de homologação da Focus ' + (l.tokenHom ? '<span style="color:#4ade80;">(já tem — deixe vazio pra manter)</span>' : ''))+'<input id="nl-th" type="password" autocomplete="off" placeholder="cole aqui" style="' + inp + '">'+
+      lbl('Token de produção da Focus ' + (l.tokenProd ? '<span style="color:#4ade80;">(já tem — deixe vazio pra manter)</span>' : ''))+'<input id="nl-tp" type="password" autocomplete="off" placeholder="cole aqui" style="' + inp + '">'+
+      '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:10px;line-height:1.4;">Os tokens ficam em Focus NFe → Minha conta → Empresas → (a loja) → Tokens. Eles ficam guardados criptografados e nunca aparecem de volta na tela.</div>'+
+    '</div>'+
+    '<div id="nl-msg" style="font-size:0.84rem;margin-bottom:8px;"></div>'+
+    '<button id="nl-btn" onclick="_nlSalvar(' + i + ')" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:13px;font-weight:800;cursor:pointer;font-family:inherit;">Salvar</button>';
+}
+function _nlSalvar(i){
+  var l = _nlLojas[i]; if(!l) return;
+  var msg = document.getElementById('nl-msg'), btn = document.getElementById('nl-btn');
+  var mesmo = document.getElementById('nl-mesmo').value;
+  var corpo = { acao:'emissorSalvar', loja:l.chave, mesmoDe:mesmo };
+  if(!mesmo){
+    corpo.cnpj = document.getElementById('nl-cnpj').value;
+    corpo.ambiente = document.getElementById('nl-amb').value;
+    corpo.tokenHomologacao = document.getElementById('nl-th').value.trim();
+    corpo.tokenProducao = document.getElementById('nl-tp').value.trim();
+    if(corpo.ambiente === 'producao' && l.ambiente !== 'producao' && !confirm('Ligar PRODUÇÃO pra ' + l.nome + '? As próximas notas passam a valer de verdade.')) return;
+  }
+  btn.disabled = true; btn.textContent = 'Salvando...';
+  _apiDono('/api/nfce', corpo).then(function(){
+    var m = document.getElementById('modal-nota-loja'); if(m) m.remove();
+    showToast('✓ Nota fiscal da ' + l.nome + ' salva', '#4ade80');
+    abrirNotaLojas();
+  }).catch(function(e){ btn.disabled = false; btn.textContent = 'Salvar'; msg.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>'; });
+}
 
 // ═══ 🚀 PRIMEIROS PASSOS (loja nova) ═══
 // Lista do que precisa estar pronto pra loja funcionar, com o status de cada item
@@ -11833,6 +12009,7 @@ function mostrarSelecaoRestaurante(){
       });
     }
 
+    if(_lojasPermitidas) lista = lista.filter(function(r){ return _lojasPermitidas.indexOf(r.id) >= 0; });
     // Ordena: default primeiro, depois alfabético
     lista.sort(function(a,b){
       if(a.id === 'default') return -1;
@@ -16863,6 +17040,8 @@ function toggleAdminUsuario(garcomId, novoValor){
       </button>
       <div class="menu-grupo-conteudo fechado">
         <button class="menu-item" onclick="menuIrPara('admin')"><span class="ico">🛡️</span><span class="lbl">Painel Admin</span></button>
+        <button class="menu-item" onclick="abrirLoginsPdv();fecharMenuLateral();"><span class="ico">👤</span><span class="lbl">Logins do PDV</span></button>
+        <button class="menu-item" onclick="abrirNotaLojas();fecharMenuLateral();"><span class="ico">🧾</span><span class="lbl">Nota fiscal das lojas</span></button>
         <button class="menu-item" onclick="abrirDiagnosticoImpressao();fecharMenuLateral();"><span class="ico">🔎</span><span class="lbl">Diagnóstico da impressão</span></button>
         <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">🔁</span><span class="lbl">Copiar cardápio de outra loja</span></button>
         <button class="menu-item" onclick="abrirBaseConhecimentoIA();fecharMenuLateral();"><span class="ico">🤖</span><span class="lbl">Base de Conhecimento da IA</span></button>
@@ -16872,6 +17051,7 @@ function toggleAdminUsuario(garcomId, novoValor){
 
     <div class="menu-divider"></div>
     <button class="menu-item" onclick="atualizarPDV()"><span class="ico">🔄</span><span class="lbl">Atualizar PDV</span></button>
+    <button class="menu-item" onclick="sairDoPdv()"><span class="ico">🚪</span><span class="lbl">Sair (trocar login)</span></button>
   </div>
 </aside>
 
@@ -17003,5 +17183,53 @@ function toggleAdminUsuario(garcomId, novoValor){
   </div>
 </div>
 
+
+<script>
+// ═══ 🔄 AVISO DE VERSÃO NOVA ═══
+// A cada 3 min confere se o sistema foi atualizado no servidor (sem baixar a página
+// inteira: só o "carimbo" ETag). Se mudou, aparece uma faixa "toque para atualizar".
+// Não recarrega sozinho (pode ter algo sendo feito na tela).
+(function(){
+  var MODO = 'pdv';
+  var base = null, avisou = false;
+  function carimbo(){
+    return fetch(location.pathname + '?vchk=' + Date.now(), { method:'HEAD', cache:'no-store' }).then(function(r){
+      var e = r.headers.get('etag') || r.headers.get('last-modified') || '';
+      if(e) return e;
+      return fetch(location.pathname + '?vchk=' + Date.now(), { cache:'no-store' }).then(function(r2){ return r2.text(); }).then(function(t){
+        var h = 5381; for(var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) >>> 0; return 'h' + t.length + ':' + h;
+      });
+    }).catch(function(){ return null; });
+  }
+  function podeRecarregarSozinho(){
+    if(MODO !== 'totem') return false;
+    try{
+      var ti = document.getElementById('tela-inicial');
+      var naInicial = ti && ti.style.display !== 'none' && !ti.classList.contains('escondida');
+      return naInicial && !(window._carrinho && window._carrinho.length) && !document.getElementById('tela-cobranca') && !document.getElementById('tela-balanca');
+    }catch(e){ return false; }
+  }
+  function avisar(){
+    if(podeRecarregarSozinho()){ location.reload(); return; }
+    if(MODO === 'totem'){ setTimeout(avisar, 30000); return; }   // totem: espera ficar livre e recarrega sozinho
+    if(avisou) return; avisou = true;
+    var f = document.createElement('div');
+    f.id = 'faixa-versao-nova';
+    f.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483000;background:#d4a843;color:#000;font-family:inherit;font-weight:800;font-size:0.95rem;padding:12px 16px;padding-top:max(12px, env(safe-area-inset-top));display:flex;align-items:center;gap:10px;box-shadow:0 4px 18px rgba(0,0,0,0.45);cursor:pointer;';
+    f.innerHTML = '<span style="font-size:1.2rem;">🔄</span><span style="flex:1;">Tem versão nova do sistema — toque aqui pra atualizar</span><span onclick="event.stopPropagation();this.parentNode.remove();" style="font-size:1.3rem;padding:0 6px;">×</span>';
+    f.onclick = function(){ location.reload(); };
+    document.body.appendChild(f);
+  }
+  function conferir(){
+    carimbo().then(function(c){
+      if(!c) return;
+      if(base === null){ base = c; return; }
+      if(c !== base) avisar();
+    });
+  }
+  setTimeout(conferir, 8000);
+  setInterval(conferir, 3 * 60 * 1000);
+})();
+</script>
 </body>
 </html>

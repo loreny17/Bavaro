@@ -46,12 +46,54 @@ function cnpjValido(c) {
 }
 
 function chaveRest(r) { r = String(r || '').trim(); return (!r || r === 'default' || r === 'bavaro') ? 'bavaro' : r; }
-function chaveEmissor(r) { const k = chaveRest(r); return MESMO_CNPJ[k] || k; }
+
+// ── Configuração da nota POR LOJA feita no PDV (Admin → Nota fiscal das lojas) ──
+// Fica no Firestore em nfce_emissores/{loja}; os tokens da Focus vão CRIPTOGRAFADOS
+// com a variável NFCE_CHAVE_SECRETA (só o servidor sabe). O que estiver lá tem
+// prioridade; o que não estiver continua vindo das variáveis da Vercel (como antes).
+const crypto = require('crypto');
+let _painel = {}, _painelEm = 0;
+function _chaveCripto() { const s = process.env.NFCE_CHAVE_SECRETA; return s ? crypto.createHash('sha256').update(String(s)).digest() : null; }
+function cifrar(txt) {
+  const k = _chaveCripto(); if (!k) throw Object.assign(new Error('Falta a variável NFCE_CHAVE_SECRETA na Vercel (uma frase longa qualquer) — sem ela não dá pra guardar o token com segurança.'), { usuario: true });
+  const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', k, iv);
+  const enc = Buffer.concat([c.update(String(txt), 'utf8'), c.final()]);
+  return 'v1:' + iv.toString('base64') + ':' + c.getAuthTag().toString('base64') + ':' + enc.toString('base64');
+}
+function decifrar(v) {
+  try {
+    const k = _chaveCripto(); if (!k || !v) return '';
+    const [, iv, tag, enc] = String(v).split(':');
+    const d = crypto.createDecipheriv('aes-256-gcm', k, Buffer.from(iv, 'base64'));
+    d.setAuthTag(Buffer.from(tag, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(enc, 'base64')), d.final()]).toString('utf8');
+  } catch (e) { return ''; }
+}
+async function carregarPainel(db, forcar) {
+  if (!forcar && Date.now() - _painelEm < 60000) return _painel;
+  try {
+    const snap = await db.collection('nfce_emissores').get();
+    const m = {}; snap.forEach((d) => { m[d.id] = d.data() || {}; });
+    _painel = m; _painelEm = Date.now();
+  } catch (e) { /* sem painel: segue com as variáveis */ }
+  return _painel;
+}
+function _cfgLoja(k) { return _painel[k] || null; }
+
+function chaveEmissor(r) { const k = chaveRest(r); const c = _cfgLoja(k); if (c && c.mesmoDe) return chaveRest(c.mesmoDe); return MESMO_CNPJ[k] || k; }
 function _suf(restId) { const k = chaveEmissor(restId); return k === 'bavaro' ? '' : '_' + k.toUpperCase().replace(/[^A-Z0-9]/g, '_'); }
 function _env(nome, restId) { return process.env[nome + _suf(restId)]; }
-// Outros restaurantes ficam em teste até terem FOCUS_AMBIENTE_<ID>=producao
-function ambiente(restId) { return String(_env('FOCUS_AMBIENTE', restId) || 'homologacao').toLowerCase().indexOf('prod') === 0 ? 'producao' : 'homologacao'; }
-function token(amb, restId) { return _env(amb === 'producao' ? 'FOCUS_TOKEN_PRODUCAO' : 'FOCUS_TOKEN_HOMOLOGACAO', restId); }
+// Outros restaurantes ficam em teste até terem FOCUS_AMBIENTE_<ID>=producao (ou "Produção" no painel)
+function ambiente(restId) {
+  const c = _cfgLoja(chaveEmissor(restId));
+  const v = (c && c.ambiente) || _env('FOCUS_AMBIENTE', restId) || 'homologacao';
+  return String(v).toLowerCase().indexOf('prod') === 0 ? 'producao' : 'homologacao';
+}
+function token(amb, restId) {
+  const c = _cfgLoja(chaveEmissor(restId));
+  const doPainel = c && decifrar(amb === 'producao' ? c.tokenProducao : c.tokenHomologacao);
+  return doPainel || _env(amb === 'producao' ? 'FOCUS_TOKEN_PRODUCAO' : 'FOCUS_TOKEN_HOMOLOGACAO', restId);
+}
 function emissor(restId, ambForcado) { const amb = ambForcado || ambiente(restId); return { amb, tk: token(amb, restId), rest: chaveEmissor(restId) }; }
 function authHeader(tk) { return 'Basic ' + Buffer.from(String(tk).trim() + ':').toString('base64'); }
 
@@ -60,7 +102,7 @@ async function configFiscal(db, tenantId, restId) {
   const ehBavaro = chaveEmissor(restId) === 'bavaro';
   try { const d = await db.collection('fiscal').doc(String(tenantId) + (ehBavaro ? '' : '__' + chaveEmissor(restId))).get(); if (d.exists) doc = d.data() || {}; } catch (e) { /* sem config */ }
   return {
-    cnpj: _so(doc.cnpj || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : (CNPJS[chaveEmissor(restId)] || ''))),
+    cnpj: _so(doc.cnpj || ((_cfgLoja(chaveEmissor(restId)) || {}).cnpj) || _env('FOCUS_CNPJ', restId) || (ehBavaro ? CNPJ_BAVARO : (CNPJS[chaveEmissor(restId)] || ''))),
     padrao: Object.assign({}, PADRAO, doc.padrao || {}),
     regras: (Array.isArray(doc.regras) ? doc.regras : []).concat(REGRAS_PADRAO),
     incluirServico: doc.incluirServico !== false, // padrão: a taxa de serviço entra na nota
@@ -223,6 +265,7 @@ function _contaDaPessoa(conta, chave) {
 function _algumaAutorizada(mapa) { return Object.keys(mapa || {}).some((k) => mapa[k] && mapa[k].status === 'autorizado'); }
 
 async function emitir(db, b) {
+  await carregarPainel(db);
   const { tenantId, documento, nomeCliente, formaPagamento, garcom } = b;
   const o = await _origem(db, b);
   if (!o) return { ok: false, error: b.origem === 'totem' ? 'Pedido do totem não encontrado.' : 'Conta não encontrada (ela pode ter sido apagada do histórico).' };
@@ -322,6 +365,7 @@ async function emitir(db, b) {
 }
 
 async function cancelar(db, b) {
+  await carregarPainel(db);
   const { justificativa, tenantId } = b;
   const o = await _origem(db, b);
   const ref0 = o && o.ref;
@@ -346,6 +390,7 @@ async function cancelar(db, b) {
 // Cancela pela referência (tela "Notas fiscais" do PDV): acha a conta/pedido de origem
 // e cancela por lá; se a origem não existe mais (conta apagada), cancela só na Focus.
 async function cancelarPorRef(db, b) {
+  await carregarPainel(db);
   const ref = String(b.ref || '');
   if (!ref) return { ok: false, error: 'Nota não informada.' };
   const d = await db.collection('nfce').doc(ref).get();
@@ -376,6 +421,50 @@ async function cancelarPorRef(db, b) {
   return { ok: false, error: msgErro(j) };
 }
 
+// ── Painel: listar e salvar a configuração da nota de cada loja ──
+async function emissoresListar(db, lojas) {
+  await carregarPainel(db, true);
+  const saida = (lojas || []).map((l) => {
+    const k = chaveRest(l.id), c = _cfgLoja(k) || {};
+    const kE = chaveEmissor(l.id), cE = _cfgLoja(kE) || {};
+    const temEnv = (amb) => !!process.env[(amb === 'producao' ? 'FOCUS_TOKEN_PRODUCAO' : 'FOCUS_TOKEN_HOMOLOGACAO') + _suf(l.id)];
+    return {
+      id: l.id, nome: l.nome || l.id, chave: k, mesmoDe: c.mesmoDe || (MESMO_CNPJ[k] || ''),
+      cnpj: cE.cnpj || _env('FOCUS_CNPJ', l.id) || (kE === 'bavaro' ? CNPJ_BAVARO : (CNPJS[kE] || '')),
+      ambiente: ambiente(l.id),
+      tokenHom: !!decifrar(cE.tokenHomologacao) || temEnv('homologacao'),
+      tokenProd: !!decifrar(cE.tokenProducao) || temEnv('producao'),
+      origem: (cE.tokenProducao || cE.tokenHomologacao) ? 'painel' : ((temEnv('producao') || temEnv('homologacao')) ? 'vercel' : 'nenhum'),
+      temChaveSecreta: !!_chaveCripto(),
+    };
+  });
+  return { ok: true, lojas: saida };
+}
+async function emissorSalvar(db, b, quem) {
+  const k = chaveRest(b.loja);
+  if (!k) return { ok: false, error: 'Loja não informada.' };
+  const atual = (await db.collection('nfce_emissores').doc(k).get());
+  const d = atual.exists ? (atual.data() || {}) : {};
+  const novo = { atualizadoEm: Date.now(), atualizadoPor: quem || '' };
+  if (b.mesmoDe !== undefined) novo.mesmoDe = b.mesmoDe ? chaveRest(b.mesmoDe) : '';
+  if (novo.mesmoDe && novo.mesmoDe === k) return { ok: false, error: 'A loja não pode usar a nota dela mesma.' };
+  if (b.cnpj !== undefined) {
+    const c = _so(b.cnpj);
+    if (c && !cnpjValido(c)) return { ok: false, error: 'CNPJ inválido.' };
+    novo.cnpj = c;
+  }
+  if (b.ambiente !== undefined) novo.ambiente = String(b.ambiente).indexOf('prod') === 0 ? 'producao' : 'homologacao';
+  if (b.tokenHomologacao) novo.tokenHomologacao = cifrar(String(b.tokenHomologacao).trim());
+  if (b.tokenProducao) novo.tokenProducao = cifrar(String(b.tokenProducao).trim());
+  if (novo.ambiente === 'producao' && !novo.mesmoDe) {
+    const temProd = novo.tokenProducao || d.tokenProducao || process.env['FOCUS_TOKEN_PRODUCAO' + (k === 'bavaro' ? '' : '_' + k.toUpperCase().replace(/[^A-Z0-9]/g, '_'))];
+    if (!temProd) return { ok: false, error: 'Pra ligar Produção, coloque o token de produção da Focus.' };
+  }
+  await db.collection('nfce_emissores').doc(k).set(novo, { merge: true });
+  await carregarPainel(db, true);
+  return { ok: true };
+}
+
 // ── Exportação mensal pra contabilidade ──
 function _mesDaNota(n) {
   const d = n.impressao && n.impressao.dataEmissao;
@@ -387,6 +476,7 @@ function _mesDaNota(n) {
   return p.year + '-' + p.month;
 }
 async function listarMes(db, tenantId, mes, incluirTestes, restauranteId) {
+  await carregarPainel(db);
   if (!/^\d{4}-\d{2}$/.test(String(mes || ''))) return { ok: false, error: 'Mês inválido.' };
   const snap = await db.collection('nfce').where('tenantId', '==', tenantId).get();
   const notas = [];
@@ -406,6 +496,7 @@ async function listarMes(db, tenantId, mes, incluirTestes, restauranteId) {
   return { ok: true, mes, notas };
 }
 async function xmlsDasNotas(db, tenantId, refs) {
+  await carregarPainel(db);
   const lista = (Array.isArray(refs) ? refs : []).slice(0, 40).map(String);
   const saida = [];
   let i = 0;
@@ -431,4 +522,4 @@ async function xmlsDasNotas(db, tenantId, refs) {
   return { ok: true, arquivos: saida };
 }
 
-module.exports = { emitir, cancelar, cancelarPorRef, ambiente, listarMes, xmlsDasNotas, _interno: { chavePessoa, _contaDaPessoa, chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };
+module.exports = { emitir, cancelar, cancelarPorRef, emissoresListar, emissorSalvar, ambiente, listarMes, xmlsDasNotas, _interno: { chavePessoa, _contaDaPessoa, chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };

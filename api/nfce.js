@@ -3,6 +3,7 @@
 const nfce = require('./_nfce');
 const { getDb, garcomEhAdmin } = require('./_assistente');
 const admin = require('firebase-admin');
+const { dono } = require('./_dono');
 
 // PDV logado: confere o token do Firebase e se o usuário é desse restaurante.
 // Devolve '' quando ok, ou o motivo da recusa (aparece na tela pra diagnóstico).
@@ -75,6 +76,13 @@ module.exports = async (req, res) => {
       if (motivo) { console.warn('[nfce] exportação recusada:', motivo); return res.status(401).json({ ok: false, error: 'Acesso recusado: ' + motivo + '.' }); }
       if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId));
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
+    }
+    if (b.acao === 'emissoresListar' || b.acao === 'emissorSalvar') {
+      // Admin → Nota fiscal das lojas: só o dono (login de verdade)
+      let tok;
+      try { tok = await dono(db, b.idToken, b.tenantId); } catch (e) { return res.status(200).json({ ok: false, error: e.message }); }
+      if (b.acao === 'emissoresListar') return res.status(200).json(await nfce.emissoresListar(db, Array.isArray(b.lojas) ? b.lojas.slice(0, 40) : []));
+      return res.status(200).json(await nfce.emissorSalvar(db, b, tok.email || tok.uid));
     }
     if (b.acao === 'cancelarRef') {
       // PDV → Notas fiscais: só com a senha do gerente (a mesma dos cancelamentos)

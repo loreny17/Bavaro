@@ -4012,4 +4012,52 @@ function _docSituacao(d){
   return 'parcial';
 }
 </script>
+
+<script>
+// ═══ 🔄 AVISO DE VERSÃO NOVA ═══
+// A cada 3 min confere se o sistema foi atualizado no servidor (sem baixar a página
+// inteira: só o "carimbo" ETag). Se mudou, aparece uma faixa "toque para atualizar".
+// Totem: recarrega sozinho quando está parado na tela inicial.
+(function(){
+  var MODO = 'totem';
+  var base = null, avisou = false;
+  function carimbo(){
+    return fetch(location.pathname + '?vchk=' + Date.now(), { method:'HEAD', cache:'no-store' }).then(function(r){
+      var e = r.headers.get('etag') || r.headers.get('last-modified') || '';
+      if(e) return e;
+      return fetch(location.pathname + '?vchk=' + Date.now(), { cache:'no-store' }).then(function(r2){ return r2.text(); }).then(function(t){
+        var h = 5381; for(var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) >>> 0; return 'h' + t.length + ':' + h;
+      });
+    }).catch(function(){ return null; });
+  }
+  function podeRecarregarSozinho(){
+    if(MODO !== 'totem') return false;
+    try{
+      var ti = document.getElementById('tela-inicial');
+      var naInicial = ti && ti.style.display !== 'none' && !ti.classList.contains('escondida');
+      return naInicial && !(window._carrinho && window._carrinho.length) && !document.getElementById('tela-cobranca') && !document.getElementById('tela-balanca');
+    }catch(e){ return false; }
+  }
+  function avisar(){
+    if(podeRecarregarSozinho()){ location.reload(); return; }
+    if(MODO === 'totem'){ setTimeout(avisar, 30000); return; }   // totem: espera ficar livre e recarrega sozinho
+    if(avisou) return; avisou = true;
+    var f = document.createElement('div');
+    f.id = 'faixa-versao-nova';
+    f.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483000;background:#d4a843;color:#000;font-family:inherit;font-weight:800;font-size:0.95rem;padding:12px 16px;padding-top:max(12px, env(safe-area-inset-top));display:flex;align-items:center;gap:10px;box-shadow:0 4px 18px rgba(0,0,0,0.45);cursor:pointer;';
+    f.innerHTML = '<span style="font-size:1.2rem;">🔄</span><span style="flex:1;">Tem versão nova do sistema — toque aqui pra atualizar</span><span onclick="event.stopPropagation();this.parentNode.remove();" style="font-size:1.3rem;padding:0 6px;">×</span>';
+    f.onclick = function(){ location.reload(); };
+    document.body.appendChild(f);
+  }
+  function conferir(){
+    carimbo().then(function(c){
+      if(!c) return;
+      if(base === null){ base = c; return; }
+      if(c !== base) avisar();
+    });
+  }
+  setTimeout(conferir, 8000);
+  setInterval(conferir, 3 * 60 * 1000);
+})();
+</script>
 </body>

@@ -3087,7 +3087,12 @@ function comecarPedido(){
 }
 
 function voltarTelaInicial(){
-  if(_modoBalanca && !_modoQR){ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc && !_balCobrancaPodeFechar()) return; if(tc) tc.remove(); }
+  if(_modoBalanca && !_modoQR){
+    _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc && !_balCobrancaPodeFechar()) return; if(tc) tc.remove();
+    // prato que ficou na balança (venda feita ou cancelada) não reabre o pedido sozinho
+    _balPrecisaZerar = true;
+    if(_balVivo && _balVivo.presenca === true && Number(_balVivo.peso) >= 20) _balPesoDesarme = Number(_balVivo.peso);
+  }
   if(_carrinho.length){
     if(!confirm('Cancelar o pedido? Os itens do carrinho serão perdidos.')) return;
   }
@@ -3644,7 +3649,7 @@ function _balLerUmaVez(){
 }
 
 // ── Peso AO VIVO publicado pelo PDV da balança (sem pedir leitura a cada vez) ──
-var _balVivo = null, _balVivoRecebido = 0, _balPrecisaZerar = false, _balVivoUnsub = null;
+var _balVivo = null, _balVivoRecebido = 0, _balPrecisaZerar = false, _balVivoUnsub = null, _balPesoDesarme = 0;
 function _balVivoFresco(){ return !!_balVivo && Date.now() - _balVivoRecebido < 25000; }
 function _balVivoAssinar(){
   if(_balVivoUnsub || _modoQR || !_modoBalanca) return;
@@ -3665,17 +3670,25 @@ function _balVivoNaTelaInicial(){
   var g = Number(_balVivo.peso) || 0;
   var temPrato = _balVivo.presenca === true || (_balVivo.presenca === undefined && g >= 20);
   if(!temPrato){ _balPrecisaZerar = false; return; }
-  // troca de tela assim que o prato encosta na balança (o peso firma já na tela de pesagem)
-  if(_balPrecisaZerar) return;
+  // Depois de uma venda o prato vendido pode continuar na balança: só começa outro
+  // pedido quando ela esvaziar OU quando aparecer um peso firme diferente (> 10 g)
+  // do prato da venda anterior (tirou e pôs outro rápido demais pra balança ver o zero).
+  if(_balPrecisaZerar){
+    if(_balVivo.estavel && g >= 20 && Math.abs(g - _balPesoDesarme) > 10) _balPrecisaZerar = false;
+    else return;
+  }
   var ti = document.getElementById('tela-inicial');
   if(!ti || ti.style.display === 'none' || ti.classList.contains('escondida')) return;
   if(document.getElementById('tela-balanca') || document.getElementById('tela-cobranca')) return;
-  _balPrecisaZerar = true;
+  _balPrecisaZerar = true; _balPesoDesarme = g;
   comecarPedido();
 }
 setInterval(function(){
   var ins = document.querySelector('.ti-instrucao');
-  if(ins && _modoBalanca && !_modoQR) ins.textContent = _balVivoFresco() ? 'o pedido começa sozinho ⚖️' : 'e toque para iniciar ⚖️';
+  if(ins && _modoBalanca && !_modoQR){
+    var preso = _balVivoFresco() && _balPrecisaZerar && _balVivo && _balVivo.presenca === true;
+    ins.textContent = !_balVivoFresco() ? 'e toque para iniciar ⚖️' : (preso ? 'tire o prato anterior — ou toque para iniciar ⚖️' : 'o pedido começa sozinho ⚖️');
+  }
   if(_balVivoFresco()) _balVivoNaTelaInicial();
 }, 1000);
 
@@ -3975,6 +3988,9 @@ function _balConcluido(linhaNota){
   }, 1000);
 }
 function _balFinalizarAtendimento(){
+  var ultKg = (_balPedido && (_balPedido.itens || []).filter(function(i){ return i.tipoVenda === 'kg'; }).pop()) || null;
+  _balPesoDesarme = ultKg ? Number(ultKg.peso) || 0 : (_balVivo ? Number(_balVivo.peso) || 0 : 0);
+  _balPrecisaZerar = true;
   _balPedido = null; _balEmitindo = false;
   var t = document.getElementById('tela-cobranca'); if(t) t.remove();
   _carrinho = [];

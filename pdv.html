@@ -8290,6 +8290,28 @@ function gerarCupomContaMesaAlmoco(pedido, modelo, imp){
   return s;
 }
 
+// Senha do totem ANTES do pagamento (modo com caixa) — mesmo modelo do "Cupom do cliente",
+// com a instrução de levar ao caixa
+function _imprimirSenhaTotemPreCaixa(cmd){
+  var modelosCupom = _modelos.filter(function(m){ return m.tipo === 'cupom_cliente'; });
+  if(!modelosCupom.length){ console.warn('[SENHA-TOTEM] nenhum modelo "Cupom do cliente" cadastrado'); showToast('⚠️ Cadastre um modelo "Cupom do cliente" pra imprimir a senha do totem','#f7a34f', 5000); return; }
+  var pedido = { senhaTotem: cmd.senhaTotem, itens: cmd.itens || [], total: cmd.total || 0 };
+  modelosCupom.forEach(function(modelo){
+    var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
+    if(!imp) return;
+    var imprimir = function(){
+      var m = Object.assign({}, modelo, { instrucaoCupomCliente: modelo.instrucaoCaixaCupomCliente || 'APRESENTE NO CAIXA\npara pagar e liberar seu pedido' });
+      _aplicarDialeto(imp);
+      var cupom = gerarCupomClienteTotem(pedido, m, imp);
+      if(cupom) enviarParaImpressora(imp, cupom);
+    };
+    if(modelo.logoCupomCliente && !(modelo._logoBytesCache && modelo._logoBytesCacheUrl === modelo.logoCupomCliente)){
+      _logoBase64ParaEscpos(modelo.logoCupomCliente, function(bytes){ modelo._logoBytesCache = bytes; modelo._logoBytesCacheUrl = modelo.logoCupomCliente; imprimir(); });
+    } else imprimir();
+  });
+  showToast('🎫 Senha #' + cmd.senhaTotem + ' impressa (aguardando pagamento)', '#4ade80');
+}
+
 function gerarCupomClienteTotem(pedido, modelo, imp){
   var L = (imp && imp.largura) || 48;
   var senha = pedido.senhaTotem || '?';
@@ -8539,7 +8561,8 @@ function imprimirPedidoAutomatico(pedido, opts){
     };
 
     preCarregarLogos().then(function(){
-      modelosCupom.forEach(function(modelo){
+      // senha já impressa na hora do pedido (totem com caixa) → não repete
+      if(!pedido.pularCupomCliente) modelosCupom.forEach(function(modelo){
         var imp = _impressoras.find(function(i){ return i.id === modelo.impressoraId; });
         if(!imp){
           console.warn('[CUPOM-CLIENTE] impressora do modelo não encontrada:', modelo.nome, 'id:', modelo.impressoraId);
@@ -9386,6 +9409,10 @@ function processarComandoImpressao(cmdId, cmd){
     showToast('🖨️ Conta completa impressa', '#4ade80');
     } // fim else conta_pessoa_junto
 
+  } else if(cmd.tipo === 'senha_totem'){
+    // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
+    _imprimirSenhaTotemPreCaixa(cmd);
+    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
   } else if(cmd.tipo === 'nfce'){
     // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO
     try{

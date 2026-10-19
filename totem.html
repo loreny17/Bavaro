@@ -2886,6 +2886,18 @@ function finalizarPedido(){
       return nova;
     });
   }).then(function(senha){
+    // Modo COM CAIXA: já imprime a senha no "Cupom do cliente" pro cliente levar ao caixa
+    // (fora da transação: se a impressão falhar, o pedido continua valendo)
+    if(!_semCaixa){
+      fbDb.collection('comandos_impressao').add({
+        tipo: 'senha_totem', restauranteId: _restauranteId, tenantId: _tenantId,
+        pedidoTotemId: refPedido.id, senhaTotem: senha, total: total,
+        itens: itensSalvar.map(function(c){ return { nome: c.nome, qtd: c.qtd, obs: [c.selecoesLabel, c.observacao ? 'OBS: ' + c.observacao : ''].filter(Boolean).join(' · ') }; }),
+        criadoEm: Date.now(), solicitadoEm: Date.now()
+      }).then(function(){
+        return refPedido.update({ senhaImpressa: true });
+      }).catch(function(e){ console.warn('[TOTEM] impressão da senha falhou:', e.code || e.message); });
+    }
     // Atualiza a senha na tela assim que confirmada
     var senhaEl = document.getElementById('numero-senha-totem');
     if(senhaEl) senhaEl.textContent = '#' + senha;
@@ -2894,7 +2906,7 @@ function finalizarPedido(){
       var titulo = _semCaixa ? 'Pedido recebido!' : 'Vá ao caixa pagar';
       var sub = _semCaixa
         ? 'Quando chamarmos sua senha <b style="color:var(--accent);">#' + senha + '</b>, retire no balcão'
-        : 'Informe sua senha <b style="color:var(--accent);">#' + senha + '</b> ao funcionário';
+        : 'Pegue sua senha <b style="color:var(--accent);">#' + senha + '</b> impressa e apresente no caixa';
       instrucaoEl.innerHTML = '<div style="font-size:1.3rem;font-weight:700;margin-bottom:6px;">' + titulo + '</div><div style="font-size:0.96rem;color:var(--muted);">' + sub + '</div>';
     }
   }).catch(function(e){

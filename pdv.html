@@ -6588,6 +6588,12 @@ function atualizarTipoModelo(){
   }
   // Bloco do Cupom Cliente: SÓ aparece quando o tipo é cupom_cliente
   if(blocoCC) blocoCC.style.display = (tipo === 'cupom_cliente') ? '' : 'none';
+  // Simplificação: o que não faz sentido pro tipo escolhido some da tela
+  var semEstilo = (tipo === 'cupom_cliente' || tipo === 'nfce_buffet');
+  var abaEst = document.querySelector('[data-modelo-tab="estilo"]'); if(abaEst) abaEst.style.display = semEstilo ? 'none' : '';
+  if(semEstilo && typeof trocarAbaModelo === 'function') trocarAbaModelo('geral');
+  var maisOp = document.getElementById('mod-mais-opcoes'); if(maisOp) maisOp.style.display = (tipo === 'nfce_buffet') ? 'none' : '';
+  var prev = document.getElementById('mod-bloco-preview'); if(prev) prev.style.display = (tipo === 'nfce_buffet') ? 'none' : '';
   atualizarPreviewCupom();
 }
 
@@ -6904,7 +6910,7 @@ function salvarModelo(){
     filtro: filtro,
     mostrarPrecos: document.getElementById('mod-mostrar-precos').checked,
     negrito: document.getElementById('mod-negrito').checked,
-    apareceSininho: (function(){ var c = document.getElementById('mod-aparece-sininho'); return c ? c.checked : false; })(),
+    apareceSininho: false,   // opção "sininho da cozinha" removida (saiu do app do garçom)
     apenasAlmoco: false,   // opção "Modelo exclusivo de Almoço" removida (aba Almoço saiu do app do garçom)
     estiloCabecalho: estilos.estiloCabecalho,
     estiloItens: estilos.estiloItens,
@@ -15718,7 +15724,7 @@ function toggleAdminUsuario(garcomId, novoValor){
     <!-- Sub-abas -->
     <div style="display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;flex-shrink:0;">
       <button class="modelo-subtab" data-modelo-tab="geral" onclick="trocarAbaModelo('geral')" style="padding:12px 16px;background:transparent;border:none;color:var(--accent);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid var(--accent);transition:all 0.15s;">⚙️ Geral</button>
-      <button class="modelo-subtab" data-modelo-tab="estilo" onclick="trocarAbaModelo('estilo')" style="padding:12px 16px;background:transparent;border:none;color:var(--muted);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;transition:all 0.15s;">🎨 Estilo do Cupom</button>
+      <button class="modelo-subtab" data-modelo-tab="estilo" onclick="trocarAbaModelo('estilo')" style="padding:12px 16px;background:transparent;border:none;color:var(--muted);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;transition:all 0.15s;">🎨 Aparência</button>
     </div>
     <div class="modal-body">
       <!-- Aba Geral (conteúdo original) -->
@@ -15728,26 +15734,25 @@ function toggleAdminUsuario(garcomId, novoValor){
         <input type="text" class="f-input" id="mod-nome" maxlength="30" placeholder="Ex: Bebidas, Cozinha, Conta">
       </div>
       <div class="f-grupo">
-        <label class="f-label">Tipo do Modelo *</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="mod-tipo" value="pedido" checked onchange="atualizarTipoModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">📝 Pedido</span>
+        <label class="f-label">Pra que serve este modelo? *</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <label style="display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="pedido" checked onchange="atualizarTipoModelo()" style="margin-top:3px;">
+            <span><span style="font-size:0.86rem;font-weight:700;display:block;">📝 Pedido</span><span style="font-size:0.7rem;color:var(--muted);line-height:1.3;">Comanda da cozinha/bar quando o pedido é feito</span></span>
           </label>
-          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="mod-tipo" value="fechamento" onchange="atualizarTipoModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">🏁 Fechamento</span>
+          <label style="display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="fechamento" onchange="atualizarTipoModelo()" style="margin-top:3px;">
+            <span><span style="font-size:0.86rem;font-weight:700;display:block;">🏁 Conta / Nota</span><span style="font-size:0.7rem;color:var(--muted);line-height:1.3;">Conta da mesa e nota fiscal</span></span>
           </label>
-          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="mod-tipo" value="cupom_cliente" onchange="atualizarTipoModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">🎫 Cupom Cliente</span>
+          <label style="display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="cupom_cliente" onchange="atualizarTipoModelo()" style="margin-top:3px;">
+            <span><span style="font-size:0.86rem;font-weight:700;display:block;">🎫 Senha do totem</span><span style="font-size:0.7rem;color:var(--muted);line-height:1.3;">Ticket com a senha pro cliente</span></span>
           </label>
-          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
-            <input type="radio" name="mod-tipo" value="nfce_buffet" onchange="atualizarTipoModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">⚖️ Nota do buffet</span>
+          <label style="display:flex;align-items:flex-start;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="nfce_buffet" onchange="atualizarTipoModelo()" style="margin-top:3px;">
+            <span><span style="font-size:0.86rem;font-weight:700;display:block;">⚖️ Nota do buffet</span><span style="font-size:0.7rem;color:var(--muted);line-height:1.3;">Nota fiscal do totem da balança</span></span>
           </label>
         </div>
-        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa. 🎫 Cupom Cliente = ticket com senha do totem (sai no caixa pro cliente). ⚖️ Nota do buffet = impressora onde sai a nota fiscal das vendas do totem em modo balança.</div>
       </div>
       <div class="f-grupo">
         <label class="f-label">Impressora *</label>
@@ -15793,8 +15798,8 @@ function toggleAdminUsuario(garcomId, novoValor){
         </div>
 
         <!-- ── Personalização visual ── -->
-        <div style="background:rgba(74,222,128,0.04);border:1px solid rgba(74,222,128,0.2);border-radius:10px;padding:12px;margin-top:6px;">
-          <div style="font-size:0.84rem;font-weight:700;color:#4ade80;margin-bottom:10px;">🎨 Personalização Visual</div>
+        <details style="background:rgba(74,222,128,0.04);border:1px solid rgba(74,222,128,0.2);border-radius:10px;padding:12px;margin-top:6px;">
+          <summary style="cursor:pointer;font-size:0.84rem;font-weight:700;color:#4ade80;">🎨 Personalizar aparência (opcional)</summary><div style="margin-top:10px;">
 
           <!-- Toggle linhas decorativas -->
           <label style="display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;margin-bottom:10px;cursor:pointer;">
@@ -15849,19 +15854,19 @@ function toggleAdminUsuario(garcomId, novoValor){
             <input type="checkbox" id="mod-cc-negrito-rodape" style="width:16px;height:16px;cursor:pointer;">
             <span style="font-size:0.82rem;">💪 Rodapé (Obrigado pela preferência)</span>
           </label>
-        </div>
+        </div></details>
       </div>
 
       <div class="f-grupo" id="mod-bloco-filtro">
-        <label class="f-label">Tipo de Filtro</label>
+        <label class="f-label">O que sai nesta impressora?</label>
         <div style="display:flex;gap:8px;">
           <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
             <input type="radio" name="mod-filtro" value="categoria" checked onchange="atualizarFiltroModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">📂 Categorias</span>
+            <span style="font-size:0.82rem;font-weight:600;">📂 Categorias inteiras</span>
           </label>
           <label style="flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
             <input type="radio" name="mod-filtro" value="item" onchange="atualizarFiltroModelo()">
-            <span style="font-size:0.82rem;font-weight:600;">🍔 Itens específicos</span>
+            <span style="font-size:0.82rem;font-weight:600;">🍔 Só alguns itens</span>
           </label>
         </div>
       </div>
@@ -15876,6 +15881,9 @@ function toggleAdminUsuario(garcomId, novoValor){
         <input type="text" class="f-input" id="mod-busca-itens" placeholder="Buscar item..." style="margin-bottom:8px;" oninput="filtrarItensModelo()">
         <div id="mod-itens-lista" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;"></div>
       </div>
+      <details id="mod-mais-opcoes" style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;margin-bottom:14px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:0.86rem;">⚙️ Mais opções</summary>
+      <div style="margin-top:10px;">
       <div class="f-grupo">
         <label class="cfg-toggle">
           <input type="checkbox" id="mod-mostrar-precos" checked onchange="atualizarPreviewCupom()">
@@ -15889,18 +15897,13 @@ function toggleAdminUsuario(garcomId, novoValor){
         </label>
         <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Deixa o cupom mais visível mas usa um pouco mais de tinta</div>
       </div>
-      <div class="f-grupo">
-        <label class="cfg-toggle">
-          <input type="checkbox" id="mod-aparece-sininho">
-          <span>🔔 Aparece no <strong>sininho da cozinha</strong></span>
-        </label>
-        <div style="font-size:0.7rem;color:var(--muted);margin-left:24px;">Os itens deste modelo vão aparecer no sininho de cozinha do app dos garçons, pra eles saberem o que está pronto pra descer.</div>
       </div>
+      </details>
       <!-- ─── PRÉ-VISUALIZAÇÃO ─── -->
-      <div class="f-grupo">
-        <label class="f-label">📄 Pré-visualização</label>
+      <details class="f-grupo" id="mod-bloco-preview">
+        <summary style="cursor:pointer;font-weight:700;font-size:0.86rem;margin-bottom:8px;">📄 Ver como fica o cupom</summary>
         <pre id="mod-preview" style="background:#fff;color:#000;font-family:'Courier New',monospace;font-size:11px;line-height:1.4;padding:12px;border-radius:8px;white-space:pre;overflow-x:auto;border:1px solid #ddd;margin:0;max-height:280px;overflow-y:auto;"></pre>
-      </div>
+      </details>
       </div><!-- fim aba Geral -->
 
       <!-- Aba Estilo (novo) -->

@@ -19446,6 +19446,7 @@ function _nfceBaixar(blob, nome){
 }
 // ── nota por pessoa: mesmo nome usado no "fechar separado" (item.pessoa / nomeCliente) ──
 var _nfcePessoaSel = null; // null = nota da mesa toda · {chave, nome}
+var _nfceComServico = true, _nfceValProd = 0, _nfceValTaxa = 0; // chave "Atendimento" na janela da nota
 var _nfceReg = {};         // ref → nfce (botões de imprimir/PDF em listas)
 function _nfceChavePessoa(nome){ var n = String(nome||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); return n || '__sem_nome__'; }
 function _nfceNomeItem(it){ return String((it && (it.pessoa || it.nomeCliente)) || '').trim(); }
@@ -19544,6 +19545,7 @@ function abrirNfce(c, pessoaChave){
     titulo += ' · ' + esc(p.nome); valor = p.valor; taxa = p.taxa;
   }
   var fReal = (c.pagamentos||[]).map(function(p){ return p && p.forma; }).filter(function(f){ return ['dinheiro','pix','debito','credito'].indexOf(f) >= 0; });
+  _nfceComServico = true; _nfceValProd = valor; _nfceValTaxa = taxa;
   _nfceForma = !_nfcePessoaSel && (fReal.length === 1 || (fReal.length && fReal.every(function(f){ return f === fReal[0]; }))) ? fReal[0] : null;
   var formas = '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Forma de pagamento</div>'+
       '<div id="nfce-formas" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;">' + _NFCE_FORMAS.map(function(f){
@@ -19552,9 +19554,10 @@ function abrirNfce(c, pessoaChave){
   _nfceModal(
     '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;gap:8px;">'+
       '<span style="font-weight:700;">' + titulo + '</span>'+
-      '<span style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);white-space:nowrap;">R$ ' + fmtPreco(valor + taxa) + '</span>'+
+      '<span id="nfce-total" style="font-family:Bebas Neue,sans-serif;font-size:1.6rem;color:var(--accent);white-space:nowrap;">R$ ' + fmtPreco(valor + taxa) + '</span>'+
     '</div>'+
-    (taxa > 0 ? '<div style="font-size:0.72rem;color:var(--muted);margin:-8px 0 12px;">Produtos R$ ' + fmtPreco(valor) + ' + taxa de serviço R$ ' + fmtPreco(taxa) + '</div>' : '')+
+    (taxa > 0 ? '<div id="nfce-total-det" style="font-size:0.72rem;color:var(--muted);margin:-8px 0 10px;">Produtos R$ ' + fmtPreco(valor) + ' + atendimento R$ ' + fmtPreco(taxa) + '</div>'+
+      '<button id="nfce-serv" onclick="_nfceAlternarServico()" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;margin-bottom:14px;border-radius:10px;border:1.5px solid rgba(74,222,128,0.45);background:rgba(74,222,128,0.08);color:var(--text);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;"></button>' : '')+
     '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">CPF ou CNPJ na nota (opcional)</div>'+
     '<input id="nfce-doc" inputmode="numeric" autocomplete="off" placeholder="Deixe vazio se o cliente não quiser" oninput="_nfceMascara(this, event)" onblur="_nfceMascara(this, null, true)" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:12px;font-size:1.05rem;font-family:inherit;outline:none;">'+
     '<div id="nfce-doc-tipo" style="font-size:0.72rem;color:var(--muted);margin:5px 0 14px;">Sem CPF/CNPJ (consumidor não identificado)</div>'+
@@ -19562,6 +19565,18 @@ function abrirNfce(c, pessoaChave){
     (pes.length ? '<button class="f-btn secondary" style="flex:1;" onclick="_nfceEscolherPessoa(_nfceConta)">‹ Voltar</button>' : '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-nfce\').remove()">Agora não</button>')+
     '<button class="f-btn" id="nfce-btn" style="flex:1.4;" onclick="emitirNfce()">🧾 Emitir</button>'
   );
+  _nfceAlternarServico(true);
+}
+function _nfceAlternarServico(forcar){
+  if(forcar === undefined) _nfceComServico = !_nfceComServico;
+  var b = document.getElementById('nfce-serv'); if(!b) return;
+  var on = _nfceComServico;
+  b.innerHTML = '<span>' + (on ? '✅ Com atendimento (taxa de serviço)' : '🚫 Sem atendimento — só os produtos') + '</span>'+
+    '<span style="width:42px;height:24px;border-radius:12px;background:' + (on ? '#4ade80' : 'var(--surface3, #333)') + ';position:relative;flex-shrink:0;"><span style="position:absolute;top:3px;' + (on ? 'right:3px' : 'left:3px') + ';width:18px;height:18px;border-radius:50%;background:#fff;"></span></span>';
+  b.style.borderColor = on ? 'rgba(74,222,128,0.45)' : 'var(--border2)';
+  b.style.background = on ? 'rgba(74,222,128,0.08)' : 'var(--surface2)';
+  var t = document.getElementById('nfce-total'); if(t) t.textContent = 'R$ ' + fmtPreco(_nfceValProd + (on ? _nfceValTaxa : 0));
+  var d = document.getElementById('nfce-total-det'); if(d) d.innerHTML = on ? 'Produtos R$ ' + fmtPreco(_nfceValProd) + ' + atendimento R$ ' + fmtPreco(_nfceValTaxa) : 'Só os produtos <span style="text-decoration:line-through;opacity:0.6;">+ atendimento R$ ' + fmtPreco(_nfceValTaxa) + '</span>';
 }
 function _nfceSelForma(f){
   _nfceForma = f;
@@ -19585,6 +19600,7 @@ function emitirNfce(){
   msg.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:8px;">Enviando para a SEFAZ… pode levar alguns segundos.</div>';
   var corpo = { acao:'emitir', tenantId:_tenantId, restauranteId:_restauranteId, contaId:c.id, documento:doc, formaPagamento:_nfceForma, garcom:_nomeGarcom };
   if(sel) corpo.pessoa = sel.nome;
+  if(!_nfceComServico) corpo.semServico = true;
   fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo)
   }).then(function(r){ return r.json(); }).then(function(j){
     if(j.ok && j.nfce){

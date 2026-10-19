@@ -253,7 +253,8 @@ async function emitir(db, b) {
   const itens = montarItens(conta, cfg, amb);
   if (!itens.length) return { ok: false, error: porPessoa ? 'Essa pessoa não tem itens com valor na conta.' : 'A conta não tem itens com valor.' };
   let totalC = itens.reduce((s, i) => s + i._c, 0);
-  const servicoC = cfg.incluirServico ? Math.max(0, centavos(conta.taxa10)) : 0;
+  // b.semServico: cliente não pagou o atendimento → nota só com os produtos
+  const servicoC = (cfg.incluirServico && !b.semServico) ? Math.max(0, centavos(conta.taxa10)) : 0;
   // Taxa de serviço = "outras despesas acessórias" (vOutro), rateada entre os itens
   if (servicoC > 0) {
     let resto = servicoC;

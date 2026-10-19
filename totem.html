@@ -750,6 +750,16 @@
           <span id="valor-fonte-valores" style="color:var(--accent);font-weight:bold;min-width:45px;text-align:right;font-size:0.9rem;">100%</span>
         </div>
       </div>
+      <div class="cfg-grupo" style="border:1.5px solid rgba(56,189,248,0.4);border-radius:12px;padding:12px;background:rgba(56,189,248,0.05);">
+        <div class="cfg-titulo">⚖️ Modo balança (buffet) — só neste aparelho</div>
+        <div class="cfg-opcoes" id="cfg-balanca-grupo">
+          <button class="cfg-op" data-val="0">Desligado</button>
+          <button class="cfg-op" data-val="1">Ligado</button>
+        </div>
+        <div style="font-size:0.74rem;color:var(--muted);margin:8px 0 6px;line-height:1.4;">Ligado: ao tocar em iniciar, o totem lê o peso do prato sozinho, mostra as sugestões e abre o carrinho. A atendente cobra na maquininha e confirma aqui (pode emitir a nota na hora). O PDV precisa estar aberto no computador da balança.</div>
+        <div class="cfg-titulo" style="margin-top:6px;">Item cobrado por quilo</div>
+        <select id="cfg-balanca-item" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.95rem;"></select>
+      </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
@@ -799,7 +809,8 @@
         <span class="cart-total-lbl">Total</span>
         <span class="cart-total-val" id="cart-total-val">R$ 0,00</span>
       </div>
-      <button class="btn-finalizar" onclick="fecharCarrinho();finalizarPedido();">Finalizar Pedido →</button>
+      <button id="cart-btn-pesar" onclick="fecharCarrinho();abrirTelaBalanca();" style="display:none;width:100%;margin-bottom:8px;padding:14px;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:12px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">⚖️ Pesar outro prato</button>
+      <button class="btn-finalizar" id="cart-btn-finalizar" onclick="fecharCarrinho();finalizarPedido();">Finalizar Pedido →</button>
     </div>
   </div>
 </div>
@@ -1904,6 +1915,7 @@ function _carregarTelasEAbrir(itemAdicionado){
 
       if(!_sugTelas.length){
         _confirmarAdicionarPendente();
+        if(_itemAdicionadoRef && _itemAdicionadoRef.tipoVenda === 'kg' && _carrinho.length) abrirCarrinho();
         return;
       }
       _sugTelaIdx = 0;
@@ -1911,6 +1923,7 @@ function _carregarTelasEAbrir(itemAdicionado){
     }).catch(function(e){
       dbg('[SUGESTOES] Erro: '+(e&&e.message||e));
       _confirmarAdicionarPendente();
+      if(_itemAdicionadoRef && _itemAdicionadoRef.tipoVenda === 'kg' && _carrinho.length) abrirCarrinho();
     });
 }
 
@@ -1923,6 +1936,8 @@ function _abrirProximaTela(){
       dbg('[SUGESTOES] Tela '+_sugTelaIdx+' sem gatilho — dispara sempre');
       break;
     }
+    // ⚖️ Prato pesado na balança: mostra todas as telas de sugestão (bebidas etc.)
+    if(_itemAdicionadoRef && _itemAdicionadoRef.tipoVenda === 'kg'){ break; }
     var catItem = _itemAdicionadoRef
       ? (_itemAdicionadoRef.categoriaId||_itemAdicionadoRef.categoria||'')
       : '';
@@ -2683,6 +2698,7 @@ function alterarQtdModal(delta){
 
 function alterarQtd(idxCart, delta){
   if(idxCart < 0 || idxCart >= _carrinho.length) return;
+  if(delta > 0 && _carrinho[idxCart].tipoVenda === 'kg'){ mostrarAvisoTotem('Pra outro prato, use ⚖️ Pesar outro prato'); return; }
   _carrinho[idxCart].qtd += delta;
   if(_carrinho[idxCart].qtd <= 0) _carrinho.splice(idxCart, 1);
   atualizarBarra();
@@ -2799,6 +2815,8 @@ function finalizarPedido(){
     mostrarAvisoTotem('Adicione itens ao carrinho primeiro');
     return;
   }
+  // ⚖️ Modo balança: a atendente cobra aqui mesmo (maquininha) e registra como pago
+  if(_modoBalanca && !_modoQR){ abrirCobrancaBalanca(); return; }
   // Trava o botão pra evitar duplo clique
   var btn = document.querySelector('.btn-finalizar');
   if(btn && btn.disabled) return;
@@ -3064,9 +3082,12 @@ function comecarPedido(){
     atualizarBotaoVoltar();
   }catch(e){ console.warn('[TOTEM] render inicial:', e); }
   iniciarTimerInatividade();
+  // ⚖️ Modo balança: já abre a pesagem do prato
+  if(_modoBalanca && !_modoQR) abrirTelaBalanca();
 }
 
 function voltarTelaInicial(){
+  if(_modoBalanca && !_modoQR){ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc && !_balCobrancaPodeFechar()) return; if(tc) tc.remove(); }
   if(_carrinho.length){
     if(!confirm('Cancelar o pedido? Os itens do carrinho serão perdidos.')) return;
   }
@@ -3377,6 +3398,7 @@ function abrirConfig(){
     };
   });
 
+  _balPreencherConfig();
   document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
   document.getElementById('cfg-url').textContent = window.location.pathname;
 
@@ -3415,6 +3437,7 @@ function aplicarCfgPreview(){
 }
 
 function salvarConfig(){
+  _balSalvarDaConfig();
   var cfg = _lerCfgDoModal();
   try{
     localStorage.setItem(_CFG_KEY, JSON.stringify(cfg));
@@ -3529,6 +3552,319 @@ function abrirTecladoVirtual(spanId, onSave){
   box.appendChild(teclasDiv);
   mod.appendChild(box);
   document.body.appendChild(mod);
+}
+</script>
+<script>
+// ════════════════════════════════════════════════════════════════
+//  ⚖️ MODO BALANÇA (totem do buffet)
+//  Toque em iniciar → lê o peso sozinho → Próximo → sugestões → carrinho
+//  → atendente cobra na maquininha → "Pago" (vai pro Caixa como buffet pago)
+//  → nota fiscal opcional, impressa na impressora do modelo "Nota do buffet".
+//  O peso vem do PDV aberto no computador da balança (comandos_balanca), ou
+//  direto do app desktop se o totem estiver rodando nele.
+// ════════════════════════════════════════════════════════════════
+var _BAL_TOTEM_KEY = 'totem_modo_balanca';
+var _modoBalanca = false, _balItemId = '';
+(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; }catch(e){} })();
+
+function _balItensKg(){
+  var l = (_itensPrincipal || []).filter(function(i){ return i.tipoVenda === 'kg'; });
+  if(l.length){ try{ localStorage.setItem('totem_balanca_itens', JSON.stringify(l.map(function(i){ return { id:i.id, nome:i.nome, preco:i.preco, categoria:i.categoria, foto:i.foto||'' }; }))); }catch(e){} return l; }
+  try{ return (JSON.parse(localStorage.getItem('totem_balanca_itens') || '[]') || []).map(function(i){ return Object.assign({ fonte:'principal', tipoVenda:'kg' }, i); }); }catch(e){ return []; }
+}
+function _balItem(){
+  var l = _balItensKg();
+  var it = l.find(function(i){ return i.id === _balItemId; }) || l[0] || null;
+  if(it && !it.tipoVenda) it.tipoVenda = 'kg';
+  return it;
+}
+function _balAplicarTelaInicial(){
+  var b = document.querySelector('.ti-bater'), ins = document.querySelector('.ti-instrucao');
+  if(!b) return;
+  if(!b.getAttribute('data-orig')){ b.setAttribute('data-orig', b.textContent); if(ins) ins.setAttribute('data-orig', ins.textContent); }
+  if(_modoBalanca && !_modoQR){ b.textContent = 'COLOQUE O PRATO NA BALANÇA'; if(ins) ins.textContent = 'e toque para iniciar ⚖️'; }
+  else { b.textContent = b.getAttribute('data-orig'); if(ins) ins.textContent = ins.getAttribute('data-orig') || ''; }
+  var bp = document.getElementById('cart-btn-pesar'); if(bp) bp.style.display = (_modoBalanca && !_modoQR) ? 'block' : 'none';
+  var bf = document.getElementById('cart-btn-finalizar'); if(bf) bf.textContent = (_modoBalanca && !_modoQR) ? '💳 Cobrar →' : 'Finalizar Pedido →';
+}
+document.addEventListener('DOMContentLoaded', _balAplicarTelaInicial);
+setTimeout(_balAplicarTelaInicial, 300);
+
+function _balPreencherConfig(){
+  var grupo = document.querySelectorAll('#cfg-balanca-grupo .cfg-op');
+  grupo.forEach(function(b){
+    b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _modoBalanca);
+    b.onclick = function(){ grupo.forEach(function(x){ x.classList.remove('ativo'); }); b.classList.add('ativo'); };
+  });
+  var sel = document.getElementById('cfg-balanca-item'); if(!sel) return;
+  var l = _balItensKg(), atual = _balItem();
+  sel.innerHTML = l.length
+    ? l.map(function(i){ return '<option value="' + escapar(i.id) + '"' + (atual && atual.id === i.id ? ' selected' : '') + '>' + escapar(i.nome) + ' — R$ ' + _balBrl(i.preco) + '/kg</option>'; }).join('')
+    : '<option value="">Nenhum item "por quilo" no cardápio do PDV</option>';
+}
+function _balSalvarDaConfig(){
+  var on = document.querySelector('#cfg-balanca-grupo .cfg-op.ativo');
+  var sel = document.getElementById('cfg-balanca-item');
+  _modoBalanca = !!(on && on.getAttribute('data-val') === '1');
+  if(sel && sel.value) _balItemId = sel.value;
+  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId })); }catch(e){}
+  _balAplicarTelaInicial();
+}
+function _balBrl(v){ return (Number(v)||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function _balKg(g){ return ((Number(g)||0) / 1000).toFixed(3).replace('.', ','); }
+
+// ── Leitura do peso ──
+function _balLerUmaVez(){
+  var cfgLocal = null; try{ cfgLocal = JSON.parse(localStorage.getItem('pdv_balanca_cfg') || 'null'); }catch(e){}
+  var d = window.__BAVARO_DESKTOP__;
+  if(d && d.printerApiUrl && cfgLocal && !cfgLocal.simulacao){
+    var url = d.printerApiUrl + '/balanca?porta=' + encodeURIComponent(cfgLocal.porta||'COM3') + '&baud=' + encodeURIComponent(cfgLocal.baud||9600) + '&protocolo=' + encodeURIComponent(cfgLocal.protocolo||'toledo');
+    return fetch(url).then(function(r){ return r.json().catch(function(){ return {}; }); }).then(function(j){
+      if(j && j.ok) return Number(j.peso) || 0;
+      if(j && /peso v[aá]lido/i.test(j.error||'')) return 0;
+      throw new Error((j && j.error) || 'Falha na balança');
+    });
+  }
+  return new Promise(function(resolve, reject){
+    fbDb.collection('comandos_balanca').add({ restauranteId:_restauranteId, tenantId:_tenantId, status:'pendente', origem:'totem', solicitadoPor:'Totem buffet', criadoEm:Date.now() })
+      .then(function(ref){
+        var fim = false, unsub = null;
+        var to = setTimeout(function(){ if(fim) return; fim = true; if(unsub) unsub(); ref.delete().catch(function(){}); reject(new Error('SEM_PDV')); }, 7000);
+        unsub = ref.onSnapshot(function(doc){
+          if(fim || !doc.exists) return;
+          var v = doc.data() || {};
+          if(v.status === 'ok'){ fim = true; clearTimeout(to); unsub(); ref.delete().catch(function(){}); resolve(Number(v.peso) || 0); }
+          else if(v.status === 'erro'){ fim = true; clearTimeout(to); unsub(); ref.delete().catch(function(){}); reject(new Error(v.erro || 'Erro na balança')); }
+        }, function(){});
+      }).catch(reject);
+  });
+}
+
+var _balLoopId = 0, _balPeso = 0, _balEstavel = 0, _balAnterior = -1;
+function abrirTelaBalanca(){
+  var it = _balItem();
+  if(!it){ mostrarAvisoTotem('Nenhum item "por quilo" no cardápio — cadastre no PDV'); return; }
+  _balFecharTela();
+  _balPeso = 0; _balEstavel = 0; _balAnterior = -1;
+  var t = document.createElement('div');
+  t.id = 'tela-balanca';
+  t.style.cssText = 'position:fixed;inset:0;z-index:450;background:linear-gradient(135deg,#0a0a0c 0%,#10161a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;';
+  t.innerHTML =
+    '<div style="font-size:1.2rem;color:var(--muted);margin-bottom:6px;">⚖️ ' + escapar(it.nome) + ' — R$ ' + _balBrl(it.preco) + '/kg</div>' +
+    '<div id="bal-status" style="font-size:1.05rem;color:#38bdf8;margin-bottom:22px;min-height:1.4em;">Coloque o prato na balança</div>' +
+    '<div id="bal-peso" style="font-family:\'Bebas Neue\',sans-serif;font-size:8rem;line-height:1;color:var(--text);letter-spacing:0.03em;">0,000 <span style="font-size:3rem;color:var(--muted);">kg</span></div>' +
+    '<div id="bal-valor" style="font-family:\'Bebas Neue\',sans-serif;font-size:5rem;line-height:1.1;color:var(--accent);margin-top:12px;">R$ 0,00</div>' +
+    '<div style="display:flex;gap:14px;margin-top:40px;width:100%;max-width:620px;">' +
+      '<button onclick="_balCancelar()" style="flex:1;padding:22px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:16px;font-weight:700;font-size:1.15rem;cursor:pointer;font-family:inherit;">Cancelar</button>' +
+      '<button id="bal-btn-prox" onclick="_balProximo()" disabled style="flex:2;padding:22px;background:var(--accent);border:none;color:#000;border-radius:16px;font-weight:800;font-size:1.3rem;cursor:pointer;font-family:inherit;opacity:0.35;">Próximo →</button>' +
+    '</div>';
+  document.body.appendChild(t);
+  var meu = ++_balLoopId;
+  var ciclo = function(){
+    if(meu !== _balLoopId || !document.getElementById('tela-balanca')) return;
+    _balLerUmaVez().then(function(g){
+      if(meu !== _balLoopId) return;
+      _balMostrar(g);
+      setTimeout(ciclo, 350);
+    }, function(e){
+      if(meu !== _balLoopId) return;
+      var st = document.getElementById('bal-status');
+      if(st){ st.style.color = '#f87171'; st.textContent = e.message === 'SEM_PDV' ? 'A balança não respondeu — o PDV está aberto no computador da balança?' : '⚠️ ' + e.message; }
+      setTimeout(ciclo, 1500);
+    });
+  };
+  ciclo();
+  resetTimerInatividade();
+}
+function _balMostrar(g){
+  var it = _balItem(); if(!it) return;
+  var estavel = g >= 20 && _balAnterior >= 0 && Math.abs(g - _balAnterior) <= 4;
+  _balAnterior = g; _balPeso = g;
+  if(estavel) _balEstavel = g;
+  else if(g < 20) _balEstavel = 0;
+  var pe = document.getElementById('bal-peso'), va = document.getElementById('bal-valor'), st = document.getElementById('bal-status'), bt = document.getElementById('bal-btn-prox');
+  if(pe) pe.innerHTML = _balKg(g) + ' <span style="font-size:3rem;color:var(--muted);">kg</span>';
+  if(va) va.textContent = 'R$ ' + _balBrl(Math.round(g * (it.preco||0) / 10) / 100);
+  if(st){
+    st.style.color = _balEstavel ? '#4ade80' : '#38bdf8';
+    st.textContent = g < 20 ? 'Coloque o prato na balança' : (_balEstavel ? '✓ Peso confirmado — toque em Próximo' : 'Lendo o peso…');
+  }
+  if(bt){ bt.disabled = !_balEstavel; bt.style.opacity = _balEstavel ? '1' : '0.35'; }
+  if(g >= 20) resetTimerInatividade();
+}
+function _balFecharTela(){ _balLoopId++; var t = document.getElementById('tela-balanca'); if(t) t.remove(); }
+function _balCancelar(){
+  _balFecharTela();
+  if(!_carrinho.length) voltarTelaInicial();
+}
+function _balProximo(){
+  var it = _balItem(), g = _balEstavel;
+  if(!it || !g) return;
+  _balFecharTela();
+  var valor = Math.round(g * (it.preco||0) / 10) / 100;
+  _itemPendente = {
+    itemId: it.id, fonte: 'principal', nome: it.nome,
+    preco: valor, precoBase: it.preco || 0, foto: it.foto || '', qtd: 1,
+    selecoes: {}, selecoesLabel: _balKg(g) + ' kg × R$ ' + _balBrl(it.preco) + '/kg',
+    observacao: '', gruposIds: [], tipoVenda: 'kg', peso: g
+  };
+  try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
+  _sugTelaIdx = 0; _sugTelas = [];
+  _carregarTelasEAbrir(Object.assign({}, it, { tipoVenda:'kg' }));
+}
+
+// ── Cobrança (maquininha) + nota fiscal ──
+var _balForma = '', _balNota = false, _balDoc = '', _balPedido = null, _balEmitindo = false;
+function _balCobrancaPodeFechar(){ return !_balEmitindo; }
+function _balTotal(){ return Math.round(_carrinho.reduce(function(s,c){ return s + c.preco * c.qtd; }, 0) * 100) / 100; }
+function abrirCobrancaBalanca(){
+  _balForma = ''; _balNota = false; _balDoc = ''; _balPedido = null; _balEmitindo = false;
+  var ex = document.getElementById('tela-cobranca'); if(ex) ex.remove();
+  var t = document.createElement('div');
+  t.id = 'tela-cobranca';
+  t.style.cssText = 'position:fixed;inset:0;z-index:460;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;';
+  t.innerHTML = '<div id="cob-box" style="background:var(--surface);border:1px solid var(--border);border-radius:20px;max-width:560px;width:100%;padding:22px;"></div>';
+  document.body.appendChild(t);
+  _balRenderCobranca();
+}
+function _balBtn(on, html, onclick, extra){
+  return '<button onclick="' + onclick + '" style="padding:18px 10px;border-radius:14px;border:2px solid ' + (on ? 'var(--accent)' : 'var(--border)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--text)') + ';font-weight:800;font-size:1.05rem;cursor:pointer;font-family:inherit;' + (extra||'') + '">' + html + '</button>';
+}
+function _balRenderCobranca(msg){
+  var box = document.getElementById('cob-box'); if(!box) return;
+  var formas = [['debito','💳 Débito'],['credito','💳 Crédito'],['pix','📱 Pix'],['dinheiro','💵 Dinheiro']];
+  var docTxt = _balDoc ? _docFormatar(_balDoc) : '';
+  var sit = _docSituacao(_balDoc);
+  var rot = !_balDoc ? 'Sem CPF/CNPJ (consumidor não identificado)' : sit === 'ok' ? (_balDoc.length === 11 ? 'CPF' : 'CNPJ') + ' válido ✓' : sit === 'invalido11' ? 'CPF inválido (se for CNPJ, continue digitando)' : /invalido/.test(sit) ? 'Número inválido — confira' : (_balDoc.length < 11 ? 'CPF: faltam ' + (11 - _balDoc.length) : 'CNPJ: faltam ' + (14 - _balDoc.length));
+  var teclas = ['1','2','3','4','5','6','7','8','9','limpar','0','⌫'];
+  box.innerHTML =
+    '<div style="text-align:center;font-size:1rem;color:var(--muted);">Passe na maquininha</div>' +
+    '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:4.2rem;color:var(--accent);line-height:1.05;margin-bottom:14px;">R$ ' + _balBrl(_balTotal()) + '</div>' +
+    '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Forma de pagamento</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
+    '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Nota fiscal?</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">' + _balBtn(!_balNota, 'Não', '_balNota=false;_balRenderCobranca()') + _balBtn(_balNota, '🧾 Emitir nota', '_balNota=true;_balRenderCobranca()') + '</div>' +
+    (_balNota ?
+      '<div style="background:var(--surface2);border:1.5px solid ' + (/invalido/.test(sit) ? '#f87171' : sit === 'ok' ? '#4ade80' : 'var(--border)') + ';border-radius:12px;padding:12px;text-align:center;font-size:1.6rem;font-weight:800;min-height:1.6em;letter-spacing:0.03em;">' + (docTxt || '<span style="color:var(--muted);font-size:1rem;font-weight:600;">CPF ou CNPJ (opcional)</span>') + '</div>' +
+      '<div style="font-size:0.8rem;color:' + (/invalido/.test(sit) ? '#f87171' : sit === 'ok' ? '#4ade80' : 'var(--muted)') + ';margin:6px 0 10px;text-align:center;">' + rot + '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">' + teclas.map(function(k){
+        return '<button onclick="_balTecla(\'' + k + '\')" style="padding:16px 0;border-radius:12px;border:1px solid var(--border);background:' + (k.length > 1 ? 'var(--surface)' : 'var(--surface2)') + ';color:' + (k === '⌫' ? '#f87171' : 'var(--text)') + ';font-size:' + (k.length > 1 && k !== '⌫' ? '0.9rem' : '1.4rem') + ';font-weight:800;cursor:pointer;font-family:inherit;">' + k + '</button>';
+      }).join('') + '</div>' : '') +
+    '<div id="cob-msg" style="min-height:1em;margin-bottom:8px;">' + (msg || '') + '</div>' +
+    '<div style="display:flex;gap:10px;">' +
+      '<button onclick="var t=document.getElementById(\'tela-cobranca\');if(t)t.remove();abrirCarrinho();" style="flex:1;padding:18px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;">Voltar</button>' +
+      '<button id="cob-btn-ok" onclick="_balConfirmarPago()" style="flex:2;padding:18px;background:#16a34a;border:none;color:#fff;border-radius:14px;font-weight:800;font-size:1.2rem;cursor:pointer;font-family:inherit;">✓ Pago</button>' +
+    '</div>';
+  resetTimerInatividade();
+}
+function _balTecla(k){
+  if(k === '⌫') _balDoc = _balDoc.slice(0, -1);
+  else if(k === 'limpar') _balDoc = '';
+  else if(_balDoc.length < 14) _balDoc += k;
+  _balRenderCobranca();
+}
+function _balAviso(html, cor){ var m = document.getElementById('cob-msg'); if(m) m.innerHTML = '<div style="color:' + (cor || '#f87171') + ';font-size:0.92rem;text-align:center;">' + html + '</div>'; }
+function _balConfirmarPago(){
+  if(!_carrinho.length) return;
+  if(!_balForma){ _balAviso('Escolha a forma de pagamento.'); return; }
+  if(_balNota){
+    var sit = _docSituacao(_balDoc);
+    if(sit === 'parcial'){ _balAviso('CPF tem 11 números e CNPJ tem 14 (ou apague pra emitir sem).'); return; }
+    if(/invalido/.test(sit)){ _balAviso('CPF/CNPJ inválido — confira com o cliente (ou apague pra emitir sem).'); return; }
+  }
+  var btn = document.getElementById('cob-btn-ok');
+  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Registrando…'; }
+  var agora = Date.now(), hoje = _dataHoje(), total = _balTotal();
+  var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId);
+  var ref = base.collection('pedidos_totem').doc();
+  var refSeq = base.collection('senhas_totem').doc(hoje + '_buffet');
+  var itens = _carrinho.map(function(c){
+    var o = { id: c.itemId, fonte: c.fonte, nome: c.nome, preco: c.preco, precoBase: c.precoBase || c.preco, qtd: c.qtd, selecoesLabel: c.selecoesLabel || '', observacao: c.observacao || '' };
+    if(c.tipoVenda === 'kg'){ o.tipoVenda = 'kg'; o.peso = c.peso; }
+    return o;
+  });
+  fbDb.runTransaction(function(tx){
+    return tx.get(refSeq).then(function(d){
+      var n = ((d.exists && d.data().ultima) || 0) + 1;
+      tx.set(refSeq, { ultima: n, atualizadoEm: agora }, { merge: true });
+      var pedido = { senha: 'B' + n, data: hoje, tipo: 'buffet', origemTotemBalanca: true,
+        itens: itens, total: total, status: 'pago', formaPagamento: _balForma,
+        criadoEm: agora, pagoEm: agora, reciboImpresso: false, restauranteId: _restauranteId, tenantId: _tenantId };
+      tx.set(ref, pedido);
+      return pedido;
+    });
+  }).then(function(pedido){
+    _balPedido = Object.assign({ id: ref.id }, pedido);
+    _carrinho = []; atualizarBarra(); try{ renderItens(); }catch(e){}
+    if(_balNota) _balEmitirNota(); else _balConcluido();
+  }).catch(function(e){
+    if(btn){ btn.disabled = false; btn.textContent = '✓ Pago'; }
+    _balAviso('Não registrou a venda: ' + escapar(e.message || e.code || 'erro') + '. Tente de novo.');
+  });
+}
+function _balEmitirNota(){
+  var p = _balPedido; if(!p) return;
+  _balEmitindo = true;
+  var box = document.getElementById('cob-box');
+  if(box) box.innerHTML = '<div style="text-align:center;padding:30px 0;"><div style="font-size:2.6rem;">🧾</div><div style="font-weight:800;font-size:1.2rem;margin:10px 0;">Venda ' + escapar(p.senha) + ' registrada</div><div style="color:var(--muted);">Emitindo a nota fiscal na SEFAZ…</div></div>';
+  fetch('/api/nfce', { method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ acao:'emitir', origem:'totem', tenantId:_tenantId, restauranteId:_restauranteId, pedidoId:p.id, documento:_balDoc, formaPagamento:_balForma, garcom:'Totem buffet' })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    _balEmitindo = false;
+    if(j.ok && j.nfce){
+      p.nfce = j.nfce;
+      if(!j.jaEmitida) fbDb.collection('comandos_impressao').add({ tipo:'nfce', buffet:true, restauranteId:_restauranteId, tenantId:_tenantId, pedidoTotemId:p.id, senhaTotem:p.senha, nfce:j.nfce, solicitadoPor:'Totem buffet', solicitadoEm:Date.now(), criadoEm:Date.now() }).catch(function(){});
+      _balConcluido('🧾 NFC-e nº ' + escapar(j.nfce.numero) + ' autorizada' + (j.nfce.ambiente === 'homologacao' ? ' (TESTE)' : '') + ' — imprimindo');
+      return;
+    }
+    _balErroNota(j.error || 'erro desconhecido');
+  }).catch(function(){ _balEmitindo = false; _balErroNota('Sem conexão com o servidor.'); });
+}
+function _balErroNota(erro){
+  var box = document.getElementById('cob-box'); if(!box) return;
+  box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:2.4rem;">⚠️</div><div style="font-weight:800;font-size:1.15rem;margin:8px 0;">Venda ' + escapar(_balPedido.senha) + ' registrada, mas a nota não saiu</div>' +
+    '<div style="color:#f87171;font-size:0.9rem;margin-bottom:6px;">' + escapar(erro) + '</div><div style="color:var(--muted);font-size:0.85rem;">Dá pra emitir depois pelo app Caixa (Histórico).</div></div>' +
+    '<div style="display:flex;gap:10px;margin-top:10px;">' +
+      '<button onclick="_balConcluido()" style="flex:1;padding:18px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:14px;font-weight:700;cursor:pointer;font-family:inherit;">Concluir sem nota</button>' +
+      '<button onclick="_balEmitirNota()" style="flex:1;padding:18px;background:var(--accent);border:none;color:#000;border-radius:14px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Tentar de novo</button>' +
+    '</div>';
+}
+function _balConcluido(linhaNota){
+  var p = _balPedido, box = document.getElementById('cob-box'); if(!box || !p) return;
+  var nomes = { debito:'Débito', credito:'Crédito', pix:'Pix', dinheiro:'Dinheiro' };
+  box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:3rem;">✅</div>' +
+    '<div style="font-weight:800;font-size:1.35rem;margin:8px 0;">Venda ' + escapar(p.senha) + ' paga</div>' +
+    '<div style="font-size:1.1rem;color:var(--accent);font-weight:700;">R$ ' + _balBrl(p.total) + ' · ' + (nomes[p.formaPagamento] || p.formaPagamento) + '</div>' +
+    (linhaNota ? '<div style="color:#4ade80;margin-top:10px;">' + linhaNota + '</div>' : '') +
+    '<div style="color:var(--muted);font-size:0.82rem;margin-top:10px;">Volta sozinha em <span id="cob-seg">6</span>s</div></div>' +
+    '<button onclick="_balFinalizarAtendimento()" style="width:100%;margin-top:8px;padding:18px;background:var(--accent);border:none;color:#000;border-radius:14px;font-weight:800;font-size:1.15rem;cursor:pointer;font-family:inherit;">✓ Concluir</button>';
+  var seg = 6, meu = p.id;
+  var iv = setInterval(function(){
+    if(!_balPedido || _balPedido.id !== meu || !document.getElementById('cob-seg')){ clearInterval(iv); return; }
+    seg--; var e = document.getElementById('cob-seg'); if(e) e.textContent = seg;
+    if(seg <= 0){ clearInterval(iv); _balFinalizarAtendimento(); }
+  }, 1000);
+}
+function _balFinalizarAtendimento(){
+  _balPedido = null; _balEmitindo = false;
+  var t = document.getElementById('tela-cobranca'); if(t) t.remove();
+  _carrinho = [];
+  voltarTelaInicial();
+}
+
+// validação de CPF/CNPJ (igual ao app Caixa)
+function _docCpfOk(c){ if(c.length !== 11 || /^(\d)\1+$/.test(c)) return false; for(var t = 9; t < 11; t++){ var s = 0; for(var i = 0; i < t; i++) s += +c[i] * (t + 1 - i); if(((s * 10) % 11) % 10 !== +c[t]) return false; } return true; }
+function _docCnpjOk(c){ if(c.length !== 14 || /^(\d)\1+$/.test(c)) return false; function calc(n){ var s = 0, p = n - 7; for(var i = 0; i < n; i++){ s += +c[i] * p--; if(p < 2) p = 9; } var r = s % 11; return r < 2 ? 0 : 11 - r; } return calc(12) === +c[12] && calc(13) === +c[13]; }
+function _docFormatar(d){
+  return d.length <= 11
+    ? d.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2')
+    : d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5').replace(/\D+$/,'');
+}
+function _docSituacao(d){
+  if(!d) return '';
+  if(d.length === 11) return _docCpfOk(d) ? 'ok' : 'invalido11';
+  if(d.length === 14) return _docCnpjOk(d) ? 'ok' : 'invalido';
+  return 'parcial';
 }
 </script>
 </body>

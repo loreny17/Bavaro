@@ -5093,6 +5093,7 @@ function iniciarListenerBalanca(){
         // Ignora pedidos velhos (ex: PDV reaberto depois)
         var v = d.data()||{};
         if(Date.now() - (v.criadoEm||0) > 15000){ d.ref.delete().catch(function(){}); return; }
+        if(v.origem === 'totem'){ _balAtenderTotem(d.ref); return; }
         balancaLerPeso().then(function(g){
           return d.ref.update({status:'ok', peso:g, respondidoEm:Date.now()});
         }).catch(function(e){
@@ -5100,6 +5101,29 @@ function iniciarListenerBalanca(){
         }).catch(function(){});
       });
     }, function(e){ console.warn('[BALANÇA] listener erro:', e.code||e.message); });
+}
+
+// Totem do buffet (modo balança): só responde o PDV que tem balança DE VERDADE
+// (sem simulação) e com "atende o totem" ligado. Transação: um PDV só lê cada pedido.
+function _balAtenderTotem(ref){
+  var cfg = _balCfg();
+  if(cfg.simulacao || cfg.atendeTotem === false) return;
+  fbDb.runTransaction(function(tx){
+    return tx.get(ref).then(function(d){
+      if(!d.exists || (d.data()||{}).status !== 'pendente') return false;
+      tx.update(ref, { status:'lendo', lidoPor:_pdvIdAparelho });
+      return true;
+    });
+  }).then(function(minha){
+    if(!minha) return;
+    return balancaLerPeso().then(function(g){
+      return ref.update({ status:'ok', peso:g, respondidoEm:Date.now() });
+    }, function(e){
+      var m = (e && e.message) || 'Falha na leitura';
+      // balança respondeu "sem peso" (prato ainda não está em cima) não é erro de verdade
+      return ref.update(/peso v[aá]lido/i.test(m) ? { status:'ok', peso:0, respondidoEm:Date.now() } : { status:'erro', erro:m, respondidoEm:Date.now() });
+    });
+  }).catch(function(){});
 }
 
 var _BAL_CFG_KEY = 'pdv_balanca_cfg';
@@ -5241,6 +5265,7 @@ function abrirBalanca(){
         '<button onclick="var c=document.getElementById(\'bal-config\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';" style="background:none;border:none;color:var(--muted);font-size:0.76rem;cursor:pointer;font-family:inherit;">⚙️ Configuração da balança</button>'+
         '<div id="bal-config" style="display:none;margin-top:8px;font-size:0.78rem;">'+
           '<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="bal-cfg-sim" '+(cfg.simulacao?'checked':'')+' style="width:16px;height:16px;"> Modo simulação (teste sem balança)</label>'+
+          '<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="bal-cfg-totem" '+(cfg.atendeTotem!==false?'checked':'')+' style="width:16px;height:16px;"> Esta balança atende o totem do buffet (modo balança)</label>'+
           '<div style="display:flex;gap:8px;margin-bottom:8px;">'+
             '<input type="text" id="bal-cfg-porta" value="'+escapeHtml(cfg.porta)+'" placeholder="COM3" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;">'+
             '<select id="bal-cfg-baud" style="flex:0 0 90px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;">'+
@@ -5677,7 +5702,8 @@ function balSalvarConfig(){
     simulacao: document.getElementById('bal-cfg-sim').checked,
     porta: (document.getElementById('bal-cfg-porta').value||'COM3').trim(),
     baud: parseInt(document.getElementById('bal-cfg-baud').value)||9600,
-    protocolo: document.getElementById('bal-cfg-proto').value
+    protocolo: document.getElementById('bal-cfg-proto').value,
+    atendeTotem: (function(){ var c = document.getElementById('bal-cfg-totem'); return c ? c.checked : true; })()
   };
   _balSalvarCfg(cfg);
   showToast('✓ Configuração da balança salva','#4ade80');
@@ -6027,6 +6053,8 @@ function renderModelos(){
       tipoBadge = '<span style="background:rgba(74,222,128,0.15);color:#4ade80;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🏁 FECHAMENTO</span>';
     } else if(tipo === 'cupom_cliente'){
       tipoBadge = '<span style="background:rgba(168,85,247,0.15);color:#c084fc;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">🎫 CUPOM CLIENTE</span>';
+    } else if(tipo === 'nfce_buffet'){
+      tipoBadge = '<span style="background:rgba(56,189,248,0.15);color:#38bdf8;border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">⚖️ NOTA DO BUFFET</span>';
     } else {
       tipoBadge = '<span style="background:rgba(212,168,67,0.15);color:var(--accent);border-radius:5px;padding:2px 6px;font-size:0.65rem;font-weight:700;text-transform:uppercase;">📝 PEDIDO</span>';
     }
@@ -6034,6 +6062,7 @@ function renderModelos(){
     var tipoTxt;
     if(tipo === 'fechamento') tipoTxt = 'Imprime no fechamento da mesa';
     else if(tipo === 'cupom_cliente') tipoTxt = 'Ticket com senha do totem';
+    else if(tipo === 'nfce_buffet') tipoTxt = 'Nota fiscal do totem do buffet';
     else tipoTxt = (m.filtro === 'item' ? qtd+' itens' : qtd+' categorias' +
       ((m.itensExcluidos||[]).length ? ' · ' + m.itensExcluidos.length + ' ' + (m.itensExcluidos.length > 1 ? 'itens fora' : 'item fora') : '') +
       ((m.itensExtras||[]).length ? ' · +' + m.itensExtras.length + ' ' + (m.itensExtras.length > 1 ? 'itens' : 'item') : ''));
@@ -6431,7 +6460,7 @@ function atualizarTipoModelo(){
   var blocoNumPed = document.getElementById('mod-num-pedido-mostrar');
   var blocoNumPedWrap = blocoNumPed ? blocoNumPed.closest('.cfg-bloco') : null;
   // Fechamento e Cupom Cliente NÃO precisam de filtro de categoria/item (pegam tudo)
-  if(tipo === 'fechamento' || tipo === 'cupom_cliente'){
+  if(tipo === 'fechamento' || tipo === 'cupom_cliente' || tipo === 'nfce_buffet'){
     if(blocoFiltro) blocoFiltro.style.display = 'none';
     document.getElementById('mod-filtro-cat').style.display = 'none';
     document.getElementById('mod-filtro-itens').style.display = 'none';
@@ -6773,7 +6802,7 @@ function salvarModelo(){
     estiloNumeroPedido: estilos.estiloNumeroPedido,
     atualizadoEm: Date.now()
   };
-  if(tipo === 'fechamento' || tipo === 'cupom_cliente'){
+  if(tipo === 'fechamento' || tipo === 'cupom_cliente' || tipo === 'nfce_buffet'){
     // Fechamento e Cupom Cliente não têm filtro - imprimem sempre o pedido inteiro
     dados.categorias = [];
     dados.categoriasTotem = [];
@@ -9423,7 +9452,8 @@ function processarComandoImpressao(cmdId, cmd){
     // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO.
     // Só UM PDV imprime (se tiver dois abertos do mesmo restaurante, o outro ignora)
     var danfeN = null;
-    _imprimirNasMinhas(cmdId, _impsDosModelos(['fechamento']), function(imp){
+    // Nota do totem do buffet (modo balança) sai na impressora do modelo "Nota do buffet"
+    _imprimirNasMinhas(cmdId, _impsDosModelos(cmd.buffet ? ['nfce_buffet', 'fechamento'] : ['fechamento']), function(imp){
       try{
         if(danfeN === null) danfeN = gerarDanfeNfce(cmd.nfce || {});
         enviarParaImpressora(imp, danfeN);
@@ -15451,8 +15481,12 @@ function toggleAdminUsuario(garcomId, novoValor){
             <input type="radio" name="mod-tipo" value="cupom_cliente" onchange="atualizarTipoModelo()">
             <span style="font-size:0.82rem;font-weight:600;">🎫 Cupom Cliente</span>
           </label>
+          <label style="flex:1;min-width:120px;display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:10px;cursor:pointer;">
+            <input type="radio" name="mod-tipo" value="nfce_buffet" onchange="atualizarTipoModelo()">
+            <span style="font-size:0.82rem;font-weight:600;">⚖️ Nota do buffet</span>
+          </label>
         </div>
-        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa. 🎫 Cupom Cliente = ticket com senha do totem (sai no caixa pro cliente).</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">📝 Pedido = imprime ao enviar pedido. 🏁 Fechamento = só ao fechar conta da mesa. 🎫 Cupom Cliente = ticket com senha do totem (sai no caixa pro cliente). ⚖️ Nota do buffet = impressora onde sai a nota fiscal das vendas do totem em modo balança.</div>
       </div>
       <!-- ☀️ Toggle: modelo exclusivo de Almoço -->
       <div class="f-grupo" id="bloco-mod-almoco" style="background:linear-gradient(135deg,rgba(251,191,36,0.06),rgba(251,191,36,0.02));border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:12px;">

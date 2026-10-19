@@ -1438,6 +1438,7 @@ function iniciarApp(){
   // Listener de comandos de impressão (insumos, reimpressão) — independente da impressora
   try { iniciarListenerComandosImpressao(); } catch(e){ console.warn('Erro comandos imp:', e); }
   try { iniciarListenerBalanca(); } catch(e){ console.warn('Erro listener balança:', e); }
+  try { _balAoVivoIniciar(); } catch(e){ console.warn('Erro balança ao vivo:', e); }
   try { iniciarListenerBaixaTotem(); } catch(e){ console.warn('Erro baixa totem:', e); }
   // ⚡ Conecta com a impressora JÁ no boot (não espera abrir a aba Impressoras)
   try { qzInicializar(); } catch(e){ console.warn('Erro init impressora:', e); }
@@ -5154,7 +5155,48 @@ function _balParsePeso(raw){
 }
 
 // Lê o peso: simulação (aleatório), app desktop (Electron) ou QZ Tray (navegador)
+// Fila: só uma leitura da porta serial por vez (ao vivo + garçom + botão "Ler balança")
+var _balFila = Promise.resolve();
 function balancaLerPeso(){
+  var p = _balFila.then(_balancaLerPesoBruto, _balancaLerPesoBruto);
+  _balFila = p.catch(function(){});
+  return p;
+}
+
+// ⚖️ BALANÇA AO VIVO pro totem do buffet: este PDV lê a balança local sem parar
+// (só o computador da balança: sem simulação e com "atende o totem" ligado) e
+// publica o peso num documento só — e só quando muda (≥5 g), quando firma, ou a
+// cada 10 s como sinal de vida. Assim o totem sabe na hora que puseram o prato,
+// sem ficar gravando pedido de pesagem no banco o dia inteiro.
+var _balVivo = { ult:-1, est:null, envio:0, erro:'', ocupado:false, ant:-1, timer:null };
+function _balAoVivoIniciar(){
+  if(_balVivo.timer) return;
+  _balVivo.timer = setInterval(_balAoVivoTick, 700);
+}
+function _balAoVivoTick(){
+  var cfg = _balCfg();
+  if(cfg.simulacao || cfg.atendeTotem === false || !_restauranteAtivo || !fbDb || _balVivo.ocupado) return;
+  _balVivo.ocupado = true;
+  balancaLerPeso().then(function(g){ _balAoVivoPublicar(Number(g) || 0, ''); }, function(e){
+    var m = (e && e.message) || 'Falha na balança';
+    if(/peso v[aá]lido/i.test(m)) _balAoVivoPublicar(0, ''); else _balAoVivoPublicar(_balVivo.ult < 0 ? 0 : _balVivo.ult, m);
+  }).then(function(){ _balVivo.ocupado = false; }, function(){ _balVivo.ocupado = false; });
+}
+function _balAoVivoPublicar(g, erro){
+  _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-3);
+  var est = g >= 20 && _balVivo.hist.length === 3 && (Math.max.apply(null, _balVivo.hist) - Math.min.apply(null, _balVivo.hist)) <= 4;
+  _balVivo.ant = g;
+  var agora = Date.now();
+  var mudou = _balVivo.ult < 0 || Math.abs(g - _balVivo.ult) >= 5 || est !== _balVivo.est || erro !== _balVivo.erro;
+  if(!mudou && agora - _balVivo.envio < 10000) return;
+  _balVivo.ult = g; _balVivo.est = est; _balVivo.erro = erro; _balVivo.envio = agora;
+  fbDb.collection('comandos_balanca').doc('aovivo_' + _restauranteAtivo.id).set({
+    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: g, estavel: est, erro: erro || '',
+    atualizadoEm: agora, por: _pdvIdAparelho
+  }).catch(function(e){ console.warn('[BALANÇA ao vivo]', e.code || e.message); });
+}
+
+function _balancaLerPesoBruto(){
   var cfg = _balCfg();
   if(cfg.simulacao){
     return new Promise(function(resolve){
@@ -5188,13 +5230,18 @@ function balancaLerPeso(){
     var to = setTimeout(function(){
       if(done) return; done = true;
       try{ qz.serial.closePort(port); }catch(e){}
+      var gParcial = _balParsePeso(buf);   // balança que não manda fim de linha: usa o que chegou
+      if(gParcial != null){ resolve(gParcial); return; }
       reject(new Error('Balança não respondeu em 3s (porta '+port+'). Confira porta/cabo.'));
     }, 3000);
     try{
       qz.serial.setSerialCallbacks(function(evt){
         if(done || !evt || evt.portName !== port) return;
         buf += (evt.output || '');
-        var g = _balParsePeso(buf);
+        // espera a resposta COMPLETA (ETX/fim de linha): antes lia pedaço do número
+        // (ex.: "0051" de "00512") e o peso ficava pulando
+        if(!/[\x03\r\n]/.test(buf)) return;
+        var g = _balParsePeso(buf.split(/[\x03\r\n]/).filter(function(x){ return /\d/.test(x); }).pop() || buf);
         if(g != null){
           done = true; clearTimeout(to);
           try{ qz.serial.closePort(port); }catch(e){}

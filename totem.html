@@ -3609,6 +3609,7 @@ function _balSalvarDaConfig(){
   if(sel && sel.value) _balItemId = sel.value;
   try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId })); }catch(e){}
   _balAplicarTelaInicial();
+  _balVivoAssinar();
 }
 function _balBrl(v){ return (Number(v)||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function _balKg(g){ return ((Number(g)||0) / 1000).toFixed(3).replace('.', ','); }
@@ -3640,12 +3641,46 @@ function _balLerUmaVez(){
   });
 }
 
+// ── Peso AO VIVO publicado pelo PDV da balança (sem pedir leitura a cada vez) ──
+var _balVivo = null, _balVivoRecebido = 0, _balPrecisaZerar = false, _balVivoUnsub = null;
+function _balVivoFresco(){ return !!_balVivo && Date.now() - _balVivoRecebido < 25000; }
+function _balVivoAssinar(){
+  if(_balVivoUnsub || _modoQR || !_modoBalanca) return;
+  if(!fbDb || !_restauranteId){ setTimeout(_balVivoAssinar, 1000); return; }
+  var primeiro = true;
+  _balVivoUnsub = fbDb.collection('comandos_balanca').doc('aovivo_' + _restauranteId).onSnapshot(function(doc){
+    var v = doc.exists ? (doc.data() || {}) : null;
+    // 1º retorno pode ser um peso velho (PDV fechado há horas): só vale se for recente
+    if(primeiro){ primeiro = false; if(!v || Math.abs(Date.now() - (v.atualizadoEm || 0)) > 25000){ _balVivo = v; return; } }
+    _balVivo = v; _balVivoRecebido = Date.now();
+    _balVivoNaTelaInicial();
+  }, function(e){ console.warn('[BALANÇA ao vivo]', e.code || e.message); _balVivoUnsub = null; setTimeout(_balVivoAssinar, 5000); });
+}
+setTimeout(_balVivoAssinar, 1500);
+// Prato colocado na balança com o totem parado na tela inicial → começa sozinho
+function _balVivoNaTelaInicial(){
+  if(!_modoBalanca || _modoQR || !_balVivo) return;
+  var g = Number(_balVivo.peso) || 0;
+  if(g < 20){ _balPrecisaZerar = false; return; }
+  if(_balPrecisaZerar || !_balVivo.estavel) return;
+  var ti = document.getElementById('tela-inicial');
+  if(!ti || ti.style.display === 'none' || ti.classList.contains('escondida')) return;
+  if(document.getElementById('tela-balanca') || document.getElementById('tela-cobranca')) return;
+  _balPrecisaZerar = true;
+  comecarPedido();
+}
+setInterval(function(){
+  var ins = document.querySelector('.ti-instrucao');
+  if(ins && _modoBalanca && !_modoQR) ins.textContent = _balVivoFresco() ? 'o pedido começa sozinho ⚖️' : 'e toque para iniciar ⚖️';
+  if(_balVivoFresco()) _balVivoNaTelaInicial();
+}, 1000);
+
 var _balLoopId = 0, _balPeso = 0, _balEstavel = 0, _balAnterior = -1;
 function abrirTelaBalanca(){
   var it = _balItem();
   if(!it){ mostrarAvisoTotem('Nenhum item "por quilo" no cardápio — cadastre no PDV'); return; }
   _balFecharTela();
-  _balPeso = 0; _balEstavel = 0; _balAnterior = -1;
+  _balPeso = 0; _balEstavel = 0; _balAnterior = -1; _balHist = [];
   var t = document.createElement('div');
   t.id = 'tela-balanca';
   t.style.cssText = 'position:fixed;inset:0;z-index:450;background:linear-gradient(135deg,#0a0a0c 0%,#10161a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;';
@@ -3660,8 +3695,16 @@ function abrirTelaBalanca(){
     '</div>';
   document.body.appendChild(t);
   var meu = ++_balLoopId;
+  _balPrecisaZerar = true;
   var ciclo = function(){
     if(meu !== _balLoopId || !document.getElementById('tela-balanca')) return;
+    // PDV publicando ao vivo: usa o peso dele (sem gravar pedido de leitura)
+    if(_balVivoFresco()){
+      if(_balVivo.erro){ var st0 = document.getElementById('bal-status'); if(st0){ st0.style.color = '#f87171'; st0.textContent = '⚠️ ' + _balVivo.erro; } }
+      else _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel);
+      setTimeout(ciclo, 250);
+      return;
+    }
     _balLerUmaVez().then(function(g){
       if(meu !== _balLoopId) return;
       _balMostrar(g);
@@ -3676,18 +3719,26 @@ function abrirTelaBalanca(){
   ciclo();
   resetTimerInatividade();
 }
-function _balMostrar(g){
+// Só mostra peso FIRME: precisa de 3 leituras seguidas iguais (±4 g). Depois de
+// confirmado, o número trava — oscilação pequena ou leitura maluca isolada não muda
+// nada. Só troca se vier OUTRO peso firme (diferença > 10 g) ou se tirarem o prato.
+var _balHist = [];
+function _balMostrar(g, estavelPdv){
   var it = _balItem(); if(!it) return;
-  var estavel = g >= 20 && _balAnterior >= 0 && Math.abs(g - _balAnterior) <= 4;
+  _balHist.push(g); if(_balHist.length > 3) _balHist.shift();
+  var firme3 = _balHist.length === 3 && g >= 20 && (Math.max.apply(null, _balHist) - Math.min.apply(null, _balHist)) <= 4;
+  var estavel = estavelPdv === undefined ? firme3 : (estavelPdv && g >= 20);
   _balAnterior = g; _balPeso = g;
-  if(estavel) _balEstavel = g;
-  else if(g < 20) _balEstavel = 0;
+  var vazio = _balHist.length === 3 && Math.max.apply(null, _balHist) < 20;
+  if(vazio) _balEstavel = 0;
+  else if(estavel && (!_balEstavel || Math.abs(g - _balEstavel) > 10)) _balEstavel = g;
   var pe = document.getElementById('bal-peso'), va = document.getElementById('bal-valor'), st = document.getElementById('bal-status'), bt = document.getElementById('bal-btn-prox');
-  if(pe) pe.innerHTML = _balKg(g) + ' <span style="font-size:3rem;color:var(--muted);">kg</span>';
-  if(va) va.textContent = 'R$ ' + _balBrl(Math.round(g * (it.preco||0) / 10) / 100);
+  var kgSpan = ' <span style="font-size:3rem;color:var(--muted);">kg</span>';
+  if(pe) pe.innerHTML = (_balEstavel ? _balKg(_balEstavel) : (g < 20 ? '0,000' : '-,---')) + kgSpan;
+  if(va) va.textContent = _balEstavel ? 'R$ ' + _balBrl(Math.round(_balEstavel * (it.preco||0) / 10) / 100) : 'R$ -,--';
   if(st){
     st.style.color = _balEstavel ? '#4ade80' : '#38bdf8';
-    st.textContent = g < 20 ? 'Coloque o prato na balança' : (_balEstavel ? '✓ Peso confirmado — toque em Próximo' : 'Lendo o peso…');
+    st.textContent = _balEstavel ? '✓ Peso confirmado — toque em Próximo' : (g < 20 ? 'Coloque o prato na balança' : 'Pesando… deixe o prato parado');
   }
   if(bt){ bt.disabled = !_balEstavel; bt.style.opacity = _balEstavel ? '1' : '0.35'; }
   if(g >= 20) resetTimerInatividade();

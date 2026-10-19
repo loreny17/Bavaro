@@ -76,6 +76,16 @@ module.exports = async (req, res) => {
       if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId));
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
     }
+    if (b.acao === 'cancelarRef') {
+      // PDV → Notas fiscais: só com a senha do gerente (a mesma dos cancelamentos)
+      const nd = b.ref ? await db.collection('nfce').doc(String(b.ref)).get() : null;
+      const restN = (nd && nd.exists && nd.data().restauranteId) || b.restauranteId;
+      if (!(await _senhaGerenteOk(db, b.tenantId, restN, String(b.senhaGerente || '')))) {
+        const temSenha = await _senhaGerenteOk(db, b.tenantId, restN, null);
+        return res.status(200).json({ ok: false, error: temSenha ? '🔒 Senha do gerente incorreta.' : '🔒 Nenhuma senha de gerente cadastrada. No PDV, em Impressão → ⚙️ Config → Cancelamentos, ligue "Pedir senha do gerente para cancelar" e defina a senha.' });
+      }
+      return res.status(200).json(await nfce.cancelarPorRef(db, b));
+    }
     if (b.acao === 'cancelar') {
       // garçom admin (app do garçom) OU a "senha do gerente" do PDV (app Caixa)
       const okAdmin = await garcomEhAdmin(db, b.restauranteId, String(b.garcom || ''));

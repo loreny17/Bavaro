@@ -343,6 +343,39 @@ async function cancelar(db, b) {
   return { ok: false, error: msgErro(j) };
 }
 
+// Cancela pela referência (tela "Notas fiscais" do PDV): acha a conta/pedido de origem
+// e cancela por lá; se a origem não existe mais (conta apagada), cancela só na Focus.
+async function cancelarPorRef(db, b) {
+  const ref = String(b.ref || '');
+  if (!ref) return { ok: false, error: 'Nota não informada.' };
+  const d = await db.collection('nfce').doc(ref).get();
+  if (!d.exists) return { ok: false, error: 'Nota não encontrada.' };
+  const n = d.data() || {};
+  if (n.tenantId && b.tenantId && n.tenantId !== b.tenantId) return { ok: false, error: 'Nota de outro restaurante.' };
+  if (n.status !== 'autorizado') return { ok: false, error: n.status === 'cancelado' ? 'Essa nota já está cancelada.' : 'Essa nota não está autorizada.' };
+  const base = { justificativa: b.justificativa, tenantId: n.tenantId || b.tenantId, restauranteId: n.restauranteId || b.restauranteId };
+  if (n.chavePessoa) base.pessoa = n.pessoa || 'Sem nome';
+  const viaOrigem = n.origem === 'totem'
+    ? Object.assign(base, { origem: 'totem', pedidoId: String(n.contaId || '').replace(/^tot/, '') })
+    : Object.assign(base, { contaId: n.contaId });
+  const o = await _origem(db, viaOrigem);
+  if (o) {
+    const atual = n.chavePessoa ? ((o.conta.nfcePessoas || {})[n.chavePessoa]) : o.conta.nfce;
+    if (atual && atual.ref === ref) return cancelar(db, viaOrigem);
+  }
+  // origem sumiu (ou já tem outra nota): cancela direto
+  const just = String(b.justificativa || '').trim();
+  if (just.length < 15) return { ok: false, error: 'A justificativa precisa ter pelo menos 15 letras.' };
+  const em = emissor(n.restauranteId, n.ambiente);
+  const { j } = await chamarFocus(em, 'DELETE', '/v2/nfce/' + encodeURIComponent(ref), { justificativa: just.slice(0, 255) });
+  if (j && j.status === 'cancelado') {
+    const nfce = Object.assign({}, n, { status: 'cancelado', canceladaEm: Date.now(), justificativa: just, mensagemSefaz: j.mensagem_sefaz || '' });
+    await db.collection('nfce').doc(ref).set(nfce);
+    return { ok: true, nfce };
+  }
+  return { ok: false, error: msgErro(j) };
+}
+
 // ── Exportação mensal pra contabilidade ──
 function _mesDaNota(n) {
   const d = n.impressao && n.impressao.dataEmissao;
@@ -366,7 +399,7 @@ async function listarMes(db, tenantId, mes, incluirTestes, restauranteId) {
     notas.push({
       ref: n.ref || d.id, numero: n.numero, serie: n.serie, chave: n.chave, status: n.status, ambiente: n.ambiente,
       data: (n.impressao && n.impressao.dataEmissao) || (n.emitidaEm ? new Date(n.emitidaEm).toISOString() : ''),
-      total: n.total, documento: n.documento || '', mesa: n.mesa, formas: ((n.impressao && n.impressao.pagamentos) || []).map((p) => p.forma + ':' + p.valor),
+      total: n.total, documento: n.documento || '', mesa: n.mesa, emitidaEm: n.emitidaEm || null, origem: n.origem || 'mesa', formas: ((n.impressao && n.impressao.pagamentos) || []).map((p) => p.forma + ':' + p.valor),
     });
   });
   notas.sort((a, b) => (Number(a.serie) - Number(b.serie)) || (Number(a.numero) - Number(b.numero)));
@@ -398,4 +431,4 @@ async function xmlsDasNotas(db, tenantId, refs) {
   return { ok: true, arquivos: saida };
 }
 
-module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { chavePessoa, _contaDaPessoa, chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };
+module.exports = { emitir, cancelar, cancelarPorRef, ambiente, listarMes, xmlsDasNotas, _interno: { chavePessoa, _contaDaPessoa, chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };

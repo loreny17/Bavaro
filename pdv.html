@@ -397,8 +397,6 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
     <button class="tab" id="tab-btn-historico" onclick="showTab('historico')">📜<span class="tab-text"> Histórico</span></button>
     <button class="tab" id="tab-btn-garcons" onclick="showTab('garcons')">👥<span class="tab-text"> Garçons</span></button>
     <button class="tab" id="tab-btn-impressao" onclick="showTab('impressao')">🖨️<span class="tab-text"> Impressão</span></button>
-    <button class="tab" id="tab-btn-diag" onclick="abrirDiagnosticoImpressao()">🔎<span class="tab-text"> Diagnóstico</span></button>
-    <button class="tab" id="tab-btn-buffet" onclick="abrirBuffet()">🍽️<span class="tab-text"> Buffet</span></button>
     <button class="tab" id="tab-btn-balanca" onclick="abrirBalanca()">⚖️<span class="tab-text"> Balança</span></button>
   </div>
 
@@ -4431,7 +4429,7 @@ function salvarGarcom(){
   var status = statusEl ? statusEl.value : 'ativo';
   var admin = document.getElementById('garcom-pdv-admin').checked === true;
   var podeInsumos = (function(){ var c = document.getElementById('garcom-pode-insumos'); return c ? c.checked : false; })();
-  var semBalanca = (function(){ var c = document.getElementById('garcom-sem-balanca'); return c ? c.checked : false; })();
+  var semBalanca = false;   // opção "Bloquear Balança" removida do cadastro
   var dados = {
     nome: nome, apelido: apelido, status: status, admin: admin,
     podeInsumos: podeInsumos, semBalanca: semBalanca,
@@ -9677,6 +9675,78 @@ function _nfcBuscar(){
       '<div id="nfc-progresso" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;"></div>'+
       '<button id="nfc-baixar" onclick="_nfcBaixarZip()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:14px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:inherit;">📦 Baixar ZIP para a contabilidade</button>';
   }).catch(function(e){ box.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">❌ ' + escapeHtml(e.message) + '</div>'; });
+}
+// ── ✖ Cancelar nota fiscal (menu Nota fiscal) — notas do dia/mês com senha do gerente ──
+// No Paraná a SEFAZ só aceita cancelar NFC-e até 30 min depois de autorizada.
+function abrirCancelarNotasPdv(){
+  var ex = document.getElementById('modal-cancel-nf'); if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-cancel-nf';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9400;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.onclick = function(e){ if(e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;padding:18px;max-height:90vh;overflow-y:auto;">'+
+    '<div style="display:flex;align-items:center;margin-bottom:4px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.35rem;color:#f87171;flex:1;">✖ CANCELAR NOTA FISCAL</div>'+
+    '<button onclick="document.getElementById(\'modal-cancel-nf\').remove()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;">×</button></div>'+
+    '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:12px;line-height:1.45;">Notas autorizadas do mês (mesas, totem e buffet), da mais nova pra mais antiga. No Paraná a SEFAZ só aceita cancelar até <b>30 minutos</b> depois da emissão. Precisa da senha do gerente (Impressão → ⚙️ Config → Cancelamentos).</div>'+
+    '<div id="cnf-lista" style="color:var(--muted);font-size:0.84rem;">Buscando notas…</div>'+
+  '</div>';
+  document.body.appendChild(m);
+  _nfcChamar({ acao:'exportarLista', mes:_nfcMesPadrao(), incluirTestes:false }).then(function(j){
+    var box = document.getElementById('cnf-lista'); if(!box) return;
+    var aut = j.notas.filter(function(n){ return n.status === 'autorizado'; })
+      .sort(function(a, b){ return (b.emitidaEm || Date.parse(b.data) || 0) - (a.emitidaEm || Date.parse(a.data) || 0); });
+    if(!aut.length){ box.innerHTML = '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;">Nenhuma nota autorizada neste mês.</div>'; return; }
+    window._cnfNotas = aut;
+    box.innerHTML = aut.slice(0, 60).map(function(n, i){
+      var t = n.emitidaEm || Date.parse(n.data) || 0, min = t ? Math.floor((Date.now() - t) / 60000) : null;
+      var quando = t ? new Date(t).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+      var prazo = min === null ? '' : (min <= 30 ? '<span style="color:#4ade80;">dá pra cancelar (faltam ' + (30 - min) + ' min)</span>' : '<span style="color:#f59e0b;">passou dos 30 min</span>');
+      var origem = n.origem === 'totem' ? '🖥️ Totem/Buffet' : (n.mesa != null ? '🍽️ Mesa ' + n.mesa : '🍽️ Mesa');
+      return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">'+
+        '<div style="flex:1;min-width:0;"><div style="font-weight:800;color:var(--text);">nº ' + escapeHtml(String(n.numero)) + ' · R$ ' + formatarPreco(Number(n.total)||0) + '</div>'+
+        '<div style="font-size:0.76rem;color:var(--muted);margin-top:2px;">' + origem + ' · ' + quando + (n.documento ? ' · CPF/CNPJ ' + escapeHtml(n.documento) : '') + '</div>'+
+        '<div style="font-size:0.74rem;margin-top:2px;">' + prazo + '</div></div>'+
+        '<button onclick="_cnfAbrir(' + i + ')" style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.45);color:#f87171;border-radius:9px;padding:9px 12px;font-weight:800;cursor:pointer;font-family:inherit;">Cancelar</button>'+
+      '</div>';
+    }).join('');
+  }).catch(function(e){ var box = document.getElementById('cnf-lista'); if(box) box.innerHTML = '<div style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</div>'; });
+}
+function _cnfAbrir(i){
+  var n = (window._cnfNotas || [])[i]; if(!n) return;
+  var ex = document.getElementById('modal-cancel-nf2'); if(ex) ex.remove();
+  var m = document.createElement('div');
+  m.id = 'modal-cancel-nf2';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9450;display:flex;align-items:center;justify-content:center;padding:14px;';
+  m.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:400px;padding:18px;">'+
+    '<div style="font-weight:800;font-size:1.05rem;margin-bottom:10px;">Cancelar NFC-e nº ' + escapeHtml(String(n.numero)) + ' (R$ ' + formatarPreco(Number(n.total)||0) + ')</div>'+
+    '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:4px;">Motivo (mín. 15 letras)</div>'+
+    '<input id="cnf2-just" value="Nota emitida por engano no sistema" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;margin-bottom:10px;">'+
+    '<div style="font-size:0.76rem;color:var(--muted);margin-bottom:4px;">Senha do gerente</div>'+
+    '<input id="cnf2-senha" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;">'+
+    '<div id="cnf2-msg" style="margin-top:10px;font-size:0.84rem;"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px;">'+
+      '<button onclick="document.getElementById(\'modal-cancel-nf2\').remove()" style="flex:1;padding:12px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Voltar</button>'+
+      '<button id="cnf2-btn" onclick="_cnfConfirmar(' + i + ')" style="flex:1.4;padding:12px;background:#dc2626;border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">✖ Cancelar nota</button>'+
+    '</div></div>';
+  document.body.appendChild(m);
+  setTimeout(function(){ var x = document.getElementById('cnf2-senha'); if(x) x.focus(); }, 60);
+}
+function _cnfConfirmar(i){
+  var n = (window._cnfNotas || [])[i]; if(!n) return;
+  var msg = document.getElementById('cnf2-msg'), btn = document.getElementById('cnf2-btn');
+  var just = (document.getElementById('cnf2-just').value || '').trim(), senha = document.getElementById('cnf2-senha').value || '';
+  if(just.length < 15){ msg.innerHTML = '<span style="color:#f87171;">O motivo precisa ter pelo menos 15 letras.</span>'; return; }
+  if(!senha){ msg.innerHTML = '<span style="color:#f87171;">Digite a senha do gerente.</span>'; return; }
+  btn.disabled = true; btn.textContent = 'Cancelando...';
+  msg.innerHTML = '<span style="color:var(--muted);">Enviando para a SEFAZ…</span>';
+  _nfcChamar({ acao:'cancelarRef', ref:n.ref, justificativa:just, senhaGerente:senha }).then(function(){
+    var m2 = document.getElementById('modal-cancel-nf2'); if(m2) m2.remove();
+    showToast('✓ NFC-e nº ' + n.numero + ' cancelada', '#4ade80');
+    abrirCancelarNotasPdv();
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = '✖ Cancelar nota';
+    msg.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>';
+  });
 }
 function _nfcCarregarJSZip(){
   if(window.JSZip) return Promise.resolve();
@@ -16033,13 +16103,6 @@ function toggleAdminUsuario(garcomId, novoValor){
             <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Mostra o botão "Pedir Insumos" no app deste garçom</div>
           </div>
         </label>
-        <label style="display:flex;align-items:center;gap:10px;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.25);border-radius:10px;padding:12px;cursor:pointer;margin-top:8px;">
-          <input type="checkbox" id="garcom-sem-balanca" style="width:18px;height:18px;cursor:pointer;">
-          <div style="flex:1;">
-            <div style="font-weight:600;font-size:0.88rem;color:#fbbf24;">⚖️ Bloquear Balança</div>
-            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">Marcado: este garçom não usa a tela de Balança (registrar e lançar pratos)</div>
-          </div>
-        </label>
       </div>
     </div>
     <div class="modal-footer">
@@ -16639,62 +16702,56 @@ function toggleAdminUsuario(garcomId, novoValor){
       <button class="menu-item destaque" onclick="menuIrPara('pedidos')"><span class="ico">🧾</span><span class="lbl">Pedidos</span></button>
       <button class="menu-item destaque" onclick="menuIrPara('historico')"><span class="ico">📜</span><span class="lbl">Histórico</span></button>
       <button class="menu-item destaque" onclick="abrirTelaCozinha();fecharMenuLateral();"><span class="ico">🍳</span><span class="lbl">Tela da Cozinha</span></button>
+      <button class="menu-item destaque" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
     </div>
 
-    <!-- 🍽️ CARDÁPIO -->
+    <!-- 🍽️ CARDÁPIO (recolhido) -->
     <div class="menu-grupo">
-      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
+      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
         <span>🍽️ Cardápio</span>
         <span class="seta">▾</span>
       </button>
-      <div class="menu-grupo-conteudo">
+      <div class="menu-grupo-conteudo fechado">
         <button class="menu-item" onclick="menuIrPara('cardapio')"><span class="ico">📋</span><span class="lbl">Cardápio Principal</span></button>
         <button class="menu-item" onclick="menuIrPara('totem')"><span class="ico">📱</span><span class="lbl">Cardápio do Totem</span></button>
         <button class="menu-item" onclick="menuIrPara('grupos')"><span class="ico">🎛️</span><span class="lbl">Grupos (acompanhamentos)</span></button>
         <button class="menu-item" onclick="abrirEstoque();fecharMenuLateral();"><span class="ico">📦</span><span class="lbl">Pausar e Estoque</span></button>
         <button class="menu-item" onclick="abrirCopiarCardapio();fecharMenuLateral();"><span class="ico">🔁</span><span class="lbl">Copiar de outro restaurante</span></button>
-        <button class="menu-item" onclick="abrirSyncGoogleSheets();fecharMenuLateral();"><span class="ico">📊</span><span class="lbl">Sincronizar Google Sheets</span></button>
         <button class="menu-item" onclick="abrirBaseConhecimentoIA();fecharMenuLateral();"><span class="ico">🤖</span><span class="lbl">Base de Conhecimento da IA</span></button>
       </div>
     </div>
 
-    <!-- ⚙️ CONFIGURAÇÕES -->
+    <!-- ⚙️ CONFIGURAÇÕES (recolhido) -->
     <div class="menu-grupo">
-      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
+      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
         <span>⚙️ Configurações</span>
         <span class="seta">▾</span>
       </button>
-      <div class="menu-grupo-conteudo">
+      <div class="menu-grupo-conteudo fechado">
         <button class="menu-item" onclick="menuIrPara('garcons')"><span class="ico">👥</span><span class="lbl">Garçons</span></button>
         <button class="menu-item" onclick="menuIrPara('impressao')"><span class="ico">🖨️</span><span class="lbl">Impressão</span></button>
+        <button class="menu-item" onclick="abrirDiagnosticoImpressao();fecharMenuLateral();"><span class="ico">🔎</span><span class="lbl">Diagnóstico da impressão</span></button>
+        <button class="menu-item" onclick="abrirBalanca();fecharMenuLateral();"><span class="ico">⚖️</span><span class="lbl">Balança</span></button>
         <button class="menu-item" onclick="abrirConfigTaxa();fecharMenuLateral();"><span class="ico">💵</span><span class="lbl">Taxa de Serviço</span></button>
+        <button class="menu-item" onclick="abrirCancelarNotasPdv();fecharMenuLateral();"><span class="ico">✖</span><span class="lbl">Cancelar nota fiscal</span></button>
+        <button class="menu-item" onclick="abrirNotasContabilidade();fecharMenuLateral();"><span class="ico">📦</span><span class="lbl">Notas do mês (contabilidade)</span></button>
         <button class="menu-item" id="menu-item-insumos" onclick="abrirPedidoInsumos();fecharMenuLateral();" style="display:none;"><span class="ico">🚚</span><span class="lbl">Pedir Insumos ao Central</span></button>
       </div>
     </div>
 
-    <!-- 📊 RELATÓRIOS -->
-    <div class="menu-grupo">
-      <button class="menu-item" onclick="menuIrPara('relatorios')"><span class="ico">📊</span><span class="lbl">Relatórios</span></button>
-      <button class="menu-item" onclick="abrirNotasContabilidade();fecharMenuLateral();"><span class="ico">🧾</span><span class="lbl">Notas fiscais (contabilidade)</span></button>
-    </div>
-
-    <!-- 🌙 FIM DO DIA -->
+    <!-- 🌙 FIM DO DIA / LOJA -->
     <div class="menu-grupo">
       <button class="menu-item" onclick="abrirEncerrarDia();fecharMenuLateral();"><span class="ico">🌙</span><span class="lbl">Encerrar o Dia</span></button>
-    </div>
-
-    <!-- 🍽️ TROCAR RESTAURANTE -->
-    <div class="menu-grupo">
       <button class="menu-item" onclick="mostrarSelecaoRestaurante();fecharMenuLateral();"><span class="ico">🔄</span><span class="lbl">Trocar Restaurante</span></button>
     </div>
 
-    <!-- 🛡️ ADMIN (só admin) -->
+    <!-- 🛡️ ADMIN (só admin, recolhido) -->
     <div class="menu-grupo" id="menu-grupo-admin" style="display:none;">
-      <button class="menu-grupo-titulo" onclick="toggleMenuGrupo(this)">
+      <button class="menu-grupo-titulo fechado" onclick="toggleMenuGrupo(this)">
         <span>🛡️ Admin</span>
         <span class="seta">▾</span>
       </button>
-      <div class="menu-grupo-conteudo">
+      <div class="menu-grupo-conteudo fechado">
         <button class="menu-item" onclick="menuIrPara('admin')"><span class="ico">🛡️</span><span class="lbl">Painel Admin</span></button>
         <button class="menu-item" onclick="abrirExcluirRestaurante();fecharMenuLateral();" style="color:#f87171;"><span class="ico">🗑️</span><span class="lbl">Excluir Restaurante</span></button>
       </div>

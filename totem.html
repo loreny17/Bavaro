@@ -809,7 +809,7 @@
         <span class="cart-total-lbl">Total</span>
         <span class="cart-total-val" id="cart-total-val">R$ 0,00</span>
       </div>
-      <button id="cart-btn-pesar" onclick="fecharCarrinho();abrirTelaBalanca();" style="display:none;width:100%;margin-bottom:8px;padding:14px;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:12px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">⚖️ Pesar outro prato</button>
+      <button id="cart-btn-pesar" onclick="fecharCarrinho();abrirTelaBalanca(true);" style="display:none;width:100%;margin-bottom:8px;padding:14px;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:12px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">⚖️ Pesar outro prato</button>
       <button class="btn-finalizar" id="cart-btn-finalizar" onclick="fecharCarrinho();finalizarPedido();">Finalizar Pedido →</button>
     </div>
   </div>
@@ -3676,8 +3676,13 @@ setInterval(function(){
 }, 1000);
 
 var _balLoopId = 0, _balPeso = 0, _balEstavel = 0, _balAnterior = -1;
-function abrirTelaBalanca(){
+// "Pesar outro prato": o prato que já está no carrinho pode continuar na balança —
+// esse peso não vale de novo até tirarem ele (balança zerar) ou o peso mudar
+var _balBloqueio = 0;
+function abrirTelaBalanca(outroPrato){
   var it = _balItem();
+  _balBloqueio = 0;
+  if(outroPrato){ for(var k = _carrinho.length - 1; k >= 0; k--){ if(_carrinho[k].tipoVenda === 'kg'){ _balBloqueio = Number(_carrinho[k].peso) || 0; break; } } }
   if(!it){ mostrarAvisoTotem('Nenhum item "por quilo" no cardápio — cadastre no PDV'); return; }
   _balFecharTela();
   _balPeso = 0; _balEstavel = 0; _balAnterior = -1; _balHist = [];
@@ -3700,7 +3705,15 @@ function abrirTelaBalanca(){
     if(meu !== _balLoopId || !document.getElementById('tela-balanca')) return;
     // PDV publicando ao vivo: usa o peso dele (sem gravar pedido de leitura)
     if(_balVivoFresco()){
-      if(_balVivo.erro){ var st0 = document.getElementById('bal-status'); if(st0){ st0.style.color = '#f87171'; st0.textContent = '⚠️ ' + _balVivo.erro; } }
+      if(_balVivo.erro){
+        // balança com problema: não deixa cobrar um peso velho
+        _balEstavel = 0; _balHist = [];
+        var st0 = document.getElementById('bal-status'), pe0 = document.getElementById('bal-peso'), va0 = document.getElementById('bal-valor'), bt0 = document.getElementById('bal-btn-prox');
+        if(st0){ st0.style.color = '#f87171'; st0.textContent = '⚠️ Balança: ' + _balVivo.erro; }
+        if(pe0) pe0.innerHTML = '-,--- <span style="font-size:3rem;color:var(--muted);">kg</span>';
+        if(va0) va0.textContent = 'R$ -,--';
+        if(bt0){ bt0.disabled = true; bt0.style.opacity = '0.35'; }
+      }
       else _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel);
       setTimeout(ciclo, 250);
       return;
@@ -3741,7 +3754,8 @@ function _balMostrar(g, estavelPdv){
     estavel = c.n >= 3 && c.peso >= 20; vazio = c.n >= 3 && c.peso < 20; gFirme = c.peso;
   } else { estavel = estavelPdv && g >= 20; vazio = g < 20; gFirme = g; }
   _balAnterior = g; _balPeso = g;
-  if(vazio) _balEstavel = 0;
+  if(vazio){ _balEstavel = 0; _balBloqueio = 0; }
+  else if(estavel && _balBloqueio && Math.abs(gFirme - _balBloqueio) <= 10){ _balEstavel = 0; }
   else if(estavel && (!_balEstavel || Math.abs(gFirme - _balEstavel) > 10)) _balEstavel = gFirme;
   g = vazio ? 0 : Math.max(g, 20);
   var pe = document.getElementById('bal-peso'), va = document.getElementById('bal-valor'), st = document.getElementById('bal-status'), bt = document.getElementById('bal-btn-prox');
@@ -3750,7 +3764,7 @@ function _balMostrar(g, estavelPdv){
   if(va) va.textContent = _balEstavel ? 'R$ ' + _balBrl(Math.round(_balEstavel * (it.preco||0) / 10) / 100) : 'R$ -,--';
   if(st){
     st.style.color = _balEstavel ? '#4ade80' : '#38bdf8';
-    st.textContent = _balEstavel ? '✓ Peso confirmado — toque em Próximo' : (g < 20 ? 'Coloque o prato na balança' : 'Pesando… deixe o prato parado');
+    st.textContent = _balEstavel ? '✓ Peso confirmado — toque em Próximo' : (g < 20 ? 'Coloque o prato na balança' : (_balBloqueio ? 'Tire o prato anterior e coloque o próximo' : 'Pesando… deixe o prato parado'));
   }
   if(bt){ bt.disabled = !_balEstavel; bt.style.opacity = _balEstavel ? '1' : '0.35'; }
   if(g >= 20) resetTimerInatividade();

@@ -5159,18 +5159,18 @@ function _balParsePeso(raw){
 var _balFila = Promise.resolve();
 // Cada leitura tem prazo de 5 s: se uma travar, não trava a fila inteira
 // (antes uma leitura presa parava o "ao vivo" e o totem ficava "Pesando…" pra sempre)
-function _balLerComPrazo(){
+// A fila só libera a próxima leitura quando a anterior TERMINA de verdade (duas
+// leituras ao mesmo tempo na porta da balança dão erro/peso errado). Quem pediu
+// recebe "demorou" em 5 s, mas a porta não é atropelada.
+function balancaLerPeso(){
+  var bruto = _balFila.then(function(){ return _balancaLerPesoBruto(); });
+  _balFila = bruto.then(function(){}, function(){});
   return new Promise(function(resolve, reject){
     var fim = false;
     var to = setTimeout(function(){ if(fim) return; fim = true; reject(new Error('Balança demorou pra responder')); }, 5000);
-    Promise.resolve().then(_balancaLerPesoBruto).then(function(g){ if(fim) return; fim = true; clearTimeout(to); resolve(g); },
+    bruto.then(function(g){ if(fim) return; fim = true; clearTimeout(to); resolve(g); },
       function(e){ if(fim) return; fim = true; clearTimeout(to); reject(e); });
   });
-}
-function balancaLerPeso(){
-  var p = _balFila.then(_balLerComPrazo, _balLerComPrazo);
-  _balFila = p.catch(function(){});
-  return p;
 }
 
 // ⚖️ BALANÇA AO VIVO pro totem do buffet: este PDV lê a balança local sem parar
@@ -5189,7 +5189,7 @@ function _balAoVivoTick(){
   _balVivo.ocupado = true;
   balancaLerPeso().then(function(g){ _balAoVivoPublicar(Number(g) || 0, ''); }, function(e){
     var m = (e && e.message) || 'Falha na balança';
-    if(/peso v[aá]lido/i.test(m)) _balAoVivoPublicar(0, ''); else _balAoVivoPublicar(_balVivo.ult < 0 ? 0 : _balVivo.ult, m);
+    if(/peso v[aá]lido/i.test(m)) _balAoVivoPublicar(0, ''); else _balAoVivoErro(m);
   }).then(function(){ _balVivo.ocupado = false; }, function(){ _balVivo.ocupado = false; });
 }
 // Peso "de consenso": entre as últimas 5 leituras, o valor que mais se repete (±4 g).
@@ -5202,7 +5202,23 @@ function _balConsenso(h){
   }
   return { peso: melhor, n: n };
 }
+// Leitura que FALHOU não vira peso: antes ela repetia o último peso no histórico e o
+// totem ficava travado no peso do prato anterior. Agora só avisa; com 3 falhas
+// seguidas tira o "firme" (o totem não deixa cobrar peso velho).
+function _balAoVivoErro(m){
+  _balVivo.falhas = (_balVivo.falhas || 0) + 1;
+  if(_balVivo.falhas < 3) return;
+  _balVivo.hist = [];
+  var agora = Date.now();
+  if(_balVivo.erro === m && agora - _balVivo.envio < 10000) return;
+  _balVivo.est = false; _balVivo.erro = m; _balVivo.envio = agora;
+  fbDb.collection('comandos_balanca').doc('aovivo_' + _restauranteAtivo.id).set({
+    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: _balVivo.ult < 0 ? 0 : _balVivo.ult, estavel: false, erro: m,
+    atualizadoEm: agora, por: _pdvIdAparelho
+  }).catch(function(e){ console.warn('[BALANÇA ao vivo]', e.code || e.message); });
+}
 function _balAoVivoPublicar(g, erro){
+  _balVivo.falhas = 0;
   _balVivo.hist = (_balVivo.hist || []).concat([g]).slice(-5);
   var c = _balConsenso(_balVivo.hist);
   var est = c.n >= 3 && c.peso >= 20, vazio = c.n >= 3 && c.peso < 20;
@@ -5231,7 +5247,10 @@ function _balancaLerPesoBruto(){
       + '?porta=' + encodeURIComponent(cfg.porta)
       + '&baud=' + encodeURIComponent(cfg.baud)
       + '&protocolo=' + encodeURIComponent(cfg.protocolo);
-    return fetch(urlBal).then(function(r){
+    var ctrlBal = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var toBal = setTimeout(function(){ try{ ctrlBal && ctrlBal.abort(); }catch(e){} }, 8000);
+    return fetch(urlBal, ctrlBal ? { signal: ctrlBal.signal } : undefined).then(function(r){
+      clearTimeout(toBal);
       if(r.status === 404){
         throw new Error('O app desktop ainda não tem o leitor de balança. É preciso atualizar o Bávaro PDV Desktop.');
       }

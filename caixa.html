@@ -1356,23 +1356,24 @@ function imprimirRelatorioCaixa(){
   var r = _relCx.r, L = [];
   var nomes = { dinheiro:'Dinheiro', pix:'Pix', debito:'Debito', credito:'Credito', sem:'Sem forma' };
   var brl = function(v){ return (Number(v)||0).toFixed(2).replace('.', ','); };
+  // Layout parecido com o modal: título, total em destaque, seções com rótulo à esquerda e valor à direita
   L.push('#T RELATORIO DE VENDAS');
   L.push('#C ' + _formatarDataLbl(_historicoData) + (_relCx.de !== '00:00' || _relCx.ate !== '23:59' ? '  ' + _relCx.de + '-' + _relCx.ate : ''));
-  L.push('--');
-  L.push('#B TOTAL VENDIDO|R$ ' + brl(r.total));
-  L.push('Vendas|' + r.qtd);
-  L.push('Ticket medio|R$ ' + brl(r.ticket));
-  L.push('--'); L.push('#B FORMA DE PAGAMENTO');
-  Object.keys(nomes).forEach(function(k){ if(r.formas[k]) L.push(nomes[k] + '|R$ ' + brl(r.formas[k])); });
-  L.push('--'); L.push('#B ORIGEM');
+  L.push('==');
+  L.push('#C TOTAL VENDIDO');
+  L.push('#G R$ ' + brl(r.total));
+  L.push('#C ' + r.qtd + (r.qtd === 1 ? ' venda' : ' vendas') + ' - ticket medio R$ ' + brl(r.ticket));
+  var formas = Object.keys(nomes).filter(function(k){ return r.formas[k]; });
+  if(formas.length){ L.push('--'); L.push('#S POR FORMA DE PAGAMENTO'); formas.forEach(function(k){ L.push(nomes[k] + '|R$ ' + brl(r.formas[k])); }); }
+  L.push('--'); L.push('#S ORIGEM');
   L.push('Totem (' + r.totem.qtd + ')|R$ ' + brl(r.totem.total));
   L.push('Buffet (' + r.buffet.qtd + ')|R$ ' + brl(r.buffet.total));
-  L.push('--');
+  L.push('--'); L.push('#S OUTROS');
   L.push('Notas fiscais (' + r.notas.qtd + ')|R$ ' + brl(r.notas.total));
   L.push('Cancelados (' + r.cancelados.qtd + ')|R$ ' + brl(r.cancelados.total));
   if(r.aguardando.qtd) L.push('Nao pagos (' + r.aguardando.qtd + ')|R$ ' + brl(r.aguardando.total));
-  if(r.topItens.length){ L.push('--'); L.push('#B ITENS VENDIDOS'); r.topItens.forEach(function(x){ L.push(x[0] + '|' + x[1] + 'x'); }); }
-  L.push('--');
+  if(r.topItens.length){ L.push('--'); L.push('#S ITENS VENDIDOS'); r.topItens.forEach(function(x){ L.push(x[0] + '|' + x[1] + 'x'); }); }
+  L.push('==');
   L.push('#C Impresso em ' + new Date().toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}));
   var btn = document.getElementById('rel-btn-imp'); if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
   fbDb.collection('comandos_impressao').add({ tipo:'relatorio_texto', restauranteId:_restauranteId, tenantId:_tenantId, titulo:'Relatório do caixa', linhas:L, solicitadoPor:'Caixa', solicitadoEm:Date.now(), criadoEm:Date.now() })

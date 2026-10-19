@@ -9673,19 +9673,26 @@ function _impsDosModelos(tipos){
 // Relatório em texto vindo do Caixa: linhas com marcadores
 //   '#T titulo' grande · '#B negrito' · '#C centralizado' · '--' linha · 'rótulo|valor' alinhado
 function _imprimirRelatorioTexto(cmd, imp){
-  var L = (imp && imp.largura) || 42, s = escposInit();
-    (cmd.linhas || []).forEach(function(l){
-      l = String(l);
-      if(l === '--'){ s += escposLeft() + linha('-', L) + '\n'; return; }
-      if(l.indexOf('#T ') === 0){ s += escposCenter() + escposBold(true) + escposLarge(true) + l.slice(3) + '\n' + escposLarge(false) + escposBold(false); return; }
-      if(l.indexOf('#C ') === 0){ s += escposCenter() + l.slice(3) + '\n'; return; }
-      var neg = l.indexOf('#B ') === 0; if(neg) l = l.slice(3);
-      s += escposLeft() + (neg ? escposBold(true) : '');
-      var p = l.split('|');
-      if(p.length > 1){ var a = p[0], b = p.slice(1).join('|'); var esp = L - a.length - b.length; s += (esp < 1 ? a.slice(0, Math.max(1, L - b.length - 1)) + ' ' : a + new Array(esp + 1).join(' ')) + b + '\n'; }
-      else s += l + '\n';
-      if(neg) s += escposBold(false);
-    });
+  // 42 colunas = a mesma largura da nota fiscal (com 48 as linhas quebravam e o valor caía pra linha de baixo)
+  var L = Math.min(42, (imp && imp.largura) || 42), s = escposInit();
+  var corta = function(t, n){ t = String(t); return t.length > n ? t.slice(0, n) : t; };
+  (cmd.linhas || []).forEach(function(l){
+    l = String(l);
+    if(l === '--'){ s += escposLeft() + linha('-', L) + '\n'; return; }
+    if(l === '=='){ s += escposLeft() + linha('=', L) + '\n'; return; }
+    if(l.indexOf('#T ') === 0){ s += escposCenter() + escposBold(true) + escposLarge(true) + corta(l.slice(3), Math.floor(L / 2)) + '\n' + escposLarge(false) + escposBold(false); return; }
+    if(l.indexOf('#G ') === 0){ s += escposCenter() + escposBold(true) + escposLarge(true) + corta(l.slice(3), Math.floor(L / 2)) + '\n' + escposLarge(false) + escposBold(false); return; }
+    if(l.indexOf('#C ') === 0){ s += escposCenter() + corta(l.slice(3), L) + '\n'; return; }
+    if(l.indexOf('#S ') === 0){ s += escposLeft() + escposBold(true) + corta(l.slice(3), L) + '\n' + escposBold(false); return; }
+    var neg = l.indexOf('#B ') === 0; if(neg) l = l.slice(3);
+    s += escposLeft() + (neg ? escposBold(true) : '');
+    var p = l.split('|');
+    if(p.length > 1){
+      var b = corta(p.slice(1).join('|'), L - 2), a = corta(p[0], L - b.length - 1);
+      s += a + new Array(L - a.length - b.length + 1).join(' ') + b + '\n';
+    } else s += corta(l, L) + '\n';
+    if(neg) s += escposBold(false);
+  });
     s += '\n\n\n' + escposCut();
     _aplicarDialeto(imp);
     enviarParaImpressora(imp, s);

@@ -5198,7 +5198,7 @@ function balancaLerPeso(){
 var _balVivo = { ult:-1, est:null, envio:0, erro:'', ocupado:false, ant:-1, timer:null };
 function _balAoVivoIniciar(){
   if(_balVivo.timer) return;
-  _balVivo.timer = setInterval(_balAoVivoTick, 700);
+  _balVivo.timer = setInterval(_balAoVivoTick, 150);   // lê de novo assim que a anterior termina
 }
 function _balAoVivoTick(){
   var cfg = _balCfg();
@@ -5244,15 +5244,19 @@ function _balAoVivoPublicar(g, erro){
   var vazio = _balVivo.zeros >= 2;
   if(vazio) _balVivo.hist = [];
   var c = _balConsenso(_balVivo.hist || []);
-  var est = !vazio && c.n >= 3 && c.peso >= 20;
+  // firme = 2 leituras iguais (±4 g) entre as 3 últimas (mais rápido que antes)
+  var c3 = _balConsenso((_balVivo.hist || []).slice(-3));
+  var est = !vazio && c3.n >= 2 && c3.peso >= 20;
   // enquanto não decide, mantém o último peso publicado (só muda o "firme")
-  var pub = est ? c.peso : (vazio ? 0 : (_balVivo.ult < 0 ? 0 : _balVivo.ult));
+  var pub = est ? c3.peso : (vazio ? 0 : (_balVivo.ult < 0 ? 0 : _balVivo.ult));
+  // "presenca": tem prato em cima AGORA (1 leitura) — o totem já troca de tela na hora
+  var presenca = g >= 20;
   var agora = Date.now();
-  var mudou = _balVivo.ult < 0 || Math.abs(pub - _balVivo.ult) >= 5 || est !== _balVivo.est || erro !== _balVivo.erro;
+  var mudou = _balVivo.ult < 0 || Math.abs(pub - _balVivo.ult) >= 5 || est !== _balVivo.est || erro !== _balVivo.erro || presenca !== _balVivo.presenca;
   if(!mudou && agora - _balVivo.envio < 10000) return;
-  _balVivo.ult = pub; _balVivo.est = est; _balVivo.erro = erro; _balVivo.envio = agora;
+  _balVivo.ult = pub; _balVivo.est = est; _balVivo.erro = erro; _balVivo.envio = agora; _balVivo.presenca = presenca;
   fbDb.collection('comandos_balanca').doc('aovivo_' + _restauranteAtivo.id).set({
-    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: pub, estavel: est, erro: erro || '',
+    restauranteId: _restauranteAtivo.id, status: 'aovivo', peso: pub, estavel: est, presenca: presenca, erro: erro || '',
     leitura: g, atualizadoEm: agora, por: _pdvIdAparelho
   }).catch(function(e){ console.warn('[BALANÇA ao vivo]', e.code || e.message); });
 }

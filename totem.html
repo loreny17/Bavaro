@@ -3663,8 +3663,10 @@ setTimeout(_balVivoAssinar, 1500);
 function _balVivoNaTelaInicial(){
   if(!_modoBalanca || _modoQR || !_balVivo) return;
   var g = Number(_balVivo.peso) || 0;
-  if(g < 20){ _balPrecisaZerar = false; return; }
-  if(_balPrecisaZerar || !_balVivo.estavel) return;
+  var temPrato = _balVivo.presenca === true || (_balVivo.presenca === undefined && g >= 20);
+  if(!temPrato){ _balPrecisaZerar = false; return; }
+  // troca de tela assim que o prato encosta na balança (o peso firma já na tela de pesagem)
+  if(_balPrecisaZerar) return;
   var ti = document.getElementById('tela-inicial');
   if(!ti || ti.style.display === 'none' || ti.classList.contains('escondida')) return;
   if(document.getElementById('tela-balanca') || document.getElementById('tela-cobranca')) return;
@@ -3725,7 +3727,7 @@ function abrirTelaBalanca(outroPrato){
         if(va0) va0.textContent = 'R$ -,--';
         if(bt0){ bt0.disabled = true; bt0.style.opacity = '0.35'; }
       }
-      else { _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel); _balDiag('ao vivo', _balVivo.por, _balVivo.leitura != null ? _balVivo.leitura : _balVivo.peso); }
+      else { _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel, _balVivo.presenca); _balDiag('ao vivo', _balVivo.por, _balVivo.leitura != null ? _balVivo.leitura : _balVivo.peso); }
       setTimeout(ciclo, 250);
       return;
     }
@@ -3793,7 +3795,7 @@ function _balConsenso(h){
 // Depois de confirmado o número trava: só troca se vier OUTRO peso firme (> 10 g de
 // diferença) ou se tirarem o prato.
 var _balHist = [], _balZeros = 0;
-function _balMostrar(g, estavelPdv){
+function _balMostrar(g, estavelPdv, presenca){
   var it = _balItem(); if(!it) return;
   // leitura < 20 g = balança vazia na hora; senão, consenso só entre pesos de prato
   _balZeros = g < 20 ? (_balZeros || 0) + 1 : 0;
@@ -3801,8 +3803,8 @@ function _balMostrar(g, estavelPdv){
   var estavel, vazio, gFirme;
   if(estavelPdv === undefined){
     var c = _balConsenso(_balHist);
-    vazio = _balZeros >= 2; if(vazio) _balHist = []; estavel = !vazio && c.n >= 3 && c.peso >= 20; gFirme = c.peso;
-  } else { estavel = estavelPdv && g >= 20; vazio = g < 20; gFirme = g; }
+    vazio = _balZeros >= 2; if(vazio) _balHist = []; var c3 = _balConsenso(_balHist.slice(-3)); estavel = !vazio && c3.n >= 2 && c3.peso >= 20; gFirme = c3.peso;
+  } else { estavel = estavelPdv && g >= 20; vazio = presenca === undefined ? g < 20 : (presenca !== true && g < 20); gFirme = g; }
   _balAnterior = g; _balPeso = g;
   if(vazio){ _balEstavel = 0; _balBloqueio = 0; }
   else if(estavel && _balBloqueio && Math.abs(gFirme - _balBloqueio) <= 10){ _balEstavel = 0; }

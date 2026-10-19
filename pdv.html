@@ -9411,20 +9411,32 @@ function processarComandoImpressao(cmdId, cmd){
 
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
-    _imprimirSenhaTotemPreCaixa(cmd);
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    _reivindicarComando(cmdId).then(function(minha){
+      if(minha) _imprimirSenhaTotemPreCaixa(cmd);
+      fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    });
   } else if(cmd.tipo === 'nfce'){
-    // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO
-    try{
-      var danfe = gerarDanfeNfce(cmd.nfce || {});
-      var modsF = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
-      var impsN = [];
-      modsF.forEach(function(m){ var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; }); if(imp && impsN.indexOf(imp) < 0) impsN.push(imp); });
-      if(!impsN.length && _impressoras.length) impsN = [_impressoras[0]];
-      impsN.forEach(function(imp){ enviarParaImpressora(imp, danfe); });
-      showToast('🧾 NFC-e ' + ((cmd.nfce||{}).numero||'') + ' impressa', '#4ade80');
-    }catch(e){ console.warn('danfe nfce:', e); showToast('❌ Erro ao imprimir a nota: ' + e.message, '#f87171'); }
-    fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){});
+    // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO.
+    // Só UM PDV imprime (se tiver dois abertos do mesmo restaurante, o outro ignora)
+    _reivindicarComando(cmdId).then(function(minha){
+      if(!minha){ console.log('[NFCE] outro PDV já pegou a impressão', cmdId); return; }
+      try{
+        var danfe = gerarDanfeNfce(cmd.nfce || {});
+        var modsF = _modelos.filter(function(m){ return m.tipo === 'fechamento'; });
+        var impsN = [], enderecos = {};
+        modsF.forEach(function(m){
+          var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
+          if(!imp) return;
+          // mesma impressora física cadastrada duas vezes (mesmo IP ou mesmo nome no Windows) conta uma vez só
+          var end = imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.nomeWindows || imp.id);
+          if(enderecos[end]) return;
+          enderecos[end] = true; impsN.push(imp);
+        });
+        if(!impsN.length && _impressoras.length) impsN = [_impressoras[0]];
+        impsN.forEach(function(imp){ enviarParaImpressora(imp, danfe); });
+        showToast('🧾 NFC-e ' + ((cmd.nfce||{}).numero||'') + ' impressa', '#4ade80');
+      }catch(e){ console.warn('danfe nfce:', e); showToast('❌ Erro ao imprimir a nota: ' + e.message, '#f87171'); }
+    }).then(function(){ fbDb.collection('comandos_impressao').doc(cmdId).delete().catch(function(){}); });
   } else if(cmd.tipo === 'conta_mesa'){
     // Busca a conta e gera o cupom solicitado
     fbDb.collection('contas_mesa').doc(cmd.contaId).get().then(function(doc){
@@ -9586,6 +9598,27 @@ function _nfcBaixarZip(){
     });
   }).catch(function(e){ prog.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>'; })
     .then(function(){ btn.disabled = false; btn.style.opacity = '1'; });
+}
+
+// Garante que só UM PDV imprime um comando (vários PDVs abertos do mesmo restaurante
+// recebem o mesmo comando). Quem conseguir marcar primeiro imprime; os outros pulam.
+var _pdvIdAparelho = (function(){ try{ var v = localStorage.getItem('pdv_aparelho_id'); if(!v){ v = 'pdv_' + Math.random().toString(36).slice(2, 10); localStorage.setItem('pdv_aparelho_id', v); } return v; }catch(e){ return 'pdv_' + Math.random().toString(36).slice(2, 10); } })();
+function _reivindicarComando(cmdId){
+  var ref = fbDb.collection('comandos_impressao').doc(cmdId);
+  return fbDb.runTransaction(function(tx){
+    return tx.get(ref).then(function(d){
+      if(!d.exists) return false;                       // outro PDV já imprimiu e apagou
+      var c = d.data() || {};
+      if(c.impressoPor && c.impressoPor !== _pdvIdAparelho) return false;
+      if(c.impressoPor === _pdvIdAparelho) return false; // este mesmo PDV já imprimiu (listener duplicado)
+      tx.update(ref, { impressoPor: _pdvIdAparelho, impressoEm: Date.now() });
+      return true;
+    });
+  }).catch(function(e){
+    // sem conseguir marcar (regra/conexão): imprime mesmo assim — melhor duplicar que não sair
+    console.warn('[IMP] não marcou o comando', cmdId, e && (e.code || e.message));
+    return true;
+  });
 }
 
 // ─── DANFE NFC-e (layout simplificado do Manual de Especificações da NFC-e) ───

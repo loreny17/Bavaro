@@ -206,14 +206,38 @@ async function _origem(db, b) {
   return s.exists ? { ref, id: String(b.contaId), conta: s.data() } : null;
 }
 
+// ── Nota por pessoa (itens com nome — o mesmo do "fechar separado") ──
+function _nomeDoItem(it) { return String((it && (it.pessoa || it.nomeCliente)) || '').trim(); }
+function chavePessoa(nome) { const n = _norm(nome).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return n || '__sem_nome__'; }
+function _valorItem(i) { return (i.tipoVenda === 'kg' && i.peso) ? (Number(i.preco) || 0) : (Number(i.preco) || 0) * (Number(i.qtd) || 1); }
+function _hash6(t) { let h = 5381; for (const ch of String(t)) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0; return h.toString(36).slice(0, 6); }
+// Conta reduzida aos itens de uma pessoa, com a parte proporcional da taxa de serviço
+function _contaDaPessoa(conta, chave) {
+  const ativos = (conta.itens || []).filter((i) => i && i.status !== 'cancelado');
+  const dela = ativos.filter((i) => chavePessoa(_nomeDoItem(i)) === chave);
+  const totalMesa = ativos.reduce((s, i) => s + _valorItem(i), 0);
+  const totalDela = dela.reduce((s, i) => s + _valorItem(i), 0);
+  const taxa = totalMesa > 0 ? (Number(conta.taxa10) || 0) * totalDela / totalMesa : 0;
+  return Object.assign({}, conta, { itens: dela, taxa10: Math.round(taxa * 100) / 100, pagamentos: [] });
+}
+function _algumaAutorizada(mapa) { return Object.keys(mapa || {}).some((k) => mapa[k] && mapa[k].status === 'autorizado'); }
+
 async function emitir(db, b) {
   const { tenantId, documento, nomeCliente, formaPagamento, garcom } = b;
   const o = await _origem(db, b);
   if (!o) return { ok: false, error: b.origem === 'totem' ? 'Pedido do totem não encontrado.' : 'Conta não encontrada (ela pode ter sido apagada do histórico).' };
-  const ref0 = o.ref, conta = o.conta, contaId = o.id;
+  const ref0 = o.ref, contaId = o.id;
+  let conta = o.conta;
   const restauranteId = conta.restauranteId || b.restauranteId;
   if (conta.tenantId && tenantId && conta.tenantId !== tenantId) return { ok: false, error: 'Conta de outro restaurante.' };
-  if (conta.nfce && conta.nfce.status === 'autorizado') return { ok: true, jaEmitida: true, nfce: conta.nfce };
+  // por pessoa: b.pessoa = nome ('' = itens sem nome)
+  const porPessoa = b.pessoa !== undefined && b.pessoa !== null && b.origem !== 'totem';
+  const chaveP = porPessoa ? chavePessoa(b.pessoa) : null;
+  const anterior = porPessoa ? ((conta.nfcePessoas || {})[chaveP] || null) : (conta.nfce || null);
+  if (anterior && anterior.status === 'autorizado') return { ok: true, jaEmitida: true, nfce: anterior, pessoa: chaveP };
+  if (porPessoa && conta.nfce && conta.nfce.status === 'autorizado') return { ok: false, error: 'Essa mesa já tem uma nota única (nº ' + conta.nfce.numero + '). Pra separar por pessoa, cancele ela antes.' };
+  if (!porPessoa && _algumaAutorizada(conta.nfcePessoas)) return { ok: false, error: 'Essa mesa já tem notas separadas por pessoa — emita as que faltam por pessoa.' };
+  if (porPessoa) conta = _contaDaPessoa(conta, chaveP);
 
   const em = emissor(restauranteId);
   const amb = em.amb;
@@ -227,7 +251,7 @@ async function emitir(db, b) {
   if (doc && doc.length !== 11 && doc.length !== 14) return { ok: false, error: 'CPF tem 11 números e CNPJ tem 14.' };
 
   const itens = montarItens(conta, cfg, amb);
-  if (!itens.length) return { ok: false, error: 'A conta não tem itens com valor.' };
+  if (!itens.length) return { ok: false, error: porPessoa ? 'Essa pessoa não tem itens com valor na conta.' : 'A conta não tem itens com valor.' };
   let totalC = itens.reduce((s, i) => s + i._c, 0);
   const servicoC = cfg.incluirServico ? Math.max(0, centavos(conta.taxa10)) : 0;
   // Taxa de serviço = "outras despesas acessórias" (vOutro), rateada entre os itens
@@ -253,7 +277,7 @@ async function emitir(db, b) {
     items: itens,
     formas_pagamento: pagamentos,
   };
-  if (conta.mesa != null && conta.mesa !== '') nota.informacoes_adicionais_contribuinte = 'Mesa ' + conta.mesa;
+  if (conta.mesa != null && conta.mesa !== '') nota.informacoes_adicionais_contribuinte = 'Mesa ' + conta.mesa + (porPessoa && b.pessoa ? ' - ' + String(b.pessoa).slice(0, 40) : '');
   else if (conta.tipo === 'buffet') nota.informacoes_adicionais_contribuinte = 'Buffet ' + (conta.senha || '');
   else if (conta.senha) nota.informacoes_adicionais_contribuinte = 'Totem senha ' + conta.senha;
   if (servicoC > 0) {
@@ -264,8 +288,9 @@ async function emitir(db, b) {
   if (doc.length === 14) { nota.cnpj_destinatario = doc; nota.indicador_inscricao_estadual_destinatario = 9; }
   if (doc && nomeCliente) nota.nome_destinatario = String(nomeCliente).slice(0, 60);
 
-  const tentativa = ((conta.nfce && conta.nfce.tentativa) || 0) + 1;
-  const ref = 'bav' + String(contaId).replace(/[^A-Za-z0-9]/g, '').slice(0, 30) + (tentativa > 1 ? 't' + tentativa : '');
+  const tentativa = ((anterior && anterior.tentativa) || 0) + 1;
+  const ref = 'bav' + String(contaId).replace(/[^A-Za-z0-9]/g, '').slice(0, 30) + (porPessoa ? 'p' + _hash6(chaveP) : '') + (tentativa > 1 ? 't' + tentativa : '');
+  const campo = porPessoa ? 'nfcePessoas.' + chaveP : 'nfce';
 
   let { http, j } = await chamarFocus(em, 'POST', '/v2/nfce?ref=' + encodeURIComponent(ref), nota);
   // assíncrono: espera um pouco a SEFAZ
@@ -274,7 +299,7 @@ async function emitir(db, b) {
     ({ http, j } = await chamarFocus(em, 'GET', '/v2/nfce/' + encodeURIComponent(ref) + '?completo=0'));
   }
   const base = { tentativa, contaId: String(contaId), origem: b.origem === 'totem' ? 'totem' : 'mesa', tenantId: tenantId || conta.tenantId || null, restauranteId: restauranteId || null,
-    mesa: conta.mesa != null ? conta.mesa : null, documento: doc || '', emitidaEm: Date.now(), total: reais(totalC + servicoC), emitidaPor: garcom || '', itens: itens.length };
+    mesa: conta.mesa != null ? conta.mesa : null, pessoa: porPessoa ? String(b.pessoa || 'Sem nome') : '', chavePessoa: chaveP || '', documento: doc || '', emitidaEm: Date.now(), total: reais(totalC + servicoC), emitidaPor: garcom || '', itens: itens.length };
 
   if (j && j.status === 'autorizado') {
     const xml = await _baixarXml(em, j.caminho_xml_nota_fiscal);
@@ -284,14 +309,14 @@ async function emitir(db, b) {
       produtos: reais(totalC), servico: reais(servicoC),
     }) }));
     await Promise.all([
-      ref0.update({ nfce }),
+      ref0.update({ [campo]: nfce }),
       db.collection('nfce').doc(ref).set(nfce),
     ]);
-    return { ok: true, nfce };
+    return { ok: true, nfce, pessoa: chaveP };
   }
   const erro = msgErro(j);
   const nfceErro = _resumo(amb, ref, j || {}, Object.assign(base, { status: (j && j.status) || 'erro', erro }));
-  try { await ref0.update({ nfce: nfceErro }); } catch (e) { /* conta pode ter sumido */ }
+  try { await ref0.update({ [campo]: nfceErro }); } catch (e) { /* conta pode ter sumido */ }
   return { ok: false, error: erro, http, nfce: nfceErro };
 }
 
@@ -300,16 +325,19 @@ async function cancelar(db, b) {
   const o = await _origem(db, b);
   const ref0 = o && o.ref;
   const conta = o ? o.conta : null;
-  if (!conta || !conta.nfce || conta.nfce.status !== 'autorizado') return { ok: false, error: 'Não tem nota autorizada nessa conta.' };
+  const porPessoa = b.pessoa !== undefined && b.pessoa !== null;
+  const chaveP = porPessoa ? chavePessoa(b.pessoa) : null;
+  const atual = conta ? (porPessoa ? (conta.nfcePessoas || {})[chaveP] : conta.nfce) : null;
+  if (!atual || atual.status !== 'autorizado') return { ok: false, error: 'Não tem nota autorizada nessa conta.' };
   if (conta.tenantId && tenantId && conta.tenantId !== tenantId) return { ok: false, error: 'Conta de outro restaurante.' };
   const just = String(justificativa || 'Cancelamento solicitado pelo estabelecimento').trim();
   if (just.length < 15) return { ok: false, error: 'A justificativa precisa ter pelo menos 15 letras.' };
-  const em = emissor(conta.nfce.restauranteId || conta.restauranteId, conta.nfce.ambiente);
-  const { j } = await chamarFocus(em, 'DELETE', '/v2/nfce/' + encodeURIComponent(conta.nfce.ref), { justificativa: just.slice(0, 255) });
+  const em = emissor(atual.restauranteId || conta.restauranteId, atual.ambiente);
+  const { j } = await chamarFocus(em, 'DELETE', '/v2/nfce/' + encodeURIComponent(atual.ref), { justificativa: just.slice(0, 255) });
   if (j && j.status === 'cancelado') {
-    const nfce = Object.assign({}, conta.nfce, { status: 'cancelado', canceladaEm: Date.now(), justificativa: just, mensagemSefaz: j.mensagem_sefaz || '' });
-    await Promise.all([ref0.update({ nfce }), db.collection('nfce').doc(conta.nfce.ref).set(nfce)]);
-    return { ok: true, nfce };
+    const nfce = Object.assign({}, atual, { status: 'cancelado', canceladaEm: Date.now(), justificativa: just, mensagemSefaz: j.mensagem_sefaz || '' });
+    await Promise.all([ref0.update({ [porPessoa ? 'nfcePessoas.' + chaveP : 'nfce']: nfce }), db.collection('nfce').doc(atual.ref).set(nfce)]);
+    return { ok: true, nfce, pessoa: chaveP };
   }
   return { ok: false, error: msgErro(j) };
 }
@@ -369,4 +397,4 @@ async function xmlsDasNotas(db, tenantId, refs) {
   return { ok: true, arquivos: saida };
 }
 
-module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };
+module.exports = { emitir, cancelar, ambiente, listarMes, xmlsDasNotas, _interno: { chavePessoa, _contaDaPessoa, chaveRest, chaveEmissor, emissor, montarItens, montarPagamentos, configFiscal, fiscalDoItem, cpfValido, cnpjValido, dadosDoXml, PADRAO } };

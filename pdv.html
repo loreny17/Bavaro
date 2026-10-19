@@ -5102,7 +5102,23 @@ function iniciarListenerBalanca(){
         }).catch(function(){});
       });
     }, function(e){ console.warn('[BALANÇA] listener erro:', e.code||e.message); });
+  // Pedidos do TOTEM vêm com status próprio ("pendente_totem"): PDV de versão antiga
+  // (ou aberto em simulação) não enxerga e não responde com peso inventado.
+  if(_unsubBalancaTotem) _unsubBalancaTotem();
+  _unsubBalancaTotem = fbDb.collection('comandos_balanca')
+    .where('restauranteId','==',_restauranteAtivo.id)
+    .where('status','==','pendente_totem')
+    .onSnapshot(function(snap){
+      snap.forEach(function(d){
+        if(_balancaProcessados[d.id]) return;
+        _balancaProcessados[d.id] = true;
+        var v = d.data()||{};
+        if(Date.now() - (v.criadoEm||0) > 15000){ d.ref.delete().catch(function(){}); return; }
+        _balAtenderTotem(d.ref);
+      });
+    }, function(e){ console.warn('[BALANÇA totem] listener erro:', e.code||e.message); });
 }
+var _unsubBalancaTotem = null;
 
 // Totem do buffet (modo balança): só responde o PDV que tem balança DE VERDADE
 // (sem simulação) e com "atende o totem" ligado. Transação: um PDV só lê cada pedido.
@@ -5111,14 +5127,15 @@ function _balAtenderTotem(ref){
   if(cfg.simulacao || cfg.atendeTotem === false) return;
   fbDb.runTransaction(function(tx){
     return tx.get(ref).then(function(d){
-      if(!d.exists || (d.data()||{}).status !== 'pendente') return false;
+      var stt = d.exists ? (d.data()||{}).status : '';
+      if(stt !== 'pendente' && stt !== 'pendente_totem') return false;
       tx.update(ref, { status:'lendo', lidoPor:_pdvIdAparelho });
       return true;
     });
   }).then(function(minha){
     if(!minha) return;
     return balancaLerPeso().then(function(g){
-      return ref.update({ status:'ok', peso:g, respondidoEm:Date.now() });
+      return ref.update({ status:'ok', peso:g, respondidoEm:Date.now(), lidoPor:_pdvIdAparelho, real:true });
     }, function(e){
       var m = (e && e.message) || 'Falha na leitura';
       // balança respondeu "sem peso" (prato ainda não está em cima) não é erro de verdade

@@ -3627,14 +3627,16 @@ function _balLerUmaVez(){
     });
   }
   return new Promise(function(resolve, reject){
-    fbDb.collection('comandos_balanca').add({ restauranteId:_restauranteId, tenantId:_tenantId, status:'pendente', origem:'totem', solicitadoPor:'Totem buffet', criadoEm:Date.now() })
+    fbDb.collection('comandos_balanca').add({ restauranteId:_restauranteId, tenantId:_tenantId, status:'pendente_totem', origem:'totem', solicitadoPor:'Totem buffet', criadoEm:Date.now() })
       .then(function(ref){
         var fim = false, unsub = null;
         var to = setTimeout(function(){ if(fim) return; fim = true; if(unsub) unsub(); ref.delete().catch(function(){}); reject(new Error('SEM_PDV')); }, 7000);
         unsub = ref.onSnapshot(function(doc){
           if(fim || !doc.exists) return;
           var v = doc.data() || {};
-          if(v.status === 'ok'){ fim = true; clearTimeout(to); unsub(); ref.delete().catch(function(){}); resolve(Number(v.peso) || 0); }
+          if(v.status === 'ok'){
+            if(v.real !== true) return;   // resposta de PDV antigo/simulação: ignora
+            fim = true; clearTimeout(to); unsub(); ref.delete().catch(function(){}); _balDiag('leitura direta', v.lidoPor, v.peso); resolve(Number(v.peso) || 0); }
           else if(v.status === 'erro'){ fim = true; clearTimeout(to); unsub(); ref.delete().catch(function(){}); reject(new Error(v.erro || 'Erro na balança')); }
         }, function(){});
       }).catch(reject);
@@ -3699,7 +3701,8 @@ function abrirTelaBalanca(outroPrato){
     '<div style="display:flex;gap:14px;margin-top:40px;width:100%;max-width:620px;">' +
       '<button onclick="_balCancelar()" style="flex:1;padding:22px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:16px;font-weight:700;font-size:1.15rem;cursor:pointer;font-family:inherit;">Cancelar</button>' +
       '<button id="bal-btn-prox" onclick="_balProximo()" disabled style="flex:2;padding:22px;background:var(--accent);border:none;color:#000;border-radius:16px;font-weight:800;font-size:1.3rem;cursor:pointer;font-family:inherit;opacity:0.35;">Próximo →</button>' +
-    '</div>';
+    '</div>' +
+    '<div id="bal-diag" style="position:absolute;bottom:10px;left:0;right:0;font-size:0.72rem;color:rgba(255,255,255,0.3);font-family:monospace;"></div>';
   document.body.appendChild(t);
   var meu = ++_balLoopId;
   _balPrecisaZerar = true;
@@ -3722,7 +3725,7 @@ function abrirTelaBalanca(outroPrato){
         if(va0) va0.textContent = 'R$ -,--';
         if(bt0){ bt0.disabled = true; bt0.style.opacity = '0.35'; }
       }
-      else _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel);
+      else { _balMostrar(Number(_balVivo.peso) || 0, !!_balVivo.estavel); _balDiag('ao vivo', _balVivo.por, _balVivo.leitura != null ? _balVivo.leitura : _balVivo.peso); }
       setTimeout(ciclo, 250);
       return;
     }
@@ -3739,6 +3742,11 @@ function abrirTelaBalanca(outroPrato){
   };
   ciclo();
   resetTimerInatividade();
+}
+// Linha discreta no rodapé: de onde veio o peso (ajuda a achar PDV errado respondendo)
+function _balDiag(fonte, por, bruto){
+  var d = document.getElementById('bal-diag'); if(!d) return;
+  d.textContent = 'balança: ' + fonte + ' · PDV ' + String(por || '?').slice(-6) + ' · leitura ' + (Number(bruto) || 0) + ' g · ' + new Date().toLocaleTimeString('pt-BR');
 }
 // 🔄 Atualizar (atendente): pede 3 leituras novas direto ao PDV da balança,
 // ignorando trava/peso anterior, e usa o peso que se repetir.

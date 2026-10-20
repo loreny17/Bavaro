@@ -623,9 +623,9 @@ header{
 @media(min-width:768px){.modal{align-items:center;}}
 /* Modal centralizado (não tampado pelo teclado) */
 .modal.modal-centro{align-items:center;padding:20px;}
-.modal.modal-centro .modal-box{border-radius:18px !important;max-height:80vh;background:rgba(18,15,12,0.97);border:1px solid rgba(255,255,255,0.20);;}
+.modal.modal-centro .modal-box{border-radius:18px !important;max-height:80vh;background:#120f0c;border:1px solid rgba(255,255,255,0.20);;}
 .modal-box{
-  background:rgba(18,15,12,0.97);border:1px solid rgba(255,255,255,0.18);
+  background:#120f0c;border:1px solid rgba(255,255,255,0.18);
   border-radius:22px 22px 0 0;width:100%;max-width:500px;max-height:92vh;
   overflow-y:auto;display:flex;flex-direction:column;
   transform:translateY(10px);transition:none;
@@ -636,7 +636,7 @@ header{
 @media(min-width:768px){.modal-box{border-radius:18px;}}
 .modal-header{padding:16px 18px;border-bottom:1px solid rgba(255,255,255,0.10);
   display:flex;align-items:center;gap:10px;position:sticky;top:0;
-  background:rgba(18,15,12,0.97);;z-index:1;}
+  background:#120f0c;;z-index:1;}
 .modal-titulo{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:0.06em;color:var(--accent);flex:1;}
 .modal-fechar{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
   width:32px;height:32px;border-radius:8px;font-size:1.3rem;line-height:1;}
@@ -805,7 +805,7 @@ header{
 .mesa-header-menu-btn:active{background:rgba(212,168,67,0.12);border-color:var(--accent);color:var(--accent);}
 .menu-lateral-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:450;opacity:0;pointer-events:none;transition:none;}
 .menu-lateral-overlay.show{opacity:1;pointer-events:all;}
-.menu-lateral{position:fixed;top:0;left:0;bottom:0;width:85%;max-width:340px;background:rgba(18,15,12,0.97);border-right:1px solid rgba(255,255,255,0.15);;z-index:460;transform:translateX(-105%);transition:transform 0.25s ease-out;display:flex;flex-direction:column;}
+.menu-lateral{position:fixed;top:0;left:0;bottom:0;width:85%;max-width:340px;background:#120f0c;border-right:1px solid rgba(255,255,255,0.15);;z-index:460;transform:translateX(-105%);transition:transform 0.25s ease-out;display:flex;flex-direction:column;}
 .menu-lateral.show{transform:translateX(0);}
 .menu-lateral-header{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--border);}
 .menu-lateral-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;}
@@ -19116,108 +19116,134 @@ function executarLimpezaAutomaticaGarcom(){
     }).catch(function(){});
 }
 
+// ═══ HISTÓRICO DE CONTAS ═══
+// Um dia por vez (◀ ▶), busca por mesa, cards compactos com selos (nota fiscal e
+// forma de pagamento) e resumo do dia. Excluir fica DENTRO da conta, só pra gerente.
+var _histTodas = [], _histDia = null, _histBusca = '';
+function _histDiaOp(ts){ var d = new Date(ts); if(d.getHours() < 2) d.setDate(d.getDate() - 1); d.setHours(0,0,0,0); return d.getTime(); }
+function _histRotulo(diaTs){
+  var hoje = _histDiaOp(Date.now()), um = 24*60*60*1000;
+  if(diaTs === hoje) return 'HOJE';
+  if(diaTs === hoje - um) return 'ONTEM';
+  if(diaTs === hoje - 2*um) return 'ANTEONTEM';
+  return new Date(diaTs).toLocaleDateString('pt-BR', {weekday:'long'}).toUpperCase();
+}
+function _histGarcom(c){
+  var g = c.garcomPrincipal || c.abertaPor || c.garcom || '';
+  if(!g){
+    var cont = {};
+    (c.itens||[]).forEach(function(it){ var n = it.garcom || it.lancadoPor || ''; if(n) cont[n] = (cont[n]||0) + 1; });
+    var mx = 0; Object.keys(cont).forEach(function(n){ if(cont[n] > mx){ mx = cont[n]; g = n; } });
+  }
+  return g || c.fechadoPor || '';
+}
+var _HIST_FORMAS = {'01':'💵 Dinheiro','03':'💳 Crédito','04':'💳 Débito','17':'⚡ Pix','10':'🎫 Vale','11':'🎫 Vale'};
+function _histNotas(c){
+  if(c.nfce && c.nfce.status === 'autorizado') return 1;
+  return Object.keys(c.nfcePessoas || {}).filter(function(k){ return c.nfcePessoas[k].status === 'autorizado'; }).length;
+}
+function _histForma(c){
+  var pg = (c.nfce && c.nfce.impressao && c.nfce.impressao.pagamentos) || [];
+  if(!pg.length && c.nfcePessoas){ var k = Object.keys(c.nfcePessoas).find(function(x){ return c.nfcePessoas[x].impressao; }); if(k) pg = c.nfcePessoas[k].impressao.pagamentos || []; }
+  var fs = []; pg.forEach(function(p){ var f = _HIST_FORMAS[p.forma] || ''; if(f && fs.indexOf(f) < 0) fs.push(f); });
+  return fs.join(' + ');
+}
 function abrirHistorico(){
   executarLimpezaAutomaticaGarcom();
   var body = document.getElementById('historico-body');
   body.innerHTML = '<div class="empty"><div class="empty-icon">⚙️</div><div class="empty-titulo">Carregando...</div></div>';
   document.getElementById('modal-historico').classList.add('show');
   pushHistory('historico');
+  _histBusca = '';
+  if(_histDia === null) _histDia = _histDiaOp(Date.now());
   fbDb.collection('contas_fechadas')
     .where('restauranteId','==', _restauranteId)
     .get().then(function(snap){
-      var lista = [];
-      snap.forEach(function(d){ lista.push(Object.assign({id: d.id}, d.data())); });
-      lista.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });
-      if(!lista.length){
-        body.innerHTML = '<div class="empty"><div class="empty-icon">📜</div><div class="empty-titulo">Nenhuma conta fechada</div><div class="empty-sub">Suas contas fechadas aparecerão aqui.</div></div>';
-        return;
-      }
-      // ── Agrupa por dia operacional (reset às 02h, igual número de pedido) ──
-      function calcularDiaOperacional(ts){
-        var d = new Date(ts);
-        if(d.getHours() < 2){
-          d.setDate(d.getDate() - 1);
-        }
-        d.setHours(0,0,0,0);
-        return d.getTime();
-      }
-      function rotuloDia(diaTs){
-        var hoje = calcularDiaOperacional(Date.now());
-        var ontem = hoje - 24*60*60*1000;
-        var anteontem = ontem - 24*60*60*1000;
-        if(diaTs === hoje) return 'HOJE';
-        if(diaTs === ontem) return 'ONTEM';
-        if(diaTs === anteontem) return 'ANTEONTEM';
-        return new Date(diaTs).toLocaleDateString('pt-BR', {weekday:'long'}).toUpperCase();
-      }
-      function dataFmt(diaTs){
-        return new Date(diaTs).toLocaleDateString('pt-BR', {day:'2-digit', month:'short'}).replace('.','');
-      }
-      // Constrói grupos: { diaTs: { contas: [...], total: 0 } }
-      var grupos = {};
-      var ordemDias = [];
-      lista.slice(0, 200).forEach(function(c){
-        var diaTs = calcularDiaOperacional(c.fechadoEm || Date.now());
-        if(!grupos[diaTs]){
-          grupos[diaTs] = { contas: [], total: 0 };
-          ordemDias.push(diaTs);
-        }
-        grupos[diaTs].contas.push(c);
-        grupos[diaTs].total += (c.total || 0);
-      });
-      // Render
-      body.innerHTML = '';
-      ordemDias.forEach(function(diaTs){
-        var g = grupos[diaTs];
-        var rotulo = rotuloDia(diaTs);
-        var data = dataFmt(diaTs);
-        var qtdMesas = g.contas.length;
-        // Cabeçalho da data
-        var header = document.createElement('div');
-        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 8px;padding:10px 12px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:10px;';
-        header.innerHTML =
-          '<div>'+
-            '<div style="font-size:0.78rem;font-weight:800;color:var(--accent);letter-spacing:0.06em;">'+rotulo+'</div>'+
-            '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">'+data+' • '+qtdMesas+' '+(qtdMesas===1?'mesa':'mesas')+'</div>'+
-          '</div>'+
-          '<div style="text-align:right;">'+
-            '<div style="font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Total do dia</div>'+
-            '<div style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.4rem;line-height:1.1;">R$ '+fmtPreco(g.total)+'</div>'+
-          '</div>';
-        body.appendChild(header);
-        // Cards das contas daquele dia
-        g.contas.forEach(function(c){
-          var hora = c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
-          var card = document.createElement('div');
-          card.className = 'hist-card';
-          card.style.position = 'relative';
-          card.innerHTML =
-            '<div class="hist-head">'+
-              '<span class="hist-mesa">Mesa ' + c.mesa + '</span>'+
-              '<span style="font-size:0.74rem;color:var(--muted);">👤 ' + esc(c.garcom||'—') + '</span>'+
-              '<span class="hist-data" style="margin-right:30px;">' + hora + '</span>'+
-            '</div>'+
-            '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-              '<span style="font-size:0.78rem;color:var(--muted);">' + ((c.itens||[]).length) + ' itens</span>'+
-              '<span class="hist-total">' + (c.nfce && c.nfce.status === 'autorizado' ? '<span style="font-size:0.7rem;color:#4ade80;font-family:inherit;margin-right:8px;">🧾 NFC-e ' + esc(c.nfce.numero) + '</span>' : (_nfceTemPorPessoa(c) ? '<span style="font-size:0.7rem;color:#4ade80;font-family:inherit;margin-right:8px;">🧾 ' + Object.keys(c.nfcePessoas).filter(function(k){ return c.nfcePessoas[k].status === 'autorizado'; }).length + ' notas</span>' : '')) + 'R$ ' + fmtPreco(c.total||0) + '</span>'+
-            '</div>'+
-            '<button onclick="event.stopPropagation();excluirContaGarcom(\''+c.id+'\',\''+c.mesa+'\')" style="position:absolute;top:8px;right:8px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:0.85rem;font-family:inherit;">🗑</button>';
-          card.onclick = (function(conta){ return function(e){
-            if(e.target.tagName === 'BUTTON') return;
-            verContaDetalhe(conta);
-          }; })(c);
-          body.appendChild(card);
-        });
-      });
+      _histTodas = [];
+      snap.forEach(function(d){ _histTodas.push(Object.assign({id: d.id}, d.data())); });
+      _histTodas.sort(function(a,b){ return (b.fechadoEm||0)-(a.fechadoEm||0); });
+      _histRender();
     }).catch(function(e){
       body.innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-titulo">Erro</div><div class="empty-sub">'+e.message+'</div></div>';
     });
+}
+function _histMudarDia(delta){
+  _histDia += delta * 24*60*60*1000;
+  _histDia = _histDiaOp(_histDia + 3*60*60*1000);   // corrige horário de verão / arredonda
+  var hoje = _histDiaOp(Date.now()); if(_histDia > hoje) _histDia = hoje;
+  _histRender();
+}
+function _histRender(){
+  var body = document.getElementById('historico-body'); if(!body) return;
+  var hoje = _histDiaOp(Date.now());
+  var doDia = _histTodas.filter(function(c){ return _histDiaOp(c.fechadoEm || Date.now()) === _histDia; });
+  var total = 0, taxa = 0, notas = 0;
+  doDia.forEach(function(c){ total += (c.total||0); taxa += (c.taxa10||0); notas += _histNotas(c); });
+  var busca = (_histBusca || '').replace(/\D/g, '');
+  var lista = busca ? doDia.filter(function(c){ return String(c.mesa||'').indexOf(busca) === 0; }) : doDia;
+  var nav = 'background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:40px;height:40px;border-radius:10px;font-size:1.1rem;cursor:pointer;font-family:inherit;';
+  var html =
+    // ◀ dia ▶
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
+      '<button onclick="_histMudarDia(-1)" style="' + nav + '">◀</button>' +
+      '<div style="flex:1;text-align:center;"><div style="font-weight:800;color:var(--accent);letter-spacing:0.06em;font-size:0.9rem;">' + _histRotulo(_histDia) + '</div>' +
+        '<div style="font-size:0.74rem;color:var(--muted);">' + new Date(_histDia).toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'numeric'}).replace('.','') + '</div></div>' +
+      '<button onclick="_histMudarDia(1)" style="' + nav + (_histDia >= hoje ? 'opacity:0.3;' : '') + '"' + (_histDia >= hoje ? ' disabled' : '') + '>▶</button>' +
+    '</div>' +
+    // resumo do dia
+    '<div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.25);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;">' +
+        '<span style="font-size:0.72rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Total do dia</span>' +
+        '<span style="font-family:Bebas Neue,sans-serif;color:var(--accent);font-size:1.6rem;line-height:1;">R$ ' + fmtPreco(total) + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;font-size:0.74rem;">' +
+        '<span style="background:var(--surface2);border-radius:8px;padding:4px 8px;">🪑 ' + doDia.length + ' ' + (doDia.length === 1 ? 'mesa' : 'mesas') + '</span>' +
+        (taxa > 0 ? '<span style="background:var(--surface2);border-radius:8px;padding:4px 8px;">💰 10%: R$ ' + fmtPreco(taxa) + '</span>' : '') +
+        '<span style="background:var(--surface2);border-radius:8px;padding:4px 8px;">🧾 ' + notas + ' ' + (notas === 1 ? 'nota' : 'notas') + '</span>' +
+      '</div>' +
+    '</div>' +
+    // busca
+    '<input id="hist-busca" type="text" inputmode="numeric" placeholder="🔍 Buscar mesa (ex: 47)" value="' + esc(_histBusca) + '" oninput="_histBusca=this.value;_histRenderLista()" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:10px;padding:10px 12px;font-family:inherit;font-size:0.92rem;margin-bottom:8px;">' +
+    '<div id="hist-lista"></div>';
+  body.innerHTML = html;
+  _histRenderLista();
+}
+function _histRenderLista(){
+  var box = document.getElementById('hist-lista'); if(!box) return;
+  var doDia = _histTodas.filter(function(c){ return _histDiaOp(c.fechadoEm || Date.now()) === _histDia; });
+  var busca = (_histBusca || '').replace(/\D/g, '');
+  var lista = busca ? doDia.filter(function(c){ return String(c.mesa||'').indexOf(busca) === 0; }) : doDia;
+  if(!lista.length){
+    box.innerHTML = '<div class="empty" style="padding:24px 0;"><div class="empty-icon">📜</div><div class="empty-titulo">' + (busca ? 'Nenhuma conta da mesa ' + esc(busca) : 'Nenhuma conta fechada neste dia') + '</div></div>';
+    return;
+  }
+  box.innerHTML = '';
+  lista.forEach(function(c){
+    var hora = c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    var nItens = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; }).length;
+    var nNotas = _histNotas(c), forma = _histForma(c), garc = _histGarcom(c);
+    var selos = (nNotas ? '<span style="background:rgba(74,222,128,0.12);color:#4ade80;border-radius:6px;padding:2px 6px;">🧾 ' + (nNotas > 1 ? nNotas + ' notas' : 'NFC-e') + '</span>' : '') +
+      (forma ? '<span style="background:var(--surface3);border-radius:6px;padding:2px 6px;">' + forma + '</span>' : '');
+    var card = document.createElement('div');
+    card.className = 'hist-card';
+    card.style.cssText = 'padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;';
+    card.innerHTML =
+      '<span class="hist-mesa" style="flex-shrink:0;">Mesa ' + esc(c.mesa) + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:0.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + hora + ' · ' + nItens + ' ' + (nItens === 1 ? 'item' : 'itens') + (garc ? ' · 👤 ' + esc(garc) : '') + '</div>' +
+        (selos ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;font-size:0.68rem;">' + selos + '</div>' : '') +
+      '</div>' +
+      '<span class="hist-total" style="flex-shrink:0;">R$ ' + fmtPreco(c.total||0) + '</span>';
+    card.onclick = (function(conta){ return function(){ verContaDetalhe(conta); }; })(c);
+    box.appendChild(card);
+  });
 }
 
 function excluirContaGarcom(id, mesa){
   if(!confirm('Excluir definitivamente a conta da Mesa ' + mesa + ' do histórico?\n\nEsta ação não pode ser desfeita.')) return;
   fbDb.collection('contas_fechadas').doc(id).delete().then(function(){
     showToast('🗑️ Conta removida','#f87171');
+    var md = document.getElementById('modal-conta-detalhe'); if(md) md.classList.remove('show');
     abrirHistorico();
   }).catch(function(e){ showToast('❌ '+e.message,'#f87171'); });
 }
@@ -19228,7 +19254,7 @@ function verContaDetalhe(c){
   document.getElementById('conta-detalhe-titulo').textContent = 'MESA ' + c.mesa;
   var data = c.fechadoEm ? new Date(c.fechadoEm).toLocaleString('pt-BR') : '';
   var html = '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;">'+
-    'Fechada em ' + data + '<br>👤 ' + esc(c.garcom||'—') + (c.fechadoPor && c.fechadoPor!==c.garcom ? ' (cobrou: '+esc(c.fechadoPor)+')' : '') +
+    'Fechada em ' + data + (_histGarcom(c) ? '<br>👤 ' + esc(_histGarcom(c)) : '') + (c.fechadoPor && c.fechadoPor !== _histGarcom(c) ? ' (cobrou: '+esc(c.fechadoPor)+')' : '') +
   '</div>';
   html += '<div class="fechar-bloco">';
   (c.itens||[]).forEach(function(it){
@@ -19250,6 +19276,8 @@ function verContaDetalhe(c){
     html += '</div>';
   }
   html += '<div id="conta-detalhe-nfce">' + _htmlNfceDetalhe(c) + '</div>';
+  // Excluir a conta: só gerente, dentro da conta (antes era uma lixeira em cada card da lista)
+  if(_ehAdmin) html += '<button onclick="excluirContaGarcom(\'' + c.id + '\',\'' + esc(String(c.mesa)) + '\')" style="width:100%;margin-top:14px;background:transparent;border:1px solid rgba(248,113,113,0.4);color:#f87171;border-radius:10px;padding:11px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.84rem;">🗑 Excluir esta conta do histórico</button>';
   document.getElementById('conta-detalhe-body').innerHTML = html;
   document.getElementById('modal-conta-detalhe').classList.add('show');
 }

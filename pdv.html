@@ -6024,25 +6024,32 @@ function carregarImpressoras(){
 }
 
 function _nomeEsteComputador(){ try{ return localStorage.getItem('pdv_computador_nome') || ''; }catch(e){ return ''; } }
-function _renomearEsteComputador(){
-  var n = prompt('Nome deste computador (ex.: Caixa, Totem, Buffet):', _nomeEsteComputador());
-  if(n === null) return null;
-  n = String(n).trim().slice(0, 30);
+function _salvarNomeComputador(n){
+  n = String(n || '').trim().slice(0, 30);
   if(!n) return null;
   try{ localStorage.setItem('pdv_computador_nome', n); }catch(e){}
   // atualiza o nome nas impressoras ligadas aqui
   _impressoras.forEach(function(imp){ if(imp.computadorId === _pdvIdAparelho && imp.computadorNome !== n){ imp.computadorNome = n; fbColImpressao('impressoras').doc(imp.id).update({ computadorNome:n }).catch(function(){}); } });
   renderImpressoras();
+  showToast('✓ Este computador agora é "' + n + '"', '#4ade80');
   return n;
 }
+var _editandoNomePc = false;
+function _renomearEsteComputador(){ _editandoNomePc = true; renderImpressoras(); setTimeout(function(){ var i = document.getElementById('imp-nome-pc'); if(i){ i.focus(); i.select(); } }, 30); }
 function renderImpressoras(){
   var lista = document.getElementById('impressoras-lista');
   if(!lista) return;
   var est = document.getElementById('imp-este-computador');
   if(est){
     var nomePc = _nomeEsteComputador();
-    est.innerHTML = '<span style="flex:1;">💻 Este computador: <b>' + (nomePc ? escapeHtml(nomePc) : '<span style="color:#f59e0b;">sem nome</span>') + '</b></span>' +
-      '<button class="p-btn secondary" style="flex:0 0 auto;padding:6px 10px;font-size:0.76rem;" onclick="_renomearEsteComputador()">' + (nomePc ? '✏️ Renomear' : 'Dar nome') + '</button>';
+    if(!nomePc || _editandoNomePc){
+      est.innerHTML = '<span style="flex:0 0 auto;">💻 Este computador:</span>' +
+        '<input id="imp-nome-pc" class="f-input" maxlength="30" placeholder="ex.: Caixa, Totem, Buffet" value="' + escapeHtml(nomePc) + '" onkeydown="if(event.key===\'Enter\'){_editandoNomePc=false;_salvarNomeComputador(this.value);}" style="flex:1;min-width:0;padding:7px 9px;font-size:0.84rem;">' +
+        '<button class="p-btn primary" style="flex:0 0 auto;padding:6px 12px;font-size:0.78rem;" onclick="var v=document.getElementById(\'imp-nome-pc\').value;if(!v.trim()){showToast(\'Digite um nome\',\'#f7a34f\');return;}_editandoNomePc=false;_salvarNomeComputador(v);">Salvar</button>';
+    } else {
+      est.innerHTML = '<span style="flex:1;">💻 Este computador: <b>' + escapeHtml(nomePc) + '</b></span>' +
+        '<button class="p-btn secondary" style="flex:0 0 auto;padding:6px 10px;font-size:0.76rem;" onclick="_renomearEsteComputador()">✏️ Renomear</button>';
+    }
   }
   if(!_impressoras.length){
     lista.innerHTML = '<div class="empty"><div class="empty-icon">🖨️</div><div class="empty-titulo">Nenhuma impressora</div><div class="empty-sub">Toque em "+ Nova" para cadastrar a primeira (Cozinha, Bar, etc.)</div></div>';
@@ -6114,6 +6121,7 @@ function _impMarcarDestePc(imp){
   var cb = document.getElementById('imp-deste-pc'), info = document.getElementById('imp-deste-pc-info');
   if(!cb) return;
   var aqui = _nomeEsteComputador() || 'este computador';
+  var inpN = document.getElementById('imp-nome-pc-modal'); if(inpN) inpN.value = _nomeEsteComputador();
   if(!imp){ cb.checked = true; info.textContent = 'Só o PDV aberto aqui (' + aqui + ') vai imprimir nela.'; return; }
   cb.checked = !!imp.computadorId && imp.computadorId === _pdvIdAparelho;
   info.textContent = imp.computadorId
@@ -6164,8 +6172,10 @@ function salvarImpressora(){
     }
     var antes = _impEditandoId ? (_impressoras.find(function(i){ return i.id === _impEditandoId; }) || {}) : {};
     if((document.getElementById('imp-deste-pc') || {}).checked){
-      var nomePc = _nomeEsteComputador() || _renomearEsteComputador();
-      if(!nomePc){ showToast('Dê um nome pra este computador (ex.: Caixa)','#f7a34f'); return; }
+      var nomeDig = String((document.getElementById('imp-nome-pc-modal') || {}).value || '').trim();
+      var nomePc = nomeDig || _nomeEsteComputador();
+      if(!nomePc){ showToast('Escreva o nome deste computador (ex.: Caixa) no campo abaixo da caixinha','#f7a34f'); var f = document.getElementById('imp-nome-pc-modal'); if(f) f.focus(); return; }
+      if(nomeDig && nomeDig !== _nomeEsteComputador()){ try{ localStorage.setItem('pdv_computador_nome', nomeDig.slice(0, 30)); }catch(e){} }
       dados.computadorId = _pdvIdAparelho; dados.computadorNome = nomePc;
     } else if(antes.computadorId === _pdvIdAparelho){
       dados.computadorId = null; dados.computadorNome = null;   // desmarcou aqui
@@ -16018,6 +16028,7 @@ function toggleAdminUsuario(garcomId, novoValor){
           <input type="checkbox" id="imp-deste-pc" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
           <span style="font-size:0.82rem;line-height:1.35;"><b>📍 Está ligada NESTE computador</b><br><span id="imp-deste-pc-info" style="color:var(--muted);font-size:0.74rem;"></span></span>
         </label>
+        <input type="text" class="f-input" id="imp-nome-pc-modal" maxlength="30" placeholder="Nome deste computador (ex.: Caixa, Totem, Buffet)" style="margin-top:6px;">
       </div>
 
       <div class="f-grupo" id="imp-campo-rede" style="display:none;">

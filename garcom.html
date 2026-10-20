@@ -1454,11 +1454,11 @@ html[data-anim="off"] .g-ripple{display:none!important;}
         <div style="display:flex;gap:10px;margin-bottom:10px;">
           <div style="flex:1;">
             <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">Peso (gramas)</label>
-            <input type="text" id="kg-peso" inputmode="decimal" placeholder="450" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
+            <input type="text" id="kg-peso" inputmode="decimal" enterkeyhint="done" onkeydown="_kgEnter(event)" placeholder="450" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
           </div>
           <div style="flex:1;">
             <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">Valor (R$)</label>
-            <input type="text" id="kg-valor" inputmode="numeric" placeholder="ex: 2582 = R$ 25,82" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
+            <input type="text" id="kg-valor" inputmode="numeric" enterkeyhint="done" onkeydown="_kgEnter(event)" placeholder="ex: 2582 = R$ 25,82" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px 12px;font-size:1.1rem;font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;text-align:center;">
           </div>
         </div>
         <button id="kg-btn-balanca" onclick="kgPesarNaBalanca()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:11px;font-weight:800;font-size:0.9rem;cursor:pointer;font-family:inherit;margin-bottom:10px;">📡 Pesar na balança</button>
@@ -1467,6 +1467,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
           <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">👤 Nome do cliente (opcional)</label>
           <input type="text" id="kg-nome-cliente" placeholder="Ex: João, Mesa 5..." maxlength="40" oninput="_kgRenderNomes()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:10px 12px;font-size:0.95rem;font-family:inherit;outline:none;">
           <div id="kg-nomes-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
+          <button type="button" id="kg-btn-outro" onclick="_kgAdicionarEOutro()" style="width:100%;margin-top:12px;background:transparent;border:1.5px dashed var(--accent);color:var(--accent);border-radius:10px;padding:11px;font-weight:800;font-size:0.9rem;cursor:pointer;font-family:inherit;">➕ Adicionar e pesar outro prato</button>
         </div>
         <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:4px;">Digite o peso OU o valor — o outro campo se ajusta automaticamente.</div>
       </div>
@@ -13247,7 +13248,36 @@ function adicionarAoCarrinho(){
   renderCatNav();
   renderCatNav();
   renderItens();
+  // ➕ "Adicionar e pesar outro prato": em vez do carrinho, já abre o próximo prato
+  if(_kgOutroProximo){
+    var itK = _kgOutroProximo; _kgOutroProximo = null;
+    showToast('✓ Prato de R$ ' + fmtPreco(itemCarrinho.preco) + ' no carrinho — próximo', '#4ade80', 1800);
+    setTimeout(function(){
+      abrirModalItem(itK);
+      setTimeout(function(){ var v = document.getElementById('kg-valor'); if(v) v.focus(); }, 250);
+    }, 150);
+    return;
+  }
   abrirModalCarrinho();
+}
+var _kgOutroProximo = null;
+function _kgAdicionarEOutro(){
+  if(!_itemAberto || _itemAberto.tipoVenda !== 'kg') return;
+  if(_editandoCartIdx !== null && _editandoCartIdx !== undefined){ adicionarAoCarrinho(); return; }   // editando: só salva
+  var antes = _carrinho.length;
+  _kgOutroProximo = _itemAberto;
+  adicionarAoCarrinho();
+  if(_carrinho.length === antes) _kgOutroProximo = null;   // não adicionou (faltou valor etc.)
+}
+// Enter (✓ do teclado) no peso ou no valor já adiciona o prato
+function _kgEnter(e){
+  if(e.key !== 'Enter') return;
+  e.preventDefault();
+  var v = document.getElementById('kg-valor');
+  var num = parseFloat(String(v && v.value || '').replace(',', '.').replace(/[^\d.]/g, ''));
+  if(!(num > 0)){ showToast('Digite o peso ou o valor', '#f7a34f'); return; }
+  try{ e.target.blur(); }catch(x){}
+  adicionarAoCarrinho();
 }
 function atualizarCarrinhoBadge(){
   var total = _carrinho.reduce(function(acc,c){ return acc+c.qtd; },0);

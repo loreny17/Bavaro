@@ -14946,13 +14946,13 @@ function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 var _toastTimer = null;
-function showToast(msg, cor){
+function showToast(msg, cor, ms){
   var el = document.getElementById('toast');
   el.textContent = msg;
   el.style.color = cor||'';
   el.classList.add('show');
   clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(function(){ el.classList.remove('show'); },2800);
+  _toastTimer = setTimeout(function(){ el.classList.remove('show'); }, ms || 2800);
 }
 
 // ════════════════════════════════════════
@@ -21772,7 +21772,15 @@ function _montarRecadoLoja(j){
       if(pont.length && (pont.length === 1 || pont[0].p > pont[1].p)) alvo = pont[0].l.id;
     }
     if(!alvo && lojas.length === 1) alvo = lojas[0].id;
-    return { lojas: lojas, lojaId: alvo, mensagem: j.mensagem || '' };
+    var ctx = { lojas: lojas, lojaId: alvo, mensagem: j.mensagem || '', impsLoja: {} };
+    if(alvo){
+      return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(alvo)
+        .collection('impressao').doc('config').collection('impressoras').get().then(function(snap){
+          var l = []; snap.forEach(function(d){ var v = d.data() || {}; l.push({ id:d.id, nome:v.nome || '(sem nome)' }); });
+          ctx.impsLoja[alvo] = l; return ctx;
+        }).catch(function(){ return ctx; });
+    }
+    return ctx;
   });
 }
 function _ctxRecadoLoja(ctxId){ return ctxId === 'box' ? _recadoLojaBox : _chatHistorico.find(function(m){ return m.id === ctxId; }); }
@@ -21781,11 +21789,55 @@ function _htmlRecadoLoja(ctx, ctxId){
   if(!ctx.lojas.length) return '<div style="font-size:0.84rem;">Não achei outras lojas cadastradas na rede.</div>';
   var op = '<option value="">Escolha a loja…</option>' + ctx.lojas.map(function(l){ return '<option value="' + l.id + '"' + (l.id === ctx.lojaId ? ' selected' : '') + '>' + esc(l.nome) + '</option>'; }).join('');
   return '<div style="font-size:0.8rem;margin-bottom:6px;">📨 <b>Recado pra outra loja</b></div>' +
-    '<select id="rl-loja-' + ctxId + '" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.84rem;">' + op + '</select>' +
+    '<select id="rl-loja-' + ctxId + '" onchange="_rlTrocarLoja(\'' + ctxId + '\', this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.84rem;">' + op + '</select>' +
+    (ctx.lojaId ? (ctx.carregandoImps ? '<div style="font-size:0.74rem;color:var(--muted);margin-top:6px;">Carregando impressoras da loja…</div>'
+      : '<select id="rl-imp-' + ctxId + '" onchange="_rlEscolherImp(\'' + ctxId + '\', this.value)" style="width:100%;margin-top:6px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:9px;font-family:inherit;font-size:0.84rem;">' +
+          '<option value="">🖨️ Impressora do caixa (automático)</option>' +
+          ((ctx.impsLoja || {})[ctx.lojaId] || []).map(function(i){ return '<option value="' + i.id + '"' + (i.id === ctx.impressoraId ? ' selected' : '') + '>🖨️ ' + esc(i.nome) + '</option>'; }).join('') +
+        '</select>') : '') +
     '<textarea id="rl-txt-' + ctxId + '" rows="3" style="width:100%;box-sizing:border-box;margin-top:6px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:8px;font-family:inherit;font-size:0.86rem;resize:none;">' + esc(ctx.mensagem) + '</textarea>' +
     (ctx.enviando ? '<div style="text-align:center;font-size:0.78rem;color:var(--muted);padding:8px;">Enviando...</div>'
       : '<button onclick="_enviarRecadoLoja(\'' + ctxId + '\')" style="width:100%;margin-top:7px;background:#60a5fa;border:none;color:#000;border-radius:9px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.84rem;">📨 Enviar pra impressora da loja</button>') +
     '<div style="font-size:0.66rem;color:var(--muted);margin-top:5px;">Sai na impressora do caixa da outra loja e aparece um aviso no PDV dela (o PDV precisa estar aberto).</div>';
+}
+// Impressoras da OUTRA loja (pra escolher onde o recado sai)
+function _rlRerender(ctxId){
+  var ctx = _ctxRecadoLoja(ctxId); if(!ctx) return;
+  var t = document.getElementById('rl-txt-' + ctxId); if(t) ctx.mensagem = t.value;
+  if(ctxId === 'box'){ var c = document.getElementById('resposta-assistente-garcom'); if(c) c.innerHTML = _htmlRecadoLoja(ctx, 'box'); }
+  else renderChatMensagens(true);
+}
+function _rlTrocarLoja(ctxId, lojaId){
+  var ctx = _ctxRecadoLoja(ctxId); if(!ctx) return;
+  ctx.lojaId = lojaId; ctx.impressoraId = '';
+  ctx.impsLoja = ctx.impsLoja || {};
+  if(!lojaId || ctx.impsLoja[lojaId]){ _rlRerender(ctxId); return; }
+  ctx.carregandoImps = true; _rlRerender(ctxId);
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(lojaId)
+    .collection('impressao').doc('config').collection('impressoras').get().then(function(snap){
+      var l = []; snap.forEach(function(d){ var v = d.data() || {}; l.push({ id:d.id, nome:v.nome || '(sem nome)' }); });
+      ctx.impsLoja[lojaId] = l;
+    }).catch(function(){ ctx.impsLoja[lojaId] = []; })
+    .then(function(){ ctx.carregandoImps = false; _rlRerender(ctxId); });
+}
+function _rlEscolherImp(ctxId, impId){ var ctx = _ctxRecadoLoja(ctxId); if(ctx) ctx.impressoraId = impId; }
+// Acompanha o recado: diz se saiu na impressora ou se nenhum PDV da loja pegou
+function _rlAcompanhar(ref, nomeLoja){
+  var visto = false, impresso = false, fim = false;
+  var un = ref.onSnapshot(function(d){
+    if(fim || !d.exists) return;
+    var v = d.data() || {};
+    if(v.vistoPor && Object.keys(v.vistoPor).length) visto = true;
+    if(v.impPor && Object.keys(v.impPor).length && !impresso){
+      impresso = true; fim = true; un();
+      showToast('🖨️ Recado impresso na ' + nomeLoja, '#4ade80', 4000);
+    }
+  }, function(){});
+  setTimeout(function(){
+    if(fim) return; fim = true; try{ un(); }catch(e){}
+    if(!visto) showToast('⚠️ Nenhum PDV da ' + nomeLoja + ' recebeu. O PDV dessa loja precisa estar aberto (com a loja selecionada) — sai quando abrir.', '#f7a34f', 8000);
+    else showToast('⚠️ O PDV da ' + nomeLoja + ' recebeu, mas não conseguiu imprimir. Confira se o QZ Tray está aberto e se a impressora escolhida está ligada nesse computador.', '#f7a34f', 8000);
+  }, 20000);
 }
 function _enviarRecadoLoja(ctxId){
   var ctx = _ctxRecadoLoja(ctxId);
@@ -21799,8 +21851,10 @@ function _enviarRecadoLoja(ctxId){
   fbDb.collection('comandos_impressao').add({
     tipo: 'recado_loja', restauranteId: lojaId, tenantId: _tenantId || null,
     origemRestauranteId: _restauranteId, origemNome: _nomeRestauranteG || _restauranteId,
-    mensagem: txt, solicitadoPor: _nomeGarcom || '', criadoEm: Date.now()
-  }).then(function(){
+    mensagem: txt, solicitadoPor: _nomeGarcom || '', criadoEm: Date.now(),
+    impressoraId: (document.getElementById('rl-imp-' + ctxId) || {}).value || ctx.impressoraId || ''
+  }).then(function(ref){
+    _rlAcompanhar(ref, loja.nome || 'loja');
     ctx.enviando = false; ctx.enviado = true;
     var feito = 'Recado enviado pra ' + (loja.nome || 'loja') + ': "' + txt + '"';
     if(ctxId === 'box'){

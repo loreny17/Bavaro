@@ -9329,9 +9329,13 @@ function processarComandoImpressao(cmdId, cmd){
   if(cmd.tipo === 'recado_loja'){
     // Recado vindo de OUTRA loja da rede: aviso na tela + impressão na
     // impressora do caixa (modelo de fechamento) ou, se não houver, na primeira.
-    _mostrarRecadoLoja(cmd);
+    if(!cmd._jaMostrado) _mostrarRecadoLoja(cmd);
+    // avisa o garçom que este PDV recebeu (e se alcança a impressora)
+    try{ var vUpd = {}; vUpd['vistoPor.' + _pdvIdAparelho] = Date.now(); fbDb.collection('comandos_impressao').doc(cmdId).update(vUpd).catch(function(){}); }catch(e){}
+    // impressora escolhida no garçom; senão a do caixa (modelo Fechamento); senão a primeira
     var modFech = _modelos.find(function(m){ return m.tipo === 'fechamento'; });
-    var impRL = (modFech && _impressoras.find(function(i){ return i.id === modFech.impressoraId; })) || _impressoras[0];
+    var impRL = (cmd.impressoraId && _impressoras.find(function(i){ return i.id === cmd.impressoraId; }))
+      || (modFech && _impressoras.find(function(i){ return i.id === modFech.impressoraId; })) || _impressoras[0];
     if(!impRL || !_qzPronto){
       // Sem impressora agora: o aviso já está na tela; tenta imprimir de novo em 15s
       _comandosImpProcessados[cmdId] = false;

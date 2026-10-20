@@ -289,6 +289,7 @@
       <div>Pagos hoje: <b id="stat-pagos">0</b></div>
     </div>
     <button onclick="abrirBuffetCaixa()" style="margin-left:12px;background:var(--surface2);color:var(--accent);border:1.5px solid var(--accent);border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">⚖️ Buffet</button>
+    <button onclick="abrirRelatorioDireto()" style="margin-left:8px;background:var(--surface2);color:var(--accent);border:1.5px solid var(--accent);border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">📊 Relatório</button>
     <button onclick="abrirHistorico()" style="margin-left:8px;background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;white-space:nowrap;">📋 Histórico</button>
   </div>
 
@@ -1308,6 +1309,17 @@ function _relCalcular(deHHMM, ateHHMM){
 }
 var _REL_FORMAS = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito'],['sem','— Sem forma']];
 function _relBrl(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+// 📊 Relatório direto do topo (sem abrir o Histórico): carrega as vendas de hoje e abre
+function abrirRelatorioDireto(){
+  var hoje = _dataHoje();
+  _historicoData = hoje;
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+    .collection('pedidos_totem').where('data','==',hoje).get().then(function(snap){
+      _historicoPedidos = [];
+      snap.forEach(function(d){ _historicoPedidos.push(Object.assign({id:d.id}, d.data())); });
+      abrirRelatorioCaixa();
+    }).catch(function(e){ mostrarToast('Erro ao carregar as vendas: ' + (e.message || e.code), '#f87171'); });
+}
 function abrirRelatorioCaixa(){
   var ex = document.getElementById('modal-rel-cx'); if(ex) ex.remove();
   var mod = document.createElement('div');

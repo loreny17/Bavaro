@@ -1091,6 +1091,18 @@ var _modoReordenarItens = false; // reordenar itens dentro de uma categoria
 var _itemEditando = null; // null = novo, ou objeto pra editar
 var _catEditando = null;
 
+// ═══ TECLADO QUE "TRAVA" ═══
+// No app desktop (Windows), depois de uma janelinha de aviso (alert/confirm/prompt)
+// os campos às vezes param de aceitar letras até trocar de janela. Aqui a página
+// pega o foco de volta logo depois de cada aviso.
+(function(){
+  function devolverFoco(){ setTimeout(function(){ try{ window.blur(); window.focus(); var a = document.activeElement; if(a && a.blur && a.tagName !== 'BODY'){ a.blur(); a.focus(); } }catch(e){} }, 30); }
+  ['alert','confirm','prompt'].forEach(function(nome){
+    var orig = window[nome]; if(typeof orig !== 'function') return;
+    window[nome] = function(){ var r = orig.apply(window, arguments); devolverFoco(); return r; };
+  });
+})();
+
 // ═══ INICIALIZAÇÃO ═══
 window.addEventListener('load', function(){
   try{
@@ -14010,8 +14022,8 @@ function _totemRenderItemCard(it, idx, total){
   var ngrupos = (it.gruposIds||[]).length;
   var ehPrimeiro = idx === 0;
   var ehUltimo = idx === total - 1;
-  return '<div class="totem-item-card" style="' + (ativo?'':'opacity:0.5;') + '">' +
-    '<div class="setas-coluna">' +
+  return '<div class="totem-item-card" onclick="totemEditarItem(\'' + it.id + '\')" style="cursor:pointer;' + (ativo?'':'opacity:0.5;') + '">' +
+    '<div class="setas-coluna" onclick="event.stopPropagation()">' +
       '<button onclick="totemMoverItem(\'' + it.id + '\',-1)" class="seta-btn"' + (ehPrimeiro?' disabled':'') + ' title="Subir">▲</button>' +
       '<button onclick="totemMoverItem(\'' + it.id + '\',1)" class="seta-btn"' + (ehUltimo?' disabled':'') + ' title="Descer">▼</button>' +
     '</div>' +
@@ -14021,9 +14033,8 @@ function _totemRenderItemCard(it, idx, total){
       '<div class="preco">R$ ' + preco + '</div>' +
       '<div class="meta">' + (ativo?'':'⚠ Inativo · ') + (ngrupos?(ngrupos + ' grupo(s) de adicionais'):'sem adicionais') + '</div>' +
     '</div>' +
-    '<div class="acoes">' +
-      '<button class="btn-mini" onclick="totemEditarItem(\'' + it.id + '\')">Editar</button>' +
-      '<button class="btn-mini del" onclick="totemExcluirItem(\'' + it.id + '\')">×</button>' +
+    '<div class="acoes" onclick="event.stopPropagation()">' +
+      '<button class="btn-mini del" onclick="totemExcluirItem(\'' + it.id + '\')" title="Excluir">×</button>' +
     '</div>' +
   '</div>';
 }
@@ -14119,35 +14130,39 @@ function totemAbrirModalItem(item){
           '</div>' +
           '<input type="file" id="ti-foto-input" accept="image/*" style="display:none;" onchange="totemFotoEscolhida(event)">' +
         '</div>' +
-        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Nome</label>' +
+        '<div style="display:flex;gap:10px;">' +
+          '<div style="flex:2;"><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Nome</label>' +
           '<input type="text" id="ti-nome" value="' + escapeHtml(item.nome||'') + '" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
-        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Preço (R$)</label>' +
+          '<div style="flex:1;"><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Preço (R$)</label>' +
           '<input type="number" id="ti-preco" value="' + (item.preco||0) + '" step="0.01" min="0" inputmode="decimal" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;"></div>' +
-        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Descrição <span style="color:var(--muted);font-size:0.72rem;">(o que vem no prato, ingredientes, etc — opcional)</span></label>' +
+        '</div>' +
+        '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Descrição <span style="font-size:0.72rem;">(opcional)</span></label>' +
           '<textarea id="ti-descricao" rows="3" maxlength="300" placeholder="Ex: Arroz, feijão, bife à milanesa, batata frita e salada" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;resize:vertical;">' + escapeHtml(item.descricao||'') + '</textarea></div>' +
         '<div><label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:5px;">Categoria</label>' +
           '<select id="ti-cat" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.92rem;box-sizing:border-box;">' + opcoesCat + '</select></div>' +
         // Grupos de adicionais
         '<div>' +
-          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:8px;">Grupos de adicionais (sem cebola, + bacon, etc)</label>' +
+          '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:8px;">Opções e adicionais (ex.: ponto da carne, + bacon, sem cebola)</label>' +
           '<div id="ti-grupos">' + gruposHtml + '</div>' +
         '</div>' +
-        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;">' +
-          '<input type="checkbox" id="ti-ativo"' + (item.ativo !== false ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
-          '<span style="font-size:0.88rem;">Item ativo (aparece no totem)</span>' +
-        '</label>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px;">' +
+            '<input type="checkbox" id="ti-ativo"' + (item.ativo !== false ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;">' +
+            '<span style="font-size:0.86rem;font-weight:600;">✅ Aparece no totem</span>' +
+          '</label>' +
+          '<label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px;">' +
+            '<input type="checkbox" id="ti-pausado"' + (item.pausado ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;accent-color:#fbbf24;">' +
+            '<span style="font-size:0.86rem;font-weight:600;">⏸️ Pausado (acabou)</span>' +
+          '</label>' +
+        '</div>' +
+        '<details style="background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;"' + (item.modoWizard || item.controlarEstoque ? ' open' : '') + '>' +
+          '<summary style="cursor:pointer;font-weight:700;font-size:0.86rem;">⚙️ Mais opções</summary>' +
+          '<div style="margin-top:10px;">' +
         '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.25);border-radius:9px;padding:10px;">' +
           '<input type="checkbox" id="ti-modo-wizard"' + (item.modoWizard ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:#c084fc;">' +
           '<div style="flex:1;">' +
             '<div style="font-size:0.88rem;font-weight:700;color:#c084fc;">✨ Modo Wizard (passo a passo)</div>' +
             '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Cliente vê <b>uma escolha por vez</b> em tela cheia com fotos grandes. Ideal pra "Monte Seu Prato" com várias etapas.</div>' +
-          '</div>' +
-        '</label>' +
-        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.3);border-radius:9px;padding:10px;margin-top:8px;">' +
-          '<input type="checkbox" id="ti-pausado"' + (item.pausado ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:#fbbf24;">' +
-          '<div style="flex:1;">' +
-            '<div style="font-size:0.88rem;font-weight:700;color:#fbbf24;">⏸️ Pausar temporariamente</div>' +
-            '<div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.4;">Quando pausado, o item <b>some do totem</b> e fica esgotado no garçom. Use pra quando o item acabar.</div>' +
           '</div>' +
         '</label>' +
         '<div style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.2);border-radius:9px;padding:10px;margin-top:8px;">' +
@@ -14164,6 +14179,8 @@ function totemAbrirModalItem(item){
             '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">Alerta quando ≤ 3. Auto-pausa quando chegar a 0.</div>' +
           '</div>' +
         '</div>' +
+          '</div>' +
+        '</details>' +
       '</div>' +
       '<div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">' +
         '<button onclick="document.getElementById(\'modal-totem-item\').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;font-weight:600;cursor:pointer;font-family:inherit;">Cancelar</button>' +
@@ -14361,15 +14378,14 @@ function totemRenderGrupos(){
     var badgePausado = g.pausado
       ? '<span style="background:rgba(248,113,113,0.18);color:#f87171;font-size:0.66rem;font-weight:700;padding:2px 7px;border-radius:5px;margin-left:5px;">⏸️ GRUPO PAUSADO</span>'
       : '';
-    return '<div class="totem-grupo-card"' + (g.pausado ? ' style="opacity:0.7;"' : '') + '>' +
+    return '<div class="totem-grupo-card" onclick="totemEditarGrupo(\''+g.id+'\')" style="cursor:pointer;' + (g.pausado ? 'opacity:0.7;' : '') + '">' +
       '<div class="topo">' +
         '<span class="nome">' + escapeHtml(g.nome||'') + badgeObr + badgePausado + '</span>' +
         '<span class="tipo">' + tipoTxt + '</span>' +
       '</div>' +
       '<div class="opcoes">' + (opcoes || '<span style="color:var(--muted);font-size:0.78rem;">sem opções</span>') + '</div>' +
-      '<div class="acoes">' +
-        '<button class="btn-mini" onclick="totemEditarGrupo(\''+g.id+'\')">Editar</button>' +
-        '<button class="btn-mini del" onclick="totemExcluirGrupo(\''+g.id+'\')">×</button>' +
+      '<div class="acoes" onclick="event.stopPropagation()">' +
+        '<button class="btn-mini del" onclick="totemExcluirGrupo(\''+g.id+'\')" title="Excluir">×</button>' +
       '</div>' +
     '</div>';
   }).join('');

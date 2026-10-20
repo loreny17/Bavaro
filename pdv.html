@@ -1944,6 +1944,7 @@ function renderItemGruposCheckboxes(gruposIdsSelecionados){
   }
   // Inicializa _itemGruposOrdem com os IDs selecionados (na ordem que vieram)
   _itemGruposOrdem = (gruposIdsSelecionados || []).slice();
+  _pickerEstado = {};   // lista de adicionar grupos começa fechada
   _renderItemGruposLista();
 }
 
@@ -1987,33 +1988,11 @@ function _renderItemGruposLista(){
     });
   }
 
-  // ── Grupos NÃO selecionados (sem setinhas, só checkbox pra adicionar) ──
-  var naoSelecionados = _grupos.filter(function(g){ return _itemGruposOrdem.indexOf(g.id) < 0; });
-  if(naoSelecionados.length){
-    if(_itemGruposOrdem.length){
-      var tituloDisp = document.createElement('div');
-      tituloDisp.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;';
-      tituloDisp.textContent = 'Disponíveis';
-      wrap.appendChild(tituloDisp);
-    }
-    naoSelecionados.forEach(function(g){
-      var label = document.createElement('label');
-      label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;cursor:pointer;margin-bottom:6px;';
-      label.innerHTML =
-        '<input type="checkbox" data-grupo-id="'+g.id+'" style="margin:0;width:18px;height:18px;accent-color:var(--accent);">' +
-        '<div style="flex:1;">' +
-          '<div style="font-size:0.86rem;font-weight:600;">' + (g.tipo==='opcao'?'🔘':'☑️') + ' ' + escapeHtml(g.nome) + '</div>' +
-          '<div style="font-size:0.7rem;color:var(--muted);">' + (g.opcoes||[]).length + ' opções' + (g.obrigatorio?' • obrigatório':'') + '</div>' +
-        '</div>';
-      label.querySelector('input').addEventListener('change', function(e){
-        if(e.target.checked){
-          if(_itemGruposOrdem.indexOf(g.id) < 0) _itemGruposOrdem.push(g.id);
-          _renderItemGruposLista();
-        }
-      });
-      wrap.appendChild(label);
-    });
-  }
+  // ── Grupos NÃO selecionados: escondidos atrás do botão "+ Adicionar" (com busca) ──
+  _pickerGrupos(wrap, _grupos.filter(function(g){ return _itemGruposOrdem.indexOf(g.id) < 0; }), function(g){
+    if(_itemGruposOrdem.indexOf(g.id) < 0) _itemGruposOrdem.push(g.id);
+    _renderItemGruposLista();
+  }, 'principal', !_itemGruposOrdem.length);
 }
 
 function moverGrupoNoItem(gid, dir){
@@ -14104,6 +14083,7 @@ function totemAbrirModalItem(item){
   }
   // Estado da ordem dos grupos NESTE item (será mantido pelas setinhas)
   window._totemItemGruposOrdem = (item.gruposIds || []).slice();
+  _pickerEstado = {};   // lista de adicionar grupos começa fechada
 
   // Preview da foto atual
   var fotoPreviewHtml = item.foto
@@ -14232,33 +14212,62 @@ function _renderTotemItemGruposLista(){
     });
   }
 
-  // Não selecionados
-  var disponiveis = _totemGrupos.filter(function(g){ return ordem.indexOf(g.id) < 0; });
-  if(disponiveis.length){
-    if(ordem.length){
-      var tituloDisp = document.createElement('div');
-      tituloDisp.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;';
-      tituloDisp.textContent = 'Disponíveis';
-      wrap.appendChild(tituloDisp);
-    }
-    disponiveis.forEach(function(g){
-      var label = document.createElement('label');
-      label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;';
-      label.innerHTML =
-        '<input type="checkbox" data-grupo-id="' + g.id + '" style="width:16px;height:16px;cursor:pointer;">' +
-        '<span style="flex:1;font-size:0.88rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span>' +
-        '<span style="font-size:0.7rem;color:var(--muted);background:var(--surface);padding:2px 6px;border-radius:5px;">' + (g.tipo === 'multipla' ? 'Múltipla' : 'Única') + '</span>';
-      label.querySelector('input').addEventListener('change', function(e){
-        if(e.target.checked){
-          if(!window._totemItemGruposOrdem) window._totemItemGruposOrdem = [];
-          if(window._totemItemGruposOrdem.indexOf(g.id) < 0) window._totemItemGruposOrdem.push(g.id);
-          _renderTotemItemGruposLista();
-        }
-      });
-      wrap.appendChild(label);
-    });
-  }
+  // Não selecionados: escondidos atrás do botão "+ Adicionar" (com busca)
+  _pickerGrupos(wrap, _totemGrupos.filter(function(g){ return ordem.indexOf(g.id) < 0; }), function(g){
+    if(!window._totemItemGruposOrdem) window._totemItemGruposOrdem = [];
+    if(window._totemItemGruposOrdem.indexOf(g.id) < 0) window._totemItemGruposOrdem.push(g.id);
+    _renderTotemItemGruposLista();
+  }, 'totem', !ordem.length);
 }
+
+// Lista de grupos pra ADICIONAR no item: fica fechada num botão; abre com busca e
+// lista curta com rolagem (antes aparecia a lista inteira e poluía a tela).
+var _pickerEstado = {};
+function _pickerGrupos(wrap, disponiveis, aoEscolher, chave, vazio){
+  if(!disponiveis.length) return;
+  var st = _pickerEstado[chave] || (_pickerEstado[chave] = { aberto:false, busca:'' });
+  var box = document.createElement('div');
+  box.style.cssText = 'margin-top:' + (vazio ? '0' : '8px') + ';';
+  if(!st.aberto){
+    box.innerHTML = '<button type="button" style="width:100%;padding:10px;background:transparent;border:1.5px dashed var(--border2, var(--border));color:var(--accent);border-radius:9px;font-weight:700;font-size:0.86rem;cursor:pointer;font-family:inherit;">+ Adicionar opções / adicionais' + (vazio ? '' : '') + '</button>';
+    box.querySelector('button').onclick = function(){ st.aberto = true; st.busca = ''; st.focar = true; _rerenderPicker(chave); };
+    wrap.appendChild(box);
+    return;
+  }
+  var lista = disponiveis;
+  box.style.cssText += 'border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface);';
+  box.innerHTML =
+    '<div style="display:flex;gap:6px;margin-bottom:6px;">' +
+      '<input type="text" placeholder="🔍 Buscar grupo…" value="' + escapeHtml(st.busca || '') + '" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:0.86rem;">' +
+      '<button type="button" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:0 12px;cursor:pointer;font-family:inherit;">Fechar</button>' +
+    '</div>' +
+    '<div class="pk-lista" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>';
+  var inp = box.querySelector('input');
+  // filtra na hora, sem redesenhar (assim não perde letra digitando rápido)
+  inp.oninput = function(){
+    st.busca = inp.value; var t = inp.value.toLowerCase(), vis = 0;
+    box.querySelectorAll('.pk-lista button').forEach(function(b){ var ok = !t || (b.getAttribute('data-nome') || '').indexOf(t) >= 0; b.style.display = ok ? 'flex' : 'none'; if(ok) vis++; });
+    var vz = box.querySelector('.pk-vazio'); if(vz) vz.style.display = vis ? 'none' : '';
+  };
+  box.querySelector('button').onclick = function(){ st.aberto = false; _rerenderPicker(chave); };
+  box.setAttribute('data-picker', chave);
+  var ul = box.querySelector('.pk-lista');
+  ul.innerHTML = '<div class="pk-vazio" style="display:none;color:var(--muted);font-size:0.8rem;padding:6px;">Nenhum grupo com esse nome.</div>';
+  lista.forEach(function(g){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('data-nome', String(g.nome||'').toLowerCase());
+    b.style.cssText = 'display:flex;align-items:center;gap:8px;text-align:left;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text);font-family:inherit;';
+    var nOp = (g.opcoes || []).length;
+    b.innerHTML = '<span style="color:var(--accent);font-weight:800;">+</span><span style="flex:1;font-size:0.86rem;font-weight:600;">' + escapeHtml(g.nome||'') + '</span><span style="font-size:0.7rem;color:var(--muted);">' + nOp + ' opç.</span>';
+    b.onclick = function(){ aoEscolher(g); };
+    ul.appendChild(b);
+  });
+  wrap.appendChild(box);
+  if(st.busca) inp.oninput();
+  if(st.focar){ st.focar = false; setTimeout(function(){ inp.focus(); }, 0); }
+}
+function _rerenderPicker(chave){ if(chave === 'totem') _renderTotemItemGruposLista(); else _renderItemGruposLista(); }
 
 function totemMoverGrupoNoItem(gid, dir){
   if(!window._totemItemGruposOrdem) return;

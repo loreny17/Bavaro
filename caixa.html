@@ -1577,6 +1577,8 @@ function abrirDetalheHistorico(pedidoId){
 (p.tipo === 'buffet' ? '' :           '<button onclick="reimprimirCozinha(\'' + p.id + '\')" style="flex:1;min-width:140px;padding:12px;background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.86rem;">🍳 Reimprimir Cozinha</button>') :
           '<div style="flex:1;text-align:center;color:var(--muted);padding:8px;font-size:0.84rem;">Reimpressão disponível só pra pedidos pagos</div>'
         ) +
+        (p.status === 'pago' ? '<button onclick="abrirCancelarVenda(\'' + p.id + '\')" style="flex-basis:100%;padding:11px;background:none;border:1.5px solid rgba(248,113,113,0.5);color:#f87171;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.84rem;">✖ Cancelar venda (não sai no relatório)</button>' : '') +
+        (p.status === 'cancelado' && p.motivoCancelamento ? '<div style="flex-basis:100%;font-size:0.78rem;color:#f87171;">Venda cancelada: ' + escapar(p.motivoCancelamento) + '</div>' : '') +
       '</div>' +
     '</div>';
   document.body.appendChild(mod);
@@ -1796,6 +1798,65 @@ function _htmlNfceTotem(p){
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + escapar(n.numero) + ' foi cancelada.</div>'
     : n && n.erro ? '<div style="font-size:0.78rem;color:#f87171;margin-bottom:8px;">Última tentativa falhou: ' + escapar(n.erro) + '</div>' : '';
   return aviso + '<button onclick="abrirNfceTotemPorId(\'' + p.id + '\')" style="width:100%;padding:12px;background:rgba(212,168,67,0.12);border:1.5px solid rgba(212,168,67,0.45);color:var(--accent);border-radius:9px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Emitir nota fiscal (NFC-e)</button>';
+}
+// ── Cancelar VENDA paga (Caixa) — ex.: testes. Sai do faturamento e dos relatórios.
+//    Senha do gerente conferida no servidor (/api/nfce acao:'cancelarVenda').
+function abrirCancelarVenda(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(!p) return;
+  var ex = document.getElementById('modal-cancel-venda'); if(ex) ex.remove();
+  var temNota = p.nfce && p.nfce.status === 'autorizado';
+  var mod = document.createElement('div');
+  mod.id = 'modal-cancel-venda';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:520;display:flex;align-items:center;justify-content:center;padding:14px;';
+  var inp = 'width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:12px;font-size:0.95rem;font-family:inherit;outline:none;';
+  var rot = 'font-size:0.8rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;';
+  mod.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;overflow:hidden;">'+
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">'+
+        '<div style="font-size:1.5rem;">✖</div><div style="flex:1;"><div style="font-weight:800;">Cancelar venda #' + escapar(p.senha||'?') + '</div><div style="font-size:0.82rem;color:var(--muted);">R$ ' + (Number(p.total)||0).toLocaleString('pt-BR', {minimumFractionDigits:2}) + ' · sai do faturamento e dos relatórios</div></div>'+
+        '<button onclick="document.getElementById(\'modal-cancel-venda\').remove()" style="background:rgba(255,255,255,0.08);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:1.3rem;">×</button>'+
+      '</div>'+
+      (temNota
+        ? '<div style="padding:16px 20px;font-size:0.88rem;line-height:1.5;color:#f59e0b;">⚠️ Essa venda tem a nota fiscal nº ' + escapar(p.nfce.numero) + '. Cancele a nota primeiro (botão "Cancelar" da nota, no pedido) e depois cancele a venda.</div>'+
+          '<div style="padding:14px 20px;border-top:1px solid var(--border);"><button onclick="document.getElementById(\'modal-cancel-venda\').remove()" style="width:100%;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Entendi</button></div>'
+        : '<div style="padding:16px 20px;">'+
+            '<div style="' + rot + '">Motivo</div>'+
+            '<input id="cv-motivo" value="Venda de teste" style="' + inp + 'margin-bottom:12px;">'+
+            '<div style="' + rot + '">Senha do gerente</div>'+
+            '<input id="cv-senha" type="password" autocomplete="off" style="' + inp + '" onkeydown="if(event.key===\'Enter\')confirmarCancelarVenda(\'' + p.id + '\')">'+
+            '<div id="cv-msg" style="margin-top:10px;"></div>'+
+          '</div>'+
+          '<div style="padding:14px 20px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2);display:flex;gap:8px;">'+
+            '<button onclick="document.getElementById(\'modal-cancel-venda\').remove()" style="flex:1;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:10px;font-weight:600;cursor:pointer;font-family:inherit;">Voltar</button>'+
+            '<button id="cv-btn" onclick="confirmarCancelarVenda(\'' + p.id + '\')" style="flex:1.4;padding:13px;background:#dc2626;border:none;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;">✖ Cancelar venda</button>'+
+          '</div>')+
+    '</div>';
+  document.body.appendChild(mod);
+  setTimeout(function(){ var i = document.getElementById('cv-senha'); if(i) i.focus(); }, 60);
+}
+function confirmarCancelarVenda(id){
+  var p = (_historicoPedidos||[]).find(function(x){ return x.id === id; });
+  if(!p) return;
+  var msg = document.getElementById('cv-msg'), btn = document.getElementById('cv-btn');
+  var motivo = (document.getElementById('cv-motivo').value || '').trim(), senha = document.getElementById('cv-senha').value || '';
+  if(!senha){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Digite a senha do gerente.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Cancelando...';
+  fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ acao:'cancelarVenda', tenantId:_tenantId, restauranteId:_restauranteId, pedidoId:p.id, motivo:motivo, senhaGerente:senha })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok){
+      var m = document.getElementById('modal-cancel-venda'); if(m) m.remove();
+      var d = document.getElementById('modal-hist-detalhe'); if(d) d.remove();
+      mostrarToast('✓ Venda #' + (p.senha||'') + ' cancelada — não entra mais no relatório', '#22c55e');
+      return;
+    }
+    btn.disabled = false; btn.textContent = '✖ Cancelar venda';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">' + escapar(j.error || 'Não consegui cancelar.') + '</div>';
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = '✖ Cancelar venda';
+    msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão com o servidor. A venda não foi cancelada.</div>';
+  });
 }
 // ── Cancelar NFC-e (Caixa) — senha do gerente do PDV; no PR só até 30 min depois de autorizada ──
 function abrirCancelarNfceTotem(id){

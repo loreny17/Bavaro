@@ -84,6 +84,25 @@ module.exports = async (req, res) => {
       if (b.acao === 'emissoresListar') return res.status(200).json(await nfce.emissoresListar(db, Array.isArray(b.lojas) ? b.lojas.slice(0, 40) : []));
       return res.status(200).json(await nfce.emissorSalvar(db, b, tok.email || tok.uid));
     }
+    if (b.acao === 'cancelarVenda') {
+      // Caixa → Histórico: cancela uma venda já paga (ex.: teste) pra não sair no relatório.
+      // Só com a senha do gerente; se tiver nota fiscal autorizada, cancela a nota antes.
+      if (!(await _senhaGerenteOk(db, b.tenantId, b.restauranteId, String(b.senhaGerente || '')))) {
+        const temSenha = await _senhaGerenteOk(db, b.tenantId, b.restauranteId, null);
+        return res.status(200).json({ ok: false, error: temSenha ? '🔒 Senha do gerente incorreta.' : '🔒 Nenhuma senha de gerente cadastrada. No PDV, em Impressão → ⚙️ Config → Cancelamentos, ligue "Pedir senha do gerente para cancelar" e defina a senha.' });
+      }
+      if (!b.tenantId || !b.pedidoId) return res.status(200).json({ ok: false, error: 'Venda não informada.' });
+      const ref = db.collection('tenants').doc(String(b.tenantId)).collection('restaurantes').doc(String(b.restauranteId || 'default'))
+        .collection('pedidos_totem').doc(String(b.pedidoId));
+      const d = await ref.get();
+      if (!d.exists) return res.status(200).json({ ok: false, error: 'Venda não encontrada.' });
+      const p = d.data() || {};
+      if (p.status === 'cancelado') return res.status(200).json({ ok: true, jaCancelada: true });
+      if (p.nfce && p.nfce.status === 'autorizado') return res.status(200).json({ ok: false, error: 'Essa venda tem nota fiscal (nº ' + (p.nfce.numero || '') + '). Cancele a nota primeiro, depois cancele a venda.' });
+      const upd = { status: 'cancelado', canceladoEm: Date.now(), statusAntesCancelar: p.status || '', motivoCancelamento: String(b.motivo || '').slice(0, 200), canceladoPor: 'Caixa (senha do gerente)' };
+      await ref.update(upd);
+      return res.status(200).json({ ok: true });
+    }
     if (b.acao === 'cancelarRef') {
       // PDV → Notas fiscais: só com a senha do gerente (a mesma dos cancelamentos)
       const nd = b.ref ? await db.collection('nfce').doc(String(b.ref)).get() : null;

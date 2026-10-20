@@ -759,6 +759,9 @@
         <div style="font-size:0.74rem;color:var(--muted);margin:8px 0 6px;line-height:1.4;">Ligado: ao tocar em iniciar, o totem lê o peso do prato sozinho, mostra as sugestões e abre o carrinho. A atendente cobra na maquininha e confirma aqui (pode emitir a nota na hora). O PDV precisa estar aberto no computador da balança.</div>
         <div class="cfg-titulo" style="margin-top:6px;">Item cobrado por quilo</div>
         <select id="cfg-balanca-item" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.95rem;"></select>
+        <div class="cfg-titulo" style="margin-top:12px;">Categorias que aparecem no modo balança</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;">Marque só o que o cliente do buffet pode pedir (bebidas, sobremesas…). Os pratos feitos ficam de fora.</div>
+        <div id="cfg-balanca-cats" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;"></div>
       </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
@@ -1437,15 +1440,30 @@ function montarCardapio(){
 }
 
 // Renderiza as abas de categoria
+// ⚖️ No modo balança (buffet) só aparecem as categorias escolhidas na configuração
+// (bebidas, sobremesas…) — os pratos feitos ficam de fora.
+function _catsVisiveis(){
+  var todas = window._cardapioCats || [];
+  if(!(typeof _modoBalanca !== 'undefined' && _modoBalanca) || _modoQR) return todas;
+  var ok = (typeof _balCatsIds !== 'undefined' && _balCatsIds) ? _balCatsIds : null;
+  if(!ok){   // ainda não escolheu: usa as que parecem bebida/sobremesa
+    var re = /bebid|drink|refri|suco|cervej|chop|agua|água|vinho|dose|sobremes|doce|sorvete|cafe|café/i;
+    var padrao = todas.filter(function(c){ return re.test(c.nome || ''); });
+    return padrao.length ? padrao : todas;
+  }
+  var f = todas.filter(function(c){ return ok.indexOf(c.id) >= 0; });
+  return f.length ? f : todas;
+}
 function renderCategorias(){
   var box = document.getElementById('cats');
-  if(!window._cardapioCats || !window._cardapioCats.length){
+  var cats = _catsVisiveis();
+  if(!cats.length){
     box.innerHTML = '';
     return;
   }
-  if(!_catAtiva) _catAtiva = window._cardapioCats[0].id;
+  if(!_catAtiva || !cats.some(function(c){ return c.id === _catAtiva; })) _catAtiva = cats[0].id;
 
-  box.innerHTML = window._cardapioCats.map(function(c){
+  box.innerHTML = cats.map(function(c){
     var emoji = c.emoji || '🍽️';
     return '<button class="cat-side' + (c.id === _catAtiva ? ' ativa' : '') +
       '" onclick="trocarCategoria(\'' + c.id + '\')">' +
@@ -1455,7 +1473,7 @@ function renderCategorias(){
   }).join('');
 
   // Atualiza o título no topo
-  var atual = window._cardapioCats.find(function(c){ return c.id === _catAtiva; });
+  var atual = cats.find(function(c){ return c.id === _catAtiva; });
   var tit = document.getElementById('titulo-cat');
   if(tit && atual) tit.textContent = atual.nome || 'Cardápio';
 }
@@ -1514,8 +1532,9 @@ function renderItens(){
   var itens;
   if(_busca){
     var b = _busca.toLowerCase();
+    var _idsVis = _catsVisiveis().map(function(c){ return c.id; });
     itens = window._cardapioItens.filter(function(it){
-      return _filtroDisponivel(it) && (
+      return _filtroDisponivel(it) && _idsVis.indexOf(it.categoriaId) >= 0 && (
         (it.nome||'').toLowerCase().indexOf(b) >= 0 ||
         (it.descricao||'').toLowerCase().indexOf(b) >= 0
       );
@@ -3570,7 +3589,8 @@ function abrirTecladoVirtual(spanId, onSave){
 // ════════════════════════════════════════════════════════════════
 var _BAL_TOTEM_KEY = 'totem_modo_balanca';
 var _modoBalanca = false, _balItemId = '';
-(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; }catch(e){} })();
+var _balCatsIds = null;   // categorias que aparecem no modo balança (null = automático)
+(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; }catch(e){} })();
 
 function _balItensKg(){
   var l = (_itensPrincipal || []).filter(function(i){ return i.tipoVenda === 'kg'; });
@@ -3601,6 +3621,15 @@ function _balPreencherConfig(){
     b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _modoBalanca);
     b.onclick = function(){ grupo.forEach(function(x){ x.classList.remove('ativo'); }); b.classList.add('ativo'); };
   });
+  var boxC = document.getElementById('cfg-balanca-cats');
+  if(boxC){
+    var atuais = _balCatsIds || (function(){ var m = _modoBalanca; _modoBalanca = true; var v = _catsVisiveis().map(function(c){ return c.id; }); _modoBalanca = m; return v; })();
+    boxC.innerHTML = (window._cardapioCats || []).map(function(c){
+      return '<label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:0.9rem;">' +
+        '<input type="checkbox" value="' + escapar(c.id) + '"' + (atuais.indexOf(c.id) >= 0 ? ' checked' : '') + ' style="width:18px;height:18px;">' +
+        '<span>' + escapar((c.emoji ? c.emoji + ' ' : '') + (c.nome || '')) + '</span></label>';
+    }).join('') || '<div style="color:var(--muted);font-size:0.8rem;">Cardápio ainda carregando…</div>';
+  }
   var sel = document.getElementById('cfg-balanca-item'); if(!sel) return;
   var l = _balItensKg(), atual = _balItem();
   sel.innerHTML = l.length
@@ -3612,7 +3641,10 @@ function _balSalvarDaConfig(){
   var sel = document.getElementById('cfg-balanca-item');
   _modoBalanca = !!(on && on.getAttribute('data-val') === '1');
   if(sel && sel.value) _balItemId = sel.value;
-  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId })); }catch(e){}
+  var marcadas = [].slice.call(document.querySelectorAll('#cfg-balanca-cats input:checked')).map(function(x){ return x.value; });
+  if(document.querySelectorAll('#cfg-balanca-cats input').length) _balCatsIds = marcadas;
+  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds })); }catch(e){}
+  try{ _catAtiva = ''; renderCategorias(); renderItens(); }catch(e){}
   _balAplicarTelaInicial();
   _balVivoAssinar();
 }

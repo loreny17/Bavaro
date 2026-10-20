@@ -253,10 +253,29 @@ function _nomeDoItem(it) { return String((it && (it.pessoa || it.nomeCliente)) |
 function chavePessoa(nome) { const n = _norm(nome).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return n || '__sem_nome__'; }
 function _valorItem(i) { return (i.tipoVenda === 'kg' && i.peso) ? (Number(i.preco) || 0) : (Number(i.preco) || 0) * (Number(i.qtd) || 1); }
 function _hash6(t) { let h = 5381; for (const ch of String(t)) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0; return h.toString(36).slice(0, 6); }
-// Conta reduzida aos itens de uma pessoa, com a parte proporcional da taxa de serviço
+// Itens sem nome pagos separados ("Por itens") → um grupo por pagamento (chave pg_<id>).
+// Mesma regra do garçom (_nfceChaveItem).
+function _chavePg(id) { return 'pg_' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '_'); }
+function _pgMulti(ativos) {
+  const v = new Set();
+  ativos.forEach((i) => { if (!_nomeDoItem(i)) v.add(i.pagamentoId || ''); });
+  return v.size >= 2;
+}
+function chaveDoItem(i, pgMulti) {
+  const nome = _nomeDoItem(i);
+  if (nome) return chavePessoa(nome);
+  if (pgMulti && i.pagamentoId) return _chavePg(i.pagamentoId);
+  return '__sem_nome__';
+}
+function _chaveGrupo(b) {
+  if (b.grupo) return String(b.grupo).toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 80);
+  return chavePessoa(b.pessoa);
+}
+// Conta reduzida aos itens de uma pessoa (ou de um pagamento), com a parte proporcional da taxa de serviço
 function _contaDaPessoa(conta, chave) {
   const ativos = (conta.itens || []).filter((i) => i && i.status !== 'cancelado');
-  const dela = ativos.filter((i) => chavePessoa(_nomeDoItem(i)) === chave);
+  const pgM = _pgMulti(ativos);
+  const dela = ativos.filter((i) => chaveDoItem(i, pgM) === chave);
   const totalMesa = ativos.reduce((s, i) => s + _valorItem(i), 0);
   const totalDela = dela.reduce((s, i) => s + _valorItem(i), 0);
   const taxa = totalMesa > 0 ? (Number(conta.taxa10) || 0) * totalDela / totalMesa : 0;
@@ -274,8 +293,8 @@ async function emitir(db, b) {
   const restauranteId = conta.restauranteId || b.restauranteId;
   if (conta.tenantId && tenantId && conta.tenantId !== tenantId) return { ok: false, error: 'Conta de outro restaurante.' };
   // por pessoa: b.pessoa = nome ('' = itens sem nome)
-  const porPessoa = b.pessoa !== undefined && b.pessoa !== null && b.origem !== 'totem';
-  const chaveP = porPessoa ? chavePessoa(b.pessoa) : null;
+  const porPessoa = ((b.pessoa !== undefined && b.pessoa !== null) || !!b.grupo) && b.origem !== 'totem';
+  const chaveP = porPessoa ? _chaveGrupo(b) : null;
   const anterior = porPessoa ? ((conta.nfcePessoas || {})[chaveP] || null) : (conta.nfce || null);
   if (anterior && anterior.status === 'autorizado') return { ok: true, jaEmitida: true, nfce: anterior, pessoa: chaveP };
   if (porPessoa && conta.nfce && conta.nfce.status === 'autorizado') return { ok: false, error: 'Essa mesa já tem uma nota única (nº ' + conta.nfce.numero + '). Pra separar por pessoa, cancele ela antes.' };
@@ -370,8 +389,8 @@ async function cancelar(db, b) {
   const o = await _origem(db, b);
   const ref0 = o && o.ref;
   const conta = o ? o.conta : null;
-  const porPessoa = b.pessoa !== undefined && b.pessoa !== null;
-  const chaveP = porPessoa ? chavePessoa(b.pessoa) : null;
+  const porPessoa = (b.pessoa !== undefined && b.pessoa !== null) || !!b.grupo;
+  const chaveP = porPessoa ? _chaveGrupo(b) : null;
   const atual = conta ? (porPessoa ? (conta.nfcePessoas || {})[chaveP] : conta.nfce) : null;
   if (!atual || atual.status !== 'autorizado') return { ok: false, error: 'Não tem nota autorizada nessa conta.' };
   if (conta.tenantId && tenantId && conta.tenantId !== tenantId) return { ok: false, error: 'Conta de outro restaurante.' };
@@ -399,7 +418,7 @@ async function cancelarPorRef(db, b) {
   if (n.tenantId && b.tenantId && n.tenantId !== b.tenantId) return { ok: false, error: 'Nota de outro restaurante.' };
   if (n.status !== 'autorizado') return { ok: false, error: n.status === 'cancelado' ? 'Essa nota já está cancelada.' : 'Essa nota não está autorizada.' };
   const base = { justificativa: b.justificativa, tenantId: n.tenantId || b.tenantId, restauranteId: n.restauranteId || b.restauranteId };
-  if (n.chavePessoa) base.pessoa = n.pessoa || 'Sem nome';
+  if (n.chavePessoa) { base.pessoa = n.pessoa || 'Sem nome'; if (String(n.chavePessoa).indexOf('pg_') === 0) base.grupo = n.chavePessoa; }
   const viaOrigem = n.origem === 'totem'
     ? Object.assign(base, { origem: 'totem', pedidoId: String(n.contaId || '').replace(/^tot/, '') })
     : Object.assign(base, { contaId: n.contaId });

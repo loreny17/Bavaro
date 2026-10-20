@@ -19540,14 +19540,41 @@ var _nfceReg = {};         // ref → nfce (botões de imprimir/PDF em listas)
 function _nfceChavePessoa(nome){ var n = String(nome||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); return n || '__sem_nome__'; }
 function _nfceNomeItem(it){ return String((it && (it.pessoa || it.nomeCliente)) || '').trim(); }
 function _nfceValItem(i){ return (i.tipoVenda === 'kg' && i.peso) ? (i.preco||0) : (i.preco||0)*(i.qtd||1); }
+// Itens SEM nome que foram pagos separados ("Por itens" no fechar conta) viram um
+// grupo por pagamento — dá pra tirar uma nota de cada pagamento sem vincular nome.
+// (mesma regra no servidor: api/_nfce.js chaveDoItem)
+function _nfceChavePg(id){ return 'pg_' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '_'); }
+function _nfcePgMulti(ativos){
+  var v = {};
+  ativos.forEach(function(i){ if(!_nfceNomeItem(i)) v[i.pagamentoId || ''] = 1; });
+  return Object.keys(v).length >= 2;
+}
+function _nfceChaveItem(i, pgMulti){
+  var nome = _nfceNomeItem(i);
+  if(nome) return _nfceChavePessoa(nome);
+  if(pgMulti && i.pagamentoId) return _nfceChavePg(i.pagamentoId);
+  return '__sem_nome__';
+}
 function _nfcePessoas(c){
   var ativos = (c.itens||[]).filter(function(i){ return i.status !== 'cancelado'; });
   var tot = ativos.reduce(function(a,i){ return a + _nfceValItem(i); }, 0), g = {}, ordem = [];
+  var pgMulti = _nfcePgMulti(ativos);
+  // ordem dos pagamentos (Pagamento 1, 2, 3…) pela hora em que foram feitos
+  var pgs = (c.pagamentos||[]).filter(function(p){ return p && p.id; }).slice().sort(function(a,b){ return (a.pagoEm||0) - (b.pagoEm||0); });
+  var numPg = {}; pgs.forEach(function(p, k){ numPg[_nfceChavePg(p.id)] = k + 1; });
+  var semNumero = 0;
   ativos.forEach(function(i){
-    var nome = _nfceNomeItem(i), k = _nfceChavePessoa(nome);
-    if(!g[k]){ g[k] = { chave:k, nome: nome || 'Sem nome', valor:0 }; ordem.push(k); }
-    g[k].valor += _nfceValItem(i);
+    var nome = _nfceNomeItem(i), k = _nfceChaveItem(i, pgMulti);
+    if(!g[k]){
+      var ehPg = k.indexOf('pg_') === 0;
+      g[k] = { chave:k, nome: ehPg ? 'Pagamento ' + (numPg[k] || ('#' + (++semNumero))) : (nome || (pgMulti ? 'Ainda não pago' : 'Sem nome')), icone: ehPg ? '💳' : '👤', valor:0, qtd:0 };
+      ordem.push(k);
+    }
+    g[k].valor += _nfceValItem(i); g[k].qtd += (i.tipoVenda === 'kg' ? 1 : (i.qtd||1));
   });
+  var pos = {}; ordem.forEach(function(k, n){ pos[k] = n; });
+  function rank(k){ return k === '__sem_nome__' ? 3000 : k.indexOf('pg_') === 0 ? 1000 + (numPg[k] || 999) : pos[k]; }
+  ordem.sort(function(a,b){ return rank(a) - rank(b); });
   var lista = ordem.map(function(k){ var p = g[k]; p.taxa = tot > 0 ? Math.round((c.taxa10||0) * p.valor / tot * 100) / 100 : 0; p.total = p.valor + p.taxa; p.nfce = (c.nfcePessoas||{})[k] || null; return p; });
   // só faz sentido separar se tem pelo menos uma pessoa com nome e mais de um grupo
   return (lista.length >= 2 && lista.some(function(p){ return p.chave !== '__sem_nome__'; })) ? lista : [];
@@ -19575,7 +19602,7 @@ function _htmlNfceDetalhe(c){
       var nf = p.nfce;
       return '<div style="padding:9px 0;border-bottom:1px solid var(--border);">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
-          '<span style="font-weight:700;">👤 ' + esc(p.nome) + '</span>'+
+          '<span style="font-weight:700;">' + (p.icone || (String(p.chave).indexOf('pg_') === 0 ? '💳' : '👤')) + ' ' + esc(p.nome) + (p.qtd ? ' <span style="font-weight:400;color:var(--muted);font-size:0.76rem;">· ' + p.qtd + ' ite' + (p.qtd > 1 ? 'ns' : 'm') + '</span>' : '') + '</span>'+
           (nf && nf.status === 'autorizado' ? '<span style="color:#4ade80;font-size:0.8rem;font-weight:700;">🧾 nº ' + esc(nf.numero) + '</span>'
             : '<span style="font-family:Bebas Neue,sans-serif;color:var(--accent);">R$ ' + fmtPreco(p.total) + '</span>')+
         '</div>'+
@@ -19584,7 +19611,7 @@ function _htmlNfceDetalhe(c){
             '<button class="f-btn" style="width:100%;margin-top:6px;padding:9px;font-size:0.8rem;background:rgba(212,168,67,0.12);color:var(--accent);border:1.5px solid rgba(212,168,67,0.45);" onclick="abrirNfce(_contaDetalheAtual, \'' + p.chave + '\')">🧾 ' + (p.chave === '__sem_nome__' ? 'Emitir nota dos itens sem nome' : 'Emitir nota de ' + esc(p.nome)) + '</button>')+
       '</div>';
     }).join('');
-    return '<div class="fechar-bloco"><div style="font-size:0.74rem;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Notas fiscais por pessoa</div>' + linhas +
+    return '<div class="fechar-bloco"><div style="font-size:0.74rem;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Notas fiscais separadas (pessoa ou pagamento)</div>' + linhas +
       (!_nfceTemPorPessoa(c) ? '<button class="f-btn secondary" style="width:100%;margin-top:10px;font-size:0.8rem;" onclick="abrirNfce(_contaDetalheAtual, \'__mesa__\')">Ou: uma nota só da mesa toda</button>' : '') + '</div>';
   }
   var aviso = n && n.status === 'cancelado' ? '<div style="font-size:0.76rem;color:#f87171;margin-bottom:8px;">A NFC-e nº ' + esc(n.numero) + ' desta conta foi cancelada.</div>'
@@ -19607,13 +19634,13 @@ function _nfceEscolherPessoa(c){
   var linhas = pes.map(function(p){
     var nf = p.nfce, ok = nf && nf.status === 'autorizado';
     return '<button ' + (ok ? 'disabled ' : '') + 'onclick="abrirNfce(_nfceConta, \'' + p.chave + '\')" style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px;margin-bottom:7px;border-radius:10px;border:1.5px solid ' + (ok ? 'rgba(74,222,128,0.4)' : 'var(--border2)') + ';background:' + (ok ? 'rgba(74,222,128,0.07)' : 'var(--surface2)') + ';color:var(--text);font-family:inherit;font-size:0.9rem;cursor:' + (ok ? 'default' : 'pointer') + ';">'+
-      '<span style="font-weight:700;">👤 ' + esc(p.nome) + '</span>'+
+      '<span style="font-weight:700;">' + (p.icone || '👤') + ' ' + esc(p.nome) + (p.qtd ? ' <span style="font-weight:400;color:var(--muted);font-size:0.76rem;">· ' + p.qtd + ' ite' + (p.qtd > 1 ? 'ns' : 'm') + '</span>' : '') + '</span>'+
       (ok ? '<span style="color:#4ade80;font-weight:700;font-size:0.82rem;">✅ nº ' + esc(nf.numero) + '</span>' : '<span style="font-family:Bebas Neue,sans-serif;font-size:1.2rem;color:var(--accent);">R$ ' + fmtPreco(p.total) + '</span>')+
     '</button>';
   }).join('');
   _nfceModal(
     '<div style="font-weight:700;margin-bottom:4px;">' + (c.mesa ? 'Mesa ' + esc(c.mesa) : esc(c.cliente||'Conta')) + '</div>'+
-    '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque em uma pessoa pra emitir a nota só dos itens dela' + ((c.taxa10||0) > 0 ? ' (com a parte dela da taxa de serviço)' : '') + '.</div>'+
+    '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;">Toque em uma pessoa ou pagamento pra emitir a nota só daqueles itens' + ((c.taxa10||0) > 0 ? ' (com a parte proporcional da taxa de serviço)' : '') + '.</div>'+
     linhas+
     (porP ? '' : '<button onclick="abrirNfce(_nfceConta, \'__mesa__\')" style="width:100%;margin-top:6px;padding:12px;border-radius:10px;border:1.5px dashed var(--border2);background:none;color:var(--muted);font-family:inherit;font-size:0.84rem;cursor:pointer;">Ou: uma nota só da mesa toda — R$ ' + fmtPreco(_nfceValor(c) + (c.taxa10||0)) + '</button>'),
     '<button class="f-btn secondary" style="flex:1;" onclick="document.getElementById(\'modal-nfce\').remove()">Fechar</button>'
@@ -19630,7 +19657,7 @@ function abrirNfce(c, pessoaChave){
   if(pessoaChave && pessoaChave !== '__mesa__'){
     var p = pes.filter(function(x){ return x.chave === pessoaChave; })[0];
     if(!p){ showToast('Pessoa não encontrada na conta','#f87171'); return; }
-    _nfcePessoaSel = { chave:p.chave, nome: p.chave === '__sem_nome__' ? '' : p.nome };
+    _nfcePessoaSel = { chave:p.chave, nome: p.chave === '__sem_nome__' ? '' : p.nome, grupo: p.chave.indexOf('pg_') === 0 };
     titulo += ' · ' + esc(p.nome); valor = p.valor; taxa = p.taxa;
   }
   var fReal = (c.pagamentos||[]).map(function(p){ return p && p.forma; }).filter(function(f){ return ['dinheiro','pix','debito','credito'].indexOf(f) >= 0; });
@@ -19688,7 +19715,7 @@ function emitirNfce(){
   btn.disabled = true; btn.textContent = 'Emitindo...';
   msg.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:8px;">Enviando para a SEFAZ… pode levar alguns segundos.</div>';
   var corpo = { acao:'emitir', tenantId:_tenantId, restauranteId:_restauranteId, contaId:c.id, documento:doc, formaPagamento:_nfceForma, garcom:_nomeGarcom };
-  if(sel) corpo.pessoa = sel.nome;
+  if(sel){ corpo.pessoa = sel.nome; if(sel.grupo) corpo.grupo = sel.chave; }
   if(!_nfceComServico) corpo.semServico = true;
   fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo)
   }).then(function(r){ return r.json(); }).then(function(j){
@@ -19737,7 +19764,7 @@ function cancelarNfce(pessoaChave){
   if(just.trim().length < 15){ showToast('O motivo precisa ter pelo menos 15 letras','#f7a34f'); return; }
   showToast('Cancelando a nota…','#94a3b8');
   var corpo = { acao:'cancelar', tenantId:_tenantId, restauranteId:_restauranteId, contaId:c.id, justificativa:just.trim(), garcom:_nomeGarcom };
-  if(pessoaChave) corpo.pessoa = n.pessoa === 'Sem nome' ? '' : (n.pessoa || '');
+  if(pessoaChave){ corpo.pessoa = n.pessoa === 'Sem nome' ? '' : (n.pessoa || ''); if(String(pessoaChave).indexOf('pg_') === 0) corpo.grupo = pessoaChave; }
   fetch('/api/nfce', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo)
   }).then(function(r){ return r.json(); }).then(function(j){
     if(j.ok){ if(pessoaChave) c.nfcePessoas[pessoaChave] = j.nfce; else c.nfce = j.nfce; showToast('✓ Nota cancelada','#4ade80'); }

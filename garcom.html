@@ -1465,7 +1465,8 @@ html[data-anim="off"] .g-ripple{display:none!important;}
         <!-- Nome do cliente (aparece na impressão de fechamento) -->
         <div style="margin-bottom:6px;">
           <label style="display:block;font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;margin-bottom:4px;">👤 Nome do cliente (opcional)</label>
-          <input type="text" id="kg-nome-cliente" placeholder="Ex: João, Mesa 5..." maxlength="40" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:10px 12px;font-size:0.95rem;font-family:inherit;outline:none;">
+          <input type="text" id="kg-nome-cliente" placeholder="Ex: João, Mesa 5..." maxlength="40" oninput="_kgRenderNomes()" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:10px 12px;font-size:0.95rem;font-family:inherit;outline:none;">
+          <div id="kg-nomes-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
         </div>
         <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:4px;">Digite o peso OU o valor — o outro campo se ajusta automaticamente.</div>
       </div>
@@ -5705,6 +5706,8 @@ function renderMesas(){
     if(eOcupada){
       anexarLongPress(el, num);
       anexarSwipe(el, num);
+    } else if(_gestoUsaBuffetKg()){
+      anexarSwipe(el, num, 'livre');
     }
     grid.appendChild(el);
   }
@@ -5741,6 +5744,7 @@ var _gestoAcoesDisponiveis = {
   'fecharConta':   { icone: '💰', nome: 'Fechar conta', desc: 'Abre tela de fechamento' },
   'verPedidos':    { icone: '👁', nome: 'Ver pedidos da mesa', desc: 'Lista tudo que foi pedido' },
   'cozinhaMesa':   { icone: '🔔', nome: 'Ver cozinha da mesa', desc: 'Itens pendentes da cozinha' },
+  'buffetKg':      { icone: '⚖️', nome: 'Buffet por kg', desc: 'Abre o buffet pra digitar o valor do prato (funciona até em mesa livre)' },
   'nenhuma':       { icone: '🚫', nome: 'Nenhuma ação', desc: 'Desativa esse gesto' }
 };
 
@@ -5761,6 +5765,32 @@ function _salvarGestosAcoes(){
     localStorage.setItem('garcom_gestos_acoes_' + (_nomeGarcom||'_'), JSON.stringify(_gestosAcoes));
   }catch(e){}
 }
+
+// ⚖️ Gesto "Buffet por kg": entra na mesa (abre a conta se estiver livre) e já abre o
+// item por quilo com o cursor no VALOR do prato.
+function _itemBuffetKg(){
+  var kg = (_itens || []).filter(function(i){ return i.tipoVenda === 'kg' && i.disponivel !== false; });
+  return kg.find(function(i){ return /buffet|almo/i.test(i.nome || ''); }) || kg[0] || null;
+}
+function _gestoBuffetKg(numMesa){
+  var it = _itemBuffetKg();
+  if(!it){ showToast('Nenhum item por quilo no cardápio', '#f87171'); return; }
+  if(_mesasOcupadas[numMesa]) selecionarMesa(numMesa); else abrirContaMesa(numMesa);
+  try{ pushHistory('cardapio:null'); }catch(e){}
+  var t0 = Date.now();
+  (function esperar(){
+    var tela = document.getElementById('mesa-screen');
+    if(String(_mesaAtiva) === String(numMesa) && tela && tela.classList.contains('hidden')){
+      setTimeout(function(){
+        abrirModalItem(it);
+        setTimeout(function(){ var v = document.getElementById('kg-valor'); if(v){ v.focus(); try{ v.select(); }catch(e){} } }, 250);
+      }, 200);
+      return;
+    }
+    if(Date.now() - t0 < 5000) setTimeout(esperar, 100);
+  })();
+}
+function _gestoUsaBuffetKg(){ return _gestosAcoes.swipeEsq === 'buffetKg' || _gestosAcoes.swipeDir === 'buffetKg'; }
 
 // Executa uma ação (chamada por qualquer gesto configurado)
 function executarAcaoGesto(acao, numMesa){
@@ -5801,6 +5831,9 @@ function executarAcaoGesto(acao, numMesa){
       if(typeof abrirModalCozinha === 'function'){
         abrirModalCozinha(numMesa);
       }
+      break;
+    case 'buffetKg':
+      _gestoBuffetKg(numMesa);
       break;
     case 'nenhuma':
       // não faz nada
@@ -5882,6 +5915,7 @@ function abrirPersonalizarGestos(){
 function setGestoAcao(gestoKey, acaoKey){
   _gestosAcoes[gestoKey] = acaoKey;
   _salvarGestosAcoes();
+  try{ if(typeof renderMesas === 'function') renderMesas(); }catch(e){}   // mesas livres ganham/perdem o arrasto do buffet
   // Re-renderiza o modal pra atualizar a marcação
   abrirPersonalizarGestos();
   showToast('✓ Gesto atualizado', '#22c55e', 1000);
@@ -5975,8 +6009,9 @@ function anexarSwipe(el, id, tipo){
         'display:flex;align-items:center;justify-content:flex-end;' +
         'padding-right:14px;gap:6px;color:#fff;font-weight:700;' +
         'pointer-events:none;z-index:0;font-family:inherit;';
-      bgEl.innerHTML =
-        '<span style="font-size:0.74rem;letter-spacing:0.04em;">FECHAR</span>' +
+      bgEl.innerHTML = (tipo !== 'comanda' && _gestosAcoes.swipeEsq === 'buffetKg')
+        ? '<span style="font-size:0.74rem;letter-spacing:0.04em;">BUFFET</span><span style="font-size:1.4rem;">⚖️</span>'
+        : '<span style="font-size:0.74rem;letter-spacing:0.04em;">FECHAR</span>' +
         '<span style="font-size:1.4rem;">💰</span>';
     } else {
       // DIREITA: pedido rápido (azul, ícone à esquerda)
@@ -5986,8 +6021,9 @@ function anexarSwipe(el, id, tipo){
         'display:flex;align-items:center;justify-content:flex-start;' +
         'padding-left:14px;gap:6px;color:#fff;font-weight:700;' +
         'pointer-events:none;z-index:0;font-family:inherit;';
-      bgEl.innerHTML =
-        '<span style="font-size:1.4rem;">⚡</span>' +
+      bgEl.innerHTML = (tipo !== 'comanda' && _gestosAcoes.swipeDir === 'buffetKg')
+        ? '<span style="font-size:1.4rem;">⚖️</span><span style="font-size:0.74rem;letter-spacing:0.04em;">BUFFET</span>'
+        : '<span style="font-size:1.4rem;">⚡</span>' +
         '<span style="font-size:0.74rem;letter-spacing:0.04em;">REPETIR</span>';
     }
     bgEl.setAttribute('data-swipe-bg','1');
@@ -6096,7 +6132,11 @@ function anexarSwipe(el, id, tipo){
         _longPressDisparou = true;
         setTimeout(function(){ _longPressDisparou = false; }, 300);
 
-        if(dirFinal < 0){
+        if(tipo === 'livre'){
+          // mesa livre: só o gesto configurado como "Buffet por kg" faz algo
+          var acLivre = dirFinal < 0 ? _gestosAcoes.swipeEsq : _gestosAcoes.swipeDir;
+          if(acLivre === 'buffetKg') _gestoBuffetKg(id);
+        } else if(dirFinal < 0){
           // ESQUERDA: fechar conta
           if(tipo === 'comanda'){
             if(typeof abrirFecharContaComanda === 'function') abrirFecharContaComanda(id);
@@ -12761,6 +12801,7 @@ function abrirModalItem(it){
     document.getElementById('kg-peso').value = '';
     document.getElementById('kg-valor').value = '';
     document.getElementById('kg-nome-cliente').value = '';
+    _kgRenderNomes();
     document.getElementById('kg-preco-info').textContent = 'R$ ' + fmtPreco(it.preco) + '/kg';
     _conectarSyncKgCampos();
   }
@@ -12769,6 +12810,31 @@ function abrirModalItem(it){
   renderGruposNoModal();
   atualizarBtnAdd();
   document.getElementById('modal-item').classList.add('show');
+}
+
+// 👤 Nomes que já existem na mesa viram botões: toca e pronto (não precisa digitar de novo)
+function _kgNomesDaMesa(){
+  var nomes = [], add = function(n){ n = String(n || '').trim(); if(n && nomes.some(function(x){ return x.toLowerCase() === n.toLowerCase(); }) === false) nomes.push(n); };
+  (_pessoasMesa || []).forEach(add);
+  var c = _contasMesaCache && _contasMesaCache[String(_mesaAtiva)];
+  ((c && c.itens) || []).forEach(function(it){ if(it.status !== 'cancelado'){ add(it.pessoa); add(it.nomeCliente); } });
+  (_carrinho || []).forEach(function(it){ add(it.pessoa); add(it.nomeCliente); });
+  return nomes;
+}
+function _kgRenderNomes(){
+  var box = document.getElementById('kg-nomes-chips'); if(!box) return;
+  var inp = document.getElementById('kg-nome-cliente');
+  var t = (inp && inp.value || '').trim().toLowerCase();
+  var nomes = _kgNomesDaMesa().filter(function(n){ return !t || n.toLowerCase().indexOf(t) >= 0; });
+  box.innerHTML = nomes.map(function(n){
+    var igual = t && n.toLowerCase() === t;
+    return '<button type="button" onclick="_kgEscolherNome(this.getAttribute(\'data-n\'))" data-n="' + esc(n) + '" style="background:' + (igual ? 'rgba(212,168,67,0.2)' : 'var(--surface2)') + ';border:1.5px solid ' + (igual ? 'var(--accent)' : 'var(--border2)') + ';color:var(--text);border-radius:20px;padding:7px 12px;font-size:0.86rem;font-weight:600;cursor:pointer;font-family:inherit;">👤 ' + esc(n) + '</button>';
+  }).join('');
+}
+function _kgEscolherNome(n){
+  var inp = document.getElementById('kg-nome-cliente'); if(!inp) return;
+  inp.value = n; _kgRenderNomes();
+  try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
 }
 
 // Conecta os 2 campos peso/valor pra sincronizarem

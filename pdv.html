@@ -461,6 +461,7 @@ header{position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur
         <div style="flex:1;font-size:0.74rem;color:var(--muted);">Cadastre as impressoras do restaurante (ex: Cozinha, Bar)</div>
         <button class="p-btn primary" style="flex:0 0 auto;padding:8px 12px;" onclick="abrirNovaImpressora()">+ Nova</button>
       </div>
+      <div id="imp-este-computador" style="font-size:0.8rem;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:9px 11px;margin-bottom:10px;display:flex;align-items:center;gap:8px;"></div>
       <div id="impressoras-lista"></div>
     </div>
 
@@ -6022,9 +6023,27 @@ function carregarImpressoras(){
   }).catch(function(e){ console.warn('Imps:', e); });
 }
 
+function _nomeEsteComputador(){ try{ return localStorage.getItem('pdv_computador_nome') || ''; }catch(e){ return ''; } }
+function _renomearEsteComputador(){
+  var n = prompt('Nome deste computador (ex.: Caixa, Totem, Buffet):', _nomeEsteComputador());
+  if(n === null) return null;
+  n = String(n).trim().slice(0, 30);
+  if(!n) return null;
+  try{ localStorage.setItem('pdv_computador_nome', n); }catch(e){}
+  // atualiza o nome nas impressoras ligadas aqui
+  _impressoras.forEach(function(imp){ if(imp.computadorId === _pdvIdAparelho && imp.computadorNome !== n){ imp.computadorNome = n; fbColImpressao('impressoras').doc(imp.id).update({ computadorNome:n }).catch(function(){}); } });
+  renderImpressoras();
+  return n;
+}
 function renderImpressoras(){
   var lista = document.getElementById('impressoras-lista');
   if(!lista) return;
+  var est = document.getElementById('imp-este-computador');
+  if(est){
+    var nomePc = _nomeEsteComputador();
+    est.innerHTML = '<span style="flex:1;">💻 Este computador: <b>' + (nomePc ? escapeHtml(nomePc) : '<span style="color:#f59e0b;">sem nome</span>') + '</b></span>' +
+      '<button class="p-btn secondary" style="flex:0 0 auto;padding:6px 10px;font-size:0.76rem;" onclick="_renomearEsteComputador()">' + (nomePc ? '✏️ Renomear' : 'Dar nome') + '</button>';
+  }
   if(!_impressoras.length){
     lista.innerHTML = '<div class="empty"><div class="empty-icon">🖨️</div><div class="empty-titulo">Nenhuma impressora</div><div class="empty-sub">Toque em "+ Nova" para cadastrar a primeira (Cozinha, Bar, etc.)</div></div>';
     return;
@@ -6041,7 +6060,10 @@ function renderImpressoras(){
         '<span class="imp-status-dot '+(_qzPronto?'online':'offline')+'"></span>'+
       '</div>'+
       '<div style="font-size:0.78rem;color:var(--muted);font-family:monospace;">'+escapeHtml(endereco)+'</div>'+
-      '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">'+(imp.largura||48)+' colunas</div>';
+      '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">'+(imp.largura||48)+' colunas</div>'+
+      (imp.tipo === 'usb' ? '<div style="font-size:0.74rem;margin-top:5px;color:' + (imp.computadorId ? (imp.computadorId === _pdvIdAparelho ? '#4ade80' : 'var(--muted)') : '#f59e0b') + ';">' +
+        (imp.computadorId ? '📍 Ligada no computador: <b>' + escapeHtml(imp.computadorNome || '?') + '</b>' + (imp.computadorId === _pdvIdAparelho ? ' (este)' : '')
+          : '⚠️ Computador não definido — abra a impressora no computador onde ela está ligada e marque "Está ligada NESTE computador"') + '</div>' : '');
     card.onclick = (function(i){ return function(){ abrirEditarImpressora(i); }; })(imp);
     lista.appendChild(card);
   });
@@ -6057,6 +6079,7 @@ function abrirNovaImpressora(){
   document.getElementById('imp-porta').value = '9100';
   document.getElementById('imp-largura').value = '48';
   document.getElementById('btn-excluir-imp').style.display = 'none';
+  _impMarcarDestePc(null);
   atualizarCamposImpressora();
   document.getElementById('modal-impressora').classList.add('show');
   if(_qzPronto) detectarImpressorasUSB();
@@ -6077,6 +6100,7 @@ function abrirEditarImpressora(imp){
   document.getElementById('imp-largura').value = imp.largura || '48';
   document.getElementById('imp-dialeto').value = imp.dialeto || 'escpos';
   document.getElementById('btn-excluir-imp').style.display = 'inline-flex';
+  _impMarcarDestePc(imp);
   atualizarCamposImpressora();
   if(imp.tipo === 'usb' && imp.nomeWindows){
     var sel = document.getElementById('imp-nome-windows');
@@ -6086,6 +6110,16 @@ function abrirEditarImpressora(imp){
   document.getElementById('modal-impressora').classList.add('show');
 }
 
+function _impMarcarDestePc(imp){
+  var cb = document.getElementById('imp-deste-pc'), info = document.getElementById('imp-deste-pc-info');
+  if(!cb) return;
+  var aqui = _nomeEsteComputador() || 'este computador';
+  if(!imp){ cb.checked = true; info.textContent = 'Só o PDV aberto aqui (' + aqui + ') vai imprimir nela.'; return; }
+  cb.checked = !!imp.computadorId && imp.computadorId === _pdvIdAparelho;
+  info.textContent = imp.computadorId
+    ? (cb.checked ? 'Ligada aqui (' + aqui + '). Só o PDV deste computador imprime nela.' : 'Hoje está marcada como ligada no computador "' + (imp.computadorNome || '?') + '". Marque só se ela estiver ligada AQUI.')
+    : 'Ainda não sei em qual computador ela está. Marque se ela estiver ligada AQUI.';
+}
 function atualizarCamposImpressora(){
   var tipo = (document.querySelector('input[name="imp-tipo"]:checked')||{}).value || 'usb';
   document.getElementById('imp-campo-usb').style.display = tipo==='usb'?'':'none';
@@ -6127,6 +6161,14 @@ function salvarImpressora(){
     dados.nomeWindows = document.getElementById('imp-nome-windows').value;
     if(!dados.nomeWindows || dados.nomeWindows.indexOf('Toque') >= 0 || dados.nomeWindows.indexOf('Detect') >= 0){
       showToast('Selecione a impressora do Windows','#f7a34f'); return;
+    }
+    var antes = _impEditandoId ? (_impressoras.find(function(i){ return i.id === _impEditandoId; }) || {}) : {};
+    if((document.getElementById('imp-deste-pc') || {}).checked){
+      var nomePc = _nomeEsteComputador() || _renomearEsteComputador();
+      if(!nomePc){ showToast('Dê um nome pra este computador (ex.: Caixa)','#f7a34f'); return; }
+      dados.computadorId = _pdvIdAparelho; dados.computadorNome = nomePc;
+    } else if(antes.computadorId === _pdvIdAparelho){
+      dados.computadorId = null; dados.computadorNome = null;   // desmarcou aqui
     }
   } else {
     dados.ip = document.getElementById('imp-ip').value.trim();
@@ -10147,9 +10189,12 @@ function _atualizarImpLocais(){
 }
 setTimeout(_atualizarImpLocais, 4000);
 setInterval(_atualizarImpLocais, 5 * 60 * 1000);
-function _impEndereco(imp){ return imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.nomeWindows || imp.id); }
+// USB com o mesmo nome em computadores diferentes (ex.: todas "POS-80") são impressoras
+// DIFERENTES — por isso a impressora USB guarda em qual computador ela está ligada.
+function _impEndereco(imp){ return imp.tipo === 'rede' ? 'ip:' + imp.ip + ':' + (imp.porta || 9100) : 'usb:' + (imp.computadorId ? imp.computadorId + ':' : '') + (imp.nomeWindows || imp.id); }
 function _impAlcancavel(imp){
   if(imp.tipo === 'rede') return true;
+  if(imp.computadorId) return imp.computadorId === _pdvIdAparelho;   // só o computador onde ela está ligada
   if(!_impLocais) return true;                       // não consegui listar: tenta mesmo assim
   var n = String(imp.nomeWindows || '').trim().toLowerCase();
   return !!n && _impLocais.indexOf(n) >= 0;
@@ -15969,6 +16014,10 @@ function toggleAdminUsuario(garcomId, novoValor){
         <select class="f-select" id="imp-nome-windows"><option>Detectando impressoras...</option></select>
         <button class="p-btn secondary" style="margin-top:6px;width:100%;font-size:0.78rem;" onclick="detectarImpressorasUSB()">🔍 Detectar Impressoras Conectadas</button>
         <div style="font-size:0.7rem;color:var(--muted);margin-top:4px;">A impressora deve estar instalada no Windows. Bematech costuma aparecer como "MP-4200 TH" ou similar.</div>
+        <label style="display:flex;align-items:flex-start;gap:9px;margin-top:10px;background:rgba(212,168,67,0.08);border:1.5px solid rgba(212,168,67,0.4);border-radius:9px;padding:10px;cursor:pointer;">
+          <input type="checkbox" id="imp-deste-pc" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
+          <span style="font-size:0.82rem;line-height:1.35;"><b>📍 Está ligada NESTE computador</b><br><span id="imp-deste-pc-info" style="color:var(--muted);font-size:0.74rem;"></span></span>
+        </label>
       </div>
 
       <div class="f-grupo" id="imp-campo-rede" style="display:none;">

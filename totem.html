@@ -763,6 +763,11 @@
         <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;">Marque só o que o cliente do buffet pode pedir (bebidas, sobremesas…). Os pratos feitos ficam de fora.</div>
         <div id="cfg-balanca-cats" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;"></div>
       </div>
+      <div class="cfg-grupo" style="border:1.5px solid rgba(212,168,67,0.4);border-radius:12px;padding:12px;background:rgba(212,168,67,0.05);">
+        <div class="cfg-titulo">🖨️ Impressora da senha — só neste aparelho</div>
+        <select id="cfg-imp-senha" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.95rem;"><option value="">Carregando…</option></select>
+        <div id="cfg-imp-senha-info" style="font-size:0.74rem;color:var(--muted);margin-top:6px;line-height:1.4;">Ex.: no totem do caixa, escolha a impressora do caixa. O PDV do computador onde ela está ligada precisa estar aberto.</div>
+      </div>
       <div style="font-size:0.7rem;color:var(--muted);text-align:center;margin-top:16px;border-top:1px solid var(--border);padding-top:10px;">
         Versão: <span id="cfg-versao">—</span><br>
         URL: <span id="cfg-url">—</span>
@@ -2964,7 +2969,8 @@ function finalizarPedido(){
         // computador onde este totem está aberto (o mesmo id do PDV deste computador):
         // a senha sai na impressora DESTE computador (totem do caixa → impressora do caixa)
         computadorId: (function(){ try{ return localStorage.getItem('pdv_aparelho_id') || ''; }catch(e){ return ''; } })(),
-        computadorNome: (function(){ try{ return localStorage.getItem('pdv_computador_nome') || ''; }catch(e){ return ''; } })()
+        computadorNome: (function(){ try{ return localStorage.getItem('pdv_computador_nome') || ''; }catch(e){ return ''; } })(),
+        impressoraId: _impSenhaEscolhida()
       }).then(function(){
         return refPedido.update({ senhaImpressa: true });
       }).catch(function(e){ console.warn('[TOTEM] impressão da senha falhou:', e.code || e.message); });
@@ -3427,6 +3433,7 @@ function abrirConfig(){
   });
 
   _balPreencherConfig();
+  _impSenhaPreencherConfig();
   document.getElementById('cfg-versao').textContent = _VERSAO_TOTEM;
   document.getElementById('cfg-url').textContent = window.location.pathname;
 
@@ -3466,6 +3473,7 @@ function aplicarCfgPreview(){
 
 function salvarConfig(){
   _balSalvarDaConfig();
+  try{ var sIS = document.getElementById('cfg-imp-senha'); if(sIS && sIS.options.length && sIS.value !== '__carregando') localStorage.setItem('totem_imp_senha', sIS.value || ''); }catch(e){}
   var cfg = _lerCfgDoModal();
   try{
     localStorage.setItem(_CFG_KEY, JSON.stringify(cfg));
@@ -3619,6 +3627,23 @@ function _balAplicarTelaInicial(){
 document.addEventListener('DOMContentLoaded', _balAplicarTelaInicial);
 setTimeout(_balAplicarTelaInicial, 300);
 
+// Impressora da senha escolhida NESTE aparelho (ex.: totem do caixa → impressora do caixa)
+function _impSenhaEscolhida(){ try{ return localStorage.getItem('totem_imp_senha') || ''; }catch(e){ return ''; } }
+function _impSenhaPreencherConfig(){
+  var sel = document.getElementById('cfg-imp-senha'); if(!sel) return;
+  var atual = _impSenhaEscolhida();
+  var pcNome = ''; try{ pcNome = localStorage.getItem('pdv_computador_nome') || ''; }catch(e){}
+  sel.innerHTML = '<option value="__carregando">Carregando impressoras…</option>';
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+    .collection('impressao').doc('config').collection('impressoras').get().then(function(snap){
+      var l = []; snap.forEach(function(d){ var v = d.data() || {}; l.push({ id:d.id, nome:v.nome || '(sem nome)', pc:v.computadorNome || '' }); });
+      sel.innerHTML = '<option value="">Automática (impressora do "Cupom do cliente")</option>' + l.map(function(i){
+        return '<option value="' + escapar(i.id) + '"' + (i.id === atual ? ' selected' : '') + '>' + escapar(i.nome) + (i.pc ? ' — computador ' + escapar(i.pc) : '') + '</option>';
+      }).join('');
+    }).catch(function(e){ sel.innerHTML = '<option value="' + escapar(atual) + '">Não consegui listar (' + escapar(e.code || e.message) + ')</option>'; });
+  var info = document.getElementById('cfg-imp-senha-info');
+  if(info) info.innerHTML = 'Ex.: no totem do caixa, escolha a impressora do caixa. O PDV do computador onde ela está ligada precisa estar aberto.' + (pcNome ? '<br>Este aparelho: <b>' + escapar(pcNome) + '</b>' : '');
+}
 function _balPreencherConfig(){
   var grupo = document.querySelectorAll('#cfg-balanca-grupo .cfg-op');
   grupo.forEach(function(b){

@@ -648,7 +648,7 @@ header{
 .acao-rapida-centro:hover,.acao-rapida-centro:active{background:rgba(212,168,67,0.25);transform:translate(-50%,-50%) scale(0.95);}
 .modal-body{padding:18px;flex:1;}
 .modal-footer{padding:14px 18px;border-top:1px solid rgba(255,255,255,0.07);
-  display:flex;gap:10px;background:rgba(20,17,14,0.72);position:sticky;bottom:0;}
+  display:flex;gap:10px;background:#120f0c;position:sticky;bottom:0;z-index:1;}
 
 /* ─── Modal Item (detalhe + adicionar) ─── */
 .det-foto{width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#2a2a2a,#1a1a1a);
@@ -12808,6 +12808,7 @@ function abrirModalItem(it){
   }
   var fotoEl = document.getElementById('det-foto');
   fotoEl.innerHTML = it.foto ? '<img src="'+it.foto+'" alt="'+it.nome+'">' : '🍽️';
+  fotoEl.style.display = ehKg ? 'none' : '';
   renderGruposNoModal();
   atualizarBtnAdd();
   document.getElementById('modal-item').classList.add('show');
@@ -22520,6 +22521,32 @@ if(window.visualViewport){
     setTimeout(_chatScrollParaBaixo, 80);
   });
 }
+// Modais (item, buffet por kg…): com o teclado aberto o app instalado não encolhe a
+// tela, aí o rodapé fixo do modal caía em cima dos campos. Ajusta o modal pra
+// altura visível e rola o campo tocado pro meio.
+function _modaisCabemNaTela(){
+  var vv = window.visualViewport; if(!vv) return;
+  var cheio = vv.height >= window.innerHeight - 40;
+  document.querySelectorAll('.modal.show').forEach(function(m){
+    var box = m.querySelector('.modal-box');
+    if(cheio){ m.style.height = ''; m.style.top = ''; m.style.bottom = ''; if(box) box.style.maxHeight = ''; return; }
+    m.style.top = vv.offsetTop + 'px'; m.style.height = vv.height + 'px'; m.style.bottom = 'auto';
+    if(box) box.style.maxHeight = Math.floor(vv.height - 6) + 'px';
+  });
+  var a = document.activeElement;
+  if(a && a.closest && a.closest('.modal.show') && /INPUT|TEXTAREA|SELECT/.test(a.tagName)){
+    try{ a.scrollIntoView({ block:'center' }); }catch(e){}
+  }
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', function(){ setTimeout(_modaisCabemNaTela, 60); });
+}
+document.addEventListener('focusin', function(e){
+  var t = e.target;
+  if(t && t.closest && t.closest('.modal.show') && /INPUT|TEXTAREA/.test(t.tagName)){
+    setTimeout(_modaisCabemNaTela, 350);
+  }
+});
 // Também rola pro fim assim que o campo ganha foco (teclado abrindo) —
 // cobre o instante entre tocar no campo e o resize disparar.
 document.addEventListener('focusin', function(e){

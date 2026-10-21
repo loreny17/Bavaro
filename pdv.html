@@ -9668,7 +9668,7 @@ function processarComandoImpressao(cmdId, cmd){
     _imprimirNasMinhas(cmdId, _impsDosModelos(['fechamento', 'cupom_cliente']), function(imp){ _imprimirRelatorioTexto(cmd, imp); });
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
-    _imprimirNasMinhas(cmdId, _impsDosModelos(['cupom_cliente']), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });
+    _imprimirNasMinhas(cmdId, _impsSenhaTotem(cmd), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });
   } else if(cmd.tipo === 'nfce'){
     // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO.
     // Só UM PDV imprime (se tiver dois abertos do mesmo restaurante, o outro ignora)
@@ -10231,6 +10231,27 @@ function _imprimirNasMinhas(cmdId, imps, fn){
     if(r.todas) ref.delete().catch(function(){});
     return r.pegar;
   });
+}
+// Senha do totem: sai na impressora do MESMO computador onde o totem foi usado
+// (totem do caixa → impressora do caixa). Ordem: Cupom do cliente desse computador →
+// Fechamento desse computador → qualquer USB desse computador → Cupom do cliente (como antes).
+function _impsSenhaTotem(cmd){
+  var base = _impsDosModelos(['cupom_cliente']);
+  var pc = cmd && cmd.computadorId;
+  if(!pc) return base;
+  function doPc(tipos){
+    var out = [], vistos = {};
+    _modelos.filter(function(m){ return tipos.indexOf(m.tipo) >= 0; }).forEach(function(m){
+      var imp = _impressoras.find(function(i){ return i.id === m.impressoraId; });
+      if(!imp || imp.computadorId !== pc) return;
+      var e = _impEndereco(imp); if(vistos[e]) return; vistos[e] = true; out.push(imp);
+    });
+    return out;
+  }
+  var l = doPc(['cupom_cliente']);
+  if(!l.length) l = doPc(['fechamento']);
+  if(!l.length) l = _impressoras.filter(function(i){ return i.tipo === 'usb' && i.computadorId === pc; }).slice(0, 1);
+  return l.length ? l : base;
 }
 function _impsDosModelos(tipos){
   var out = [], vistos = {};

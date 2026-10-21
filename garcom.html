@@ -1445,6 +1445,7 @@ html[data-anim="off"] .g-ripple{display:none!important;}
           <button class="qtd-btn" onclick="alterarQtd(1)">+</button>
         </div>
       </div>
+      <div id="aviso-qtd-extras" style="display:none;margin-top:8px;padding:9px 11px;border-radius:10px;background:rgba(247,163,79,0.1);border:1px solid rgba(247,163,79,0.4);color:#f7a34f;font-size:0.78rem;line-height:1.4;"></div>
       <!-- Bloco de pesagem (item por kg) — escondido por padrão -->
       <div id="kg-row" style="display:none;background:rgba(212,168,67,0.08);border:1.5px solid rgba(212,168,67,0.3);border-radius:14px;padding:14px;margin-top:10px;">
         <div style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
@@ -13117,9 +13118,16 @@ function atualizarBtnAdd(){
     // ⚠️ Adicionais com quantidade são ABSOLUTOS: "3x Palito" = 3 palitos no
     // pedido, não 3 por lanche. Antes: (base+extras)×qtd → 3 burgers com 3
     // palitos cobrava 9 palitos (o bug dos R$154,80 em vez de R$125,40).
-    var total = (_itemAberto.preco||0) * _qtdTemp + calcularPrecoExtras();
+    var extrasN = calcularPrecoExtras();
+    var total = (_itemAberto.preco||0) * _qtdTemp + extrasN;
     btn.textContent = 'Adicionar — R$ ' + fmtPreco(total);
     btn.style.opacity = '1';
+    var av = document.getElementById('aviso-qtd-extras');
+    if(av){
+      var mostra = _qtdTemp > 1 && extrasN > 0;
+      av.style.display = mostra ? '' : 'none';
+      if(mostra) av.innerHTML = '⚠️ O adicional (R$ ' + fmtPreco(extrasN) + ') vale <b>uma vez</b> pros ' + _qtdTemp + '. Se cada um tem adicional diferente (ex.: 1 com palito, outro com rústica), lance <b>separado</b>, um de cada vez.';
+    }
   }
 }
 
@@ -16974,13 +16982,14 @@ function separarUnidadesItem(itemKey){
       var q = it.qtd || 1;
       if(q <= 1) return 0;
       var unidades = [];
+      var puS = _precosUnidades(it, q);
       for(var u = 0; u < q; u++){
-        var copia = Object.assign({}, it, {
+        var copia = _aplicarPrecoUnidade(Object.assign({}, it, {
           qtd: 1,
           itemKey: u === 0 ? it.itemKey : (it.itemKey + '_u' + u),
           separadoDe: u === 0 ? null : it.itemKey,
           separadoEm: u === 0 ? null : Date.now()
-        });
+        }), it, u, puS);
         if(copia.separadoDe === null){ delete copia.separadoDe; delete copia.separadoEm; }
         unidades.push(copia);
       }
@@ -17608,6 +17617,23 @@ function setFecharModo(m){
   if(m === 'itens') _separarTodasUnidades();
 }
 
+// Ao separar "2x Alcatra + palito" em unidades: a 1ª fica com o adicional
+// (39,90 + 4,90 = 44,80) e as outras com o preço base (39,90) — antes ficava
+// a média (42,35 cada). O total da linha não muda.
+function _precosUnidades(it, q){
+  var tot = Math.round((it.preco || 0) * q * 100) / 100;
+  var base = typeof it.precoBase === 'number' ? it.precoBase : null;
+  var ex = Number(it.extras) || 0;
+  if(base === null || ex <= 0 || Math.abs(base * q + ex - tot) > 0.05) return null;
+  var outros = Math.round(base * 100) / 100;
+  return { primeiro: Math.round((tot - outros * (q - 1)) * 100) / 100, outros: outros };
+}
+function _aplicarPrecoUnidade(copia, it, u, pu){
+  if(!pu) return copia;
+  if(u === 0){ copia.preco = pu.primeiro; return copia; }
+  copia.preco = pu.outros; copia.extras = 0; copia.selecoes = []; copia.selecoesLabel = '';
+  return copia;
+}
 // Desmembra de uma vez todos os itens qtd>1 da conta (transação única).
 var _separandoUnidades = false;
 function _separarTodasUnidades(){
@@ -17632,8 +17658,9 @@ function _separarTodasUnidades(){
         var podeSeparar = q > 1 && !(it.divisao && it.divisao.total > 1) && it.tipoVenda !== 'kg' && it.status !== 'pago' && it.status !== 'cancelado' && it.itemKey;
         if(!podeSeparar){ novos.push(it); return; }
         mudou = true;
+        var puT = _precosUnidades(it, q);
         for(var u = 0; u < q; u++){
-          var copia = Object.assign({}, it, {qtd: 1});
+          var copia = _aplicarPrecoUnidade(Object.assign({}, it, {qtd: 1}), it, u, puT);
           if(u > 0){
             copia.itemKey = it.itemKey + '_u' + u;
             copia.separadoDe = it.itemKey;

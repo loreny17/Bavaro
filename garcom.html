@@ -21657,6 +21657,13 @@ function _registrarAparelhoRecado(forcar){
     else console.warn('[recados] registrar:', j.error);
   }).catch(function(){});
 }
+function _statusAparelhoRecado(){
+  var tk = '', plat = '', reg = '';
+  try{ tk = localStorage.getItem('garcom_push_token') || ''; plat = localStorage.getItem('garcom_push_plat') || ''; reg = localStorage.getItem('garcom_push_reg') || ''; }catch(e){}
+  if(!tk) return 'Este celular: 📵 sem notificação (aberto fora do app instalado)';
+  var ok = reg.indexOf(tk.slice(-24) + '|' + _nomeGarcom + '|') === 0;
+  return 'Este celular: ' + (plat === 'android' ? '📲 app Android' : '🔔 web') + ' · ' + (ok ? '✓ ligado a ' + esc(_nomeGarcom) : '⏳ ligando…');
+}
 // Notificação web (iPhone com o app na tela inicial / navegador) — só quando tiver a chave
 function _ativarPushWeb(){
   if(!_VAPID_WEB || !window.firebase || !firebase.messaging || !('serviceWorker' in navigator) || !window.Notification) return Promise.resolve(false);
@@ -21674,9 +21681,14 @@ function _ativarPushWeb(){
   }).catch(function(e){ console.warn('[recados] push web:', e && e.message); return false; });
 }
 var _recadosUnsub = null, _recadosChave = '', _recadosVistos = {};
+// o app pode abrir (e chamar mostrarMesas) antes do Firebase / do token estarem prontos:
+// tenta de novo sozinho até ligar
+setTimeout(function(){ try{ _recadosIniciar(); }catch(e){} }, 2500);
+setInterval(function(){ try{ _recadosIniciar(); }catch(e){} }, 20000);
 function _recadosIniciar(){
-  if(!_nomeGarcom || !_restauranteId || !window.fbDb) return;
+  if(!_nomeGarcom || !_restauranteId) return;
   _registrarAparelhoRecado(false);
+  if(!window.fbDb) return;
   var chave = _restauranteId + '|' + _normRecado(_nomeGarcom);
   if(_recadosUnsub && _recadosChave === chave) return;
   if(_recadosUnsub){ try{ _recadosUnsub(); }catch(e){} }
@@ -21759,6 +21771,7 @@ function abrirFalarComGarcom(){
       '<div id="falar-msg" style="margin-top:10px;"></div>' +
       '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:16px 0 6px;">Últimos recados</div>' +
       '<div id="falar-hist" style="font-size:0.84rem;color:var(--muted);">—</div>' +
+      '<div style="font-size:0.7rem;color:var(--muted);margin-top:14px;border-top:1px solid var(--border);padding-top:8px;">' + _statusAparelhoRecado() + '</div>' +
     '</div>' +
     '<div class="modal-footer"><button class="f-btn secondary" style="flex:1;" onclick="fecharFalarComGarcom()">Fechar</button><button class="f-btn" id="falar-btn" style="flex:1.5;" onclick="enviarRecadoGarcom()">📣 Enviar</button></div>' +
   '</div>';

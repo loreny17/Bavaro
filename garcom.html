@@ -1273,6 +1273,13 @@ html[data-anim="off"] .g-ripple{display:none!important;}
       </button>
       <div id="menu-grupo-gerente" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
         <div style="font-size:0.7rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:0.06em;padding:4px 14px 6px;">🛡️ Gerente</div>
+      <button class="menu-lateral-item" onclick="fecharMenuLateral();abrirFalarComGarcom()">
+        <span style="font-size:1.4rem;">📣</span>
+        <div style="flex:1;text-align:left;">
+          <div style="font-weight:700;">Falar com garçom</div>
+          <div style="font-size:0.72rem;color:var(--muted);">Recado que chega como notificação</div>
+        </div>
+      </button>
       <button class="menu-lateral-item" id="menu-item-admin-garcom" onclick="fecharMenuLateral();abrirPainelAdminGarcom()" style="display:none;background:linear-gradient(135deg,rgba(212,168,67,0.10),rgba(212,168,67,0.02));border-left:3px solid var(--accent);">
         <span style="font-size:1.4rem;">🛡️</span>
         <div style="flex:1;text-align:left;">
@@ -4086,6 +4093,7 @@ function reverterDescido(pedidoId, idx){
 }
 
 function mostrarMesas(){
+  try{ _recadosIniciar(); }catch(e){ console.warn('[recados]', e); }
   var _msEl = document.getElementById('mesa-screen');
   if(_msEl){ _msEl.style.display = ''; _msEl.classList.remove('hidden'); }
   document.getElementById('app').style.display = 'none';
@@ -21611,6 +21619,222 @@ setInterval(function(){
 function _desfazerAutoChat(msgId){
   var m = _chatHistorico.find(function(x){ return x.id === msgId; });
   if(m){ m.autoAte = null; renderChatMensagens(true); }
+}
+
+// ════════════════════════════════════════
+//  📣 RECADOS DO GERENTE → GARÇOM (notificação)
+//  • APK Android: abre garcom.html?app=android&fcm=<token> → o token fica guardado
+//    e é ligado a este garçom em /api/recado (acao 'registrar').
+//  • Com o app aberto: escuta recados_garcom e mostra um aviso grande na tela.
+// ════════════════════════════════════════
+var _VAPID_WEB = '';   // chave "Web Push" do Firebase (iPhone/navegador) — vazio = só APK + aviso na tela
+(function(){
+  try{
+    var q = new URLSearchParams(location.search);
+    var tk = q.get('fcm'), app = q.get('app');
+    if(tk){ localStorage.setItem('garcom_push_token', tk); localStorage.setItem('garcom_push_plat', app === 'android' ? 'android' : 'web'); }
+    if(app === 'android') localStorage.setItem('garcom_no_apk', '1');
+    if(q.get('recado')) window._recadoAbrirId = q.get('recado');
+    if(tk || app || q.get('recado')){
+      ['fcm','app','recado'].forEach(function(k){ q.delete(k); });
+      var qs = q.toString();
+      history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+    }
+  }catch(e){}
+})();
+function _normRecado(t){ return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim(); }
+function _registrarAparelhoRecado(forcar){
+  var tk = '', plat = 'web';
+  try{ tk = localStorage.getItem('garcom_push_token') || ''; plat = localStorage.getItem('garcom_push_plat') || 'web'; }catch(e){}
+  if(!tk || !_nomeGarcom || !_restauranteId) return;
+  var chave = tk.slice(-24) + '|' + _nomeGarcom + '|' + _restauranteId, feito = '';
+  try{ feito = localStorage.getItem('garcom_push_reg') || ''; }catch(e){}
+  if(!forcar && feito.indexOf(chave + '@') === 0 && Date.now() - Number(feito.split('@')[1] || 0) < 3 * 86400000) return;
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    acao:'registrar', tenantId:_tenantId || null, restauranteId:_restauranteId, garcom:_nomeGarcom, token:tk, plataforma:plat, modelo:(navigator.userAgent || '').slice(0, 80)
+  }) }).then(function(r){ return r.json(); }).then(function(j){
+    if(j.ok){ try{ localStorage.setItem('garcom_push_reg', chave + '@' + Date.now()); }catch(e){} }
+    else console.warn('[recados] registrar:', j.error);
+  }).catch(function(){});
+}
+// Notificação web (iPhone com o app na tela inicial / navegador) — só quando tiver a chave
+function _ativarPushWeb(){
+  if(!_VAPID_WEB || !window.firebase || !firebase.messaging || !('serviceWorker' in navigator) || !window.Notification) return Promise.resolve(false);
+  try{ if(localStorage.getItem('garcom_push_plat') === 'android') return Promise.resolve(false); }catch(e){}
+  return Notification.requestPermission().then(function(p){
+    if(p !== 'granted') return false;
+    return navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope:'/firebase-cloud-messaging-push-scope' }).then(function(reg){
+      return firebase.messaging().getToken({ vapidKey:_VAPID_WEB, serviceWorkerRegistration:reg });
+    }).then(function(tk){
+      if(!tk) return false;
+      try{ localStorage.setItem('garcom_push_token', tk); localStorage.setItem('garcom_push_plat', 'web'); }catch(e){}
+      _registrarAparelhoRecado(true);
+      return true;
+    });
+  }).catch(function(e){ console.warn('[recados] push web:', e && e.message); return false; });
+}
+var _recadosUnsub = null, _recadosChave = '', _recadosVistos = {};
+function _recadosIniciar(){
+  if(!_nomeGarcom || !_restauranteId || !window.fbDb) return;
+  _registrarAparelhoRecado(false);
+  var chave = _restauranteId + '|' + _normRecado(_nomeGarcom);
+  if(_recadosUnsub && _recadosChave === chave) return;
+  if(_recadosUnsub){ try{ _recadosUnsub(); }catch(e){} }
+  _recadosChave = chave;
+  try{ _recadosVistos = JSON.parse(localStorage.getItem('garcom_recados_vistos') || '{}'); }catch(e){ _recadosVistos = {}; }
+  _recadosUnsub = fbDb.collection('recados_garcom').where('restauranteId','==', _restauranteId).where('paraNorm','==', _normRecado(_nomeGarcom))
+    .onSnapshot(function(snap){
+      var limite = Date.now() - 12 * 3600000, pend = [];
+      snap.forEach(function(d){
+        var r = Object.assign({ id:d.id }, d.data());
+        if((r.criadoEm || 0) < limite || _recadosVistos[r.id] || r.status === 'visto' || r.status === 'ja_vou') return;
+        pend.push(r);
+      });
+      pend.sort(function(a,b){ return (a.criadoEm || 0) - (b.criadoEm || 0); });
+      _mostrarRecadoGarcom(pend[0] || null, pend.length);
+    }, function(e){ console.warn('[recados] escuta:', e.code || e.message); });
+}
+var _recadoNaTela = '';
+function _mostrarRecadoGarcom(r, total){
+  var ex = document.getElementById('banner-recado-garcom');
+  if(!r){ if(ex) ex.remove(); _recadoNaTela = ''; return; }
+  var novo = _recadoNaTela !== r.id;
+  _recadoNaTela = r.id;
+  if(!ex){ ex = document.createElement('div'); ex.id = 'banner-recado-garcom'; document.body.appendChild(ex); }
+  var cor = r.urgente ? '#f87171' : '#fbbf24';
+  ex.style.cssText = 'position:fixed;left:10px;right:10px;top:12px;z-index:999998;background:' + cor + ';color:#000;border-radius:16px;padding:14px 14px 12px;box-shadow:0 10px 34px rgba(0,0,0,0.55);';
+  ex.innerHTML =
+    '<div style="display:flex;gap:10px;align-items:flex-start;">' +
+      '<span style="font-size:1.7rem;line-height:1;">' + (r.urgente ? '🚨' : '📣') + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:0.74rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;opacity:0.75;">Recado de ' + esc(r.de || 'gerente') + (total > 1 ? ' · +' + (total - 1) : '') + '</div>' +
+        '<div style="font-size:1.05rem;font-weight:800;margin-top:3px;word-wrap:break-word;">' + esc(r.texto || '') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:11px;">' +
+      '<button onclick="_responderRecado(\'' + r.id + '\',\'visto\')" style="flex:1;background:rgba(0,0,0,0.12);color:#000;border:1.5px solid rgba(0,0,0,0.35);border-radius:10px;padding:11px;font-weight:800;font-family:inherit;font-size:0.92rem;cursor:pointer;">✓ Vi</button>' +
+      '<button onclick="_responderRecado(\'' + r.id + '\',\'ja_vou\')" style="flex:1.3;background:#000;color:' + cor + ';border:none;border-radius:10px;padding:11px;font-weight:800;font-family:inherit;font-size:0.92rem;cursor:pointer;">🏃 Já vou</button>' +
+    '</div>';
+  if(novo){
+    try{ if(navigator.vibrate) navigator.vibrate(r.urgente ? [500,150,500,150,500,150,500] : [300,120,300]); }catch(e){}
+    try{
+      var AC = window.AudioContext || window.webkitAudioContext; if(AC){
+        var ac = new AC(), t0 = ac.currentTime;
+        [0, 0.22, 0.44].forEach(function(dt, k){ var o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = k === 2 ? 1320 : 990; o.connect(g); g.connect(ac.destination); g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.35, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.2); o.start(t0 + dt); o.stop(t0 + dt + 0.21); });
+      }
+    }catch(e){}
+  }
+}
+function _responderRecado(id, resp){
+  _recadosVistos[id] = Date.now();
+  try{
+    var lim = Date.now() - 2 * 86400000;
+    Object.keys(_recadosVistos).forEach(function(k){ if(_recadosVistos[k] < lim) delete _recadosVistos[k]; });
+    localStorage.setItem('garcom_recados_vistos', JSON.stringify(_recadosVistos));
+  }catch(e){}
+  var b = document.getElementById('banner-recado-garcom'); if(b) b.remove(); _recadoNaTela = '';
+  showToast(resp === 'ja_vou' ? '🏃 Avisado: já vou' : '✓ Recado visto', '#4ade80');
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'resposta', id:id, resposta:resp, garcom:_nomeGarcom }) }).catch(function(){});
+}
+
+// ── Gerente: "📣 Falar com garçom" ──
+var _falarSel = {}, _falarUrgente = false, _falarUnsub = null;
+function abrirFalarComGarcom(){
+  if(!_ehAdmin){ showToast('🔒 Só o gerente', '#f87171'); return; }
+  var ex = document.getElementById('modal-falar-garcom'); if(ex) ex.remove();
+  _falarSel = {}; _falarUrgente = false;
+  var mod = document.createElement('div');
+  mod.className = 'modal show'; mod.id = 'modal-falar-garcom'; mod.style.zIndex = '9600';
+  mod.innerHTML = '<div class="modal-box" style="max-width:460px;">' +
+    '<div class="modal-header"><div class="modal-titulo">📣 FALAR COM GARÇOM</div><button class="modal-fechar" onclick="fecharFalarComGarcom()">×</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:6px;">Pra quem</div>' +
+      '<div id="falar-lista" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;"><div style="color:var(--muted);font-size:0.84rem;">Carregando garçons…</div></div>' +
+      '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:6px;">Recado</div>' +
+      '<textarea id="falar-texto" rows="3" maxlength="300" placeholder="Ex.: Vem no caixa, por favor" style="width:100%;box-sizing:border-box;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:11px;font-family:inherit;font-size:0.98rem;resize:none;outline:none;"></textarea>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">' +
+        ['Vem no caixa, por favor','Mesa te chamando','Vem na cozinha','Pode vir aqui?'].map(function(t){ return '<button onclick="document.getElementById(\'falar-texto\').value=this.textContent" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:99px;padding:7px 11px;font-family:inherit;font-size:0.8rem;cursor:pointer;">' + t + '</button>'; }).join('') +
+      '</div>' +
+      '<button id="falar-urg" onclick="_falarAlternarUrgente()" style="width:100%;margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;"></button>' +
+      '<div id="falar-msg" style="margin-top:10px;"></div>' +
+      '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:16px 0 6px;">Últimos recados</div>' +
+      '<div id="falar-hist" style="font-size:0.84rem;color:var(--muted);">—</div>' +
+    '</div>' +
+    '<div class="modal-footer"><button class="f-btn secondary" style="flex:1;" onclick="fecharFalarComGarcom()">Fechar</button><button class="f-btn" id="falar-btn" style="flex:1.5;" onclick="enviarRecadoGarcom()">📣 Enviar</button></div>' +
+  '</div>';
+  document.body.appendChild(mod);
+  _falarAlternarUrgente(true);
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listar', restauranteId:_restauranteId, de:_nomeGarcom }) })
+    .then(function(r){ return r.json(); }).then(function(j){
+      var box = document.getElementById('falar-lista'); if(!box) return;
+      if(!j.ok){ box.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">' + esc(j.error || 'Erro') + '</div>'; return; }
+      window._falarGarcons = j.garcons || [];
+      _falarRenderLista();
+    }).catch(function(){ var box = document.getElementById('falar-lista'); if(box) box.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão.</div>'; });
+  // acompanha os recados enviados (Vi / Já vou)
+  if(_falarUnsub){ try{ _falarUnsub(); }catch(e){} }
+  _falarUnsub = fbDb.collection('recados_garcom').where('restauranteId','==', _restauranteId).where('de','==', _nomeGarcom)
+    .onSnapshot(function(snap){
+      var l = []; snap.forEach(function(d){ l.push(Object.assign({ id:d.id }, d.data())); });
+      l.sort(function(a,b){ return (b.criadoEm || 0) - (a.criadoEm || 0); }); l = l.slice(0, 12);
+      var h = document.getElementById('falar-hist'); if(!h) return;
+      h.innerHTML = l.length ? l.map(function(r){
+        var st = r.status === 'ja_vou' ? '<span style="color:#4ade80;font-weight:800;">🏃 Já vou</span>'
+          : r.status === 'visto' ? '<span style="color:#4ade80;font-weight:700;">✓ Viu</span>'
+          : (r.aparelhos ? (r.notificados ? '<span style="color:#fbbf24;">📲 Notificado</span>' : '<span style="color:#f87171;">⚠️ Não chegou</span>') : '<span style="color:var(--muted);">📵 Sem app (só na tela)</span>');
+        var hr = new Date(r.criadoEm || 0).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--border);"><div style="display:flex;justify-content:space-between;gap:8px;"><b style="color:var(--text);">' + esc(r.para) + '</b><span style="font-size:0.78rem;">' + st + '</span></div>' +
+          '<div style="font-size:0.8rem;margin-top:2px;">' + hr + ' · ' + (r.urgente ? '🚨 ' : '') + esc(r.texto) + '</div></div>';
+      }).join('') : 'Nenhum recado ainda.';
+    }, function(){});
+}
+function fecharFalarComGarcom(){
+  if(_falarUnsub){ try{ _falarUnsub(); }catch(e){} _falarUnsub = null; }
+  var m = document.getElementById('modal-falar-garcom'); if(m) m.remove();
+}
+function _falarRenderLista(){
+  var box = document.getElementById('falar-lista'); if(!box) return;
+  var gs = (window._falarGarcons || []).filter(function(g){ return _normRecado(g.nome) !== _normRecado(_nomeGarcom); });
+  var todos = !!_falarSel.__todos__;
+  function chip(id, rot, sub, on){
+    return '<button onclick="_falarToggle(\'' + id.replace(/'/g, "\\'") + '\')" style="padding:9px 12px;border-radius:12px;font-family:inherit;cursor:pointer;text-align:left;border:1.5px solid ' + (on ? 'var(--accent)' : 'var(--border2)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--text)') + ';">' +
+      '<div style="font-weight:800;font-size:0.88rem;">' + rot + '</div>' + (sub ? '<div style="font-size:0.66rem;color:var(--muted);margin-top:1px;">' + sub + '</div>' : '') + '</button>';
+  }
+  box.innerHTML = chip('__todos__', '👥 Todos', '', todos) + gs.map(function(g){
+    var sub = g.android ? '📲 com app' : g.web ? '🔔 notificação web' : '📵 sem app';
+    return chip(g.nome, esc(g.nome), sub, todos || !!_falarSel[g.nome]);
+  }).join('');
+}
+function _falarToggle(nome){
+  if(nome === '__todos__'){ var on = !_falarSel.__todos__; _falarSel = {}; if(on) _falarSel.__todos__ = true; }
+  else { delete _falarSel.__todos__; _falarSel[nome] = !_falarSel[nome]; }
+  _falarRenderLista();
+}
+function _falarAlternarUrgente(forcar){
+  if(forcar !== true) _falarUrgente = !_falarUrgente;
+  var b = document.getElementById('falar-urg'); if(!b) return;
+  var on = _falarUrgente;
+  b.innerHTML = '<span>' + (on ? '🚨 Urgente — toca até ele abrir' : '🔔 Normal') + '</span>' +
+    '<span style="width:42px;height:24px;border-radius:12px;background:' + (on ? '#f87171' : 'var(--border2)') + ';position:relative;flex-shrink:0;"><span style="position:absolute;top:3px;' + (on ? 'right:3px' : 'left:3px') + ';width:18px;height:18px;border-radius:50%;background:#fff;"></span></span>';
+  b.style.borderColor = on ? 'rgba(248,113,113,0.6)' : 'var(--border2)';
+}
+function enviarRecadoGarcom(){
+  var txt = (document.getElementById('falar-texto').value || '').trim();
+  var para = Object.keys(_falarSel).filter(function(k){ return _falarSel[k]; });
+  var msg = document.getElementById('falar-msg'), btn = document.getElementById('falar-btn');
+  if(!para.length){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escolha pra quem é o recado.</div>'; return; }
+  if(!txt){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escreva o recado.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Enviando…'; msg.innerHTML = '';
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    acao:'enviar', tenantId:_tenantId || null, restauranteId:_restauranteId, de:_nomeGarcom, para:para, texto:txt, urgente:_falarUrgente
+  }) }).then(function(r){ return r.json(); }).then(function(j){
+    btn.disabled = false; btn.textContent = '📣 Enviar';
+    if(!j.ok){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">' + esc(j.error || 'Não enviou') + '</div>'; return; }
+    var semApp = (j.resultado || []).filter(function(x){ return !x.notificados; }).map(function(x){ return x.nome; });
+    document.getElementById('falar-texto').value = '';
+    showToast('📣 Recado enviado', '#4ade80');
+    msg.innerHTML = semApp.length ? '<div style="color:#fbbf24;font-size:0.8rem;line-height:1.4;">Sem notificação no celular: <b>' + esc(semApp.join(', ')) + '</b>. Vai aparecer na tela quando abrirem o app.</div>' : '';
+  }).catch(function(){ btn.disabled = false; btn.textContent = '📣 Enviar'; msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão.</div>'; });
 }
 
 // ════════════════════════════════════════

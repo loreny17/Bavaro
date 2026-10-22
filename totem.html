@@ -1864,6 +1864,15 @@ function _sugQtd(itemId, delta){
   _sugRenderGrid();
 }
 
+function _sugReiniciarTimer(){
+  if(!document.getElementById('tela-adicionais')) return;
+  var agora = Date.now(); if(window._sugUltReinicio && agora - window._sugUltReinicio < 1500) return;
+  window._sugUltReinicio = agora;
+  clearTimeout(_sugAutoClose);
+  _sugAutoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 25000);
+  var f = document.getElementById('adicionais-timer-fill');
+  if(f){ f.style.transition = 'none'; f.style.width = '100%'; void f.offsetWidth; f.style.transition = 'width 25s linear'; f.style.width = '0%'; }
+}
 function _sugRenderGrid(){
   var grid = document.getElementById('sug-grid');
   if(!grid) return;
@@ -1872,28 +1881,27 @@ function _sugRenderGrid(){
     var sel = qtd > 0;
     var preco = 'R$ '+(it.preco||0).toFixed(2).replace('.',',');
     var foto = it.foto
-      ? '<img src="'+it.foto+'" style="width:100%;height:80px;object-fit:cover;border-radius:10px 10px 0 0;" loading="lazy">'
-      : '<div style="width:100%;height:80px;background:rgba(255,255,255,0.04);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:center;font-size:2rem;">'+(it.emoji||'🍽️')+'</div>';
-    var btnHtml = sel
-      ? '<div style="display:flex;align-items:center;justify-content:space-between;background:#d4a843;border-radius:7px;overflow:hidden;">'+
-          '<button data-id="'+it.id+'" data-d="-1" style="background:none;border:none;color:#000;font-size:1.2rem;font-weight:900;padding:6px 12px;cursor:pointer;line-height:1;">−</button>'+
-          '<span style="color:#000;font-weight:900;font-size:0.88rem;pointer-events:none;">'+qtd+'</span>'+
-          '<button data-id="'+it.id+'" data-d="1" style="background:none;border:none;color:#000;font-size:1.2rem;font-weight:900;padding:6px 12px;cursor:pointer;line-height:1;">+</button>'+
-        '</div>'
-      : '<button data-id="'+it.id+'" data-d="1" style="width:100%;background:rgba(212,168,67,0.12);border:1.5px solid #d4a843;color:#d4a843;border-radius:7px;padding:8px;font-weight:800;font-size:0.8rem;cursor:pointer;">+ Adicionar</button>';
-    return '<div style="background:'+(sel?'rgba(212,168,67,0.07)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;transition:all 0.15s;">'+
+      ? '<img src="'+it.foto+'" style="width:100%;height:64px;object-fit:cover;display:block;pointer-events:none;" loading="lazy">'
+      : '<div style="width:100%;height:64px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-size:1.7rem;pointer-events:none;">'+(it.emoji||'🥤')+'</div>';
+    return '<div data-id="'+it.id+'" data-d="1" style="position:relative;cursor:pointer;background:'+(sel?'rgba(212,168,67,0.10)':'#1a1a1a')+';border:2px solid '+(sel?'#d4a843':'rgba(255,255,255,0.07)')+';border-radius:12px;overflow:hidden;user-select:none;-webkit-tap-highlight-color:transparent;">'+
       foto+
-      '<div style="padding:8px;">'+
-        '<div style="font-size:0.78rem;font-weight:800;color:#fff;line-height:1.2;margin-bottom:2px;">'+it.nome+'</div>'+
-        '<div style="font-size:0.78rem;color:#d4a843;font-weight:700;margin-bottom:6px;">'+preco+'</div>'+
-        btnHtml+
+      (sel ? '<div style="position:absolute;top:5px;right:5px;min-width:26px;height:26px;padding:0 6px;box-sizing:border-box;border-radius:13px;background:#d4a843;color:#000;font-weight:900;font-size:0.9rem;display:flex;align-items:center;justify-content:center;pointer-events:none;">'+qtd+'</div>'+
+             '<button data-id="'+it.id+'" data-d="-1" style="position:absolute;top:5px;left:5px;width:28px;height:28px;border-radius:50%;border:none;background:rgba(0,0,0,0.75);color:#fff;font-size:1.1rem;font-weight:900;line-height:1;cursor:pointer;">−</button>' : '')+
+      '<div style="padding:6px 7px 7px;pointer-events:none;">'+
+        '<div style="font-size:0.74rem;font-weight:800;color:#fff;line-height:1.15;height:2.3em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+it.nome+'</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:3px;">'+
+          '<span style="font-size:0.76rem;color:#d4a843;font-weight:800;">'+preco+'</span>'+
+          '<span style="font-size:0.95rem;font-weight:900;color:'+(sel?'#d4a843':'rgba(255,255,255,0.55)')+';">＋</span>'+
+        '</div>'+
       '</div>'+
     '</div>';
   }).join('');
   grid.onclick = function(e){
     var btn = e.target.closest('[data-id]');
     if(!btn) return;
+    e.stopPropagation();
     _sugQtd(btn.getAttribute('data-id'), btn.getAttribute('data-d'));
+    _sugReiniciarTimer();
   };
   var qtdTotal = Object.keys(_sugSelecoes).reduce(function(a,k){ return a+(_sugSelecoes[k]||0); },0);
   var totalVal = Object.keys(_sugSelecoes).reduce(function(acc,id){
@@ -2059,22 +2067,29 @@ function _abrirTelaAdicionais(itemAdicionado, telaConfig){
   if(ex) ex.remove();
   var el = document.createElement('div');
   el.id = 'tela-adicionais';
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.97);z-index:8000;display:flex;flex-direction:column;align-items:center;padding:24px 16px 20px;gap:16px;animation:fadeIn 0.2s ease;overflow-y:auto;';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.97);z-index:8000;display:flex;flex-direction:column;align-items:center;padding:18px 14px 0;gap:12px;animation:fadeIn 0.2s ease;overflow:hidden;';
   _sugAutoClose = setTimeout(function(){ _fecharTelaAdicionais(); }, 25000);
   el.innerHTML =
     '<div style="text-align:center;flex-shrink:0;">'+
-      (_sugTelas.length>1?'<div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-bottom:6px;">'+(_sugTelaIdx+1)+' de '+_sugTelas.length+'</div>':'')+'<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:50px;padding:7px 16px;margin-bottom:10px;">'+
-        '<span>✅</span><span style="font-size:0.85rem;font-weight:700;color:#4ade80;">'+itemAdicionado.nome+' adicionado!</span>'+
+      '<div style="display:inline-flex;align-items:center;gap:7px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:50px;padding:5px 14px;margin-bottom:8px;">'+
+        '<span>✅</span><span style="font-size:0.8rem;font-weight:700;color:#4ade80;">'+itemAdicionado.nome+' adicionado!</span>'+
+        (_sugTelas.length>1?'<span style="font-size:0.7rem;color:rgba(255,255,255,0.45);margin-left:4px;">· '+(_sugTelaIdx+1)+' de '+_sugTelas.length+'</span>':'')+
       '</div>'+
-      '<div style="font-size:1.3rem;font-weight:900;color:#fff;">'+(telaConfig&&telaConfig.titulo?telaConfig.titulo:'Quer adicionar algo mais?')+'</div>'+
+      '<div style="font-size:1.2rem;font-weight:900;color:#fff;">'+(telaConfig&&telaConfig.titulo?telaConfig.titulo:'Quer adicionar algo mais?')+'</div>'+
+      '<div style="font-size:0.78rem;color:rgba(255,255,255,0.5);margin-top:3px;">Toque pra adicionar</div>'+
     '</div>'+
-    '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:600px;"></div>'+
-    '<div style="display:flex;gap:10px;width:100%;max-width:480px;flex-shrink:0;">'+
-      '<button onclick="_pularTelaSugestao()" style="flex:1;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:12px;padding:14px;font-size:0.9rem;font-weight:700;cursor:pointer;">'+(_sugTelaIdx<_sugTelas.length-1?'Próximo ▶':'Não, obrigado')+'</button>'+
-      '<button id="sug-btn-confirmar" onclick="_confirmarAdicionaisSugeridos()" style="flex:2;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:12px;padding:14px;font-size:0.9rem;font-weight:900;cursor:pointer;opacity:0.75;">🛒 Ver meu pedido</button>'+
+    '<div style="flex:1;min-height:0;width:100%;max-width:760px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px;" onscroll="_sugReiniciarTimer()">'+
+      '<div id="sug-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;"></div>'+
     '</div>'+
-    '<div style="width:100%;max-width:480px;height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;flex-shrink:0;">'+
-      '<div id="adicionais-timer-fill" style="height:100%;background:#d4a843;width:100%;transition:width 25s linear;border-radius:2px;"></div>'+
+    // rodapé fixo: o "Não, obrigado" fica sempre à vista, por mais bebidas que tenha
+    '<div style="flex-shrink:0;width:100%;max-width:760px;padding:10px 0 16px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.97);">'+
+      '<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;margin-bottom:10px;">'+
+        '<div id="adicionais-timer-fill" style="height:100%;background:#d4a843;width:100%;transition:width 25s linear;border-radius:2px;"></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:10px;">'+
+        '<button onclick="_pularTelaSugestao()" style="flex:1;background:#2a2a2a;border:2px solid rgba(255,255,255,0.55);color:#fff;border-radius:14px;padding:16px 10px;font-size:1.02rem;font-weight:900;cursor:pointer;">'+(_sugTelaIdx<_sugTelas.length-1?'Pular ▶':'✕ Não, obrigado')+'</button>'+
+        '<button id="sug-btn-confirmar" onclick="_confirmarAdicionaisSugeridos()" style="flex:1.4;background:linear-gradient(135deg,#d4a843,#f0c060);border:none;color:#000;border-radius:14px;padding:16px 10px;font-size:1.02rem;font-weight:900;cursor:pointer;opacity:0.75;">🛒 Ver meu pedido</button>'+
+      '</div>'+
     '</div>';
   document.body.appendChild(el);
   _sugRenderGrid();

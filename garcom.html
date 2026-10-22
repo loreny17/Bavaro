@@ -12821,6 +12821,7 @@ function abrirModalItem(it){
   renderGruposNoModal();
   atualizarBtnAdd();
   document.getElementById('modal-item').classList.add('show');
+  try{ _modaisCabemNaTela(); }catch(e){}
 }
 
 // 👤 Nomes que já existem na mesa viram botões: toca e pronto (não precisa digitar de novo)
@@ -22891,17 +22892,19 @@ if(window.visualViewport){
 // altura visível e rola o campo tocado pro meio.
 function _modaisCabemNaTela(){
   var vv = window.visualViewport; if(!vv) return;
-  var cheio = vv.height >= window.innerHeight - 40;
-  document.querySelectorAll('.modal.show').forEach(function(m){
+  var a = document.activeElement;
+  var digitando = a && a.closest && a.closest('.modal.show') && /INPUT|TEXTAREA|SELECT/.test(a.tagName);
+  var teclado = digitando && vv.height < window.innerHeight - 120;
+  // ⚠️ limpa TODOS os modais (inclusive os fechados): antes, um modal fechado com o
+  // teclado aberto ficava com a altura "encolhida" e abria cortado da próxima vez
+  // (dava pra ver o carrinho e o cardápio por baixo).
+  document.querySelectorAll('.modal').forEach(function(m){
     var box = m.querySelector('.modal-box');
-    if(cheio){ m.style.height = ''; m.style.top = ''; m.style.bottom = ''; if(box) box.style.maxHeight = ''; return; }
+    if(!teclado || !m.classList.contains('show')){ m.style.height = ''; m.style.top = ''; m.style.bottom = ''; if(box) box.style.maxHeight = ''; return; }
     m.style.top = vv.offsetTop + 'px'; m.style.height = vv.height + 'px'; m.style.bottom = 'auto';
     if(box) box.style.maxHeight = Math.floor(vv.height - 6) + 'px';
   });
-  var a = document.activeElement;
-  if(a && a.closest && a.closest('.modal.show') && /INPUT|TEXTAREA|SELECT/.test(a.tagName)){
-    try{ a.scrollIntoView({ block:'center' }); }catch(e){}
-  }
+  if(teclado){ try{ a.scrollIntoView({ block:'center' }); }catch(e){} }
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', function(){ setTimeout(_modaisCabemNaTela, 60); });
@@ -22912,6 +22915,7 @@ document.addEventListener('focusin', function(e){
     setTimeout(_modaisCabemNaTela, 350);
   }
 });
+document.addEventListener('focusout', function(){ setTimeout(_modaisCabemNaTela, 400); });
 // Também rola pro fim assim que o campo ganha foco (teclado abrindo) —
 // cobre o instante entre tocar no campo e o resize disparar.
 document.addEventListener('focusin', function(e){

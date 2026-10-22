@@ -818,7 +818,10 @@
         <span class="cart-total-val" id="cart-total-val">R$ 0,00</span>
       </div>
       <button id="cart-btn-pesar" onclick="fecharCarrinho();abrirTelaBalanca(true);" style="display:none;width:100%;margin-bottom:8px;padding:14px;background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:12px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">⚖️ Pesar outro prato</button>
-      <button class="btn-finalizar" id="cart-btn-finalizar" onclick="fecharCarrinho();finalizarPedido();">Finalizar Pedido →</button>
+      <div style="display:flex;gap:10px;align-items:stretch;">
+        <button id="cart-btn-continuar" onclick="fecharCarrinho();resetTimerInatividade();" style="flex:1;padding:16px 10px;background:var(--surface2);border:2px solid var(--accent);color:var(--accent);border-radius:12px;font-weight:900;font-size:1rem;cursor:pointer;font-family:inherit;line-height:1.2;">➕ Continuar meu pedido</button>
+        <button class="btn-finalizar" id="cart-btn-finalizar" onclick="fecharCarrinho();finalizarPedido();" style="flex:1.3;width:auto;">Finalizar Pedido →</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2445,7 +2448,12 @@ function renderWizardPasso(){
       : '');
 }
 
+// Trava de toque: depois de escolher (a tela espera ~0,3 s e passa), um 2º toque rápido
+// caía na PRÓXIMA etapa e escolhia sozinho a opção que estava embaixo do dedo — ou pulava
+// uma etapa inteira. Agora toques nesse intervalo são ignorados.
+var _wizTravaAte = 0, _wizUltAvanco = 0;
 function wizardEscolher(idx){
+  if(Date.now() < _wizTravaAte) return;
   var grupo = _wizGrupos[_wizPassoAtual];
   if(!grupo) return;
   var opEscolhida = (grupo.opcoes||[])[idx];
@@ -2460,6 +2468,7 @@ function wizardEscolher(idx){
     var ehNegativa = /^(nenhum|nenhuma|nao |nao,|nao$|sem observacao|nada|pular)/.test(nomeNorm)
       || nomeNorm.indexOf('nenhuma delas') >= 0 || nomeNorm.indexOf('nenhum deles') >= 0;
     if(ehNegativa){
+      _wizTravaAte = Date.now() + 750;
       _selecoesTemp[grupo.id] = []; // "nenhuma" = zera qualquer marcação anterior
       try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
       var ov2 = document.getElementById('wizard-overlay');
@@ -2470,13 +2479,11 @@ function wizardEscolher(idx){
       setTimeout(wizardAvancar, 280);
       return;
     }
-    var atual = _selecoesTemp[grupo.id] || [];
-    var pos = atual.indexOf(idx);
-    if(pos >= 0) atual.splice(pos, 1); else atual.push(idx);
-    _selecoesTemp[grupo.id] = atual;
+    _selecoesTemp[grupo.id] = _alternarMultipla(grupo, _selecoesTemp[grupo.id] || [], idx);
     renderWizardPasso(); // re-renderiza pra atualizar visual
   } else {
     // Única: salva como ARRAY com 1 item (compatível com o resto do sistema)
+    _wizTravaAte = Date.now() + 750;   // cobre a espera + o começo da próxima tela
     _selecoesTemp[grupo.id] = [idx];
     try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
     // Pulse verde no card escolhido antes de avançar
@@ -2490,12 +2497,15 @@ function wizardEscolher(idx){
 }
 
 function wizardAvancar(){
+  if(Date.now() - _wizUltAvanco < 400) return;   // 2 toques no "Próximo" não pulam etapa
   var grupo = _wizGrupos[_wizPassoAtual];
   // Valida obrigatório
   if(grupo && grupo.obrigatorio){
     var sel = _selecoesTemp[grupo.id] || [];
     if(!sel.length) return;
   }
+  _wizUltAvanco = Date.now();
+  _wizTravaAte = Math.max(_wizTravaAte, Date.now() + 450);
   _wizDirecao = 'forward';
   _wizRecalcular();
   _wizPassoAtual++;
@@ -2505,6 +2515,7 @@ function wizardAvancar(){
 function wizardVoltar(){
   if(_wizPassoAtual <= 0){ fecharWizard(); return; }
   _wizDirecao = 'back';
+  _wizTravaAte = Date.now() + 350;
   _wizPassoAtual--;
   renderWizardPasso();
 }
@@ -2705,6 +2716,20 @@ function atualizarTotalModal(){
   document.getElementById('mi-total').textContent = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
+// "Completo" (ou "Com tudo") é o contrário de "Sem tomate", "Sem cebola"…: marcar um desmarca o outro
+function _ehOpcaoCompleto(o){
+  var n = String((o && o.nome) || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  return /^(completo|completa|com tudo|tudo|normal|padrao)$/.test(n);
+}
+function _alternarMultipla(g, atual, idx){
+  var pos = atual.indexOf(idx);
+  if(pos >= 0){ atual.splice(pos, 1); return atual; }
+  var ops = g.opcoes || [];
+  if(_ehOpcaoCompleto(ops[idx])) atual = [];                                  // completo → tira os "sem…"
+  else atual = atual.filter(function(i){ return !_ehOpcaoCompleto(ops[i]); }); // "sem…" → tira o completo
+  atual.push(idx);
+  return atual;
+}
 function selecionarOpcao(grupoId, idx){
   var g = _grupos.find(function(x){ return x.id === grupoId; });
   if(!g) return;
@@ -2717,10 +2742,8 @@ function selecionarOpcao(grupoId, idx){
     // Escolha única: substitui
     _selecoesTemp[grupoId] = [idx];
   } else {
-    // Múltipla: alterna
-    var pos = atual.indexOf(idx);
-    if(pos >= 0) atual.splice(pos, 1);
-    else atual.push(idx);
+    // Múltipla: alterna ("Completo" e "Sem…" se excluem)
+    _selecoesTemp[grupoId] = _alternarMultipla(g, atual, idx);
   }
   // Se a mudança "fechou" algum grupo condicional, remove as seleções dele
   _limparSelecoesOrfas();

@@ -10256,6 +10256,34 @@ function _impsSenhaTotem(cmd){
   if(!l.length) l = _impressoras.filter(function(i){ return i.tipo === 'usb' && i.computadorId === pc; }).slice(0, 1);
   return l.length ? l : base;
 }
+// ⏰ Lembretes agendados pelo gerente (app do garçom): o PDV fica aberto o dia todo,
+// então ele também avisa o servidor quando chega a hora (sai uma vez só — o servidor trava).
+var _lembPdvUnsub = null, _lembPdvRest = '', _lembPdvLista = [], _lembPdvPing = 0;
+setInterval(function(){
+  var rid = _restauranteAtivo && _restauranteAtivo.id;
+  if(!rid || typeof fbDb === 'undefined' || !fbDb) return;
+  if(!_lembPdvUnsub || _lembPdvRest !== rid){
+    if(_lembPdvUnsub){ try{ _lembPdvUnsub(); }catch(e){} }
+    _lembPdvRest = rid;
+    _lembPdvUnsub = fbDb.collection('lembretes_garcom').where('restauranteId','==', rid).onSnapshot(function(snap){
+      _lembPdvLista = []; snap.forEach(function(d){ _lembPdvLista.push(d.data() || {}); });
+    }, function(){});
+    return;
+  }
+  if(!_lembPdvLista.length || Date.now() - _lembPdvPing < 90000) return;
+  var p = {};
+  try{ new Intl.DateTimeFormat('en-CA', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', weekday:'short', hourCycle:'h23' }).formatToParts(new Date()).forEach(function(x){ p[x.type] = x.value; }); }catch(e){ return; }
+  var dia = p.year + '-' + p.month + '-' + p.day, agora = (+p.hour) * 60 + (+p.minute), sem = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(p.weekday);
+  var venc = _lembPdvLista.some(function(l){
+    if(l.ativo === false || !l.hora || l.ultimoDia === dia) return false;
+    var vale = l.repetir === 'uma' ? l.data === dia : l.repetir === 'diario' ? true : (l.dias || []).indexOf(sem) >= 0;
+    var h = String(l.hora).split(':'), atraso = agora - ((+h[0]) * 60 + (+h[1]));
+    return vale && atraso >= 0 && atraso <= 120;
+  });
+  if(!venc) return;
+  _lembPdvPing = Date.now();
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'tick', restauranteId: rid }) }).catch(function(){});
+}, 20000);
 function _impsDosModelos(tipos){
   var out = [], vistos = {};
   for(var t = 0; t < tipos.length && !out.length; t++){

@@ -21749,12 +21749,45 @@ function _responderRecado(id, resp){
   fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'resposta', id:id, resposta:resp, garcom:_nomeGarcom }) }).catch(function(){});
 }
 
+// ⏰ Vigia dos lembretes agendados: quem estiver com o app aberto avisa o servidor
+// quando chega a hora (o servidor trava pra sair uma vez só).
+var _lembVigiaUnsub = null, _lembVigiaRest = '', _lembLista = [], _lembPing = {};
+function _lembVigiar(restId){
+  if(!restId || !window.fbDb) return;
+  if(_lembVigiaUnsub && _lembVigiaRest === restId) return;
+  if(_lembVigiaUnsub){ try{ _lembVigiaUnsub(); }catch(e){} }
+  _lembVigiaRest = restId;
+  _lembVigiaUnsub = fbDb.collection('lembretes_garcom').where('restauranteId','==', restId).onSnapshot(function(snap){
+    _lembLista = []; snap.forEach(function(d){ _lembLista.push(Object.assign({ id:d.id }, d.data())); });
+  }, function(){});
+}
+function _lembAgoraSP(){
+  var p = {};
+  try{ new Intl.DateTimeFormat('en-CA', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', weekday:'short', hourCycle:'h23' }).formatToParts(new Date()).forEach(function(x){ p[x.type] = x.value; }); }catch(e){ return null; }
+  return { dia: p.year + '-' + p.month + '-' + p.day, hm: p.hour + ':' + p.minute, sem: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(p.weekday) };
+}
+setInterval(function(){
+  if(!_restauranteId) return;
+  _lembVigiar(_restauranteId);
+  var a = _lembAgoraSP(); if(!a || !_lembLista.length) return;
+  function mins(h){ var x = String(h).split(':'); return (+x[0]) * 60 + (+x[1]); }
+  var venc = _lembLista.some(function(l){
+    if(l.ativo === false || !l.hora || l.ultimoDia === a.dia) return false;
+    var vale = l.repetir === 'uma' ? l.data === a.dia : l.repetir === 'diario' ? true : (l.dias || []).indexOf(a.sem) >= 0;
+    var atraso = mins(a.hm) - mins(l.hora);
+    return vale && atraso >= 0 && atraso <= 120 && !(_lembPing[l.id] > Date.now() - 90000);
+  });
+  if(!venc) return;
+  _lembLista.forEach(function(l){ _lembPing[l.id] = Date.now(); });
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'tick', restauranteId:_restauranteId }) }).catch(function(){});
+}, 20000);
+
 // ── Gerente: "📣 Falar com garçom" ──
-var _falarSel = {}, _falarUrgente = false, _falarUnsub = null;
+var _falarSel = {}, _falarUrgente = false, _falarUnsub = null, _falarAgendar = false, _falarRepetir = 'uma', _falarDias = {}, _falarLembUnsub = null;
 function abrirFalarComGarcom(){
   if(!_ehAdmin){ showToast('🔒 Só o gerente', '#f87171'); return; }
   var ex = document.getElementById('modal-falar-garcom'); if(ex) ex.remove();
-  _falarSel = {}; _falarUrgente = false;
+  _falarSel = {}; _falarUrgente = false; _falarAgendar = false; _falarRepetir = 'uma'; _falarDias = {};
   var mod = document.createElement('div');
   mod.className = 'modal show'; mod.id = 'modal-falar-garcom'; mod.style.zIndex = '9600';
   mod.innerHTML = '<div class="modal-box" style="max-width:460px;">' +
@@ -21768,7 +21801,11 @@ function abrirFalarComGarcom(){
         ['Vem no caixa, por favor','Mesa te chamando','Vem na cozinha','Pode vir aqui?'].map(function(t){ return '<button onclick="document.getElementById(\'falar-texto\').value=this.textContent" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:99px;padding:7px 11px;font-family:inherit;font-size:0.8rem;cursor:pointer;">' + t + '</button>'; }).join('') +
       '</div>' +
       '<button id="falar-urg" onclick="_falarAlternarUrgente()" style="width:100%;margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text);font-family:inherit;font-size:0.86rem;font-weight:700;cursor:pointer;"></button>' +
+      '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:14px 0 6px;">Quando</div>' +
+      '<div id="falar-quando"></div>' +
       '<div id="falar-msg" style="margin-top:10px;"></div>' +
+      '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:16px 0 6px;">⏰ Lembretes agendados</div>' +
+      '<div id="falar-lembretes" style="font-size:0.84rem;color:var(--muted);">—</div>' +
       '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin:16px 0 6px;">Últimos recados</div>' +
       '<div id="falar-hist" style="font-size:0.84rem;color:var(--muted);">—</div>' +
       '<div style="font-size:0.7rem;color:var(--muted);margin-top:14px;border-top:1px solid var(--border);padding-top:8px;">' + _statusAparelhoRecado() + '</div>' +
@@ -21777,6 +21814,24 @@ function abrirFalarComGarcom(){
   '</div>';
   document.body.appendChild(mod);
   _falarAlternarUrgente(true);
+  _falarRenderQuando();
+  if(_falarLembUnsub){ try{ _falarLembUnsub(); }catch(e){} }
+  _falarLembUnsub = fbDb.collection('lembretes_garcom').where('restauranteId','==', _restauranteId).onSnapshot(function(snap){
+    var l = []; snap.forEach(function(d){ var v = d.data() || {}; if(v.ativo !== false) l.push(Object.assign({ id:d.id }, v)); });
+    l.sort(function(a,b){ return String(a.hora).localeCompare(String(b.hora)); });
+    var box = document.getElementById('falar-lembretes'); if(!box) return;
+    var SEM = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    box.innerHTML = l.length ? l.map(function(x){
+      var quando = x.repetir === 'diario' ? 'todo dia' : x.repetir === 'dias' ? (x.dias || []).slice().sort().map(function(d){ return SEM[d]; }).join(', ') : (x.data ? x.data.split('-').reverse().slice(0,2).join('/') : 'uma vez');
+      var pra = (x.para || []).indexOf('__todos__') >= 0 ? 'Todos' : (x.para || []).join(', ');
+      return '<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="font-family:Bebas Neue,sans-serif;font-size:1.3rem;color:var(--accent);min-width:48px;">' + esc(x.hora) + '</div>' +
+        '<div style="flex:1;min-width:0;"><div style="color:var(--text);font-weight:700;word-wrap:break-word;">' + (x.urgente ? '🚨 ' : '') + esc(x.texto) + '</div>' +
+          '<div style="font-size:0.74rem;">' + esc(quando) + ' · pra ' + esc(pra) + '</div></div>' +
+        '<button onclick="_apagarLembreteGarcom(\'' + x.id + '\')" style="background:none;border:1px solid var(--border2);color:#f87171;border-radius:8px;padding:6px 9px;cursor:pointer;font-size:0.9rem;">🗑</button>' +
+      '</div>';
+    }).join('') : 'Nenhum lembrete agendado.';
+  }, function(){});
   fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listar', restauranteId:_restauranteId, de:_nomeGarcom }) })
     .then(function(r){ return r.json(); }).then(function(j){
       var box = document.getElementById('falar-lista'); if(!box) return;
@@ -21803,11 +21858,12 @@ function abrirFalarComGarcom(){
 }
 function fecharFalarComGarcom(){
   if(_falarUnsub){ try{ _falarUnsub(); }catch(e){} _falarUnsub = null; }
+  if(_falarLembUnsub){ try{ _falarLembUnsub(); }catch(e){} _falarLembUnsub = null; }
   var m = document.getElementById('modal-falar-garcom'); if(m) m.remove();
 }
 function _falarRenderLista(){
   var box = document.getElementById('falar-lista'); if(!box) return;
-  var gs = (window._falarGarcons || []).filter(function(g){ return _normRecado(g.nome) !== _normRecado(_nomeGarcom); });
+  var gs = (window._falarGarcons || []).filter(function(g){ return _falarAgendar || _normRecado(g.nome) !== _normRecado(_nomeGarcom); });
   var todos = !!_falarSel.__todos__;
   function chip(id, rot, sub, on){
     return '<button onclick="_falarToggle(\'' + id.replace(/'/g, "\\'") + '\')" style="padding:9px 12px;border-radius:12px;font-family:inherit;cursor:pointer;text-align:left;border:1.5px solid ' + (on ? 'var(--accent)' : 'var(--border2)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--text)') + ';">' +
@@ -21823,6 +21879,34 @@ function _falarToggle(nome){
   else { delete _falarSel.__todos__; _falarSel[nome] = !_falarSel[nome]; }
   _falarRenderLista();
 }
+function _falarRenderQuando(){
+  var box = document.getElementById('falar-quando'); if(!box) return;
+  function seg(on, rot, fn){ return '<button onclick="' + fn + '" style="flex:1;padding:10px;border-radius:10px;font-family:inherit;font-weight:800;font-size:0.86rem;cursor:pointer;border:1.5px solid ' + (on ? 'var(--accent)' : 'var(--border2)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--text)') + ';">' + rot + '</button>'; }
+  var h = '<div style="display:flex;gap:8px;">' + seg(!_falarAgendar, '📣 Agora', '_falarModo(false)') + seg(_falarAgendar, '⏰ Agendar', '_falarModo(true)') + '</div>';
+  if(_falarAgendar){
+    var horaAtual = (document.getElementById('falar-hora') || {}).value || '';
+    h += '<div style="display:flex;gap:8px;margin-top:9px;align-items:center;">' +
+      '<input type="time" id="falar-hora" value="' + esc(horaAtual) + '" style="flex:0 0 120px;background:var(--surface2);border:1.5px solid var(--border2);color:var(--text);border-radius:10px;padding:10px;font-family:inherit;font-size:1.05rem;">' +
+      '<div style="display:flex;gap:6px;flex:1;">' + seg(_falarRepetir === 'uma', 'Uma vez', '_falarRep(\'uma\')') + seg(_falarRepetir === 'diario', 'Todo dia', '_falarRep(\'diario\')') + seg(_falarRepetir === 'dias', 'Dias', '_falarRep(\'dias\')') + '</div>' +
+    '</div>';
+    if(_falarRepetir === 'dias'){
+      h += '<div style="display:flex;gap:5px;margin-top:8px;">' + ['D','S','T','Q','Q','S','S'].map(function(l, i){
+        var on = !!_falarDias[i];
+        return '<button onclick="_falarDia(' + i + ')" style="flex:1;padding:9px 0;border-radius:9px;font-family:inherit;font-weight:800;cursor:pointer;border:1.5px solid ' + (on ? 'var(--accent)' : 'var(--border2)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--muted)') + ';">' + l + '</button>';
+      }).join('') + '</div>';
+    }
+    h += '<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Sai sozinho no horário, como notificação. Precisa ter um PDV ou um app de garçom aberto na loja nessa hora.</div>';
+  }
+  box.innerHTML = h;
+  var btn = document.getElementById('falar-btn'); if(btn) btn.textContent = _falarAgendar ? '⏰ Agendar' : '📣 Enviar';
+}
+function _falarModo(ag){ _falarAgendar = ag; _falarRenderQuando(); _falarRenderLista(); }
+function _falarRep(r){ _falarRepetir = r; _falarRenderQuando(); }
+function _falarDia(i){ _falarDias[i] = !_falarDias[i]; _falarRenderQuando(); }
+function _apagarLembreteGarcom(id){
+  fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'lembreteApagar', restauranteId:_restauranteId, de:_nomeGarcom, id:id }) })
+    .then(function(r){ return r.json(); }).then(function(j){ showToast(j.ok ? '🗑 Lembrete apagado' : '❌ ' + (j.error || 'Erro'), j.ok ? '#4ade80' : '#f87171'); }).catch(function(){ showToast('Sem conexão', '#f87171'); });
+}
 function _falarAlternarUrgente(forcar){
   if(forcar !== true) _falarUrgente = !_falarUrgente;
   var b = document.getElementById('falar-urg'); if(!b) return;
@@ -21837,6 +21921,23 @@ function enviarRecadoGarcom(){
   var msg = document.getElementById('falar-msg'), btn = document.getElementById('falar-btn');
   if(!para.length){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escolha pra quem é o recado.</div>'; return; }
   if(!txt){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escreva o recado.</div>'; return; }
+  if(_falarAgendar){
+    var hora = (document.getElementById('falar-hora') || {}).value || '';
+    var dias = Object.keys(_falarDias).filter(function(k){ return _falarDias[k]; }).map(Number);
+    if(!hora){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escolha o horário.</div>'; return; }
+    if(_falarRepetir === 'dias' && !dias.length){ msg.innerHTML = '<div style="color:#f7a34f;font-size:0.84rem;">Escolha os dias da semana.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Agendando…'; msg.innerHTML = '';
+    fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      acao:'lembreteSalvar', tenantId:_tenantId || null, restauranteId:_restauranteId, de:_nomeGarcom, para:para, texto:txt, urgente:_falarUrgente, hora:hora, repetir:_falarRepetir, dias:dias
+    }) }).then(function(r){ return r.json(); }).then(function(j){
+      btn.disabled = false; btn.textContent = '⏰ Agendar';
+      if(!j.ok){ msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">' + esc(j.error || 'Não agendou') + '</div>'; return; }
+      document.getElementById('falar-texto').value = '';
+      var quando = _falarRepetir === 'uma' ? (j.data ? ' (' + j.data.split('-').reverse().slice(0,2).join('/') + ')' : '') : _falarRepetir === 'diario' ? ' todo dia' : '';
+      showToast('⏰ Agendado pra ' + hora + quando, '#4ade80');
+    }).catch(function(){ btn.disabled = false; btn.textContent = '⏰ Agendar'; msg.innerHTML = '<div style="color:#f87171;font-size:0.84rem;">Sem conexão.</div>'; });
+    return;
+  }
   btn.disabled = true; btn.textContent = 'Enviando…'; msg.innerHTML = '';
   fetch('/api/recado', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
     acao:'enviar', tenantId:_tenantId || null, restauranteId:_restauranteId, de:_nomeGarcom, para:para, texto:txt, urgente:_falarUrgente

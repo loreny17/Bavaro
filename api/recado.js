@@ -61,6 +61,91 @@ async function enviarParaAparelho(ap, recado) {
   }
 }
 
+// Envia um recado (agora) pra uma lista de garçons — usado pelo "Enviar" e pelos lembretes
+async function enviarRecado(db, b) {
+  const de = String(b.de || '');
+  const texto = String(b.texto || '').trim().slice(0, 300);
+  if (!texto) return { ok: false, error: 'Escreva o recado.' };
+  const lista = await garconsDaLoja(db, b.restauranteId);
+  const para = Array.isArray(b.para) ? b.para : [];
+  let dest = para.indexOf('__todos__') >= 0
+    ? lista.filter((g) => { if (b.incluirEu) return true; const eu = acharGarcom(lista, de); return !eu || eu.nome !== g.nome; })
+    : para.map((n) => acharGarcom(lista, n)).filter(Boolean);
+  dest = dest.filter((g, i, a) => a.findIndex((x) => x.nome === g.nome) === i);
+  if (!dest.length) return { ok: false, error: 'Escolha pra quem é o recado.' };
+
+  const snapAp = await db.collection('garcom_aparelhos').where('restauranteId', '==', String(b.restauranteId)).get();
+  const aparelhos = [];
+  snapAp.forEach((d) => aparelhos.push(Object.assign({ _id: d.id }, d.data())));
+
+  const resultado = [];
+  for (const g of dest) {
+    const ref = db.collection('recados_garcom').doc();
+    const aps = aparelhos.filter((a) => a.garcomNorm === norm(g.nome));
+    const recado = {
+      id: ref.id, tenantId: b.tenantId || null, restauranteId: String(b.restauranteId), de, para: g.nome, paraNorm: norm(g.nome),
+      texto, urgente: b.urgente === true, criadoEm: Date.now(), status: 'enviado', tokens: aps.map((a) => a.token),
+    };
+    if (b.lembreteId) recado.lembreteId = b.lembreteId;
+    await ref.set(recado);
+    let enviados = 0;
+    for (const ap of aps) {
+      const r = await enviarParaAparelho(ap, recado);
+      if (r.ok) enviados++;
+      else if (TOKEN_MORTO.indexOf(r.codigo) >= 0) { try { await db.collection('garcom_aparelhos').doc(ap._id).delete(); } catch (e) { /* ok */ } }
+      else console.warn('[recado] envio falhou', g.nome, r.codigo, r.erro);
+    }
+    await ref.update({ aparelhos: aps.length, notificados: enviados });
+    resultado.push({ nome: g.nome, id: ref.id, aparelhos: aps.length, notificados: enviados });
+  }
+  return { ok: true, resultado };
+}
+
+// Hora de Brasília: { dia:'2026-10-22', hm:'14:05', sem:0..6 }
+function agoraSP(ms) {
+  const p = {};
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23' })
+    .formatToParts(ms ? new Date(ms) : new Date()).forEach((x) => { p[x.type] = x.value; });
+  return { dia: p.year + '-' + p.month + '-' + p.day, hm: p.hour + ':' + p.minute, sem: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday) };
+}
+function diaMais(dia, n) { const d = new Date(dia + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function minDe(hm) { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; }
+// Vence hoje, já passou da hora (até 2h de atraso, se ninguém estava com o app aberto) e ainda não saiu hoje
+function lembreteVencido(l, a) {
+  if (!l || l.ativo === false || !l.hora || l.ultimoDia === a.dia) return false;
+  const hojeVale = l.repetir === 'uma' ? l.data === a.dia : l.repetir === 'diario' ? true : (l.dias || []).indexOf(a.sem) >= 0;
+  if (!hojeVale) return false;
+  const atraso = minDe(a.hm) - minDe(l.hora);
+  return atraso >= 0 && atraso <= 120;
+}
+async function dispararLembretes(db, restauranteId) {
+  if (!restauranteId) return { ok: false, error: 'Loja não informada.' };
+  const a = agoraSP();
+  const snap = await db.collection('lembretes_garcom').where('restauranteId', '==', restauranteId).get();
+  const vencidos = [];
+  snap.forEach((d) => { const l = d.data() || {}; if (lembreteVencido(l, a)) vencidos.push({ ref: d.ref || db.collection('lembretes_garcom').doc(d.id), id: d.id }); });
+  const enviados = [];
+  for (const v of vencidos) {
+    // trava: só UM aparelho dispara (vários PDVs/garçons podem chamar ao mesmo tempo)
+    let l = null;
+    try {
+      l = await db.runTransaction(async (tx) => {
+        const d = await tx.get(v.ref);
+        const x = d.exists ? d.data() : null;
+        if (!lembreteVencido(x, a)) return null;
+        const upd = { ultimoDia: a.dia, ultimoEnvioEm: Date.now() };
+        if (x.repetir === 'uma') upd.ativo = false;
+        tx.update(v.ref, upd);
+        return x;
+      });
+    } catch (e) { console.warn('[lembrete] trava', e.message); }
+    if (!l) continue;
+    const r = await enviarRecado(db, { tenantId: l.tenantId, restauranteId, de: l.criadoPor || 'Lembrete', para: l.para, texto: '⏰ ' + l.texto, urgente: l.urgente === true, lembreteId: v.id, incluirEu: true });
+    enviados.push({ id: v.id, ok: r.ok });
+  }
+  return { ok: true, enviados };
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Use POST' });
   const b = req.body || {};
@@ -93,40 +178,43 @@ module.exports = async (req, res) => {
     if (b.acao === 'enviar') {
       const de = String(b.de || '');
       if (!(await garcomEhAdmin(db, b.restauranteId, de))) return res.status(200).json({ ok: false, error: '🔒 Só o gerente (garçom admin) pode mandar recado.' });
-      const texto = String(b.texto || '').trim().slice(0, 300);
-      if (!texto) return res.status(200).json({ ok: false, error: 'Escreva o recado.' });
-      const lista = await garconsDaLoja(db, b.restauranteId);
-      const para = Array.isArray(b.para) ? b.para : [];
-      let dest = para.indexOf('__todos__') >= 0
-        ? lista.filter((g) => { const eu = acharGarcom(lista, de); return !eu || eu.nome !== g.nome; })
-        : para.map((n) => acharGarcom(lista, n)).filter(Boolean);
-      dest = dest.filter((g, i, a) => a.findIndex((x) => x.nome === g.nome) === i);
-      if (!dest.length) return res.status(200).json({ ok: false, error: 'Escolha pra quem é o recado.' });
+      return res.status(200).json(await enviarRecado(db, b));
+    }
 
-      const snapAp = await db.collection('garcom_aparelhos').where('restauranteId', '==', String(b.restauranteId)).get();
-      const aparelhos = [];
-      snapAp.forEach((d) => aparelhos.push(Object.assign({ _id: d.id }, d.data())));
-
-      const resultado = [];
-      for (const g of dest) {
-        const ref = db.collection('recados_garcom').doc();
-        const aps = aparelhos.filter((a) => a.garcomNorm === norm(g.nome));
-        const recado = {
-          id: ref.id, tenantId: b.tenantId || null, restauranteId: String(b.restauranteId), de, para: g.nome, paraNorm: norm(g.nome),
-          texto, urgente: b.urgente === true, criadoEm: Date.now(), status: 'enviado', tokens: aps.map((a) => a.token),
-        };
-        await ref.set(recado);
-        let enviados = 0;
-        for (const ap of aps) {
-          const r = await enviarParaAparelho(ap, recado);
-          if (r.ok) enviados++;
-          else if (TOKEN_MORTO.indexOf(r.codigo) >= 0) { try { await db.collection('garcom_aparelhos').doc(ap._id).delete(); } catch (e) { /* ok */ } }
-          else console.warn('[recado] envio falhou', g.nome, r.codigo, r.erro);
-        }
-        await ref.update({ aparelhos: aps.length, notificados: enviados });
-        resultado.push({ nome: g.nome, id: ref.id, aparelhos: aps.length, notificados: enviados });
+    // ── ⏰ Lembretes agendados (o gerente marca hora e pra quem) ──
+    if (b.acao === 'lembreteSalvar' || b.acao === 'lembreteApagar') {
+      if (!(await garcomEhAdmin(db, b.restauranteId, String(b.de || '')))) return res.status(200).json({ ok: false, error: '🔒 Só o gerente (garçom admin) pode agendar.' });
+      const col = db.collection('lembretes_garcom');
+      if (b.acao === 'lembreteApagar') {
+        const d = await col.doc(String(b.id || '')).get();
+        if (!d.exists || d.data().restauranteId !== String(b.restauranteId)) return res.status(200).json({ ok: false, error: 'Lembrete não encontrado.' });
+        await col.doc(String(b.id)).delete();
+        return res.status(200).json({ ok: true });
       }
-      return res.status(200).json({ ok: true, resultado });
+      const texto = String(b.texto || '').trim().slice(0, 300);
+      const hora = /^\d{2}:\d{2}$/.test(String(b.hora || '')) ? String(b.hora) : '';
+      const repetir = ['uma', 'diario', 'dias'].indexOf(b.repetir) >= 0 ? b.repetir : 'uma';
+      const dias = Array.isArray(b.dias) ? b.dias.map(Number).filter((x) => x >= 0 && x <= 6) : [];
+      const para = Array.isArray(b.para) ? b.para.map(String).slice(0, 40) : [];
+      if (!texto) return res.status(200).json({ ok: false, error: 'Escreva o lembrete.' });
+      if (!hora) return res.status(200).json({ ok: false, error: 'Escolha o horário.' });
+      if (!para.length) return res.status(200).json({ ok: false, error: 'Escolha pra quem é.' });
+      if (repetir === 'dias' && !dias.length) return res.status(200).json({ ok: false, error: 'Escolha os dias da semana.' });
+      const hoje = agoraSP();
+      // "só uma vez": hoje, ou amanhã se o horário já passou
+      let data = '';
+      if (repetir === 'uma') data = hora > hoje.hm ? hoje.dia : diaMais(hoje.dia, 1);
+      const ref = b.id ? col.doc(String(b.id)) : col.doc();
+      await ref.set({
+        tenantId: b.tenantId || null, restauranteId: String(b.restauranteId), criadoPor: String(b.de), para, texto,
+        urgente: b.urgente === true, hora, repetir, dias, data, ativo: true, ultimoDia: '', criadoEm: Date.now(),
+      });
+      return res.status(200).json({ ok: true, id: ref.id, data });
+    }
+
+    // Algum app aberto (PDV / garçom) viu que tem lembrete na hora → dispara
+    if (b.acao === 'tick') {
+      return res.status(200).json(await dispararLembretes(db, String(b.restauranteId || '')));
     }
 
     if (b.acao === 'resposta') {

@@ -256,6 +256,7 @@ document.getElementById('pwa-manifest').href = URL.createObjectURL(blob);
     </div>
 
     <!-- CONTEÚDO -->
+    <div id="rel-atualizado" style="font-size:0.72rem;color:var(--muted);text-align:right;margin:-2px 2px 8px;min-height:1em;"></div>
     <div id="relatorio-content">
       <div class="loading"><div class="spinner"></div>Carregando...</div>
     </div>
@@ -330,9 +331,14 @@ try {
   firebase.initializeApp(firebaseConfig);
   fbDb = firebase.firestore();
   try {
-    fbDb.settings({ experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false });
-    dlog('Firestore: long-polling forçado.');
+    // detecta sozinho (long-polling forçado deixava tudo mais lento)
+    fbDb.settings({ experimentalAutoDetectLongPolling: true });
   } catch(e){ dlog('settings() falhou: '+e.message); }
+  // Guarda os dados no aparelho: na próxima abertura o relatório aparece na hora
+  // (do que ficou salvo) e se atualiza sozinho em seguida.
+  try {
+    fbDb.enablePersistence({ synchronizeTabs: true }).catch(function(e){ dlog('cache local indisponível: '+(e.code||e.message)); });
+  } catch(e){ dlog('enablePersistence falhou: '+e.message); }
   dlog('Firebase inicializado', {projectId: firebaseConfig.projectId});
 } catch(e){ dlog('ERRO ao inicializar Firebase: '+e.message); }
 
@@ -405,7 +411,9 @@ function carregarDados(){
     _dataInicio = new Date(di+'T00:00:00');
     _dataFim = new Date(df+'T23:59:59');
   }
-  // Já temos os dados em cache → só refiltra (instantâneo)
+  // período mais antigo que o que já foi lido → amplia a janela e busca de novo
+  if(_dataInicio && _dataInicio.getTime() < _janela()){ _janelaIni = _dataInicio.getTime(); _todasContas = null; }
+  // Já temos os dados → só refiltra (instantâneo)
   if(_todasContas){ _aplicarFiltros(); return; }
 
   document.getElementById('relatorio-content').innerHTML =
@@ -414,11 +422,26 @@ function carregarDados(){
 
   esperarAuth(function(ok){
     if(!ok) dlog('Login não confirmado — tentando consulta mesmo assim.');
-    _buscarTudo();
+    _buscarTudo('cache');    // aparece na hora com o que está salvo no aparelho
+    _buscarTudo('server');   // e atualiza com o servidor
   });
 }
 
 function recarregarTudo(){ _todasContas = null; carregarDados(); }
+
+// Janela de dados lidos: do começo do mês passado até hoje (cobre todos os botões de período).
+// Período personalizado mais antigo → aumenta a janela e busca de novo.
+function _inicioJanelaPadrao(){ var a = new Date(); return new Date(a.getFullYear(), a.getMonth()-1, 1).getTime(); }
+// (o app começa a carregar antes desta linha rodar — por isso tudo aqui é "var" sem depender da ordem)
+var _janelaIni, _buscaSeq, _servidorOk, _ultimaAtualizacao;
+function _janela(){ if(!_janelaIni) _janelaIni = _inicioJanelaPadrao(); return _janelaIni; }
+function _mostrarAtualizado(txt){ var el = document.getElementById('rel-atualizado'); if(el) el.innerHTML = txt; }
+// Atualiza sozinho: ao voltar pro app e a cada 5 minutos com ele aberto
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && _todasContas && Date.now() - (_ultimaAtualizacao||0) > 60000) _atualizarServidor();
+});
+setInterval(function(){ if(document.visibilityState === 'visible' && _todasContas) _atualizarServidor(); }, 5*60000);
+function _atualizarServidor(){ _mostrarAtualizado('🔄 Atualizando…'); _buscarTudo('server'); }
 
 function esperarAuth(cb){
   if(_authReady) return cb(true);
@@ -449,27 +472,46 @@ function labelRest(id){
 }
 
 // Lê as DUAS fontes: contas_fechadas (Principal/garçom) + pedidos_totem pagos (Prinzen/totem)
-function _buscarTudo(){
+function _buscarTudo(fonte){
+  fonte = fonte || 'server';
+  var doCache = fonte === 'cache';
+  var opt = { source: fonte };
+  var janela = _janela();
   var _respondeu = false;
-  var _watchdog = setTimeout(function(){
+  // Internet lenta: avisa com calma e continua esperando (antes dava "erro" e mandava tocar 5×)
+  var _watchdog = doCache ? null : setTimeout(function(){
     if(_respondeu) return;
-    dlog('TIMEOUT: consulta não retornou em 12s.');
-    document.getElementById('relatorio-content').innerHTML =
-      '<div class="loading" style="color:var(--danger);">⏱️ A consulta não respondeu.<br><small style="color:var(--muted);">Toque 5× no título "Relatórios" para ver o debug.</small></div>';
+    dlog('Consulta demorando mais de 12s — continuando a esperar.');
+    if(!_todasContas){
+      document.getElementById('relatorio-content').innerHTML =
+        '<div class="loading"><div class="spinner"></div>Carregando… a internet está lenta, só mais um pouquinho.</div>';
+    } else _mostrarAtualizado('🔄 Atualizando… (internet lenta)');
   }, 12000);
 
   var tref = fbDb.collection('tenants').doc(TENANT_ID);
 
+  // Só lê o período que interessa (antes lia TODO o histórico a cada abertura — por isso demorava)
   function lerContas(){
-    return fbDb.collection('contas_fechadas').where('tenantId','==',TENANT_ID).get()
+    return fbDb.collection('contas_fechadas').where('fechadoEm','>=',janela).get(opt)
       .then(function(s){ return {tipo:'contas', rid:null, snap:s}; })
-      .catch(function(e){ dlog('contas_fechadas falhou: '+(e.code||'')+' — '+e.message); return {tipo:'contas', rid:null, snap:null}; });
+      .catch(function(e){
+        if(doCache) return {tipo:'contas', rid:null, snap:null};
+        dlog('contas por data falhou ('+(e.code||'')+') — lendo do jeito antigo');
+        return fbDb.collection('contas_fechadas').where('tenantId','==',TENANT_ID).get(opt)
+          .then(function(s){ return {tipo:'contas', rid:null, snap:s}; })
+          .catch(function(e2){ dlog('contas_fechadas falhou: '+(e2.code||'')+' — '+e2.message); return {tipo:'contas', rid:null, snap:null}; });
+      });
   }
   function lerTotem(rid){
-    return tref.collection('restaurantes').doc(rid).collection('pedidos_totem')
-      .get()
+    var col = tref.collection('restaurantes').doc(rid).collection('pedidos_totem');
+    return col.where('pagoEm','>=',janela).get(opt)
       .then(function(s){ return {tipo:'totem', rid:rid, snap:s}; })
-      .catch(function(e){ dlog('totem/'+rid+' falhou: '+(e.code||'')+' — '+e.message); return {tipo:'totem', rid:rid, snap:null}; });
+      .catch(function(e){
+        if(doCache) return {tipo:'totem', rid:rid, snap:null};
+        dlog('totem/'+rid+' por data falhou ('+(e.code||'')+') — lendo tudo');
+        return col.get(opt).then(function(s){ return {tipo:'totem', rid:rid, snap:s}; })
+          .catch(function(e2){ dlog('totem/'+rid+' falhou: '+(e2.code||'')+' — '+e2.message); return {tipo:'totem', rid:rid, snap:null}; });
+      });
   }
 
   // Lê o cardápio (principal + totem) de cada restaurante só pra montar o mapa
@@ -479,8 +521,8 @@ function _buscarTudo(){
     var base = tref.collection('restaurantes').doc(rid);
     function lerPar(colCard){
       return Promise.all([
-        base.collection(colCard).doc('data').collection('categorias').get().catch(function(){ return null; }),
-        base.collection(colCard).doc('data').collection('itens').get().catch(function(){ return null; })
+        base.collection(colCard).doc('data').collection('categorias').get(opt).catch(function(){ return null; }),
+        base.collection(colCard).doc('data').collection('itens').get(opt).catch(function(){ return null; })
       ]).then(function(r){
         var catsSnap = r[0], itensSnap = r[1];
         var catsPorId = {};
@@ -505,16 +547,16 @@ function _buscarTudo(){
 
   // Lê o almoço manual (registro_almoco) por ID de documento (get), cobrindo os últimos 70 dias.
   // Buscar por ID contorna regras que bloqueiam consulta (list) mas liberam leitura simples (get).
+  var _almocosNovos = [];
   function lerAlmocos(){
-    _almocos = [];
     var col = fbDb.collection('registro_almoco');
-    var dias = 70, jobs = [];
+    var dias = Math.min(400, Math.ceil((Date.now() - janela) / 86400000) + 1), jobs = [];
     var base = new Date(); base.setHours(12,0,0,0);
     for(var i=0; i<dias; i++){
       (function(d){
         var ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
         jobs.push(
-          col.doc('almoco_default_'+ds).get()
+          col.doc('almoco_default_'+ds).get(opt)
             .then(function(snap){ return {ds:ds, snap:snap, err:null}; })
             .catch(function(e){ return {ds:ds, snap:null, err:e}; })
         );
@@ -526,10 +568,11 @@ function _buscarTudo(){
         if(r.err){ if(!permErr) permErr=r.err; return; }
         if(r.snap && r.snap.exists){
           var x = r.snap.data() || {};
-          _almocos.push({ rest:'default', ms:new Date(r.ds+'T12:00:00').getTime(), valor:x.valor||0 });
+          _almocosNovos.push({ rest:'default', ms:new Date(r.ds+'T12:00:00').getTime(), valor:x.valor||0 });
           n++;
         }
       });
+      if(permErr && doCache) permErr = null;
       if(permErr) dlog('registro_almoco BLOQUEADO: '+(permErr.code||'')+' — '+permErr.message+' (libere leitura nas regras do Firestore)');
       dlog('registro_almoco: '+n+' lançamento(s) de almoço (últimos '+dias+' dias)');
       return {tipo:'almoco'};
@@ -537,7 +580,7 @@ function _buscarTudo(){
   }
 
   // 1) Descobre os restaurantes do tenant; 2) lê contas_fechadas + pedidos_totem de cada um
-  tref.collection('restaurantes').get()
+  tref.collection('restaurantes').get(opt)
     .then(function(rs){ var ids=[]; rs.forEach(function(d){ ids.push(d.id); }); return ids; })
     .catch(function(e){ dlog('lista de restaurantes falhou: '+(e.code||'')+' — '+e.message); return []; })
     .then(function(rids){
@@ -549,7 +592,10 @@ function _buscarTudo(){
       return Promise.all(jobs);
     })
     .then(function(resultados){
-      _respondeu = true; clearTimeout(_watchdog);
+      _respondeu = true; if(_watchdog) clearTimeout(_watchdog);
+      // cache que chegou depois do servidor, ou janela que mudou no meio → ignora
+      if(doCache && _servidorOk) return;
+      if(janela !== _janela()) return;
 
       var byKey = {}, mapRest = {}, statusPorRest = {};
       resultados.forEach(function(r){
@@ -569,6 +615,8 @@ function _buscarTudo(){
             if(STATUS_NAO_VENDA[String(st).toLowerCase()]) return;
           }
 
+          if(r.tipo === 'contas' && dados.tenantId && dados.tenantId !== TENANT_ID) return;   // outra empresa
+          if(r.tipo === 'contas' && !dados.tenantId) return;
           var key = (r.rid || 'cf') + '_' + d.id;
           if(byKey[key]) return;
           var c = Object.assign({_docId:d.id}, dados);
@@ -591,8 +639,17 @@ function _buscarTudo(){
         dlog('Status totem/'+rid+': '+det);
       });
 
-      _todasContas = Object.keys(byKey).map(function(k){ return byKey[k]; });
-      dlog('Total de vendas (únicas): '+_todasContas.length);
+      var lista = Object.keys(byKey).map(function(k){ return byKey[k]; });
+      if(doCache){
+        if(!lista.length){ dlog('Cache vazio — esperando o servidor'); return; }
+        _mostrarAtualizado('🔄 Atualizando…');
+      } else {
+        _servidorOk = true; _ultimaAtualizacao = Date.now();
+        _mostrarAtualizado('✓ Atualizado às ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) + ' · <a href="javascript:void(0)" onclick="_atualizarServidor()" style="color:var(--muted);">atualizar</a>');
+      }
+      _todasContas = lista;
+      _almocos = _almocosNovos;
+      dlog((doCache ? '[cache] ' : '')+'Total de vendas (únicas): '+_todasContas.length);
 
       _restaurantes = Object.keys(mapRest).map(function(id){ return {id:id, label:labelRest(id), count:mapRest[id]}; })
                                           .sort(function(a,b){ return b.count - a.count; });

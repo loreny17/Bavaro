@@ -3169,6 +3169,7 @@ function voltarTelaInicial(){
     _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc && !_balCobrancaPodeFechar()) return; if(tc) tc.remove();
     // prato que ficou na balança (venda feita ou cancelada) não reabre o pedido sozinho
     _balPrecisaZerar = true;
+    _balDescParceria = false;
     if(_balVivo && _balVivo.presenca === true && Number(_balVivo.peso) >= 20) _balPesoDesarme = Number(_balVivo.peso);
   }
   if(_carrinho.length){
@@ -3990,7 +3991,16 @@ function _balProximo(){
 // ── Cobrança (maquininha) + nota fiscal ──
 var _balForma = '', _balNota = false, _balDoc = '', _balPedido = null, _balEmitindo = false;
 function _balCobrancaPodeFechar(){ return !_balEmitindo; }
-function _balTotal(){ return Math.round(_carrinho.reduce(function(s,c){ return s + c.preco * c.qtd; }, 0) * 100) / 100; }
+// 🤝 Parceria: 10% de desconto SÓ no prato por quilo (bebidas e outros itens não).
+// Botão discreto no canto da cobrança; vale até o fim deste atendimento.
+var _balDescParceria = false, _BAL_DESC_PCT = 10;
+function _balPrecoCobrado(c){
+  if(_balDescParceria && c.tipoVenda === 'kg') return Math.round(c.preco * (100 - _BAL_DESC_PCT)) / 100;
+  return c.preco;
+}
+function _balDescontoValor(){ return Math.round(_carrinho.reduce(function(s,c){ return s + (c.preco - _balPrecoCobrado(c)) * c.qtd; }, 0) * 100) / 100; }
+function _balAlternarParceria(){ _balDescParceria = !_balDescParceria; _balRenderCobranca(); }
+function _balTotal(){ return Math.round(_carrinho.reduce(function(s,c){ return s + _balPrecoCobrado(c) * c.qtd; }, 0) * 100) / 100; }
 function abrirCobrancaBalanca(){
   _balForma = ''; _balNota = false; _balDoc = ''; _balPedido = null; _balEmitindo = false;
   var ex = document.getElementById('tela-cobranca'); if(ex) ex.remove();
@@ -4011,9 +4021,15 @@ function _balRenderCobranca(msg){
   var sit = _docSituacao(_balDoc);
   var rot = !_balDoc ? 'Sem CPF/CNPJ (consumidor não identificado)' : sit === 'ok' ? (_balDoc.length === 11 ? 'CPF' : 'CNPJ') + ' válido ✓' : sit === 'invalido11' ? 'CPF inválido (se for CNPJ, continue digitando)' : /invalido/.test(sit) ? 'Número inválido — confira' : (_balDoc.length < 11 ? 'CPF: faltam ' + (11 - _balDoc.length) : 'CNPJ: faltam ' + (14 - _balDoc.length));
   var teclas = ['1','2','3','4','5','6','7','8','9','limpar','0','⌫'];
+  var temKg = _carrinho.some(function(c){ return c.tipoVenda === 'kg'; });
+  var desc = _balDescontoValor();
   box.innerHTML =
-    '<div style="text-align:center;font-size:1rem;color:var(--muted);">Passe na maquininha</div>' +
-    '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:4.2rem;color:var(--accent);line-height:1.05;margin-bottom:14px;">R$ ' + _balBrl(_balTotal()) + '</div>' +
+    '<div style="position:relative;">' +
+      (temKg ? '<button onclick="_balAlternarParceria()" title="Desconto parceria (' + _BAL_DESC_PCT + '% no prato)" style="position:absolute;top:-6px;right:-6px;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;cursor:pointer;padding:0;' + (_balDescParceria ? 'background:rgba(34,197,94,0.18);border:2px solid #22c55e;' : 'background:transparent;border:1px solid var(--border);opacity:0.5;') + '">🤝</button>' : '') +
+      '<div style="text-align:center;font-size:1rem;color:var(--muted);">Passe na maquininha</div>' +
+    '</div>' +
+    '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:4.2rem;color:var(--accent);line-height:1.05;margin-bottom:' + (desc > 0 ? '2px' : '14px') + ';">R$ ' + _balBrl(_balTotal()) + '</div>' +
+    (desc > 0 ? '<div style="text-align:center;font-size:0.9rem;color:#22c55e;font-weight:700;margin-bottom:14px;">🤝 Parceria: −' + _BAL_DESC_PCT + '% no prato (− R$ ' + _balBrl(desc) + ')</div>' : '') +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Forma de pagamento</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Nota fiscal?</div>' +
@@ -4048,13 +4064,15 @@ function _balConfirmarPago(){
   }
   var btn = document.getElementById('cob-btn-ok');
   if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Registrando…'; }
-  var agora = Date.now(), hoje = _dataHoje(), total = _balTotal();
+  var agora = Date.now(), hoje = _dataHoje(), total = _balTotal(), descParc = _balDescontoValor();
   var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId);
   var ref = base.collection('pedidos_totem').doc();
   var refSeq = base.collection('senhas_totem').doc(hoje + '_buffet');
   var itens = _carrinho.map(function(c){
-    var o = { id: c.itemId, fonte: c.fonte, nome: c.nome, preco: c.preco, precoBase: c.precoBase || c.preco, qtd: c.qtd, selecoesLabel: c.selecoesLabel || '', observacao: c.observacao || '' };
+    var pc = _balPrecoCobrado(c);
+    var o = { id: c.itemId, fonte: c.fonte, nome: c.nome, preco: pc, precoBase: c.precoBase || c.preco, qtd: c.qtd, selecoesLabel: c.selecoesLabel || '', observacao: c.observacao || '' };
     if(c.tipoVenda === 'kg'){ o.tipoVenda = 'kg'; o.peso = c.peso; }
+    if(pc !== c.preco){ o.precoSemDesconto = c.preco; o.descontoParceria = Math.round((c.preco - pc) * 100) / 100; o.selecoesLabel = (o.selecoesLabel ? o.selecoesLabel + ' · ' : '') + '🤝 Parceria -' + _BAL_DESC_PCT + '%'; }
     return o;
   });
   fbDb.runTransaction(function(tx){
@@ -4064,6 +4082,7 @@ function _balConfirmarPago(){
       var pedido = { senha: 'B' + n, data: hoje, tipo: 'buffet', origemTotemBalanca: true,
         itens: itens, total: total, status: 'pago', formaPagamento: _balForma,
         criadoEm: agora, pagoEm: agora, reciboImpresso: false, restauranteId: _restauranteId, tenantId: _tenantId };
+      if(descParc > 0){ pedido.parceria = true; pedido.descontoParceria = descParc; pedido.descontoParceriaPct = _BAL_DESC_PCT; }
       tx.set(ref, pedido);
       return pedido;
     });
@@ -4123,7 +4142,7 @@ function _balFinalizarAtendimento(){
   var ultKg = (_balPedido && (_balPedido.itens || []).filter(function(i){ return i.tipoVenda === 'kg'; }).pop()) || null;
   _balPesoDesarme = ultKg ? Number(ultKg.peso) || 0 : (_balVivo ? Number(_balVivo.peso) || 0 : 0);
   _balPrecisaZerar = true;
-  _balPedido = null; _balEmitindo = false;
+  _balPedido = null; _balEmitindo = false; _balDescParceria = false;
   var t = document.getElementById('tela-cobranca'); if(t) t.remove();
   _carrinho = [];
   voltarTelaInicial();

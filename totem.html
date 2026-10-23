@@ -573,6 +573,7 @@ input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
     <div id="ti-qr-canvas" style="display:block;"></div>
     <div style="font-size:0.56rem;color:#333;font-weight:700;letter-spacing:0.04em;text-align:center;line-height:1.2;">PEÇA PELO<br>CELULAR</div>
   </div>
+  <div id="ti-esperas" onclick="event.stopPropagation();_balListaEsperas();" style="display:none;position:absolute;top:18px;right:18px;background:rgba(212,168,67,0.15);border:1.5px solid var(--accent);color:var(--accent);border-radius:99px;padding:9px 16px;font-weight:800;font-size:1rem;cursor:pointer;"></div>
   <div id="ti-diag" style="position:absolute;bottom:36px;left:0;right:0;text-align:center;font-size:0.68rem;color:rgba(255,255,255,0.35);font-family:monospace;line-height:1.6;"></div>
   <div id="ti-versao" style="position:absolute;bottom:14px;right:18px;font-size:0.7rem;color:rgba(255,255,255,0.25);">v.—</div>
 </div>
@@ -3727,6 +3728,7 @@ function _balAplicarTelaInicial(){
   if(_modoBalanca && !_modoQR){ b.textContent = 'COLOQUE O PRATO NA BALANÇA'; if(ins) ins.textContent = 'e toque para pesar ⚖️'; }
   else { b.textContent = b.getAttribute('data-orig'); if(ins) ins.textContent = ins.getAttribute('data-orig') || ''; }
   var bp = document.getElementById('cart-btn-pesar'); if(bp) bp.style.display = (_modoBalanca && !_modoQR) ? 'block' : 'none';
+  try{ _balAtualizarEtiquetaEspera(); }catch(e){}
   var bf = document.getElementById('cart-btn-finalizar'); if(bf) bf.textContent = (_modoBalanca && !_modoQR) ? '💳 Cobrar →' : 'Finalizar Pedido →';
 }
 document.addEventListener('DOMContentLoaded', _balAplicarTelaInicial);
@@ -4158,12 +4160,106 @@ function _balRenderCobranca(msg){
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">' + teclas.map(function(k){
         return '<button onclick="_balTecla(\'' + k + '\')" style="padding:16px 0;border-radius:12px;border:1px solid var(--border);background:' + (k.length > 1 ? 'var(--surface)' : 'var(--surface2)') + ';color:' + (k === '⌫' ? '#f87171' : 'var(--text)') + ';font-size:' + (k.length > 1 && k !== '⌫' ? '0.9rem' : '1.4rem') + ';font-weight:800;cursor:pointer;font-family:inherit;">' + k + '</button>';
       }).join('') + '</div>' : '') +
+    _balHtmlJuntar() +
     '<div id="cob-msg" style="min-height:1em;margin-bottom:8px;">' + (msg || '') + '</div>' +
+    '<button onclick="_balDeixarEmEspera()" style="width:100%;margin-bottom:10px;padding:15px;background:var(--surface2);border:1.5px dashed var(--border);color:var(--text);border-radius:14px;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">⏸️ Deixar em espera (vai pagar junto com outra pessoa)</button>' +
     '<div style="display:flex;gap:10px;">' +
       '<button onclick="var t=document.getElementById(\'tela-cobranca\');if(t)t.remove();abrirCarrinho();" style="flex:1;padding:18px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;">Voltar</button>' +
       '<button id="cob-btn-ok" onclick="_balConfirmarPago()" style="flex:2;padding:18px;background:#16a34a;border:none;color:#fff;border-radius:14px;font-weight:800;font-size:1.2rem;cursor:pointer;font-family:inherit;">✓ Pago</button>' +
     '</div>';
   resetTimerInatividade();
+}
+// ═══ ⏸️ CONTA EM ESPERA (buffet) ═══
+// Pessoa 1 pesa e escolhe a bebida mas vai pagar junto com alguém que ainda está se
+// servindo: "Deixar em espera" guarda a conta (A, B, C…) e libera o totem pro próximo.
+// Quando o acompanhante chega na cobrança: "➕ Juntar com A" e paga tudo de uma vez.
+// Fica só neste totem (guardado no aparelho — sobrevive a atualização/recarregar).
+var _BAL_ESPERA_KEY = 'totem_buffet_esperas_' + _restauranteId;
+function _balEsperas(){ try{ return JSON.parse(localStorage.getItem(_BAL_ESPERA_KEY) || '[]'); }catch(e){ return []; } }
+function _balGravarEsperas(l){ try{ localStorage.setItem(_BAL_ESPERA_KEY, JSON.stringify(l)); }catch(e){} _balAtualizarEtiquetaEspera(); }
+function _balTotalItens(itens){ return Math.round(itens.reduce(function(s,c){ return s + c.preco * c.qtd; }, 0) * 100) / 100; }
+function _balResumoItens(itens){
+  return itens.map(function(c){ return c.tipoVenda === 'kg' ? '⚖️ ' + _balKg(c.peso) + ' kg' : (c.qtd > 1 ? c.qtd + 'x ' : '') + c.nome; }).join(' + ');
+}
+function _balProximaLetra(l){
+  var usadas = {}; l.forEach(function(e){ usadas[e.letra] = 1; });
+  for(var i = 0; i < 26; i++){ var c = String.fromCharCode(65 + i); if(!usadas[c]) return c; }
+  return String(l.length + 1);
+}
+function _balDeixarEmEspera(){
+  if(!_carrinho.length) return;
+  var l = _balEsperas(), letra = _balProximaLetra(l);
+  l.push({ letra: letra, itens: JSON.parse(JSON.stringify(_carrinho)), criadoEm: Date.now() });
+  _balGravarEsperas(l);
+  _carrinho = [];
+  var t = document.getElementById('tela-cobranca'); if(t) t.remove();
+  try{ atualizarBarra(); renderItens(); }catch(e){}
+  voltarTelaInicial();
+  mostrarAvisoTotem('⏸️ Conta ' + letra + ' em espera');
+  var a = document.getElementById('aviso-totem'); if(a){ a.style.background = '#16a34a'; a.textContent = '⏸️ Conta ' + letra + ' em espera'; }
+}
+function _balHtmlJuntar(){
+  var l = _balEsperas(); if(!l.length) return '';
+  return '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Pagar junto com</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">' + l.map(function(e, i){
+      return '<button onclick="_balJuntarEspera(' + i + ')" style="display:flex;align-items:center;gap:12px;text-align:left;padding:14px;border-radius:14px;border:2px solid var(--accent);background:rgba(212,168,67,0.08);color:var(--text);cursor:pointer;font-family:inherit;">' +
+        '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;color:var(--accent);min-width:28px;">' + e.letra + '</span>' +
+        '<span style="flex:1;min-width:0;font-size:0.9rem;">➕ Juntar com a conta ' + e.letra + '<br><span style="color:var(--muted);font-size:0.8rem;">' + escapar(_balResumoItens(e.itens)) + '</span></span>' +
+        '<span style="font-weight:800;color:var(--accent);">R$ ' + _balBrl(_balTotalItens(e.itens)) + '</span>' +
+      '</button>';
+    }).join('') + '</div>';
+}
+function _balJuntarEspera(i){
+  var l = _balEsperas(), e = l[i]; if(!e) return;
+  l.splice(i, 1); _balGravarEsperas(l);
+  _carrinho = e.itens.concat(_carrinho);
+  try{ atualizarBarra(); renderItens(); }catch(x){}
+  _balRenderCobranca('<div style="color:#4ade80;font-size:0.92rem;text-align:center;">✓ Conta ' + e.letra + ' junto — passe o total na maquininha</div>');
+}
+function _balAtualizarEtiquetaEspera(){
+  var el = document.getElementById('ti-esperas'); if(!el) return;
+  var n = _balEsperas().length;
+  el.style.display = (n && _modoBalanca && !_modoQR) ? 'block' : 'none';
+  el.textContent = '⏸️ ' + n + ' em espera';
+}
+setTimeout(_balAtualizarEtiquetaEspera, 1500);
+// Tocou na etiqueta da tela inicial: ver as contas em espera (pagar sozinha / excluir)
+function _balListaEsperas(){
+  var l = _balEsperas(); if(!l.length){ _balAtualizarEtiquetaEspera(); return; }
+  var ex = document.getElementById('tela-esperas'); if(ex) ex.remove();
+  var t = document.createElement('div'); t.id = 'tela-esperas';
+  t.style.cssText = 'position:fixed;inset:0;z-index:470;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:16px;';
+  t.onclick = function(ev){ if(ev.target === t) t.remove(); };
+  t.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:20px;max-width:560px;width:100%;padding:22px;">' +
+    '<div style="font-size:1.2rem;font-weight:900;margin-bottom:14px;">⏸️ Contas em espera</div>' +
+    l.map(function(e, i){
+      var min = Math.floor((Date.now() - e.criadoEm) / 60000);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">' +
+        '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:2.2rem;color:var(--accent);min-width:30px;">' + e.letra + '</span>' +
+        '<div style="flex:1;min-width:0;"><div style="font-weight:800;">R$ ' + _balBrl(_balTotalItens(e.itens)) + '</div><div style="font-size:0.8rem;color:var(--muted);">' + escapar(_balResumoItens(e.itens)) + ' · há ' + min + ' min</div></div>' +
+        '<button onclick="_balPagarEspera(' + i + ')" style="padding:12px 14px;border-radius:12px;border:none;background:#16a34a;color:#fff;font-weight:800;cursor:pointer;font-family:inherit;">💳 Pagar</button>' +
+        '<button onclick="_balExcluirEspera(' + i + ')" style="padding:12px;border-radius:12px;border:1px solid var(--border);background:none;color:#f87171;cursor:pointer;font-size:1rem;">🗑</button>' +
+      '</div>';
+    }).join('') +
+    '<button onclick="document.getElementById(\'tela-esperas\').remove()" style="width:100%;margin-top:14px;padding:15px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;font-family:inherit;">Fechar</button>' +
+  '</div>';
+  document.body.appendChild(t);
+}
+function _balPagarEspera(i){
+  var l = _balEsperas(), e = l[i]; if(!e) return;
+  l.splice(i, 1); _balGravarEsperas(l);
+  var te = document.getElementById('tela-esperas'); if(te) te.remove();
+  comecarPedido(); _balFecharTela();
+  _carrinho = e.itens;
+  try{ atualizarBarra(); renderItens(); }catch(x){}
+  abrirCobrancaBalanca();
+}
+function _balExcluirEspera(i){
+  var l = _balEsperas(), e = l[i]; if(!e) return;
+  if(!confirm('Excluir a conta ' + e.letra + ' (R$ ' + _balBrl(_balTotalItens(e.itens)) + ')? Ela não foi paga.')) return;
+  l.splice(i, 1); _balGravarEsperas(l);
+  var te = document.getElementById('tela-esperas'); if(te) te.remove();
+  if(l.length) _balListaEsperas();
 }
 function _balTecla(k){
   if(k === '⌫') _balDoc = _balDoc.slice(0, -1);

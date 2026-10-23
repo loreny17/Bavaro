@@ -3425,6 +3425,50 @@ function abrirMenuAdmin(){
   setTimeout(function(){ var b = document.getElementById('menu-admin-totem'); if(b) b.remove(); }, 15000);
 }
 
+// ═══ 👀 CARDÁPIO AO VIVO ═══
+// O totem fica "escutando" o cardápio (pausar/despausar, preço, item novo...).
+// Quando muda, ele NÃO atualiza no meio do pedido: espera o cliente terminar
+// (tela inicial, carrinho vazio, sem pesagem/cobrança aberta) e aí atualiza.
+var _cardapioMudou = false, _vigiaCardapioLigado = false;
+function _vigiarCardapio(){
+  if(_vigiaCardapioLigado) return;
+  if(!window.fbDb || !_tenantId || !_restauranteId){ setTimeout(_vigiarCardapio, 3000); return; }
+  _vigiaCardapioLigado = true;
+  var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId);
+  var alvos = [
+    base.collection('cardapio_totem').doc('data').collection('itens'),
+    base.collection('cardapio_totem').doc('data').collection('categorias'),
+    base.collection('cardapio_totem').doc('data').collection('grupos_opcoes'),
+    base.collection('cardapio').doc('data').collection('itens'),
+    base.collection('cardapio').doc('data').collection('categorias'),
+    base.collection('cardapio').doc('data').collection('grupos_opcoes'),
+    base.collection('cardapio_totem').doc('config')
+  ];
+  alvos.forEach(function(ref){
+    var primeiro = true;
+    ref.onSnapshot(function(snap){
+      if(primeiro){ primeiro = false; return; }          // 1ª resposta = o que já está na tela
+      if(snap.metadata && snap.metadata.hasPendingWrites) return;
+      _cardapioMudou = true;
+      dbg && dbg('[CARDAPIO] mudou no PDV — atualiza quando o cliente terminar');
+    }, function(e){ console.warn('[CARDAPIO ao vivo]', e.code || e.message); });
+  });
+}
+setTimeout(_vigiarCardapio, 8000);
+function _totemLivreParaAtualizar(){
+  try{
+    var ti = document.getElementById('tela-inicial');
+    var naInicial = ti && ti.style.display !== 'none' && !ti.classList.contains('escondida');
+    return naInicial && !(window._carrinho && window._carrinho.length) && !_itemPendente &&
+      !document.getElementById('tela-cobranca') && !document.getElementById('tela-balanca') &&
+      !document.getElementById('wizard-overlay') && !document.getElementById('tela-adicionais') &&
+      !document.getElementById('modal-config').classList.contains('aberto');
+  }catch(e){ return false; }
+}
+setInterval(function(){
+  if(_cardapioMudou && _totemLivreParaAtualizar()){ _cardapioMudou = false; atualizarTotem(); }
+}, 3000);
+
 // Limpa o cache do cardápio e recarrega a página — pra puxar alterações
 // recém-feitas no PDV sem precisar fechar/abrir o app.
 function atualizarTotem(){

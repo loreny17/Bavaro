@@ -551,12 +551,57 @@ function renderDetalhe(p){
         '<span class="total-lbl">Total a receber</span>' +
         '<span class="total-val">R$ ' + totalTxt + '</span>' +
       '</div>' +
+      _htmlBtnCortesia(p) +
       '<div class="btns-rodape">' +
         '<button class="btn-cancelar" onclick="cancelarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">Cancelar</button>' +
         '<button class="btn-editar" onclick="abrirEdicaoPedido(\'' + p.id + '\')">✏️ Editar</button>' +
         '<button class="btn-liberar" id="btn-liberar" onclick="liberarPedido(\'' + p.id + '\',' + (p.senha||0) + ')">✓ Pago — Liberar pra cozinha</button>' +
       '</div>' +
     '</div>';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  🎓 SUCO CORTESIA (estudante) — um toque no caixa, depois de ver a carteirinha.
+//  Usa o item do cardápio que tem "cortesia" no nome (ex.: "Suco Cortesia"),
+//  pra sair na impressora certa. Entra a R$ 0,00 (fica fora da nota fiscal).
+// ════════════════════════════════════════════════════════════════
+function _ehCortesia(it){ return !!(it && it.cortesia === true); }
+function _htmlBtnCortesia(p){
+  var tem = (p.itens||[]).some(_ehCortesia);
+  return '<button onclick="alternarCortesia(\'' + p.id + '\')" style="width:100%;margin-bottom:10px;padding:15px;border-radius:12px;font-family:inherit;font-weight:800;font-size:1rem;cursor:pointer;' +
+    (tem ? 'background:rgba(34,197,94,0.12);border:2px solid #22c55e;color:#22c55e;">✓ Suco cortesia (estudante) adicionado <span style="font-weight:600;font-size:0.82rem;opacity:0.8;">· tocar pra tirar</span>'
+         : 'background:rgba(212,168,67,0.12);border:2px dashed var(--accent);color:var(--accent);">🎓 Estudante · + Suco cortesia') +
+  '</button>';
+}
+function _norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function alternarCortesia(pedidoId){
+  var p = _pedidos.find(function(x){ return x.id === pedidoId; });
+  if(!p) return;
+  var itens = JSON.parse(JSON.stringify(p.itens || []));
+  var ref = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId).collection('pedidos_totem').doc(pedidoId);
+  // já tem → tira
+  if(itens.some(_ehCortesia)){
+    itens = itens.filter(function(it){ return !_ehCortesia(it); });
+    ref.update({ itens: itens, cortesiaEstudante: false, editadoEm: Date.now() })
+      .then(function(){ mostrarToast('Suco cortesia retirado', '#f7a34f'); })
+      .catch(function(e){ mostrarToast('Erro: ' + (e.message||e.code), '#f87171'); });
+    return;
+  }
+  carregarCardapioParaEdicao().then(function(){
+    var todos = (_cardapioTotem.itens||[]).concat(_cardapioPrincipal.itens||[]);
+    var achados = todos.filter(function(it){ return _norm(it.nome).indexOf('cortesia') >= 0; });
+    if(!achados.length){
+      alert('Não achei o item do suco cortesia no cardápio.\n\nNo PDV, cadastre UMA vez um item chamado "Suco Cortesia" (na categoria dos sucos, pra sair na impressora certa). O preço pode ser qualquer um — aqui ele entra sempre a R$ 0,00.');
+      return;
+    }
+    var it = achados.find(function(x){ return x.fonte === 'totem'; }) || achados[0];
+    itens.push({
+      id: it.id, fonte: it.fonte, nome: it.nome, preco: 0, precoBase: 0, qtd: 1,
+      foto: it.foto || '', selecoes: {}, selecoesLabel: '🎓 Estudante', gruposIds: [], cortesia: true
+    });
+    return ref.update({ itens: itens, cortesiaEstudante: true, editadoEm: Date.now() })
+      .then(function(){ mostrarToast('🎓 Suco cortesia adicionado', '#22c55e'); });
+  }).catch(function(e){ mostrarToast('Erro: ' + (e.message||e.code), '#f87171'); });
 }
 
 function renderDetalheVazio(){

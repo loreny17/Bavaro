@@ -3886,6 +3886,7 @@ function abrirTelaBalanca(outroPrato){
   t.innerHTML =
     '<div style="font-size:1.2rem;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:10px;">⚖️' +
       '<button id="bal-btn-atualizar" onclick="_balAtualizarManual()" title="Ler a balança de novo" style="background:var(--surface2);border:1.5px solid var(--accent);color:var(--accent);border-radius:10px;padding:6px 12px;font-size:1rem;font-weight:800;cursor:pointer;font-family:inherit;">🔄 Atualizar</button>' +
+      '<button onclick="_balAbrirDigitar(\'peso\')" title="Digitar o peso ou o valor (se a balança falhar)" style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:10px;padding:6px 12px;font-size:1rem;font-weight:800;cursor:pointer;font-family:inherit;">⌨️ Digitar</button>' +
       '<span>' + escapar(it.nome) + ' — R$ ' + _balBrl(it.preco) + '/kg</span></div>' +
     '<div id="bal-status" style="font-size:1.05rem;color:#38bdf8;margin-bottom:22px;min-height:1.4em;">Coloque o prato na balança</div>' +
     '<div id="bal-peso" style="font-family:\'Bebas Neue\',sans-serif;font-size:8rem;line-height:1;color:var(--text);letter-spacing:0.03em;">0,000 <span style="font-size:3rem;color:var(--muted);">kg</span></div>' +
@@ -3899,6 +3900,7 @@ function abrirTelaBalanca(outroPrato){
   var meu = ++_balLoopId;
   _balPrecisaZerar = true;
   _balManual = null;
+  _balDig = null; _balValorDigitado = 0; _balPesoDigitado = false;
   var ciclo = function(){
     if(meu !== _balLoopId || !document.getElementById('tela-balanca')) return;
     // peso lido no botão 🔄: segura ele até a leitura ao vivo trazer um peso NOVO
@@ -4016,15 +4018,87 @@ function _balCancelar(){
   _balFecharTela();
   if(!_carrinho.length) voltarTelaInicial();
 }
+// ═══ ⌨️ PESO/VALOR DIGITADO (balança com problema na correria) ═══
+// No botão "⌨️ Digitar" ou direto no teclado do computador: números → peso em gramas
+// (450 = 0,450 kg) ou valor (2545 = R$ 25,45). Enter confirma, Esc volta pra balança.
+var _balDig = null, _balValorDigitado = 0, _balPesoDigitado = false;
+function _balAbrirDigitar(modo){
+  if(!document.getElementById('tela-balanca')) return;
+  _balLoopId++;                       // para a leitura da balança enquanto digita
+  _balDig = { modo: modo || (_balDig && _balDig.modo) || 'peso', d: (_balDig && _balDig.d) || '' };
+  _balRenderDigitar();
+}
+function _balDigGramas(){
+  var it = _balItem(); if(!_balDig || !_balDig.d) return 0;
+  var n = parseInt(_balDig.d, 10) || 0;
+  if(_balDig.modo === 'peso') return n;
+  return it && it.preco ? Math.round((n / 100) / it.preco * 1000) : 0;
+}
+function _balDigValor(){
+  var it = _balItem(); if(!_balDig || !_balDig.d) return 0;
+  var n = parseInt(_balDig.d, 10) || 0;
+  return _balDig.modo === 'valor' ? n / 100 : Math.round(n * ((it && it.preco) || 0) / 10) / 100;
+}
+function _balRenderDigitar(){
+  var t = document.getElementById('tela-balanca'); if(!t || !_balDig) return;
+  var box = document.getElementById('bal-dig');
+  if(!box){ box = document.createElement('div'); box.id = 'bal-dig'; box.style.cssText = 'position:absolute;inset:0;z-index:5;background:linear-gradient(135deg,#0a0a0c 0%,#10161a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;'; t.appendChild(box); }
+  var n = parseInt(_balDig.d || '0', 10) || 0;
+  var mostra = _balDig.modo === 'peso' ? _balKg(n) + ' <span style="font-size:2.2rem;color:var(--muted);">kg</span>' : '<span style="font-size:2.2rem;color:var(--muted);">R$</span> ' + _balBrl(n / 100);
+  var outro = _balDig.modo === 'peso' ? 'R$ ' + _balBrl(_balDigValor()) : _balKg(_balDigGramas()) + ' kg';
+  function seg(m, rot){ var on = _balDig.modo === m; return '<button onclick="_balDig.modo=\'' + m + '\';_balDig.d=\'\';_balRenderDigitar()" style="flex:1;padding:14px;border-radius:12px;font-family:inherit;font-weight:800;font-size:1.05rem;cursor:pointer;border:2px solid ' + (on ? 'var(--accent)' : 'var(--border)') + ';background:' + (on ? 'rgba(212,168,67,0.15)' : 'var(--surface2)') + ';color:' + (on ? 'var(--accent)' : 'var(--text)') + ';">' + rot + '</button>'; }
+  var teclas = ['1','2','3','4','5','6','7','8','9','limpar','0','⌫'];
+  box.innerHTML =
+    '<div style="width:100%;max-width:520px;">' +
+      '<div style="text-align:center;font-size:1.05rem;color:#f59e0b;font-weight:800;margin-bottom:12px;">⌨️ Digitar ' + (_balDig.modo === 'peso' ? 'o peso (em gramas)' : 'o valor') + '</div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:14px;">' + seg('peso', '⚖️ Peso') + seg('valor', '💰 Valor') + '</div>' +
+      '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:5.5rem;line-height:1;color:var(--text);">' + mostra + '</div>' +
+      '<div style="text-align:center;font-size:1.3rem;color:var(--accent);font-weight:800;margin:6px 0 16px;">' + (n ? '= ' + outro : (_balDig.modo === 'peso' ? 'ex.: 450 = 0,450 kg' : 'ex.: 2545 = R$ 25,45')) + '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">' + teclas.map(function(k){
+        return '<button onclick="_balDigTecla(\'' + k + '\')" style="padding:18px 0;border-radius:14px;border:1px solid var(--border);background:' + (k.length > 1 ? 'var(--surface)' : 'var(--surface2)') + ';color:' + (k === '⌫' ? '#f87171' : 'var(--text)') + ';font-size:' + (k === 'limpar' ? '1rem' : '1.7rem') + ';font-weight:800;cursor:pointer;font-family:inherit;">' + k + '</button>';
+      }).join('') + '</div>' +
+      '<div style="display:flex;gap:12px;">' +
+        '<button onclick="_balFecharDigitar()" style="flex:1;padding:20px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:16px;font-weight:700;font-size:1.1rem;cursor:pointer;font-family:inherit;">⚖️ Voltar pra balança</button>' +
+        '<button onclick="_balUsarDigitado()" ' + (n ? '' : 'disabled ') + 'style="flex:1.4;padding:20px;background:var(--accent);border:none;color:#000;border-radius:16px;font-weight:800;font-size:1.25rem;cursor:pointer;font-family:inherit;' + (n ? '' : 'opacity:0.35;') + '">Próximo →</button>' +
+      '</div>' +
+    '</div>';
+  resetTimerInatividade();
+}
+function _balDigTecla(k){
+  if(!_balDig) return;
+  if(k === '⌫') _balDig.d = _balDig.d.slice(0, -1);
+  else if(k === 'limpar') _balDig.d = '';
+  else if(/^\d$/.test(k)){ var max = _balDig.modo === 'peso' ? 5 : 6; if(_balDig.d.length < max && !(k === '0' && !_balDig.d)) _balDig.d += k; }
+  _balRenderDigitar();
+}
+function _balFecharDigitar(){ _balDig = null; abrirTelaBalanca(); }
+function _balUsarDigitado(){
+  var g = _balDigGramas(), v = _balDigValor();
+  if(!g || !v){ return; }
+  if(g > 5000 && !confirm('Peso de ' + _balKg(g) + ' kg — está certo?')) return;
+  _balEstavel = g; _balPesoDigitado = true; _balValorDigitado = _balDig.modo === 'valor' ? v : 0;
+  _balDig = null;
+  _balProximo();
+}
+// teclado do computador: com a pesagem aberta, números já entram no "Digitar"
+document.addEventListener('keydown', function(e){
+  if(!document.getElementById('tela-balanca')) return;
+  var alvo = e.target && e.target.tagName; if(alvo === 'INPUT' || alvo === 'TEXTAREA') return;
+  if(/^\d$/.test(e.key)){ if(!_balDig) _balAbrirDigitar('peso'); _balDigTecla(e.key); e.preventDefault(); }
+  else if(_balDig && e.key === 'Backspace'){ _balDigTecla('⌫'); e.preventDefault(); }
+  else if(_balDig && e.key === 'Enter'){ _balUsarDigitado(); e.preventDefault(); }
+  else if(_balDig && e.key === 'Escape'){ _balFecharDigitar(); e.preventDefault(); }
+  else if(_balDig && (e.key === 'v' || e.key === 'V' || e.key === 'p' || e.key === 'P')){ _balDig.modo = (e.key.toLowerCase() === 'v') ? 'valor' : 'peso'; _balDig.d = ''; _balRenderDigitar(); }
+});
 function _balProximo(){
   var it = _balItem(), g = _balEstavel;
   if(!it || !g) return;
   _balFecharTela();
-  var valor = Math.round(g * (it.preco||0) / 10) / 100;
+  var valor = _balValorDigitado || Math.round(g * (it.preco||0) / 10) / 100;
   _itemPendente = {
     itemId: it.id, fonte: 'principal', nome: it.nome,
     preco: valor, precoBase: it.preco || 0, foto: it.foto || '', qtd: 1,
-    selecoes: {}, selecoesLabel: _balKg(g) + ' kg × R$ ' + _balBrl(it.preco) + '/kg',
+    selecoes: {}, selecoesLabel: _balKg(g) + ' kg × R$ ' + _balBrl(it.preco) + '/kg' + (_balPesoDigitado ? ' · ' + (_balValorDigitado ? 'valor' : 'peso') + ' digitado' : ''),
     observacao: '', gruposIds: [], tipoVenda: 'kg', peso: g
   };
   try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}

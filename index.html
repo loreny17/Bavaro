@@ -1507,6 +1507,10 @@ body.admin-mode .admin-only{display:flex!important;}
     </div>
     <div class="sec-col-body">
       <div class="form-group"><textarea id="f-obs" placeholder="Escreva qualquer observação..." oninput="atualizarBadgeObs()"></textarea></div>
+      <div class="form-group">
+        <label>📤 Observação pra contabilidade <span style="font-weight:400;color:var(--muted);">(sai nos relatórios)</span></label>
+        <textarea id="f-obs-contab" placeholder="Ex.: do dia 01 ao 14 trabalhou das 10h às 18h; a partir do dia 15 passou pro horário das 14h às 22h." oninput="atualizarBadgeObs()"></textarea>
+      </div>
     </div>
   </div>
 
@@ -2350,6 +2354,7 @@ function salvarFuncionario(){
     pendencias:{itau:document.getElementById('p-itau').checked,vt:document.getElementById('p-vt').checked},
     arquivos:currentFiles.slice(),
     obs:document.getElementById('f-obs').value.trim(),
+    obsContab:(document.getElementById('f-obs-contab')||{value:''}).value.trim(),
     criadoEm:new Date().toISOString()
   };
   if(editingId){
@@ -2364,7 +2369,7 @@ function salvarFuncionario(){
   }).catch(function(){showToast('❌ Erro ao salvar','#f75a5a');});
 }
 function limparForm(){
-  ['f-nome','f-cargo','f-cpf','f-nascimento','f-tel','f-agencia','f-conta','f-cartao-num','f-obs'].forEach(function(id){document.getElementById(id).value='';});  
+  ['f-nome','f-cargo','f-cpf','f-nascimento','f-tel','f-agencia','f-conta','f-cartao-num','f-obs','f-obs-contab'].forEach(function(id){document.getElementById(id).value='';});  
   document.getElementById('f-admissao').value='';
   document.getElementById('f-cartao-tipo').value='';
   document.getElementById('p-itau').checked=false;document.getElementById('p-vt').checked=false;
@@ -3320,6 +3325,7 @@ function editarFuncionario(id){
   document.getElementById('p-itau').checked=f.pendencias.itau;
   document.getElementById('p-vt').checked=f.pendencias.vt;
   document.getElementById('f-obs').value=f.obs||'';
+  if(document.getElementById('f-obs-contab')) document.getElementById('f-obs-contab').value=f.obsContab||'';
   currentFiles=(f.arquivos||[]).slice();renderFilePreviews();editingId=id;abrirCadastro();
   // Atualizar hints e badges para os dados carregados
   atualizarIdade();atualizarTempoCasa();atualizarBotaoWA();
@@ -6542,11 +6548,51 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
     {header:'DATAS', width:110, align:'left'}
   ], linhasFer, _COR.amarelo);
 
+  // ─── SEÇÃO 4: ADMISSÕES DO MÊS E OBSERVAÇÕES ───
+  var mesK = String(k||'').slice(0,7);
+  var comInfo = funcionarios.filter(function(f){
+    return String(f.obsContab||'').trim() || (f.admissao && String(f.admissao).slice(0,7) === mesK);
+  }).sort(function(a,b){ return (a.nome||'').localeCompare(b.nome||''); });
+  if(comInfo.length){
+    if(y + 20 > 277){ doc.addPage(); _jspdfPintarFundo(doc,_COR.bgEscuro); y = 15; }
+    y = _jspdfSectionTitle(doc, y+4, 'Admissoes e Observacoes', _COR.textoClaro);
+    comInfo.forEach(function(f){ y = _jspdfInfoFunc(doc, y, f, true); });
+  }
+
   _jspdfFooter(doc,'Gerado em '+hoje+' - Gestao Bavaro');
   return doc;
 }
 
 // ═══ Gera PDF individual ═══
+// Cartão "Admissão / Observação" (só aparece o que estiver preenchido)
+function _jspdfInfoFunc(doc, y, f, comNome){
+  var adm = f.admissao ? fmtDataBR(f.admissao) : '';
+  var obs = String(f.obsContab||'').trim();
+  var loja = (typeof _temVariasLojas==='function' && _temVariasLojas()) ? _lojaDe(f) : '';
+  if(!adm && !obs && !loja) return y;
+  doc.setFontSize(10);
+  var linhasObs = obs ? doc.splitTextToSize(obs, 172) : [];
+  var h = 6 + (comNome ? 7 : 0) + (adm||loja ? 7 : 0) + (obs ? 6 + linhasObs.length*5 : 0) + 2;
+  if(y + h > 277){ doc.addPage(); _jspdfPintarFundo(doc,_COR.bgEscuro); y = 15; }
+  doc.setFillColor(_COR.bgCard[0],_COR.bgCard[1],_COR.bgCard[2]);
+  doc.rect(12,y,186,h,'F');
+  var yy = y + 7;
+  if(comNome){ doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]); doc.text(String(f.nome||''), 16, yy); doc.setFontSize(10); yy += 7; }
+  if(adm || loja){
+    doc.setFont('helvetica','bold'); doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]);
+    var x = 16;
+    if(adm){ doc.text('ADMISSAO:', x, yy); doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]); doc.text(adm, x+23, yy); x += 60; }
+    if(loja){ doc.setTextColor(_COR.textoMudo[0],_COR.textoMudo[1],_COR.textoMudo[2]); doc.text('LOJA:', x, yy); doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]); doc.text(String(loja), x+13, yy); }
+    yy += 7;
+  }
+  if(obs){
+    doc.setFont('helvetica','bold'); doc.setTextColor(_COR.amareloClaro[0],_COR.amareloClaro[1],_COR.amareloClaro[2]);
+    doc.text('OBSERVACAO:', 16, yy); yy += 6;
+    doc.setFont('helvetica','normal'); doc.setTextColor(_COR.textoClaro[0],_COR.textoClaro[1],_COR.textoClaro[2]);
+    linhasObs.forEach(function(l){ doc.text(l, 16, yy); yy += 5; });
+  }
+  return y + h + 3;
+}
 function _jspdfRelatorioIndividual(f, k, mesNome, hoje){
   var doc = _jspdfNovoDoc();
   var d=vfData[k]&&vfData[k][f.id];
@@ -6560,6 +6606,7 @@ function _jspdfRelatorioIndividual(f, k, mesNome, hoje){
   _jspdfHeader(doc,f.nome,(f.cargo||'Sem cargo'),mesNome,_COR.verde,_COR.bgHeader);
 
   var y = 46;
+  y = _jspdfInfoFunc(doc, y, f);
   // Totais compactos no topo
   y = _jspdfMiniTotais(doc, y, [
     {label:'VALES',  valor:'R$ '+totV.toFixed(2).replace('.',','), cor:_COR.verde},

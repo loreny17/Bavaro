@@ -1456,8 +1456,9 @@ body.admin-mode .admin-only{display:flex!important;}
           <input type="text" id="f-cartao-num" placeholder="Número do cartão" style="flex:1">
           <select id="f-cartao-tipo" style="width:140px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:10px 8px;outline:none;font-size:0.85rem">
             <option value="">Tipo</option>
-            <option value="Urbs">Urbs</option>
+            <option value="Opus">Opus</option>
             <option value="Metrocard">Metrocard</option>
+            <option value="Urbs">Urbs</option>
           </select>
         </div>
       </div>
@@ -1574,6 +1575,8 @@ body.admin-mode .admin-only{display:flex!important;}
 
 <!-- TAB VT & TAXAS -->
 <div class="tab-content" id="tab-cvt">
+
+  <button onclick="abrirVTContab()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px;background:#25d366;color:#fff;border:none;border-radius:12px;padding:13px;font-weight:700;font-size:0.92rem;cursor:pointer;font-family:'Space Grotesk',sans-serif;">📤 Enviar VT pra contabilidade</button>
 
   <!-- GRUPO VT -->
   <div class="cvt-grupo cvt-grupo-vt">
@@ -6917,6 +6920,134 @@ function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&qu
 function iniciais(nome,fb){var n=(nome||'').trim();if(!n)return fb||'??';return n.split(' ').slice(0,2).map(function(p){return p[0];}).join('').toUpperCase();}
 
 function renderCVT(){renderVTLista();renderTaxaLista();}
+
+// ═══ 📤 VALE TRANSPORTE → CONTABILIDADE ═══
+// Lista com nome, nº do cartão e tipo (Opus / Metrocard) de quem vai receber VT.
+// Cada funcionário pode ser ligado/desligado da lista, e dá pra incluir alguém à mão.
+// Fica salvo junto do VT (configuracoes/cvtData → contabVT), igual em todos os aparelhos.
+function _vtcCfg(){
+  if(!cvtData.contabVT || typeof cvtData.contabVT!=='object') cvtData.contabVT={};
+  var c=cvtData.contabVT;
+  if(!c.sel || typeof c.sel!=='object') c.sel={};
+  if(!Array.isArray(c.manuais)) c.manuais=[];
+  return c;
+}
+// padrão: entra quem tem número de cartão na ficha
+function _vtcIncluido(f){ var c=_vtcCfg(); var v=c.sel[f.id]; return v===undefined ? !!(f.cartaoNum&&String(f.cartaoNum).trim()) : v===true; }
+function _vtcLinhas(){
+  var c=_vtcCfg(), l=[];
+  funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');}).forEach(function(f){
+    if(_vtcIncluido(f)) l.push({nome:f.nome||'', cartao:String(f.cartaoNum||'').trim(), tipo:f.cartaoTipo||''});
+  });
+  c.manuais.forEach(function(m){ if(m.ativo!==false) l.push({nome:m.nome||'', cartao:m.cartao||'', tipo:m.tipo||'', manual:true}); });
+  return l;
+}
+function abrirVTContab(){
+  var ex=document.getElementById('vtc-overlay'); if(ex) ex.remove();
+  var ov=document.createElement('div');
+  ov.id='vtc-overlay'; ov.className='modal-overlay';
+  ov.onclick=function(e){ if(e.target===ov) fecharVTContab(); };
+  ov.innerHTML='<div class="modal-sheet" style="padding:0 16px 18px;">'
+    +'<div class="modal-handle"></div>'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="flex:1;font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.06em;color:var(--accent);">📤 VT pra contabilidade</div>'
+    +'<button onclick="fecharVTContab()" style="background:var(--surface3,#333);border:none;color:var(--text);width:34px;height:34px;border-radius:50%;font-size:1.2rem;cursor:pointer;">×</button></div>'
+    +'<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px;line-height:1.4;">Ligue quem vai na lista. O número e o tipo do cartão vêm da ficha do funcionário.</div>'
+    +'<div id="vtc-lista"></div>'
+    +'<div style="font-size:0.72rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 6px;">➕ Adicionar manualmente</div>'
+    +'<input id="vtc-nome" class="cvt-add-input" placeholder="Nome" style="width:100%;box-sizing:border-box;margin-bottom:6px;">'
+    +'<div style="display:flex;gap:6px;">'
+      +'<input id="vtc-cartao" class="cvt-add-input" inputmode="numeric" placeholder="Nº do cartão" style="flex:1;min-width:0;">'
+      +'<select id="vtc-tipo" style="flex:0 0 120px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;color:var(--text);padding:10px 8px;font-size:0.85rem;"><option value="Opus">Opus</option><option value="Metrocard">Metrocard</option><option value="Urbs">Urbs</option></select>'
+      +'<button class="cvt-add-btn" onclick="vtcAddManual()">Adicionar</button>'
+    +'</div>'
+    +'<div id="vtc-resumo" style="font-size:0.8rem;color:var(--muted);margin:16px 0 8px;text-align:center;"></div>'
+    +'<button onclick="enviarVTContab()" style="width:100%;background:#25d366;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:800;font-size:0.95rem;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;">📤 Gerar PDF e enviar</button>'
+    +'<button onclick="copiarVTContab()" style="width:100%;margin-top:8px;background:var(--surface);color:var(--text);border:1px solid var(--border2);border-radius:12px;padding:12px;font-weight:600;font-size:0.86rem;cursor:pointer;font-family:\'Space Grotesk\',sans-serif;">📋 Copiar como texto</button>'
+  +'</div>';
+  document.body.appendChild(ov);
+  renderVTContab();
+  requestAnimationFrame(function(){ ov.classList.add('open'); });
+}
+function fecharVTContab(){ var ov=document.getElementById('vtc-overlay'); if(!ov) return; ov.classList.remove('open'); setTimeout(function(){ ov.remove(); },260); }
+function _vtcSwitch(on, onclick){
+  return '<button onclick="'+onclick+'" aria-label="incluir" style="flex-shrink:0;width:46px;height:26px;border-radius:13px;border:none;cursor:pointer;position:relative;background:'+(on?'#25d366':'var(--border2)')+';">'
+    +'<span style="position:absolute;top:3px;'+(on?'right:3px':'left:3px')+';width:20px;height:20px;border-radius:50%;background:#fff;"></span></button>';
+}
+function renderVTContab(){
+  var box=document.getElementById('vtc-lista'); if(!box) return;
+  var c=_vtcCfg();
+  var fs=funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+  var linha=function(on, nome, cartao, tipo, acao, extra){
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);'+(on?'':'opacity:0.55;')+'">'
+      +'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:0.9rem;">'+escHtml(nome||'(sem nome)')+'</div>'
+      +'<div style="font-size:0.76rem;color:'+(cartao?'var(--muted)':'#f59e0b')+';margin-top:2px;">'+(cartao?'💳 '+escHtml(cartao)+(tipo?' · '+escHtml(tipo):' · <span style="color:#f59e0b;">sem tipo</span>'):'⚠️ sem número do cartão na ficha')+'</div></div>'
+      +(extra||'')+_vtcSwitch(on, acao)+'</div>';
+  };
+  var h=fs.map(function(f){ return linha(_vtcIncluido(f), f.nome, String(f.cartaoNum||'').trim(), f.cartaoTipo||'', "vtcToggle('"+f.id+"')"); }).join('');
+  h+=c.manuais.map(function(m,i){
+    return linha(m.ativo!==false, m.nome+' ✍️', m.cartao, m.tipo, 'vtcToggleManual('+i+')',
+      '<button onclick="vtcRemoverManual('+i+')" style="background:none;border:1px solid var(--border2);color:#f87171;border-radius:8px;padding:5px 8px;cursor:pointer;flex-shrink:0;">🗑</button>');
+  }).join('');
+  box.innerHTML=h||'<div style="color:var(--muted);font-size:0.84rem;padding:10px 0;">Nenhum funcionário cadastrado.</div>';
+  var r=document.getElementById('vtc-resumo'); var n=_vtcLinhas().length;
+  if(r) r.textContent=n+' pessoa'+(n===1?'':'s')+' vão no envio';
+}
+function vtcToggle(fid){ var f=funcionarios.find(function(x){return x.id===fid;}); if(!f) return; var c=_vtcCfg(); c.sel[fid]=!_vtcIncluido(f); salvarCVT(); renderVTContab(); }
+function vtcToggleManual(i){ var c=_vtcCfg(); if(!c.manuais[i]) return; c.manuais[i].ativo=(c.manuais[i].ativo===false); salvarCVT(); renderVTContab(); }
+function vtcRemoverManual(i){ var c=_vtcCfg(); if(!c.manuais[i]) return; if(!confirm('Remover '+(c.manuais[i].nome||'esse cadastro')+' da lista?')) return; c.manuais.splice(i,1); salvarCVT(); renderVTContab(); }
+function vtcAddManual(){
+  var nome=(document.getElementById('vtc-nome').value||'').trim();
+  var cartao=(document.getElementById('vtc-cartao').value||'').trim();
+  var tipo=document.getElementById('vtc-tipo').value||'';
+  if(!nome){ showToast('Digite o nome','var(--warn)'); return; }
+  if(!cartao){ showToast('Digite o número do cartão','var(--warn)'); return; }
+  var c=_vtcCfg(); c.manuais.push({id:gerarId(), nome:nome, cartao:cartao, tipo:tipo, ativo:true});
+  salvarCVT();
+  document.getElementById('vtc-nome').value=''; document.getElementById('vtc-cartao').value='';
+  renderVTContab(); showToast('✓ '+nome+' adicionado');
+}
+function _vtcMesNome(){ var m=nomesMeses(), d=new Date(); return m[d.getMonth()].toLowerCase()+' de '+d.getFullYear(); }
+function copiarVTContab(){
+  var l=_vtcLinhas(); if(!l.length){ showToast('Ninguém selecionado','var(--warn)'); return; }
+  var t='VALE TRANSPORTE — '+_vtcMesNome().toUpperCase()+'\n\n'+l.map(function(x,i){ return (i+1)+'. '+x.nome+'\n   Cartão: '+(x.cartao||'—')+(x.tipo?' ('+x.tipo+')':''); }).join('\n')+'\n\nTotal: '+l.length+' pessoa'+(l.length===1?'':'s');
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function(){ showToast('📋 Copiado — cole no WhatsApp'); }, function(){ prompt('Copie o texto:', t); });
+  else prompt('Copie o texto:', t);
+}
+function enviarVTContab(){
+  var JsPDF=(window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if(!JsPDF){ showToast(window._jspdfFalhou?'❌ Sem internet pra montar o PDF':'⏳ Carregando… tente em 2 segundos','#f7a34f'); return; }
+  var l=_vtcLinhas(); if(!l.length){ showToast('Ninguém selecionado','var(--warn)'); return; }
+  var mes=_vtcMesNome();
+  try{
+    var doc=new JsPDF({unit:'mm',format:'a4'});
+    var W=210, M=16, y=20;
+    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text('Vale Transporte',W/2,y,{align:'center'}); y+=7;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(90);
+    doc.text('Gestao Bavaro  -  '+mes+'  -  gerado em '+new Date().toLocaleDateString('pt-BR'),W/2,y,{align:'center'}); y+=10;
+    doc.setTextColor(0);
+    var cN=M+8, cC=M+98, cT=M+150;
+    function cab(){
+      doc.setFillColor(235,235,235); doc.rect(M,y-5,W-2*M,8,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(10);
+      doc.text('#',M+2,y); doc.text('Nome',cN,y); doc.text('Numero do cartao',cC,y); doc.text('Tipo',cT,y);
+      doc.setFont('helvetica','normal'); y+=8;
+    }
+    cab();
+    l.forEach(function(x,i){
+      if(y>280){ doc.addPage(); y=20; cab(); }
+      doc.setFontSize(10);
+      doc.text(String(i+1),M+2,y);
+      doc.text(doc.splitTextToSize(String(x.nome||''),86)[0],cN,y);
+      doc.text(String(x.cartao||'-'),cC,y);
+      doc.text(String(x.tipo||'-'),cT,y);
+      doc.setDrawColor(220); doc.line(M,y+2.5,W-M,y+2.5);
+      y+=8;
+    });
+    y+=4; doc.setFont('helvetica','bold'); doc.text('Total: '+l.length+' pessoa'+(l.length===1?'':'s'),M,y);
+    var nome='Vale_Transporte_'+mes.replace(/\s/g,'_');
+    _compartilharPDF(doc.output('blob'), nome, '🚌 Vale Transporte — '+mes);
+  }catch(e){ console.error(e); showToast('❌ Falha ao gerar o PDF: '+(e.message||''),'#f75a5a'); }
+}
 
 // ── VT ──
 // ── Track open cards ──

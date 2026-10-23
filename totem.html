@@ -555,6 +555,9 @@
    O que o cliente digita e as telas de configuração continuam normais. */
 body,button{text-transform:uppercase;}
 input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
+
+/* configurações sempre por cima de tudo (inclusive da pesagem do modo balança) */
+#modal-config{z-index:99990;}
 </style>
 </head>
 <body>
@@ -3394,6 +3397,17 @@ function contarToqueLogo(){
   }
 }
 
+// 5 toques rápidos no CANTO DE CIMA À ESQUERDA, em qualquer tela (inclusive na
+// pesagem do modo balança, que cobre o menu) → abre a barrinha ⚙️ / 🔄
+var _toquesCanto = 0, _toquesCantoT = 0;
+document.addEventListener('pointerdown', function(e){
+  if(e.clientX > 90 || e.clientY > 90) return;
+  var agora = Date.now();
+  if(agora - _toquesCantoT > 1500) _toquesCanto = 0;
+  _toquesCantoT = agora; _toquesCanto++;
+  if(_toquesCanto >= 5){ _toquesCanto = 0; setTimeout(function(){ if(!document.getElementById('menu-admin-totem')) abrirMenuAdmin(); }, 400); } // espera o toque terminar (senão ele já cai no botão da barrinha)
+}, true);
+
 // Barrinha de admin (aparece nos 5 toques): ⚙️ configurações + 🔄 atualizar
 function abrirMenuAdmin(){
   var ex = document.getElementById('menu-admin-totem');
@@ -3720,6 +3734,8 @@ function _balSalvarDaConfig(){
   if(document.querySelectorAll('#cfg-balanca-cats input').length) _balCatsIds = marcadas;
   try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds })); }catch(e){}
   try{ _catAtiva = ''; renderCategorias(); renderItens(); }catch(e){}
+  // desligou o modo balança com a pesagem aberta → fecha a pesagem/cobrança
+  if(!_modoBalanca){ try{ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc) tc.remove(); }catch(e){} }
   _balAplicarTelaInicial();
   _balVivoAssinar();
 }

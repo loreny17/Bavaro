@@ -2352,6 +2352,10 @@ function salvarFuncionario(){
     obs:document.getElementById('f-obs').value.trim(),
     criadoEm:new Date().toISOString()
   };
+  if(editingId){
+    var antes=funcionarios.find(function(f){return f.id===editingId;});
+    if(antes){ if(antes.loja) func.loja=antes.loja; if(antes.lojaHist) func.lojaHist=antes.lojaHist; }
+  }
   dbPut('funcionarios',func).then(function(){
     if(editingId){var idx=funcionarios.findIndex(function(f){return f.id===editingId;});funcionarios[idx]=func;}
     else funcionarios.push(func);
@@ -2379,12 +2383,25 @@ function toggleFiltro(tipo){
 }
 
 // ═══ LISTA ═══
+// ═══ LOJAS (funcionário transferido pra outra loja continua aqui — vales, faltas e VT
+// saem todos juntos nos PDFs, com o nome da loja do lado) ═══
+var _filtroLoja='';
+function _lojaPadrao(){ return (restauranteAtivo&&restauranteAtivo.nome)||'Bávaro'; }
+function _lojaDe(f){ return (f&&f.loja)||_lojaPadrao(); }
+function _lojasUsadas(){ var v={}; funcionarios.forEach(function(f){ v[_lojaDe(f)]=(v[_lojaDe(f)]||0)+1; }); return v; }
+function _temVariasLojas(){ return Object.keys(_lojasUsadas()).length>1; }
+// "Nome (Loja)" só quando tem funcionário em mais de uma loja
+function _nomeComLoja(f){ return _temVariasLojas() ? f.nome+' ('+_lojaDe(f)+')' : f.nome; }
+function filtrarLoja(l){ _filtroLoja=(_filtroLoja===l?'':l); renderLista(); }
 function renderLista(){
   var q=(document.getElementById('search-input').value||'').toLowerCase();
+  var variasLojas=_temVariasLojas();
+  if(!variasLojas) _filtroLoja='';
   var fil=funcionarios.filter(function(f){
     var matchQ=f.nome.toLowerCase().includes(q)||(f.cargo||'').toLowerCase().includes(q);
     var matchF=!filtroAtivo||(filtroAtivo==='itau'&&f.pendencias.itau)||(filtroAtivo==='vt'&&f.pendencias.vt);
-    return matchQ&&matchF;
+    var matchL=!_filtroLoja||_lojaDe(f)===_filtroLoja;
+    return matchQ&&matchF&&matchL;
   });
   var total=filtroAtivo?fil.length:funcionarios.length;
   var label=filtroAtivo?fil.length+' de '+funcionarios.length:funcionarios.length;
@@ -2394,7 +2411,7 @@ function renderLista(){
     var msg=filtroAtivo?'Nenhum com esta pendência.':funcionarios.length?'Nenhum resultado.':'Nenhum funcionário cadastrado.';
     c.innerHTML='<div class="empty-state"><div class="empty-icon">👤</div><p>'+msg+'</p></div>';return;
   }
-  c.innerHTML=fil.map(function(f){
+  var cardFn=function(f){
     var ini=f.nome.split(' ').slice(0,2).map(function(p){return p[0];}).join('').toUpperCase();
     var pend=[];
     if(f.pendencias.itau)pend.push('<span class="badge badge-danger">🏦 Conta Itaú</span>');
@@ -2413,7 +2430,19 @@ function renderLista(){
       +(temPend?'<div class="pendencia-badges" style="margin-top:5px;">'+pend.join('')+'</div>':'')
       +casaCanto
       +'</div>';
-  }).join('');
+  };
+  if(!variasLojas){ c.innerHTML=fil.map(cardFn).join(''); }
+  else {
+    var usadas=_lojasUsadas(), nomes=Object.keys(usadas).sort(function(a,b){ return a===_lojaPadrao()?-1:b===_lojaPadrao()?1:a.localeCompare(b); });
+    var chips='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">'+nomes.map(function(n){
+      var on=_filtroLoja===n;
+      return '<button onclick="filtrarLoja(\''+String(n).replace(/'/g,"\\'")+'\')" style="padding:6px 11px;border-radius:99px;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid '+(on?'var(--accent)':'var(--border2)')+';background:'+(on?'var(--accent-dim)':'var(--surface)')+';color:'+(on?'var(--accent)':'var(--text)')+';">🏪 '+escHtml(n)+' <span style="opacity:0.7;">'+usadas[n]+'</span></button>';
+    }).join('')+'</div>';
+    var grupos={}; fil.forEach(function(f){ (grupos[_lojaDe(f)]=grupos[_lojaDe(f)]||[]).push(f); });
+    c.innerHTML=chips+nomes.filter(function(n){ return grupos[n]; }).map(function(n){
+      return '<div style="font-size:0.72rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin:12px 2px 6px;">🏪 '+escHtml(n)+' · '+grupos[n].length+'</div>'+grupos[n].map(cardFn).join('');
+    }).join('');
+  }
   // Habilita toque longo nos cards renderizados
   setupLongPressCards();
 }
@@ -2551,6 +2580,15 @@ function abrirActionSheet(fid){
     sub:'Abrir cadastro',
     fn:'asAcaoEditar('+fid+')'
   });
+  // Transferir de loja (só admin)
+  if(_isAdmin){
+    acoes.push({
+      ico:'🔁',
+      label:'Transferir de loja',
+      sub:'Hoje: '+_lojaDe(f),
+      fn:'abrirTransferirLoja('+fid+')'
+    });
+  }
   // Desligamento
   acoes.push({
     cls:'warn',
@@ -2575,6 +2613,47 @@ function abrirActionSheet(fid){
   }).join('');
   document.getElementById('as-backdrop').classList.add('show');
   document.getElementById('as-sheet').classList.add('show');
+}
+function abrirTransferirLoja(fid){
+  fecharActionSheet();
+  if(!_isAdmin){ showToast('🔒 Só no modo admin','var(--warn)'); return; }
+  var f=funcionarios.find(function(x){return String(x.id)===String(fid);}); if(!f) return;
+  var lojas={};
+  try{ JSON.parse(localStorage.getItem('gestao_restaurantes')||'[]').forEach(function(r){ if(r&&r.nome) lojas[r.nome]=1; }); }catch(e){}
+  Object.keys(_lojasUsadas()).forEach(function(n){ lojas[n]=1; });
+  lojas[_lojaPadrao()]=1;
+  var atual=_lojaDe(f);
+  var ex=document.getElementById('trl-overlay'); if(ex) ex.remove();
+  var ov=document.createElement('div'); ov.id='trl-overlay'; ov.className='modal-overlay';
+  ov.onclick=function(e){ if(e.target===ov) fecharTransferirLoja(); };
+  ov.innerHTML='<div class="modal-sheet" style="padding:0 16px 18px;">'
+    +'<div class="modal-handle"></div>'
+    +'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;letter-spacing:0.06em;color:var(--accent);">🔁 Transferir de loja</div>'
+    +'<div style="font-size:0.84rem;margin:4px 0 12px;"><b>'+escHtml(f.nome)+'</b> <span style="color:var(--muted);">· hoje em '+escHtml(atual)+'</span></div>'
+    +Object.keys(lojas).sort().map(function(n){
+      var eh=n===atual;
+      return '<button '+(eh?'disabled ':'')+'onclick="transferirLoja('+fid+',\''+String(n).replace(/'/g,"\\'")+'\')" style="width:100%;text-align:left;padding:13px;margin-bottom:7px;border-radius:11px;font-family:inherit;font-size:0.92rem;font-weight:600;cursor:'+(eh?'default':'pointer')+';border:1.5px solid '+(eh?'var(--accent)':'var(--border2)')+';background:'+(eh?'var(--accent-dim)':'var(--surface)')+';color:var(--text);">🏪 '+escHtml(n)+(eh?' <span style="color:var(--accent);font-size:0.76rem;">(atual)</span>':'')+'</button>';
+    }).join('')
+    +'<div style="font-size:0.72rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin:12px 0 6px;">Outra loja</div>'
+    +'<div style="display:flex;gap:6px;"><input id="trl-nova" class="cvt-add-input" placeholder="Nome da loja" style="flex:1;min-width:0;">'
+    +'<button class="cvt-add-btn" onclick="var v=document.getElementById(\'trl-nova\').value.trim(); if(v) transferirLoja('+fid+', v);">Transferir</button></div>'
+    +'<div style="font-size:0.74rem;color:var(--muted);margin-top:12px;line-height:1.4;">Os vales, faltas e o VT dele continuam aqui e saem juntos nos PDFs da contabilidade, com o nome da loja do lado.</div>'
+  +'</div>';
+  document.body.appendChild(ov);
+  requestAnimationFrame(function(){ ov.classList.add('open'); });
+}
+function fecharTransferirLoja(){ var ov=document.getElementById('trl-overlay'); if(!ov) return; ov.classList.remove('open'); setTimeout(function(){ ov.remove(); },260); }
+function transferirLoja(fid, loja){
+  var f=funcionarios.find(function(x){return String(x.id)===String(fid);}); if(!f||!loja) return;
+  var de=_lojaDe(f);
+  if(de===loja){ fecharTransferirLoja(); return; }
+  f.loja=loja;
+  f.lojaHist=(f.lojaHist||[]).concat([{de:de, para:loja, em:new Date().toISOString()}]);
+  dbPut('funcionarios',f).catch(function(){});
+  fbSalvar(f);
+  fecharTransferirLoja();
+  renderLista();
+  showToast('🔁 '+f.nome+' agora é da '+loja);
 }
 function fecharActionSheet(){
   document.getElementById('as-backdrop').classList.remove('show');
@@ -6408,7 +6487,7 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
   var linhasV = listaVales.length
     ? listaVales.map(function(item){
         return [
-          {text:item.f.nome, cor:_COR.textoClaro, bold:true},
+          {text:_nomeComLoja(item.f), cor:_COR.textoClaro, bold:true},
           {text:'R$ '+item.total.toFixed(2).replace('.',','), cor:_COR.verde, bold:true}
         ];
       })
@@ -6430,7 +6509,7 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
           return p[2]+'/'+p[1]+sab+marca;
         }).join(', ');
         return [
-          {text:item.f.nome, cor:_COR.textoClaro, bold:true},
+          {text:_nomeComLoja(item.f), cor:_COR.textoClaro, bold:true},
           {text:item.contagem.texto, cor:_COR.vermelho, bold:true},
           {text:datas, cor:_COR.vermelho}
         ];
@@ -6451,7 +6530,7 @@ function _jspdfRelatorioGeral(k, mesNome, hoje){
           return p[2]+'/'+p[1]+(fe.desc?' ('+fe.desc+')':'');
         }).join(', ');
         return [
-          {text:item.f.nome, cor:_COR.textoClaro, bold:true},
+          {text:_nomeComLoja(item.f), cor:_COR.textoClaro, bold:true},
           {text:String(item.feriados.length), cor:_COR.amarelo, bold:true},
           {text:datas, cor:_COR.amareloClaro}
         ];
@@ -6937,9 +7016,9 @@ function _vtcIncluido(f){ var c=_vtcCfg(); var v=c.sel[f.id]; return v===undefin
 function _vtcLinhas(){
   var c=_vtcCfg(), l=[];
   funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');}).forEach(function(f){
-    if(_vtcIncluido(f)) l.push({nome:f.nome||'', cartao:String(f.cartaoNum||'').trim(), tipo:f.cartaoTipo||''});
+    if(_vtcIncluido(f)) l.push({nome:f.nome||'', cartao:String(f.cartaoNum||'').trim(), tipo:f.cartaoTipo||'', loja:_lojaDe(f)});
   });
-  c.manuais.forEach(function(m){ if(m.ativo!==false) l.push({nome:m.nome||'', cartao:m.cartao||'', tipo:m.tipo||'', manual:true}); });
+  c.manuais.forEach(function(m){ if(m.ativo!==false) l.push({nome:m.nome||'', cartao:m.cartao||'', tipo:m.tipo||'', loja:m.loja||'', manual:true}); });
   return l;
 }
 function abrirVTContab(){
@@ -6976,14 +7055,15 @@ function _vtcSwitch(on, onclick){
 function renderVTContab(){
   var box=document.getElementById('vtc-lista'); if(!box) return;
   var c=_vtcCfg();
-  var fs=funcionarios.slice().sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+  var fs=funcionarios.slice().sort(function(a,b){return (_lojaDe(a)+a.nome).localeCompare(_lojaDe(b)+b.nome);});
+  var variasL=_temVariasLojas();
   var linha=function(on, nome, cartao, tipo, acao, extra){
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);'+(on?'':'opacity:0.55;')+'">'
       +'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:0.9rem;">'+escHtml(nome||'(sem nome)')+'</div>'
       +'<div style="font-size:0.76rem;color:'+(cartao?'var(--muted)':'#f59e0b')+';margin-top:2px;">'+(cartao?'💳 '+escHtml(cartao)+(tipo?' · '+escHtml(tipo):' · <span style="color:#f59e0b;">sem tipo</span>'):'⚠️ sem número do cartão na ficha')+'</div></div>'
       +(extra||'')+_vtcSwitch(on, acao)+'</div>';
   };
-  var h=fs.map(function(f){ return linha(_vtcIncluido(f), f.nome, String(f.cartaoNum||'').trim(), f.cartaoTipo||'', "vtcToggle('"+f.id+"')"); }).join('');
+  var h=fs.map(function(f){ return linha(_vtcIncluido(f), variasL ? f.nome+' · 🏪 '+_lojaDe(f) : f.nome, String(f.cartaoNum||'').trim(), f.cartaoTipo||'', "vtcToggle('"+f.id+"')"); }).join('');
   h+=c.manuais.map(function(m,i){
     return linha(m.ativo!==false, m.nome+' ✍️', m.cartao, m.tipo, 'vtcToggleManual('+i+')',
       '<button onclick="vtcRemoverManual('+i+')" style="background:none;border:1px solid var(--border2);color:#f87171;border-radius:8px;padding:5px 8px;cursor:pointer;flex-shrink:0;">🗑</button>');
@@ -7010,7 +7090,8 @@ function vtcAddManual(){
 function _vtcMesNome(){ var m=nomesMeses(), d=new Date(); return m[d.getMonth()].toLowerCase()+' de '+d.getFullYear(); }
 function copiarVTContab(){
   var l=_vtcLinhas(); if(!l.length){ showToast('Ninguém selecionado','var(--warn)'); return; }
-  var t='VALE TRANSPORTE — '+_vtcMesNome().toUpperCase()+'\n\n'+l.map(function(x,i){ return (i+1)+'. '+x.nome+'\n   Cartão: '+(x.cartao||'—')+(x.tipo?' ('+x.tipo+')':''); }).join('\n')+'\n\nTotal: '+l.length+' pessoa'+(l.length===1?'':'s');
+  var vl=_temVariasLojas();
+  var t='VALE TRANSPORTE — '+_vtcMesNome().toUpperCase()+'\n\n'+l.map(function(x,i){ return (i+1)+'. '+x.nome+(vl&&x.loja?' — '+x.loja:'')+'\n   Cartão: '+(x.cartao||'—')+(x.tipo?' ('+x.tipo+')':''); }).join('\n')+'\n\nTotal: '+l.length+' pessoa'+(l.length===1?'':'s');
   if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function(){ showToast('📋 Copiado — cole no WhatsApp'); }, function(){ prompt('Copie o texto:', t); });
   else prompt('Copie o texto:', t);
 }
@@ -7026,11 +7107,12 @@ function enviarVTContab(){
     doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(90);
     doc.text('Gestao Bavaro  -  '+mes+'  -  gerado em '+new Date().toLocaleDateString('pt-BR'),W/2,y,{align:'center'}); y+=10;
     doc.setTextColor(0);
-    var cN=M+8, cC=M+98, cT=M+150;
+    var vl=_temVariasLojas();
+    var cN=M+8, cL=M+78, cC=vl?M+112:M+98, cT=vl?M+152:M+150;
     function cab(){
       doc.setFillColor(235,235,235); doc.rect(M,y-5,W-2*M,8,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(10);
-      doc.text('#',M+2,y); doc.text('Nome',cN,y); doc.text('Numero do cartao',cC,y); doc.text('Tipo',cT,y);
+      doc.text('#',M+2,y); doc.text('Nome',cN,y); if(vl) doc.text('Loja',cL,y); doc.text('Numero do cartao',cC,y); doc.text('Tipo',cT,y);
       doc.setFont('helvetica','normal'); y+=8;
     }
     cab();
@@ -7038,7 +7120,8 @@ function enviarVTContab(){
       if(y>280){ doc.addPage(); y=20; cab(); }
       doc.setFontSize(10);
       doc.text(String(i+1),M+2,y);
-      doc.text(doc.splitTextToSize(String(x.nome||''),86)[0],cN,y);
+      doc.text(doc.splitTextToSize(String(x.nome||''),vl?68:86)[0],cN,y);
+      if(vl) doc.text(doc.splitTextToSize(String(x.loja||'-'),32)[0],cL,y);
       doc.text(String(x.cartao||'-'),cC,y);
       doc.text(String(x.tipo||'-'),cT,y);
       doc.setDrawColor(220); doc.line(M,y+2.5,W-M,y+2.5);

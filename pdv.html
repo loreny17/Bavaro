@@ -8532,6 +8532,41 @@ function gerarCupomContaMesaAlmoco(pedido, modelo, imp){
   return s;
 }
 
+// 🍽️ Comanda do totem do buffet nos dias de buffet + prato feito (ex.: sábado):
+// senha grande, prato feito primeiro, depois o buffet por quilo e o resto.
+function gerarComandaBuffet(cmd, imp){
+  var L = (imp && imp.largura) || 48;
+  var itens = (cmd.itens || []).slice();
+  var ordem = function(i){ return i.pratoFeito ? 0 : (i.porKg ? 1 : 2); };
+  itens.sort(function(a, b){ return ordem(a) - ordem(b); });
+  var d = new Date(cmd.criadoEm || Date.now());
+  var s = escposInit() + escposCenter();
+  s += escposBold(true) + escposSize('grande') + 'BUFFET\n';
+  s += escposSize('extra') + 'SENHA ' + (cmd.senhaTotem || '?') + '\n';
+  s += escposSize('normal') + escposBold(false);
+  s += d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) + (cmd.pago ? '  -  PAGO' : '') + '\n';
+  s += escposLeft() + linha('=', L) + '\n';
+  var grupoAnt = -1;
+  itens.forEach(function(it){
+    var g = ordem(it);
+    if(g !== grupoAnt){
+      if(grupoAnt !== -1) s += linha('-', L) + '\n';
+      s += (g === 0 ? '>> PRATO FEITO' : g === 1 ? '>> BUFFET POR QUILO' : '>> OUTROS') + '\n';
+      grupoAnt = g;
+    }
+    s += escposBold(true) + escposSize('alto') + (it.qtd || 1) + 'x ' + String(it.nome || '').toUpperCase() + '\n' + escposSize('normal') + escposBold(false);
+    if(it.obs) s += '   ' + it.obs + '\n';
+  });
+  s += linha('=', L) + '\n';
+  if(cmd.total){
+    var tot = 'R$ ' + formatarPreco(cmd.total), lbl = 'TOTAL';
+    s += escposBold(true) + lbl + ' '.repeat(Math.max(1, L - lbl.length - tot.length)) + tot + '\n' + escposBold(false);
+  }
+  s += '\n\n\n';
+  if(_configImp && _configImp.cortePapel) s += escposCut();
+  return s;
+}
+
 // Senha do totem ANTES do pagamento (modo com caixa) — mesmo modelo do "Cupom do cliente",
 // com a instrução de levar ao caixa
 function _imprimirSenhaTotemPreCaixa(cmd, soImp){
@@ -9669,6 +9704,15 @@ function processarComandoImpressao(cmdId, cmd){
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
     _imprimirNasMinhas(cmdId, _impsSenhaTotem(cmd), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });
+  } else if(cmd.tipo === 'comanda_buffet'){
+    // 📅 Dia de buffet + prato feito (ex.: sábado): a cozinha do prato feito não abre,
+    // então a comanda do pedido inteiro do totem do buffet sai na impressora escolhida
+    // no totem (caixa do buffet). Mesma escolha de impressora da senha do totem.
+    _imprimirNasMinhas(cmdId, _impsSenhaTotem(cmd), function(imp){
+      _aplicarDialeto(imp);
+      enviarParaImpressora(imp, gerarComandaBuffet(cmd, imp));
+      showToast('🍽️ Comanda ' + (cmd.senhaTotem || '') + ' impressa em ' + imp.nome, '#4ade80');
+    });
   } else if(cmd.tipo === 'nfce'){
     // DANFE NFC-e (nota fiscal do consumidor) — sai nas impressoras de FECHAMENTO.
     // Só UM PDV imprime (se tiver dois abertos do mesmo restaurante, o outro ignora)

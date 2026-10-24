@@ -771,6 +771,15 @@ input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
         <div class="cfg-titulo" style="margin-top:12px;">Categorias que aparecem no modo balança</div>
         <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;">Marque só o que o cliente do buffet pode pedir (bebidas, sobremesas…). Os pratos feitos ficam de fora.</div>
         <div id="cfg-balanca-cats" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;"></div>
+        <div style="border-top:1px dashed rgba(56,189,248,0.4);margin:14px 0 10px;"></div>
+        <div class="cfg-titulo">📅 Dias de buffet + prato feito</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4;">Nos dias marcados este totem também vende prato feito: aparece o botão "🍛 Só prato feito (sem balança)", as categorias do prato feito entram no cardápio e cada venda paga imprime a comanda inteira (buffet + prato feito + bebidas) na impressora escolhida abaixo. Nos outros dias fica tudo como antes.</div>
+        <div id="cfg-balanca-dias" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px;"></div>
+        <div class="cfg-titulo">Categorias do prato feito (só nesses dias)</div>
+        <div id="cfg-balanca-cats-pf" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;"></div>
+        <div class="cfg-titulo" style="margin-top:12px;">🖨️ Impressora da comanda nesses dias</div>
+        <select id="cfg-balanca-imp-pf" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.95rem;"><option value="">Carregando…</option></select>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Escolha a impressora do caixa do buffet. O PDV do computador onde ela está ligada precisa estar aberto.</div>
       </div>
       <div class="cfg-grupo" style="border:1.5px solid rgba(212,168,67,0.4);border-radius:12px;padding:12px;background:rgba(212,168,67,0.05);">
         <div class="cfg-titulo">🖨️ Impressora da senha — só neste aparelho</div>
@@ -1463,12 +1472,14 @@ function _catsVisiveis(){
   var todas = window._cardapioCats || [];
   if(!(typeof _modoBalanca !== 'undefined' && _modoBalanca) || _modoQR) return todas;
   var ok = (typeof _balCatsIds !== 'undefined' && _balCatsIds) ? _balCatsIds : null;
+  // 📅 Dia de buffet + prato feito (ex.: sábado): as categorias do prato feito também aparecem
+  var extra = (typeof _balDiaPF === 'function' && !_balSemPF && _balDiaPF()) ? _balCatsPFIds() : [];
   if(!ok){   // ainda não escolheu: usa as que parecem bebida/sobremesa
     var re = /bebid|drink|refri|suco|cervej|chop|agua|água|vinho|dose|sobremes|doce|sorvete|cafe|café/i;
-    var padrao = todas.filter(function(c){ return re.test(c.nome || ''); });
+    var padrao = todas.filter(function(c){ return re.test(c.nome || '') || extra.indexOf(c.id) >= 0; });
     return padrao.length ? padrao : todas;
   }
-  var f = todas.filter(function(c){ return ok.indexOf(c.id) >= 0; });
+  var f = todas.filter(function(c){ return ok.indexOf(c.id) >= 0 || extra.indexOf(c.id) >= 0; });
   return f.length ? f : todas;
 }
 function renderCategorias(){
@@ -3708,7 +3719,61 @@ function abrirTecladoVirtual(spanId, onSave){
 var _BAL_TOTEM_KEY = 'totem_modo_balanca';
 var _modoBalanca = false, _balItemId = '';
 var _balCatsIds = null;   // categorias que aparecem no modo balança (null = automático)
-(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; }catch(e){} })();
+// 📅 Dias de buffet + prato feito (0=domingo … 6=sábado). Padrão: só sábado.
+// Nesses dias: botão "Só prato feito", categorias do prato feito no cardápio e
+// comanda do pedido inteiro na impressora do caixa do buffet.
+var _balDiasPF = [6], _balCatsPF = null, _balImpPF = '', _balSemPF = false;
+(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; _balDiasPF = Array.isArray(c.diasPF) ? c.diasPF : [6]; _balCatsPF = Array.isArray(c.catsPF) ? c.catsPF : null; _balImpPF = c.impPF || ''; }catch(e){} })();
+function _balDiaPF(){
+  return !!(_modoBalanca && !(typeof _modoQR !== 'undefined' && _modoQR) && (_balDiasPF || []).indexOf(new Date().getDay()) >= 0);
+}
+// categorias do prato feito: as marcadas na configuração, ou (sem configurar) as que parecem prato feito
+function _balCatsPFIds(){
+  if(_balCatsPF) return _balCatsPF;
+  var re = /prato|executiv|marmit|almo[cç]|refei[cç]|\bpf\b/i;
+  return (window._cardapioCats || []).filter(function(c){ return re.test(c.nome || ''); }).map(function(c){ return c.id; });
+}
+function _balItemEhPF(c){
+  var def = (window._cardapioItens || []).find(function(x){ return x.id === c.itemId && x.fonte === c.fonte; });
+  return !!(def && _balCatsPFIds().indexOf(def.categoriaId) >= 0);
+}
+// 🍛 Cliente sem prato na balança (só prato feito): fecha a pesagem e abre o cardápio no prato feito
+function _balSoPratoFeito(){
+  _balFecharTela();
+  var pf = _balCatsPFIds();
+  var alvo = _catsVisiveis().find(function(c){ return pf.indexOf(c.id) >= 0; });
+  try{ _catAtiva = alvo ? alvo.id : ''; renderCategorias(); renderItens(); }catch(e){}
+  try{ resetTimerInatividade(); }catch(e){}
+}
+// 🍽️ Comanda do pedido inteiro (buffet + prato feito + bebidas) na impressora do caixa do buffet
+function _balImprimirComanda(p){
+  if(!p) return;
+  var pcId = '', pcNome = '';
+  try{ pcId = localStorage.getItem('pdv_aparelho_id') || ''; pcNome = localStorage.getItem('pdv_computador_nome') || ''; }catch(e){}
+  fbDb.collection('comandos_impressao').add({
+    tipo: 'comanda_buffet', restauranteId: _restauranteId, tenantId: _tenantId,
+    pedidoTotemId: p.id, senhaTotem: p.senha, total: p.total, pago: true, formaPagamento: p.formaPagamento || '',
+    itens: (p.itens || []).map(function(i){ return { nome: i.nome, qtd: i.qtd, pratoFeito: !!i.pratoFeito, porKg: i.tipoVenda === 'kg', obs: [i.selecoesLabel, i.observacao ? 'OBS: ' + i.observacao : ''].filter(Boolean).join(' · ') }; }),
+    criadoEm: Date.now(), solicitadoEm: Date.now(), solicitadoPor: 'Totem buffet',
+    computadorId: pcId, computadorNome: pcNome,
+    impressoraId: _balImpPF || _impSenhaEscolhida()
+  }).then(function(){
+    return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+      .collection('pedidos_totem').doc(p.id).update({ comandaImpressa: true });
+  }).catch(function(e){ console.warn('[TOTEM] comanda do buffet falhou:', e.code || e.message); });
+}
+// lista as impressoras num <select> (mesma lista da impressora da senha)
+function _balListarImpressoras(sel, atual, rotuloVazio){
+  if(!sel) return;
+  sel.innerHTML = '<option value="__carregando">Carregando impressoras…</option>';
+  fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+    .collection('impressao').doc('config').collection('impressoras').get().then(function(snap){
+      var l = []; snap.forEach(function(d){ var v = d.data() || {}; l.push({ id:d.id, nome:v.nome || '(sem nome)', pc:v.computadorNome || '' }); });
+      sel.innerHTML = '<option value="">' + escapar(rotuloVazio) + '</option>' + l.map(function(i){
+        return '<option value="' + escapar(i.id) + '"' + (i.id === atual ? ' selected' : '') + '>' + escapar(i.nome) + (i.pc ? ' — computador ' + escapar(i.pc) : '') + '</option>';
+      }).join('');
+    }).catch(function(e){ sel.innerHTML = '<option value="' + escapar(atual) + '">Não consegui listar (' + escapar(e.code || e.message) + ')</option>'; });
+}
 
 function _balItensKg(){
   var l = (_itensPrincipal || []).filter(function(i){ return i.tipoVenda === 'kg'; });
@@ -3759,13 +3824,31 @@ function _balPreencherConfig(){
   });
   var boxC = document.getElementById('cfg-balanca-cats');
   if(boxC){
-    var atuais = _balCatsIds || (function(){ var m = _modoBalanca; _modoBalanca = true; var v = _catsVisiveis().map(function(c){ return c.id; }); _modoBalanca = m; return v; })();
+    var atuais = _balCatsIds || (function(){ var m = _modoBalanca; _modoBalanca = true; _balSemPF = true; var v = _catsVisiveis().map(function(c){ return c.id; }); _balSemPF = false; _modoBalanca = m; return v; })();
     boxC.innerHTML = (window._cardapioCats || []).map(function(c){
       return '<label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:0.9rem;">' +
         '<input type="checkbox" value="' + escapar(c.id) + '"' + (atuais.indexOf(c.id) >= 0 ? ' checked' : '') + ' style="width:18px;height:18px;">' +
         '<span>' + escapar((c.emoji ? c.emoji + ' ' : '') + (c.nome || '')) + '</span></label>';
     }).join('') || '<div style="color:var(--muted);font-size:0.8rem;">Cardápio ainda carregando…</div>';
   }
+  // 📅 dias de buffet + prato feito
+  var boxD = document.getElementById('cfg-balanca-dias');
+  if(boxD){
+    boxD.innerHTML = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(function(n, d){
+      return '<label style="display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 0;cursor:pointer;font-size:0.78rem;font-weight:700;">' +
+        '<input type="checkbox" value="' + d + '"' + ((_balDiasPF || []).indexOf(d) >= 0 ? ' checked' : '') + ' style="width:18px;height:18px;">' + n + '</label>';
+    }).join('');
+  }
+  var boxPF = document.getElementById('cfg-balanca-cats-pf');
+  if(boxPF){
+    var atuaisPF = _balCatsPFIds();
+    boxPF.innerHTML = (window._cardapioCats || []).map(function(c){
+      return '<label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:0.9rem;">' +
+        '<input type="checkbox" value="' + escapar(c.id) + '"' + (atuaisPF.indexOf(c.id) >= 0 ? ' checked' : '') + ' style="width:18px;height:18px;">' +
+        '<span>' + escapar((c.emoji ? c.emoji + ' ' : '') + (c.nome || '')) + '</span></label>';
+    }).join('') || '<div style="color:var(--muted);font-size:0.8rem;">Cardápio ainda carregando…</div>';
+  }
+  _balListarImpressoras(document.getElementById('cfg-balanca-imp-pf'), _balImpPF, 'Mesma da senha (configuração abaixo)');
   var sel = document.getElementById('cfg-balanca-item'); if(!sel) return;
   var l = _balItensKg(), atual = _balItem();
   sel.innerHTML = l.length
@@ -3779,7 +3862,11 @@ function _balSalvarDaConfig(){
   if(sel && sel.value) _balItemId = sel.value;
   var marcadas = [].slice.call(document.querySelectorAll('#cfg-balanca-cats input:checked')).map(function(x){ return x.value; });
   if(document.querySelectorAll('#cfg-balanca-cats input').length) _balCatsIds = marcadas;
-  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds })); }catch(e){}
+  if(document.querySelectorAll('#cfg-balanca-dias input').length) _balDiasPF = [].slice.call(document.querySelectorAll('#cfg-balanca-dias input:checked')).map(function(x){ return +x.value; });
+  if(document.querySelectorAll('#cfg-balanca-cats-pf input').length) _balCatsPF = [].slice.call(document.querySelectorAll('#cfg-balanca-cats-pf input:checked')).map(function(x){ return x.value; });
+  var selPF = document.getElementById('cfg-balanca-imp-pf');
+  if(selPF && selPF.options.length && selPF.value !== '__carregando') _balImpPF = selPF.value || '';
+  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds, diasPF:_balDiasPF, catsPF:_balCatsPF, impPF:_balImpPF })); }catch(e){}
   try{ _catAtiva = ''; renderCategorias(); renderItens(); }catch(e){}
   // desligou o modo balança com a pesagem aberta → fecha a pesagem/cobrança
   if(!_modoBalanca){ try{ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc) tc.remove(); }catch(e){} }
@@ -3897,6 +3984,8 @@ function abrirTelaBalanca(outroPrato){
       '<button onclick="_balCancelar()" style="flex:1;padding:22px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:16px;font-weight:700;font-size:1.15rem;cursor:pointer;font-family:inherit;">Cancelar</button>' +
       '<button id="bal-btn-prox" onclick="_balProximo()" disabled style="flex:2;padding:22px;background:var(--accent);border:none;color:#000;border-radius:16px;font-weight:800;font-size:1.3rem;cursor:pointer;font-family:inherit;opacity:0.35;">Próximo →</button>' +
     '</div>' +
+    // 📅 dia de buffet + prato feito: cliente sem prato na balança pede só o prato feito
+    (_balDiaPF() ? '<button onclick="_balSoPratoFeito()" style="margin-top:16px;width:100%;max-width:620px;padding:20px;background:var(--surface2);border:2px solid var(--accent);color:var(--accent);border-radius:16px;font-weight:800;font-size:1.2rem;cursor:pointer;font-family:inherit;">🍛 Só prato feito (sem balança)</button>' : '') +
     '<div id="bal-diag" style="position:absolute;bottom:10px;left:0;right:0;font-size:0.72rem;color:rgba(255,255,255,0.3);font-family:monospace;"></div>';
   document.body.appendChild(t);
   var meu = ++_balLoopId;
@@ -4282,9 +4371,11 @@ function _balConfirmarPago(){
   var base = fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId);
   var ref = base.collection('pedidos_totem').doc();
   var refSeq = base.collection('senhas_totem').doc(hoje + '_buffet');
+  var diaPF = _balDiaPF();   // dia de buffet + prato feito → sai a comanda no caixa do buffet
   var itens = _carrinho.map(function(c){
     var pc = _balPrecoCobrado(c);
     var o = { id: c.itemId, fonte: c.fonte, nome: c.nome, preco: pc, precoBase: c.precoBase || c.preco, qtd: c.qtd, selecoesLabel: c.selecoesLabel || '', observacao: c.observacao || '' };
+    if(diaPF && c.tipoVenda !== 'kg' && _balItemEhPF(c)) o.pratoFeito = true;
     if(c.tipoVenda === 'kg'){ o.tipoVenda = 'kg'; o.peso = c.peso; }
     if(pc !== c.preco){ o.precoSemDesconto = c.preco; o.descontoParceria = Math.round((c.preco - pc) * 100) / 100; o.selecoesLabel = (o.selecoesLabel ? o.selecoesLabel + ' · ' : '') + '🤝 Parceria -' + _BAL_DESC_PCT + '%'; }
     return o;
@@ -4302,6 +4393,7 @@ function _balConfirmarPago(){
     });
   }).then(function(pedido){
     _balPedido = Object.assign({ id: ref.id }, pedido);
+    if(diaPF) _balImprimirComanda(_balPedido);
     _carrinho = []; atualizarBarra(); try{ renderItens(); }catch(e){}
     if(_balNota) _balEmitirNota(); else _balConcluido();
   }).catch(function(e){

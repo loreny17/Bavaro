@@ -1545,6 +1545,7 @@ function iniciarListeners(){
         sugerido: d.sugerido === true,
         ordemSugerido: d.ordemSugerido || 99,
         pausado: d.pausado === true,
+        pausadoAte: d.pausadoAte || null,
         combo: d.combo || [],
         controlarEstoque: d.controlarEstoque === true,
         estoque: d.estoque || 0,
@@ -1893,7 +1894,7 @@ function editarItem(id){
   renderFaixasHorario();
   document.getElementById('item-codigo').value = i.codigo || '';
   document.getElementById('item-disponivel-toggle').classList.toggle('active', i.disponivel !== false);
-  document.getElementById('item-pausado-toggle').classList.toggle('active', i.pausado === true);
+  document.getElementById('item-pausado-toggle').classList.toggle('active', pausaAtiva(i));
   var temCtrlEst = i.controlarEstoque === true;
   document.getElementById('item-ctrl-estoque-toggle').classList.toggle('active', temCtrlEst);
   document.getElementById('item-estoque-bloco').style.display = temCtrlEst ? 'block' : 'none';
@@ -2509,6 +2510,17 @@ function _rotuloPausaAte(ts){
   var hm = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   return d <= hoje ? ('até '+hm) : ('até '+d.getDate()+'/'+(d.getMonth()+1)+' '+hm);
 }
+// ⏸️ Prazo da pausa ao salvar pelo editor do item.
+// Antes o editor gravava só "pausado" e deixava o prazo antigo: um item pausado
+// "só hoje" ontem (prazo vencido) e pausado de novo pelo editor continuava com o
+// prazo vencido — e aparecia no totem/garçom como se não estivesse pausado.
+// Agora: continua pausado com prazo ainda valendo → mantém o prazo;
+// pausado agora pelo editor → "até eu reativar"; despausado → sem prazo.
+function _pausaAteAoSalvar(itemAntes, pausado){
+  if(!pausado) return null;
+  if(itemAntes && pausaAtiva(itemAntes) && itemAntes.pausadoAte) return itemAntes.pausadoAte;
+  return null;
+}
 function escolherDuracaoPausa(titulo, cb){
   var ex = document.getElementById('modal-duracao-pausa');
   if(ex) ex.remove();
@@ -2765,6 +2777,7 @@ function salvarItem(){
     fichaTecnica:fichaTecnica, precosPorHorario:precosPorHorario,
     codigo:codigo, foto:foto, disponivel:disponivel,
     pausado: pausado,
+    pausadoAte: _pausaAteAoSalvar(_itemEditando, pausado),
     controlarEstoque: controlarEstoque,
     estoque: controlarEstoque ? estoque : null,
     gruposIds: gruposIds,
@@ -14300,7 +14313,7 @@ function totemAbrirModalItem(item){
             '<span style="font-size:0.86rem;font-weight:600;">✅ Aparece no totem</span>' +
           '</label>' +
           '<label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px;">' +
-            '<input type="checkbox" id="ti-pausado"' + (item.pausado ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;accent-color:#fbbf24;">' +
+            '<input type="checkbox" id="ti-pausado"' + (pausaAtiva(item) ? ' checked' : '') + ' style="width:18px;height:18px;cursor:pointer;accent-color:#fbbf24;">' +
             '<span style="font-size:0.86rem;font-weight:600;">⏸️ Pausado (acabou)</span>' +
           '</label>' +
         '</div>' +
@@ -14510,6 +14523,7 @@ function totemSalvarItem(id, fotoAtual){
     ativo: ativo,
     modoWizard: modoWizard,
     pausado: pausado,
+    pausadoAte: _pausaAteAoSalvar(id ? (_totemItens || []).find(function(x){ return x.id === id; }) : null, pausado),
     controlarEstoque: controlarEstoque,
     estoque: controlarEstoque ? estoque : null,
     gruposIds: gruposIds,

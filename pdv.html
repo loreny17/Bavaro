@@ -1409,6 +1409,8 @@ function tentarFallbackTenant(){
     });
 }
 
+// Nome genérico ("Restaurante", "Meu Restaurante", vazio) na loja principal (id 'default') = Bávaro
+function _nomeGenericoRest(n){ return !n || /^\s*(meu\s+)?restaurante\s*$/i.test(String(n)); }
 function prosseguirComTenant(){
   try{ checkAdminPDV(); }catch(e){}
   // Salva tenantId no localStorage pra próximas vezes
@@ -1430,7 +1432,7 @@ function prosseguirComTenant(){
     try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
   }
   // Se o id é 'default' e nome ainda for "Meu Restaurante", renomeia pra Bávaro
-  if(_restauranteAtivo.id === 'default' && _restauranteAtivo.nome === 'Meu Restaurante'){
+  if(_restauranteAtivo.id === 'default' && _nomeGenericoRest(_restauranteAtivo.nome)){
     _restauranteAtivo.nome = 'Bávaro';
     _restauranteAtivo.emoji = '🍺';
     try{ localStorage.setItem('restauranteAtivo', JSON.stringify(_restauranteAtivo)); }catch(e){}
@@ -1443,8 +1445,14 @@ function prosseguirComTenant(){
     .then(function(doc){
       if(doc.exists){
         var d = doc.data() || {};
-        if(d.nome) _restauranteAtivo.nome = d.nome;
-        if(d.emoji) _restauranteAtivo.emoji = d.emoji;
+        var _genDef = _restauranteAtivo.id === 'default' && _nomeGenericoRest(d.nome);
+        if(d.nome && !_genDef) _restauranteAtivo.nome = d.nome;
+        if(d.emoji && !_genDef) _restauranteAtivo.emoji = d.emoji;
+        // cadastro da loja principal com nome genérico ("Restaurante") → corrige pra Bávaro no banco
+        // (assim o garçom, o caixa e as listas de lojas também passam a mostrar Bávaro)
+        if(_genDef){
+          doc.ref.set({ nome:'Bávaro', emoji:'🍺' }, { merge:true }).catch(function(e){ console.warn('[RESTAURANTE] corrigir nome:', e.code || e.message); });
+        }
         // Config de taxa de serviço
         _taxaServicoAtivaPDV = d.taxaServicoAtiva !== false;
         _taxaServicoPctPDV = (typeof d.taxaServicoPercentual === 'number') ? d.taxaServicoPercentual : 10;
@@ -10030,7 +10038,7 @@ function _apiDono(url, corpo){
 function _lojasDoTenant(){
   return fbDb.collection('restaurantes_publicos').limit(50).get().then(function(snap){
     var l = [];
-    snap.forEach(function(d){ var x = d.data() || {}; if(x.tenantId === _tenantId) l.push({ id:d.id, nome:(d.id === 'default' && (!x.nome || x.nome === 'Meu Restaurante')) ? 'Bávaro' : (x.nome || d.id) }); });
+    snap.forEach(function(d){ var x = d.data() || {}; if(x.tenantId === _tenantId) l.push({ id:d.id, nome:(d.id === 'default' && _nomeGenericoRest(x.nome)) ? 'Bávaro' : (x.nome || d.id) }); });
     if(!l.some(function(r){ return r.id === 'default'; })) l.unshift({ id:'default', nome:'Bávaro' });
     return l;
   });
@@ -12218,7 +12226,7 @@ function mostrarSelecaoRestaurante(){
     } else {
       // Renomeia se ainda estiver com nome antigo
       lista = lista.map(function(r){
-        if(r.id === 'default' && (r.nome === 'Meu Restaurante' || !r.nome)){
+        if(r.id === 'default' && _nomeGenericoRest(r.nome)){
           return {id:'default', nome:'Bávaro', emoji:'🍺'};
         }
         return r;
@@ -12624,7 +12632,7 @@ function carregarDestinosCopia(){
     });
     // Renomeia "Meu Restaurante" → "Bávaro"
     lista = lista.map(function(r){
-      if(r.id === 'default' && (r.nome === 'Meu Restaurante' || !r.nome)){
+      if(r.id === 'default' && _nomeGenericoRest(r.nome)){
         return {id:'default', nome:'Bávaro', emoji:'🍺'};
       }
       return r;

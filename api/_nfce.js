@@ -494,25 +494,33 @@ function _mesDaNota(n) {
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).formatToParts(new Date(ts)).forEach((x) => { p[x.type] = x.value; });
   return p.year + '-' + p.month;
 }
-async function listarMes(db, tenantId, mes, incluirTestes, restauranteId) {
+// todas=true: notas de TODAS as lojas do tenant (o PDV separa por CNPJ no ZIP).
+// permitidas: lojas que o login enxerga (null = todas) — gerente de uma loja só vê a dele.
+async function listarMes(db, tenantId, mes, incluirTestes, restauranteId, todas, permitidas) {
   await carregarPainel(db);
   if (!/^\d{4}-\d{2}$/.test(String(mes || ''))) return { ok: false, error: 'Mês inválido.' };
+  const emissoresOk = Array.isArray(permitidas) ? permitidas.map((r) => chaveEmissor(r)) : null;
   const snap = await db.collection('nfce').where('tenantId', '==', tenantId).get();
   const notas = [];
   snap.forEach((d) => {
     const n = d.data() || {};
     if (_mesDaNota(n) !== mes) return;
-    if (chaveEmissor(n.restauranteId) !== chaveEmissor(restauranteId)) return; // por CNPJ (Omar entra junto com a Prinzen)
+    if (todas) { if (emissoresOk && emissoresOk.indexOf(chaveEmissor(n.restauranteId)) < 0) return; }
+    else if (chaveEmissor(n.restauranteId) !== chaveEmissor(restauranteId)) return; // por CNPJ (Omar entra junto com a Prinzen)
+    const imp = n.impressao || {};
+    // CNPJ do emitente: está dentro da chave de acesso (posições 7 a 20); senão, do XML guardado
+    const cnpj = (String(n.chave || '').length === 44 ? String(n.chave).slice(6, 20) : '') || _so(imp.emitCnpj);
     if (!incluirTestes && n.ambiente !== 'producao') return;
     if (n.status !== 'autorizado' && n.status !== 'cancelado') return;
     notas.push({
       ref: n.ref || d.id, numero: n.numero, serie: n.serie, chave: n.chave, status: n.status, ambiente: n.ambiente,
       data: (n.impressao && n.impressao.dataEmissao) || (n.emitidaEm ? new Date(n.emitidaEm).toISOString() : ''),
       total: n.total, documento: n.documento || '', mesa: n.mesa, emitidaEm: n.emitidaEm || null, origem: n.origem || 'mesa', formas: ((n.impressao && n.impressao.pagamentos) || []).map((p) => p.forma + ':' + p.valor),
+      cnpj, emitente: imp.emitNome || '', loja: n.restauranteId || '',
     });
   });
-  notas.sort((a, b) => (Number(a.serie) - Number(b.serie)) || (Number(a.numero) - Number(b.numero)));
-  return { ok: true, mes, notas };
+  notas.sort((a, b) => String(a.cnpj).localeCompare(String(b.cnpj)) || (Number(a.serie) - Number(b.serie)) || (Number(a.numero) - Number(b.numero)));
+  return { ok: true, mes, todas: !!todas, notas };
 }
 async function xmlsDasNotas(db, tenantId, refs) {
   await carregarPainel(db);

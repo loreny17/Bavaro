@@ -74,7 +74,19 @@ module.exports = async (req, res) => {
     if (b.acao === 'exportarLista' || b.acao === 'exportarXmls') {
       const motivo = await _motivoRecusa(db, b.idToken, b.tenantId);
       if (motivo) { console.warn('[nfce] exportação recusada:', motivo); return res.status(401).json({ ok: false, error: 'Acesso recusado: ' + motivo + '.' }); }
-      if (b.acao === 'exportarLista') return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId));
+      if (b.acao === 'exportarLista') {
+        // "Todas as lojas": respeita o login de gerente de uma loja só (users/{uid}.restaurantes)
+        let permitidas = null;
+        if (b.todas === true) {
+          try {
+            const tok = await admin.auth().verifyIdToken(String(b.idToken));
+            const u = await db.collection('users').doc(tok.uid).get();
+            const r = u.exists ? (u.data() || {}).restaurantes : null;
+            if (Array.isArray(r) && r.length) permitidas = r;
+          } catch (e) { return res.status(401).json({ ok: false, error: 'Acesso recusado: ' + e.message }); }
+        }
+        return res.status(200).json(await nfce.listarMes(db, b.tenantId, b.mes, b.incluirTestes === true, b.restauranteId, b.todas === true, permitidas));
+      }
       return res.status(200).json(await nfce.xmlsDasNotas(db, b.tenantId, b.refs));
     }
     if (b.acao === 'emissoresListar' || b.acao === 'emissorSalvar') {

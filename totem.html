@@ -4429,8 +4429,26 @@ function _balErroNota(erro){
       '<button onclick="_balEmitirNota()" style="flex:1;padding:18px;background:var(--accent);border:none;color:#000;border-radius:14px;font-weight:800;cursor:pointer;font-family:inherit;">🧾 Tentar de novo</button>' +
     '</div>';
 }
+// 🧾 Recibo do cliente (não fiscal) da venda do buffet — sai quando a venda fecha SEM nota
+// fiscal (com nota, a própria nota já é o comprovante). Mesma impressora da nota do buffet.
+function _balImprimirRecibo(p){
+  if(!p || p._reciboEnviado) return;
+  p._reciboEnviado = true;
+  var limpa = function(t){ return String(t || '').replace(/🤝\s*/g, '').replace(/×/g, 'x'); };
+  fbDb.collection('comandos_impressao').add({
+    tipo: 'recibo_buffet', restauranteId: _restauranteId, tenantId: _tenantId,
+    pedidoTotemId: p.id, senhaTotem: p.senha, total: p.total, formaPagamento: p.formaPagamento || '',
+    descontoParceria: p.descontoParceria || 0,
+    itens: (p.itens || []).map(function(i){ return { nome: i.nome, qtd: i.qtd, preco: i.preco, obs: limpa([i.selecoesLabel, i.observacao ? 'OBS: ' + i.observacao : ''].filter(Boolean).join(' · ')) }; }),
+    criadoEm: Date.now(), solicitadoEm: Date.now(), solicitadoPor: 'Totem buffet'
+  }).then(function(){
+    return fbDb.collection('tenants').doc(_tenantId).collection('restaurantes').doc(_restauranteId)
+      .collection('pedidos_totem').doc(p.id).update({ reciboImpresso: true });
+  }).catch(function(e){ console.warn('[TOTEM] recibo do buffet falhou:', e.code || e.message); });
+}
 function _balConcluido(linhaNota){
   var p = _balPedido, box = document.getElementById('cob-box'); if(!box || !p) return;
+  if(!p.nfce) _balImprimirRecibo(p);   // sem nota (ou nota falhou e concluiu sem) → recibo
   var nomes = { debito:'Débito', credito:'Crédito', pix:'Pix', dinheiro:'Dinheiro' };
   box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:3rem;">✅</div>' +
     '<div style="font-weight:800;font-size:1.35rem;margin:8px 0;">Venda ' + escapar(p.senha) + ' paga</div>' +

@@ -9725,6 +9725,16 @@ function processarComandoImpressao(cmdId, cmd){
   } else if(cmd.tipo === 'senha_totem'){
     // Totem COM CAIXA: cliente pega a senha aqui e leva ao caixa pra pagar
     _imprimirNasMinhas(cmdId, _impsSenhaTotem(cmd), function(imp){ _imprimirSenhaTotemPreCaixa(cmd, imp); });
+  } else if(cmd.tipo === 'recibo_buffet'){
+    // 🧾 Recibo do cliente do totem do buffet (venda sem nota fiscal).
+    // Sai na mesma impressora da nota do buffet (modelo "Nota do buffet" → senão "Fechamento").
+    var modCupomRB = _modelos.find(function(m){ return m.tipo === 'cupom_cliente'; }) || null;
+    _imprimirNasMinhas(cmdId, _impsDosModelos(['nfce_buffet', 'fechamento']), function(imp){
+      _aplicarDialeto(imp);
+      var pedRB = { senhaTotem: cmd.senhaTotem, itens: cmd.itens || [], total: Number(cmd.total) || 0, formaPagamento: cmd.formaPagamento || '' };
+      enviarParaImpressora(imp, gerarReciboCliente(pedRB, modCupomRB, imp));
+      showToast('🧾 Recibo ' + (cmd.senhaTotem || '') + ' impresso em ' + imp.nome, '#4ade80');
+    });
   } else if(cmd.tipo === 'comanda_buffet'){
     // 📅 Dia de buffet + prato feito (ex.: sábado): a cozinha do prato feito não abre,
     // então a comanda do pedido inteiro do totem do buffet sai na impressora escolhida

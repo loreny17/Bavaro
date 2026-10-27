@@ -4220,6 +4220,14 @@ function _balUsarDigitado(){
   _balDig = null;
   _balProximo();
 }
+// teclado do computador: na cobrança em dinheiro, números/vírgula/apagar vão pro "Valor recebido"
+document.addEventListener('keydown', function(e){
+  if(!document.getElementById('tela-cobranca') || _balForma !== 'dinheiro' || !document.getElementById('cob-btn-ok')) return;
+  var alvo = e.target && e.target.tagName; if(alvo === 'INPUT' || alvo === 'TEXTAREA') return;
+  if(/^\d$/.test(e.key)){ _balRecTecla(e.key); e.preventDefault(); }
+  else if(e.key === ',' || e.key === '.'){ _balRecTecla(','); e.preventDefault(); }
+  else if(e.key === 'Backspace'){ _balRecTecla('⌫'); e.preventDefault(); }
+});
 // teclado do computador: com a pesagem aberta, números já entram no "Digitar"
 document.addEventListener('keydown', function(e){
   if(!document.getElementById('tela-balanca')) return;
@@ -4248,6 +4256,57 @@ function _balProximo(){
 
 // ── Cobrança (maquininha) + nota fiscal ──
 var _balForma = '', _balNota = false, _balDoc = '', _balPedido = null, _balEmitindo = false;
+// 💵 Dinheiro: valor que o cliente entregou (texto em reais, ex.: "50" ou "52,5") → troco na hora
+var _balRecebido = '';
+function _balRecebidoNum(){ var v = parseFloat(String(_balRecebido || '').replace(',', '.')); return isNaN(v) ? 0 : Math.round(v * 100) / 100; }
+function _balRecTecla(k){
+  var r = String(_balRecebido || '');
+  if(k === '⌫') r = r.slice(0, -1);
+  else if(k === 'C') r = '';
+  else if(k === ','){ if(r.indexOf(',') < 0) r = (r || '0') + ','; }
+  else if(/^\d$/.test(k)){
+    var dec = r.indexOf(',') >= 0 ? r.split(',')[1] : null;
+    if(dec !== null && dec.length >= 2) return;          // no máximo 2 casas de centavos
+    if(dec === null && r.replace(/^0+/, '').length >= 5) return;   // até R$ 99.999
+    r = (r === '0' ? '' : r) + k;
+  }
+  _balRecebido = r; _balRenderCobranca();
+}
+function _balRecDefinir(v){ _balRecebido = String(v).replace('.', ','); _balRenderCobranca(); }
+// notas sugeridas: valor exato + as notas que cobrem o total
+function _balNotasSugeridas(total){
+  var l = [], vistos = {};
+  [5, 10, 20, 50, 100, 200].forEach(function(n){ if(n >= total && l.length < 4){ l.push(n); } });
+  // próximo múltiplo de 10 (ex.: 37,80 → 40) quando ajuda
+  var m10 = Math.ceil(total / 10) * 10; if(m10 > total && l.indexOf(m10) < 0) l.unshift(m10);
+  return l.filter(function(n){ if(vistos[n]) return false; vistos[n] = true; return true; }).sort(function(a, b){ return a - b; }).slice(0, 4);
+}
+function _balHtmlTroco(){
+  if(_balForma !== 'dinheiro') return '';
+  var total = _balTotal(), rec = _balRecebidoNum(), temRec = String(_balRecebido || '') !== '';
+  var falta = Math.round((total - rec) * 100) / 100, troco = Math.round((rec - total) * 100) / 100;
+  var resultado = !temRec
+    ? '<div style="color:var(--muted);font-size:0.95rem;">Digite quanto o cliente entregou</div>'
+    : (falta > 0
+      ? '<div style="color:#f87171;font-weight:800;font-size:1.3rem;">Faltam R$ ' + _balBrl(falta) + '</div>'
+      : '<div style="font-size:0.85rem;color:var(--muted);font-weight:700;letter-spacing:0.05em;">TROCO</div><div style="font-family:\'Bebas Neue\',sans-serif;font-size:3.6rem;line-height:1;color:#4ade80;">R$ ' + _balBrl(troco) + '</div>');
+  var teclas = ['1','2','3','4','5','6','7','8','9',',','0','⌫'];
+  return '<div style="background:var(--surface2);border:1.5px solid #4ade80;border-radius:14px;padding:12px;margin-bottom:16px;">' +
+    '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">💵 Valor recebido</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+      '<div style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:1.7rem;font-weight:800;text-align:right;">R$ ' + (temRec ? escapar(_balRecebido) : '<span style="color:var(--muted);">0</span>') + '</div>' +
+      '<button onclick="_balRecTecla(\'C\')" style="padding:14px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-weight:800;cursor:pointer;font-family:inherit;">Limpar</button>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(' + (_balNotasSugeridas(total).length + 1) + ',1fr);gap:6px;margin-bottom:8px;">' +
+      '<button onclick="_balRecDefinir(' + total + ')" style="padding:12px 4px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:800;font-size:0.85rem;cursor:pointer;font-family:inherit;">Exato</button>' +
+      _balNotasSugeridas(total).map(function(n){ return '<button onclick="_balRecDefinir(' + n + ')" style="padding:12px 4px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:#4ade80;font-weight:800;font-size:1rem;cursor:pointer;font-family:inherit;">R$ ' + n + '</button>'; }).join('') +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">' + teclas.map(function(k){
+      return '<button onclick="_balRecTecla(\'' + k + '\')" style="padding:13px 0;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:' + (k === '⌫' ? '#f87171' : 'var(--text)') + ';font-size:1.3rem;font-weight:800;cursor:pointer;font-family:inherit;">' + k + '</button>';
+    }).join('') + '</div>' +
+    '<div style="text-align:center;min-height:3.4em;">' + resultado + '</div>' +
+  '</div>';
+}
 function _balCobrancaPodeFechar(){ return !_balEmitindo; }
 // 🤝 Parceria: 10% de desconto SÓ no prato por quilo (bebidas e outros itens não).
 // Botão discreto no canto da cobrança; vale até o fim deste atendimento.
@@ -4260,7 +4319,7 @@ function _balDescontoValor(){ return Math.round(_carrinho.reduce(function(s,c){ 
 function _balAlternarParceria(){ _balDescParceria = !_balDescParceria; _balRenderCobranca(); }
 function _balTotal(){ return Math.round(_carrinho.reduce(function(s,c){ return s + _balPrecoCobrado(c) * c.qtd; }, 0) * 100) / 100; }
 function abrirCobrancaBalanca(){
-  _balForma = ''; _balNota = false; _balDoc = ''; _balPedido = null; _balEmitindo = false;
+  _balForma = ''; _balNota = false; _balDoc = ''; _balPedido = null; _balEmitindo = false; _balRecebido = '';
   var ex = document.getElementById('tela-cobranca'); if(ex) ex.remove();
   var t = document.createElement('div');
   t.id = 'tela-cobranca';
@@ -4284,12 +4343,13 @@ function _balRenderCobranca(msg){
   box.innerHTML =
     '<div style="position:relative;">' +
       (temKg ? '<button onclick="_balAlternarParceria()" title="Desconto parceria (' + _BAL_DESC_PCT + '% no prato)" style="position:absolute;top:-6px;right:-6px;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;cursor:pointer;padding:0;' + (_balDescParceria ? 'background:rgba(34,197,94,0.18);border:2px solid #22c55e;' : 'background:transparent;border:1px solid var(--border);opacity:0.5;') + '">🤝</button>' : '') +
-      '<div style="text-align:center;font-size:1rem;color:var(--muted);">Passe na maquininha</div>' +
+      '<div style="text-align:center;font-size:1rem;color:var(--muted);">' + (_balForma === 'dinheiro' ? 'Pagamento em dinheiro' : 'Passe na maquininha') + '</div>' +
     '</div>' +
     '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:4.2rem;color:var(--accent);line-height:1.05;margin-bottom:' + (desc > 0 ? '2px' : '14px') + ';">R$ ' + _balBrl(_balTotal()) + '</div>' +
     (desc > 0 ? '<div style="text-align:center;font-size:0.9rem;color:#22c55e;font-weight:700;margin-bottom:14px;">🤝 Parceria: −' + _BAL_DESC_PCT + '% no prato (− R$ ' + _balBrl(desc) + ')</div>' : '') +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Forma de pagamento</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "if(_balForma!=='" + f[0] + "')_balRecebido='';_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
+    _balHtmlTroco() +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Nota fiscal?</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">' + _balBtn(!_balNota, 'Não', '_balNota=false;_balRenderCobranca()') + _balBtn(_balNota, '🧾 Emitir nota', '_balNota=true;_balRenderCobranca()') + '</div>' +
     (_balNota ?
@@ -4409,6 +4469,9 @@ function _balAviso(html, cor){ var m = document.getElementById('cob-msg'); if(m)
 function _balConfirmarPago(){
   if(!_carrinho.length) return;
   if(!_balForma){ _balAviso('Escolha a forma de pagamento.'); return; }
+  if(_balForma === 'dinheiro' && String(_balRecebido || '') !== '' && _balRecebidoNum() < _balTotal()){
+    _balAviso('O valor recebido é menor que o total — faltam R$ ' + _balBrl(Math.round((_balTotal() - _balRecebidoNum()) * 100) / 100) + '.'); return;
+  }
   if(_balNota){
     var sit = _docSituacao(_balDoc);
     if(sit === 'parcial'){ _balAviso('CPF tem 11 números e CNPJ tem 14 (ou apague pra emitir sem).'); return; }
@@ -4437,6 +4500,7 @@ function _balConfirmarPago(){
         itens: itens, total: total, status: 'pago', formaPagamento: _balForma,
         criadoEm: agora, pagoEm: agora, reciboImpresso: false, restauranteId: _restauranteId, tenantId: _tenantId };
       if(descParc > 0){ pedido.parceria = true; pedido.descontoParceria = descParc; pedido.descontoParceriaPct = _BAL_DESC_PCT; }
+      if(_balForma === 'dinheiro' && _balRecebidoNum() > 0){ pedido.valorRecebido = _balRecebidoNum(); pedido.troco = Math.round((_balRecebidoNum() - total) * 100) / 100; }
       tx.set(ref, pedido);
       return pedido;
     });
@@ -4501,10 +4565,11 @@ function _balConcluido(linhaNota){
   box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:3rem;">✅</div>' +
     '<div style="font-weight:800;font-size:1.35rem;margin:8px 0;">Venda ' + escapar(p.senha) + ' paga</div>' +
     '<div style="font-size:1.1rem;color:var(--accent);font-weight:700;">R$ ' + _balBrl(p.total) + ' · ' + (nomes[p.formaPagamento] || p.formaPagamento) + '</div>' +
+    (p.troco > 0 ? '<div style="margin-top:12px;background:rgba(74,222,128,0.1);border:1.5px solid #4ade80;border-radius:14px;padding:10px;"><div style="font-size:0.85rem;color:var(--muted);font-weight:700;">Recebido R$ ' + _balBrl(p.valorRecebido) + ' · TROCO</div><div style="font-family:\'Bebas Neue\',sans-serif;font-size:3.4rem;line-height:1.05;color:#4ade80;">R$ ' + _balBrl(p.troco) + '</div></div>' : '') +
     (linhaNota ? '<div style="color:#4ade80;margin-top:10px;">' + linhaNota + '</div>' : '') +
-    '<div style="color:var(--muted);font-size:0.82rem;margin-top:10px;">Volta sozinha em <span id="cob-seg">6</span>s</div></div>' +
+    '<div style="color:var(--muted);font-size:0.82rem;margin-top:10px;">Volta sozinha em <span id="cob-seg">' + (p.troco > 0 ? 15 : 6) + '</span>s</div></div>' +
     '<button onclick="_balFinalizarAtendimento()" style="width:100%;margin-top:8px;padding:18px;background:var(--accent);border:none;color:#000;border-radius:14px;font-weight:800;font-size:1.15rem;cursor:pointer;font-family:inherit;">✓ Concluir</button>';
-  var seg = 6, meu = p.id;
+  var seg = p.troco > 0 ? 15 : 6, meu = p.id;
   var iv = setInterval(function(){
     if(!_balPedido || _balPedido.id !== meu || !document.getElementById('cob-seg')){ clearInterval(iv); return; }
     seg--; var e = document.getElementById('cob-seg'); if(e) e.textContent = seg;

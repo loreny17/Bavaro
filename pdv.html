@@ -2633,6 +2633,8 @@ function estoqueAjustar(itemId, fonte){
         '<button onclick="document.getElementById(\'modal-est-ajustar\').remove()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:11px;font-family:inherit;cursor:pointer;font-size:0.92rem;">Cancelar</button>' +
         '<button onclick="_estConfirmarAjuste(\'' + itemId + '\',\'' + fonte + '\')" style="flex:1.5;background:var(--accent);border:none;color:#000;border-radius:8px;padding:11px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.92rem;">Salvar</button>' +
       '</div>' +
+      // desligar o controle: o item volta a vender sem contar unidades
+      '<button onclick="_estDesativarControle(\'' + itemId + '\',\'' + fonte + '\')" style="width:100%;margin-top:10px;background:transparent;border:1px dashed rgba(248,113,113,0.5);color:#f87171;border-radius:8px;padding:11px;font-family:inherit;font-weight:700;cursor:pointer;font-size:0.88rem;">⏻ Desligar controle de estoque</button>' +
     '</div>';
   document.body.appendChild(mod);
   // Foca e seleciona o input
@@ -2676,6 +2678,21 @@ function _estConfirmarAjuste(itemId, fonte){
   }).catch(function(e){
     showToast('Erro: ' + e.message, '#f87171');
   });
+}
+
+// Desliga o controle de estoque: para de contar unidades e o item volta a "Sem controle".
+// Se estava pausado só porque o estoque zerou (pausa automática), volta a ficar disponível.
+function _estDesativarControle(itemId, fonte){
+  var lista = _estoqueItensP.concat(_estoqueItensT);
+  var item = lista.find(function(x){ return x.id === itemId && x._fonte === fonte; });
+  if(!item) return;
+  var update = { controlarEstoque: false, estoque: null, atualizadoEm: Date.now() };
+  var reativou = false;
+  if((item.estoque || 0) <= 0 && item.pausado === true && !item.pausadoAte){ update.pausado = false; reativou = true; }
+  _estoqueRef(itemId, fonte).update(update).then(function(){
+    showToast('⏻ ' + item.nome + ': controle de estoque desligado' + (reativou ? ' (item disponível de novo)' : ''), '#4ade80');
+    var m = document.getElementById('modal-est-ajustar'); if(m) m.remove();
+  }).catch(function(e){ showToast('Erro: ' + e.message, '#f87171'); });
 }
 
 // Ativa controle de estoque em um item que ainda não tem

@@ -811,8 +811,13 @@ input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
         <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Escolha a impressora do caixa do buffet. O PDV do computador onde ela está ligada precisa estar aberto.</div>
       </div>
       <div class="cfg-secao">
-        <div class="cfg-secao-tit">🧾 Nota fiscal e recibo do buffet</div>
-        <div style="font-size:0.78rem;color:var(--muted);line-height:1.45;">Saem na impressora do modelo <b>"Nota do buffet"</b>, que é configurado no PDV (Impressão → Modelos).</div>
+        <div class="cfg-secao-tit">🧾 Cupom não fiscal (recibo) do buffet</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4;">Nas vendas <b>sem</b> nota fiscal. Quando o cliente pede nota, sai só a nota fiscal.</div>
+        <div class="cfg-opcoes" id="cfg-recibo-grupo">
+          <button class="cfg-op" data-val="1">🖨️ Imprimir</button>
+          <button class="cfg-op" data-val="0">🚫 Não imprimir</button>
+        </div>
+        <div style="font-size:0.78rem;color:var(--muted);line-height:1.45;margin-top:10px;">A nota fiscal e o cupom saem na impressora do modelo <b>"Nota do buffet"</b>, que é configurado no PDV (Impressão → Modelos).</div>
       </div>
       </div>
 
@@ -3772,7 +3777,8 @@ var _balCatsIds = null;   // categorias que aparecem no modo balança (null = au
 // Nesses dias: botão "Só prato feito", categorias do prato feito no cardápio e
 // comanda do pedido inteiro na impressora do caixa do buffet.
 var _balDiasPF = [6], _balCatsPF = null, _balImpPF = '', _balSemPF = false;
-(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; _balDiasPF = Array.isArray(c.diasPF) ? c.diasPF : [6]; _balCatsPF = Array.isArray(c.catsPF) ? c.catsPF : null; _balImpPF = c.impPF || ''; }catch(e){} })();
+var _balReciboSemNota = true;   // 🧾 imprime o cupom não fiscal nas vendas sem nota (padrão: sim)
+(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; _balDiasPF = Array.isArray(c.diasPF) ? c.diasPF : [6]; _balCatsPF = Array.isArray(c.catsPF) ? c.catsPF : null; _balImpPF = c.impPF || ''; _balReciboSemNota = c.reciboSemNota !== false; }catch(e){} })();
 function _balDiaPF(){
   return !!(_modoBalanca && !(typeof _modoQR !== 'undefined' && _modoQR) && (_balDiasPF || []).indexOf(new Date().getDay()) >= 0);
 }
@@ -3866,6 +3872,11 @@ function _impSenhaPreencherConfig(){
   if(info) info.innerHTML = 'Ex.: no totem do caixa, escolha a impressora do caixa. O PDV do computador onde ela está ligada precisa estar aberto.' + (pcNome ? '<br>Este aparelho: <b>' + escapar(pcNome) + '</b>' : '');
 }
 function _balPreencherConfig(){
+  var grupoRec = document.querySelectorAll('#cfg-recibo-grupo .cfg-op');
+  grupoRec.forEach(function(b){
+    b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _balReciboSemNota);
+    b.onclick = function(){ grupoRec.forEach(function(x){ x.classList.remove('ativo'); }); b.classList.add('ativo'); };
+  });
   var grupo = document.querySelectorAll('#cfg-balanca-grupo .cfg-op');
   grupo.forEach(function(b){
     b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _modoBalanca);
@@ -3905,6 +3916,8 @@ function _balPreencherConfig(){
     : '<option value="">Nenhum item "por quilo" no cardápio do PDV</option>';
 }
 function _balSalvarDaConfig(){
+  var recOn = document.querySelector('#cfg-recibo-grupo .cfg-op.ativo');
+  if(recOn) _balReciboSemNota = recOn.getAttribute('data-val') === '1';
   var on = document.querySelector('#cfg-balanca-grupo .cfg-op.ativo');
   var sel = document.getElementById('cfg-balanca-item');
   _modoBalanca = !!(on && on.getAttribute('data-val') === '1');
@@ -3915,7 +3928,7 @@ function _balSalvarDaConfig(){
   if(document.querySelectorAll('#cfg-balanca-cats-pf input').length) _balCatsPF = [].slice.call(document.querySelectorAll('#cfg-balanca-cats-pf input:checked')).map(function(x){ return x.value; });
   var selPF = document.getElementById('cfg-balanca-imp-pf');
   if(selPF && selPF.options.length && selPF.value !== '__carregando') _balImpPF = selPF.value || '';
-  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds, diasPF:_balDiasPF, catsPF:_balCatsPF, impPF:_balImpPF })); }catch(e){}
+  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds, diasPF:_balDiasPF, catsPF:_balCatsPF, impPF:_balImpPF, reciboSemNota:_balReciboSemNota })); }catch(e){}
   try{ _catAtiva = ''; renderCategorias(); renderItens(); }catch(e){}
   // desligou o modo balança com a pesagem aberta → fecha a pesagem/cobrança
   if(!_modoBalanca){ try{ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc) tc.remove(); }catch(e){} }
@@ -4560,7 +4573,7 @@ function _balImprimirRecibo(p){
 }
 function _balConcluido(linhaNota){
   var p = _balPedido, box = document.getElementById('cob-box'); if(!box || !p) return;
-  if(!p.nfce){ _balImprimirRecibo(p); if(!linhaNota) linhaNota = '🧾 Recibo enviado para a impressora'; }   // sem nota (ou nota falhou e concluiu sem) → recibo
+  if(!p.nfce && _balReciboSemNota){ _balImprimirRecibo(p); if(!linhaNota) linhaNota = '🧾 Recibo enviado para a impressora'; }   // sem nota (ou nota falhou e concluiu sem) → recibo
   var nomes = { debito:'Débito', credito:'Crédito', pix:'Pix', dinheiro:'Dinheiro' };
   box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:3rem;">✅</div>' +
     '<div style="font-weight:800;font-size:1.35rem;margin:8px 0;">Venda ' + escapar(p.senha) + ' paga</div>' +

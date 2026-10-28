@@ -714,6 +714,14 @@ input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
     <div class="modal-body">
       <div class="cfg-aba" data-aba="aparencia">
       <div class="cfg-grupo">
+        <div class="cfg-titulo">🏁 Tela inicial "Toque para iniciar"</div>
+        <div class="cfg-opcoes" id="cfg-tela-inicial-grupo">
+          <button class="cfg-op" data-val="mostrar">Mostrar</button>
+          <button class="cfg-op" data-val="pular">Abrir direto no cardápio</button>
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.4;">Só neste aparelho. No modo balança a tela inicial continua (é nela que o totem espera o prato).</div>
+      </div>
+      <div class="cfg-grupo">
         <div class="cfg-titulo">Largura do menu lateral</div>
         <input type="range" id="cfg-lateral" min="80" max="220" step="5" oninput="aplicarCfgPreview()">
         <div class="cfg-val"><span id="cfg-lateral-val">100</span> px</div>
@@ -1507,6 +1515,8 @@ function montarCardapio(){
       tela.style.display = 'none';
     }
     document.getElementById('app').style.display = 'flex';
+  } else if(_semTelaInicial()){
+    _abrirCardapioDireto();
   }
 }
 
@@ -3202,6 +3212,33 @@ function concluirAtendimento(){
 }
 
 // ─── Tela inicial / fluxo ───
+// 🏁 "Abrir direto no cardápio": pula a tela "Toque para iniciar" (só neste aparelho, fora do modo balança)
+var _ultimoToqueTotem = Date.now();
+function _semTelaInicial(){
+  var on = false; try{ on = localStorage.getItem('totem_sem_tela_inicial') === '1'; }catch(e){}
+  return on && !_modoQR && !(typeof _modoBalanca !== 'undefined' && _modoBalanca);
+}
+// abre o cardápio na 1ª categoria, pronto pro próximo cliente (sem animação e sem timer)
+function _abrirCardapioDireto(){
+  var ti = document.getElementById('tela-inicial');
+  if(ti){ ti.classList.add('escondida'); ti.style.display = 'none'; }
+  document.getElementById('app').style.display = 'flex';
+  _catAtiva = ''; _historicoCategoria = [];
+  try{ renderCategorias(); renderItens(); atualizarBotaoVoltar(); }catch(e){ console.warn('[TOTEM] cardápio direto:', e); }
+  var g = document.getElementById('grade'); if(g) g.scrollTop = 0;
+}
+// totem parado no cardápio, sem ninguém usando (pra atualizar cardápio/versão sozinho)
+function _totemOciosoNoCardapio(){
+  try{
+    if(!_semTelaInicial()) return false;
+    if(Date.now() - _ultimoToqueTotem < 60000) return false;
+    if(window._carrinho && window._carrinho.length) return false;
+    if(typeof _itemPendente !== 'undefined' && _itemPendente) return false;
+    if(document.querySelector('.modal-bg.aberto')) return false;
+    return !['tela-senha','tela-adicionais','wizard-overlay','tela-cobranca','tela-balanca'].some(function(id){ return document.getElementById(id); });
+  }catch(e){ return false; }
+}
+document.addEventListener('pointerdown', function(){ _ultimoToqueTotem = Date.now(); }, true);
 function comecarPedido(){
   document.getElementById('tela-inicial').classList.add('escondida');
   setTimeout(function(){
@@ -3250,6 +3287,7 @@ function voltarTelaInicial(){
   // Remove tela de senha se ainda estiver visível
   var ts = document.getElementById('tela-senha');
   if(ts) ts.remove();
+  if(_semTelaInicial()){ pararTimerInatividade(); _abrirCardapioDireto(); return; }
   document.getElementById('tela-inicial').style.display = 'flex';
   setTimeout(function(){
     document.getElementById('tela-inicial').classList.remove('escondida');
@@ -3517,6 +3555,7 @@ function _totemLivreParaAtualizar(){
   try{
     var ti = document.getElementById('tela-inicial');
     var naInicial = ti && ti.style.display !== 'none' && !ti.classList.contains('escondida');
+    if(!naInicial && _totemOciosoNoCardapio()) return true;
     return naInicial && !(window._carrinho && window._carrinho.length) && !_itemPendente &&
       !document.getElementById('tela-cobranca') && !document.getElementById('tela-balanca') &&
       !document.getElementById('wizard-overlay') && !document.getElementById('tela-adicionais') &&
@@ -3644,6 +3683,13 @@ function aplicarCfgPreview(){
 
 function salvarConfig(){
   _balSalvarDaConfig();
+  var tiOp = document.querySelector('#cfg-tela-inicial-grupo .cfg-op.ativo');
+  if(tiOp){ try{ localStorage.setItem('totem_sem_tela_inicial', tiOp.getAttribute('data-val') === 'pular' ? '1' : '0'); }catch(e){} }
+  // ligou agora e o totem está parado na tela inicial → já abre o cardápio
+  setTimeout(function(){
+    var ti = document.getElementById('tela-inicial');
+    if(_semTelaInicial() && ti && ti.style.display !== 'none' && !(window._carrinho && window._carrinho.length)) _abrirCardapioDireto();
+  }, 50);
   try{ var sIS = document.getElementById('cfg-imp-senha'); if(sIS && sIS.options.length && sIS.value !== '__carregando') localStorage.setItem('totem_imp_senha', sIS.value || ''); }catch(e){}
   var cfg = _lerCfgDoModal();
   try{
@@ -3871,7 +3917,16 @@ function _impSenhaPreencherConfig(){
   var info = document.getElementById('cfg-imp-senha-info');
   if(info) info.innerHTML = 'Ex.: no totem do caixa, escolha a impressora do caixa. O PDV do computador onde ela está ligada precisa estar aberto.' + (pcNome ? '<br>Este aparelho: <b>' + escapar(pcNome) + '</b>' : '');
 }
+function _telaIniPreencherConfig(){
+  var on = false; try{ on = localStorage.getItem('totem_sem_tela_inicial') === '1'; }catch(e){}
+  var g = document.querySelectorAll('#cfg-tela-inicial-grupo .cfg-op');
+  g.forEach(function(b){
+    b.classList.toggle('ativo', (b.getAttribute('data-val') === 'pular') === on);
+    b.onclick = function(){ g.forEach(function(x){ x.classList.remove('ativo'); }); b.classList.add('ativo'); };
+  });
+}
 function _balPreencherConfig(){
+  _telaIniPreencherConfig();
   var grupoRec = document.querySelectorAll('#cfg-recibo-grupo .cfg-op');
   grupoRec.forEach(function(b){
     b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _balReciboSemNota);
@@ -4637,6 +4692,7 @@ function _docSituacao(d){
     try{
       var ti = document.getElementById('tela-inicial');
       var naInicial = ti && ti.style.display !== 'none' && !ti.classList.contains('escondida');
+      if(!naInicial && typeof _totemOciosoNoCardapio === 'function' && _totemOciosoNoCardapio()) return true;
       return naInicial && !(window._carrinho && window._carrinho.length) && !document.getElementById('tela-cobranca') && !document.getElementById('tela-balanca');
     }catch(e){ return false; }
   }

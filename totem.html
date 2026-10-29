@@ -800,6 +800,11 @@ input,textarea,select,#modal-config,#modal-config *{text-transform:none;}
         <select id="cfg-balanca-item" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font-family:inherit;font-size:0.95rem;"></select>
       </div>
       <div class="cfg-secao">
+        <div class="cfg-secao-tit">💳 Formas de pagamento aceitas</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4;">Desmarque a que esta loja não aceita (ex.: dinheiro). Ela some da tela de cobrança deste totem.</div>
+        <div id="cfg-formas-pg" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
+      </div>
+      <div class="cfg-secao">
         <div class="cfg-secao-tit">🥤 O que o cliente do buffet pode pedir</div>
         <div class="cfg-titulo">Categorias que aparecem no modo balança</div>
         <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;">Marque só o que o cliente do buffet pode pedir (bebidas, sobremesas…). Os pratos feitos ficam de fora.</div>
@@ -3835,7 +3840,12 @@ var _balCatsIds = null;   // categorias que aparecem no modo balança (null = au
 // comanda do pedido inteiro na impressora do caixa do buffet.
 var _balDiasPF = [6], _balCatsPF = null, _balImpPF = '', _balSemPF = false;
 var _balReciboSemNota = true;   // 🧾 imprime o cupom não fiscal nas vendas sem nota (padrão: sim)
-(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; _balDiasPF = Array.isArray(c.diasPF) ? c.diasPF : [6]; _balCatsPF = Array.isArray(c.catsPF) ? c.catsPF : null; _balImpPF = c.impPF || ''; _balReciboSemNota = c.reciboSemNota !== false; }catch(e){} })();
+// 💳 formas de pagamento da cobrança do buffet; cada totem pode desligar as que a loja não aceita
+var _BAL_FORMAS = [['debito','💳 Débito','Débito'],['credito','💳 Crédito','Crédito'],['pix','📱 Pix','Pix'],['dinheiro','💵 Dinheiro','Dinheiro'],['voucher','🎟️ Voucher','Voucher']];
+var _balFormasOff = [];
+function _balFormasAtivas(){ var l = _BAL_FORMAS.filter(function(f){ return _balFormasOff.indexOf(f[0]) < 0; }); return l.length ? l : _BAL_FORMAS; }
+function _balNomeForma(f){ var x = _BAL_FORMAS.filter(function(y){ return y[0] === f; })[0]; return x ? x[2] : (f || ''); }
+(function(){ try{ var c = JSON.parse(localStorage.getItem(_BAL_TOTEM_KEY) || '{}'); _modoBalanca = c.ativo === true; _balItemId = c.itemId || ''; _balCatsIds = Array.isArray(c.cats) ? c.cats : null; _balDiasPF = Array.isArray(c.diasPF) ? c.diasPF : [6]; _balCatsPF = Array.isArray(c.catsPF) ? c.catsPF : null; _balImpPF = c.impPF || ''; _balReciboSemNota = c.reciboSemNota !== false; _balFormasOff = Array.isArray(c.formasOff) ? c.formasOff : []; }catch(e){} })();
 function _balDiaPF(){
   return !!(_modoBalanca && !(typeof _modoQR !== 'undefined' && _modoQR) && (_balDiasPF || []).indexOf(new Date().getDay()) >= 0);
 }
@@ -3938,6 +3948,11 @@ function _telaIniPreencherConfig(){
 }
 function _balPreencherConfig(){
   _telaIniPreencherConfig();
+  var boxF = document.getElementById('cfg-formas-pg');
+  if(boxF) boxF.innerHTML = _BAL_FORMAS.map(function(f){
+    return '<label style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;font-size:0.92rem;font-weight:600;">' +
+      '<input type="checkbox" value="' + f[0] + '"' + (_balFormasOff.indexOf(f[0]) < 0 ? ' checked' : '') + ' style="width:18px;height:18px;">' + f[1] + '</label>';
+  }).join('');
   var grupoRec = document.querySelectorAll('#cfg-recibo-grupo .cfg-op');
   grupoRec.forEach(function(b){
     b.classList.toggle('ativo', (b.getAttribute('data-val') === '1') === _balReciboSemNota);
@@ -3982,6 +3997,12 @@ function _balPreencherConfig(){
     : '<option value="">Nenhum item "por quilo" no cardápio do PDV</option>';
 }
 function _balSalvarDaConfig(){
+  var inpF = document.querySelectorAll('#cfg-formas-pg input');
+  if(inpF.length){
+    var off = [].slice.call(inpF).filter(function(x){ return !x.checked; }).map(function(x){ return x.value; });
+    if(off.length < _BAL_FORMAS.length) _balFormasOff = off;   // desmarcou todas → ignora (precisa de pelo menos uma)
+    else alert('Deixe pelo menos uma forma de pagamento marcada.');
+  }
   var recOn = document.querySelector('#cfg-recibo-grupo .cfg-op.ativo');
   if(recOn) _balReciboSemNota = recOn.getAttribute('data-val') === '1';
   var on = document.querySelector('#cfg-balanca-grupo .cfg-op.ativo');
@@ -3994,7 +4015,7 @@ function _balSalvarDaConfig(){
   if(document.querySelectorAll('#cfg-balanca-cats-pf input').length) _balCatsPF = [].slice.call(document.querySelectorAll('#cfg-balanca-cats-pf input:checked')).map(function(x){ return x.value; });
   var selPF = document.getElementById('cfg-balanca-imp-pf');
   if(selPF && selPF.options.length && selPF.value !== '__carregando') _balImpPF = selPF.value || '';
-  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds, diasPF:_balDiasPF, catsPF:_balCatsPF, impPF:_balImpPF, reciboSemNota:_balReciboSemNota })); }catch(e){}
+  try{ localStorage.setItem(_BAL_TOTEM_KEY, JSON.stringify({ ativo:_modoBalanca, itemId:_balItemId, cats:_balCatsIds, diasPF:_balDiasPF, catsPF:_balCatsPF, impPF:_balImpPF, reciboSemNota:_balReciboSemNota, formasOff:_balFormasOff })); }catch(e){}
   try{ _catAtiva = ''; renderCategorias(); renderItens(); }catch(e){}
   // desligou o modo balança com a pesagem aberta → fecha a pesagem/cobrança
   if(!_modoBalanca){ try{ _balFecharTela(); var tc = document.getElementById('tela-cobranca'); if(tc) tc.remove(); }catch(e){} }
@@ -4412,7 +4433,8 @@ function _balBtn(on, html, onclick, extra){
 }
 function _balRenderCobranca(msg){
   var box = document.getElementById('cob-box'); if(!box) return;
-  var formas = [['debito','💳 Débito'],['credito','💳 Crédito'],['pix','📱 Pix'],['dinheiro','💵 Dinheiro']];
+  var formas = _balFormasAtivas();
+  if(_balForma && !formas.some(function(f){ return f[0] === _balForma; })){ _balForma = ''; _balRecebido = ''; }
   var docTxt = _balDoc ? _docFormatar(_balDoc) : '';
   var sit = _docSituacao(_balDoc);
   var rot = !_balDoc ? 'Sem CPF/CNPJ (consumidor não identificado)' : sit === 'ok' ? (_balDoc.length === 11 ? 'CPF' : 'CNPJ') + ' válido ✓' : sit === 'invalido11' ? 'CPF inválido (se for CNPJ, continue digitando)' : /invalido/.test(sit) ? 'Número inválido — confira' : (_balDoc.length < 11 ? 'CPF: faltam ' + (11 - _balDoc.length) : 'CNPJ: faltam ' + (14 - _balDoc.length));
@@ -4427,7 +4449,7 @@ function _balRenderCobranca(msg){
     '<div style="text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:4.2rem;color:var(--accent);line-height:1.05;margin-bottom:' + (desc > 0 ? '2px' : '14px') + ';">R$ ' + _balBrl(_balTotal()) + '</div>' +
     (desc > 0 ? '<div style="text-align:center;font-size:0.9rem;color:#22c55e;font-weight:700;margin-bottom:14px;">🤝 Parceria: −' + _BAL_DESC_PCT + '% no prato (− R$ ' + _balBrl(desc) + ')</div>' : '') +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Forma de pagamento</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "if(_balForma!=='" + f[0] + "')_balRecebido='';_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(' + (formas.length === 3 || formas.length > 4 ? 3 : 2) + ',1fr);gap:10px;margin-bottom:16px;">' + formas.map(function(f){ return _balBtn(_balForma === f[0], f[1], "if(_balForma!=='" + f[0] + "')_balRecebido='';_balForma='" + f[0] + "';_balRenderCobranca()"); }).join('') + '</div>' +
     _balHtmlTroco() +
     '<div style="font-size:0.82rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Nota fiscal?</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">' + _balBtn(!_balNota, 'Não', '_balNota=false;_balRenderCobranca()') + _balBtn(_balNota, '🧾 Emitir nota', '_balNota=true;_balRenderCobranca()') + '</div>' +
@@ -4637,23 +4659,25 @@ function _balImprimirRecibo(p){
       .collection('pedidos_totem').doc(p.id).update({ reciboImpresso: true });
   }).catch(function(e){ console.warn('[TOTEM] recibo do buffet falhou:', e.code || e.message); });
 }
+// ✅ aviso verde rápido (não trava a tela) depois que a venda é registrada
+function _balAvisoOk(html){
+  var t = document.getElementById('aviso-ok-buffet');
+  if(!t){
+    t = document.createElement('div'); t.id = 'aviso-ok-buffet';
+    t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#16a34a;color:#fff;padding:14px 24px;border-radius:14px;font-weight:800;font-size:1.05rem;line-height:1.4;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,0.5);max-width:92vw;pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = html; t.style.display = 'block';
+  clearTimeout(t._timer); t._timer = setTimeout(function(){ t.style.display = 'none'; }, 4500);
+}
 function _balConcluido(linhaNota){
   var p = _balPedido, box = document.getElementById('cob-box'); if(!box || !p) return;
   if(!p.nfce && _balReciboSemNota){ _balImprimirRecibo(p); if(!linhaNota) linhaNota = '🧾 Recibo enviado para a impressora'; }   // sem nota (ou nota falhou e concluiu sem) → recibo
-  var nomes = { debito:'Débito', credito:'Crédito', pix:'Pix', dinheiro:'Dinheiro' };
-  box.innerHTML = '<div style="text-align:center;padding:16px 0;"><div style="font-size:3rem;">✅</div>' +
-    '<div style="font-weight:800;font-size:1.35rem;margin:8px 0;">Venda ' + escapar(p.senha) + ' paga</div>' +
-    '<div style="font-size:1.1rem;color:var(--accent);font-weight:700;">R$ ' + _balBrl(p.total) + ' · ' + (nomes[p.formaPagamento] || p.formaPagamento) + '</div>' +
-    (p.troco > 0 ? '<div style="margin-top:12px;background:rgba(74,222,128,0.1);border:1.5px solid #4ade80;border-radius:14px;padding:10px;"><div style="font-size:0.85rem;color:var(--muted);font-weight:700;">Recebido R$ ' + _balBrl(p.valorRecebido) + ' · TROCO</div><div style="font-family:\'Bebas Neue\',sans-serif;font-size:3.4rem;line-height:1.05;color:#4ade80;">R$ ' + _balBrl(p.troco) + '</div></div>' : '') +
-    (linhaNota ? '<div style="color:#4ade80;margin-top:10px;">' + linhaNota + '</div>' : '') +
-    '<div style="color:var(--muted);font-size:0.82rem;margin-top:10px;">Volta sozinha em <span id="cob-seg">' + (p.troco > 0 ? 15 : 6) + '</span>s</div></div>' +
-    '<button onclick="_balFinalizarAtendimento()" style="width:100%;margin-top:8px;padding:18px;background:var(--accent);border:none;color:#000;border-radius:14px;font-weight:800;font-size:1.15rem;cursor:pointer;font-family:inherit;">✓ Concluir</button>';
-  var seg = p.troco > 0 ? 15 : 6, meu = p.id;
-  var iv = setInterval(function(){
-    if(!_balPedido || _balPedido.id !== meu || !document.getElementById('cob-seg')){ clearInterval(iv); return; }
-    seg--; var e = document.getElementById('cob-seg'); if(e) e.textContent = seg;
-    if(seg <= 0){ clearInterval(iv); _balFinalizarAtendimento(); }
-  }, 1000);
+  // sem a tela "Venda paga" (era um toque a mais): já volta pro próximo cliente
+  _balAvisoOk('✅ Venda ' + escapar(p.senha) + ' paga · R$ ' + _balBrl(p.total) + ' · ' + escapar(_balNomeForma(p.formaPagamento)) +
+    (p.troco > 0 ? '<br>💵 Troco R$ ' + _balBrl(p.troco) : '') +
+    (linhaNota ? '<div style="font-size:0.85rem;font-weight:600;opacity:0.9;">' + linhaNota + '</div>' : ''));
+  _balFinalizarAtendimento();
 }
 function _balFinalizarAtendimento(){
   var ultKg = (_balPedido && (_balPedido.itens || []).filter(function(i){ return i.tipoVenda === 'kg'; }).pop()) || null;

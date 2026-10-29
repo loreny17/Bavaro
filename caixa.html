@@ -1352,7 +1352,7 @@ function _relCalcular(deHHMM, ateHHMM){
   r.topItens = Object.keys(r.itens).map(function(k){ return [k, r.itens[k]]; }).sort(function(a,b){ return b[1] - a[1]; });
   return r;
 }
-var _REL_FORMAS = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito'],['sem','— Sem forma']];
+var _REL_FORMAS = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito'],['voucher','🎟️ Voucher'],['sem','— Sem forma']];
 function _relBrl(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 // 📊 Relatório direto do topo (sem abrir o Histórico): carrega as vendas de hoje e abre
 function abrirRelatorioDireto(){
@@ -1407,7 +1407,7 @@ function _relRender(){
 function imprimirRelatorioCaixa(){
   if(!_relCx) return;
   var r = _relCx.r, L = [];
-  var nomes = { dinheiro:'Dinheiro', pix:'Pix', debito:'Debito', credito:'Credito', sem:'Sem forma' };
+  var nomes = { dinheiro:'Dinheiro', pix:'Pix', debito:'Debito', credito:'Credito', voucher:'Voucher', sem:'Sem forma' };
   var brl = function(v){ return (Number(v)||0).toFixed(2).replace('.', ','); };
   // Layout parecido com o modal: título, total em destaque, seções com rótulo à esquerda e valor à direita
   L.push('#T RELATORIO DE VENDAS');
@@ -1522,6 +1522,7 @@ function atualizarResumoHistorico(){
       '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>📱 Pix</span><b>' + fmt(porForma.pix) + '</b></div>' +
       '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>💳 Débito</span><b>' + fmt(porForma.debito) + '</b></div>' +
       '<div style="background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>💳 Crédito</span><b>' + fmt(porForma.credito) + '</b></div>' +
+      (porForma.voucher > 0 ? '<div style="grid-column:span 2;background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;"><span>🎟️ Voucher</span><b>' + fmt(porForma.voucher) + '</b></div>' : '') +
       (porForma[''] > 0 ? '<div style="grid-column:span 2;background:var(--bg);padding:7px 10px;border-radius:7px;display:flex;justify-content:space-between;color:var(--muted);"><span>Sem forma de pagamento</span><b>' + fmt(porForma['']) + '</b></div>' : '') +
     '</div>';
 }
@@ -1561,7 +1562,7 @@ function renderHistoricoLista(){
     }
     var formaLbl = '';
     if(p.formaPagamento){
-      var nomes = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito' };
+      var nomes = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito', voucher:'🎟️ Voucher' };
       formaLbl = '<span style="font-size:0.74rem;color:var(--muted);margin-left:8px;">• ' + (nomes[p.formaPagamento] || p.formaPagamento) + '</span>';
     }
     var itensResumo = (p.itens||[]).map(function(it){ return (it.qtd||1) + 'x ' + it.nome; }).join(', ');
@@ -1589,7 +1590,7 @@ function abrirDetalheHistorico(pedidoId){
   var totalTxt = (p.total||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   var hora = p.pagoEm ? new Date(p.pagoEm).toLocaleString('pt-BR') :
              (p.criadoEm ? new Date(p.criadoEm).toLocaleString('pt-BR') : '');
-  var nomesPagto = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito' };
+  var nomesPagto = { dinheiro:'💵 Dinheiro', pix:'📱 Pix', debito:'💳 Débito', credito:'💳 Crédito', voucher:'🎟️ Voucher' };
   var itensHtml = (p.itens||[]).map(function(it){
     var sub = ((it.preco||0) * (it.qtd||1)).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
     var opcoes = it.selecoesLabel ? '<div style="font-size:0.74rem;color:var(--muted);margin-top:2px;">' + escapar(it.selecoesLabel) + '</div>' : '';
@@ -1732,7 +1733,7 @@ function confirmarBuffetCaixa(){
 //  NOTA FISCAL (NFC-e) DO TOTEM — /api/nfce (origem 'totem')
 // ════════════════════════════════════════
 var _nfceTotem = null, _nfceTotemForma = '';
-var _NFCE_FORMAS_CX = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito']];
+var _NFCE_FORMAS_CX = [['dinheiro','💵 Dinheiro'],['pix','📱 Pix'],['debito','💳 Débito'],['credito','💳 Crédito'],['voucher','🎟️ Voucher']];
 
 // ── Nota em PDF (gerada no aparelho) e compartilhada no WhatsApp ──
 function _nfceScript(src, globo){
